@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Manuscript Annotator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+
+        .instructions {
+            background: #333;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .controls-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .control-group h3 {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+        }
+
+        .class-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .class-btn {
+            padding: 10px 15px;
+            border: 2px solid #555;
+            background: #333;
+            color: #fff;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .class-btn:hover {
+            background: #444;
+            border-color: #666;
+        }
+
+        .class-btn.active {
+            border-color: #4CAF50;
+            background: #4CAF50;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .class-btn.class-1 { border-color: #2196F3; }
+        .class-btn.class-1.active { background: #2196F3; border-color: #2196F3; }
+
+        .class-btn.class-2 { border-color: #4CAF50; }
+        .class-btn.class-2.active { background: #4CAF50; border-color: #4CAF50; }
+
+        .class-btn.class-3 { border-color: #f44336; }
+        .class-btn.class-3.active { background: #f44336; border-color: #f44336; }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #45a049;
+        }
+
+        .btn-secondary {
+            background: #555;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #666;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-upload-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #2196F3;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .file-upload-label:hover {
+            background: #0b7dda;
+        }
+
+        .canvas-container {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #annotationCanvas {
+            max-width: 100%;
+            border: 2px solid #555;
+            border-radius: 4px;
+            cursor: crosshair;
+            background: #000;
+        }
+
+        .stats {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 5px;
+        }
+
+        .annotation-list {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .annotation-item {
+            background: #333;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .annotation-item:hover {
+            background: #444;
+        }
+
+        .delete-btn {
+            background: #f44336;
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .delete-btn:hover {
+            background: #da190b;
+        }
+
+        .overlay-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .keyboard-shortcuts {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .keyboard-shortcuts kbd {
+            background: #555;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        @media (max-width: 768px) {
+            .controls-panel {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 YOLO Manuscript Annotator</h1>
+            <p>Create bounding box annotations for YOLO training - all in your browser</p>
+        </header>
+
+        <div class="instructions">
+            <strong>Quick Start:</strong> Upload an image → Select a class → Click and drag to draw boxes → Download annotations when done
+        </div>
+
+        <div class="controls-panel">
+            <div class="control-group">
+                <h3>1. Load Image</h3>
+                <label for="imageInput" class="file-upload-label">
+                    📁 Choose Manuscript Image
+                </label>
+                <input type="file" id="imageInput" accept="image/*">
+                <div style="margin-top: 10px; font-size: 12px; color: #aaa;">
+                    <span id="imageName">No image loaded</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>2. Select Class</h3>
+                <div class="class-buttons">
+                    <button class="class-btn class-1 active" data-class="1">1 - Text</button>
+                    <button class="class-btn class-2" data-class="2">2 - Music</button>
+                    <button class="class-btn class-3" data-class="3">3 - Staves</button>
+                </div>
+                <div class="keyboard-shortcuts">
+                    <strong>Shortcuts:</strong> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>3. Actions</h3>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="undoBtn">↶ Undo (U)</button>
+                    <button class="btn btn-danger" id="clearBtn">🗑️ Clear All</button>
+                </div>
+                <div class="keyboard-shortcuts">
+                    <strong>Shortcuts:</strong> <kbd>U</kbd> Undo | <kbd>Ctrl+Z</kbd> Undo | <kbd>ESC</kbd> Cancel
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>4. Download Annotations</h3>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="downloadJsonBtn">📄 Download JSON</button>
+                    <button class="btn btn-primary" id="downloadYoloBtn">📋 Download YOLO</button>
+                    <button class="btn btn-primary" id="downloadBothBtn">📦 Download Both (ZIP)</button>
+                </div>
+                <div class="keyboard-shortcuts">
+                    <strong>Shortcuts:</strong> <kbd>J</kbd> JSON | <kbd>Y</kbd> YOLO | <kbd>Z</kbd> ZIP
+                </div>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="totalCount">0</div>
+                <div class="stat-label">Total Annotations</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="textCount">0</div>
+                <div class="stat-label">Text</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="musicCount">0</div>
+                <div class="stat-label">Music</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stavesCount">0</div>
+                <div class="stat-label">Staves</div>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <div style="position: relative; display: inline-block;">
+                <canvas id="annotationCanvas"></canvas>
+                <div class="overlay-info" id="overlayInfo">
+                    Current: <span id="currentClass">Text</span> | 
+                    Mouse: <span id="mousePos">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="annotation-list">
+            <h3 style="margin-bottom: 10px;">Annotations List</h3>
+            <div id="annotationsList"></div>
+        </div>
+    </div>
+
+    <script src="annotator.js"></script>
+</body>
+</html>
