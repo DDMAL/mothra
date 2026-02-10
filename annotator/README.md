@@ -144,4 +144,4 @@ Once you have annotated images:
 
 ## Questions?
 
-See the [project brief](project_brief.md) for more context on the YOLO training pipeline.
+See the [project brief](https://github.com/DDMAL/mothra/tree/main?tab=readme-ov-file#mothra-) for more context on the YOLO training pipeline.
