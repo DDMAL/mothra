@@ -10,7 +10,9 @@ Start with DocLayout-YOLO rather than basic YOLO tutorials. It’s purpose-built
 
 - Global-to-Local Controllable Receptive Module (GL-CRM): Handles multi-scale variation (tiny neume components → large, decorated initials)
 Synthetic data generation pipeline: Adaptable for creating training data with parchment damage/degradation
+
 - Document-specific optimizations: Built on YOLOv10/11 with modifications for complex document structures
+
 ### Key Considerations for Medieval Manuscripts
 1.	Multi-scale detection: Significant scale variation between small neumes, wide staves, and large initials
     - 	GL-CRM architecture addresses this
@@ -30,70 +32,79 @@ Synthetic data generation pipeline: Adaptable for creating training data with pa
  
 ## GitHub Repositories
 ### Primary (Start Here):
-•	DocLayout-YOLO: https://github.com/opendatalab/DocLayout-YOLO 
-o	Production-ready, 2k+ stars, actively maintained
-o	Built on YOLOv10/11 with document-specific optimizations
+DocLayout-YOLO: https://github.com/opendatalab/DocLayout-YOLO 
+- Production-ready, 2k+ stars, actively maintained
+- Built on YOLOv10/11 with document-specific optimizations
 ### External Reference Datasets (Optional):
-•	OMMR4all Medieval Datasets: https://github.com/OMMR4all/datasets 
-o	Graduel de Nevers (12th c., 49 pages)
-o	Pa904 (12th-13th c., 20 pages)
-o	Classes: clefs, accidentals, neume components (starts, gapped, looped)
-o	Note: Useful for comparison/benchmarking, but we have our own annotated dataset
-•	Existing DDMAL annotations
-o	Gen and Kyrie have a ton of images
-o	Kyrie has tens of thousands of neume crops
+OMMR4all Medieval Datasets: https://github.com/OMMR4all/datasets 
+- Graduel de Nevers (12th c., 49 pages)
+- Pa904 (12th-13th c., 20 pages)
+- Classes: clefs, accidentals, neume components (starts, gapped, looped)
+- Note: Useful for comparison/benchmarking, but we have our own annotated dataset
+
+**Existing DDMAL annotations**
+- Gen and Kyrie have a ton of images
+- Kyrie has tens of thousands of neume crops, you can find a lot of square notation ones here: https://huggingface.co/datasets/grackle-in-a-HEB-parking-lot/possumm-local
+
 ### Reference:
-•	Ultralytics YOLO: https://github.com/ultralytics/ultralytics 
-o	Base framework (DocLayout-YOLO builds on this)
+- Base framework (DocLayout-YOLO builds on this)
  
 ## Key Papers
 ### Core Architecture & Methodology
 1.	“DocLayout-YOLO: Enhancing Document Layout Analysis through Diverse Synthetic Data and Global-to-Local Adaptive Perception”
-o	Zhao et al., arXiv:2410.12628, October 2024
-o	https://arxiv.org/abs/2410.12628
-o	Read this first - foundation architecture
+	- Zhao et al., arXiv:2410.12628, October 2024
+	- https://arxiv.org/abs/2410.12628
+	- Read this first - foundation architecture
 2.	“Optical Medieval Music Recognition Using Background Knowledge”
-o	Hartelt & Puppe, MDPI Algorithms 2022
-o	https://www.mdpi.com/1999-4893/15/7/221
-o	Domain-specific: medieval notation, post-processing with musicological rules
-o	Uses YOLO for symbol detection, includes dataset info
+	- Hartelt & Puppe, MDPI Algorithms 2022
+	- https://www.mdpi.com/1999-4893/15/7/221
+ 	- Domain-specific: medieval notation, post-processing with musicological rules
+  	- Uses YOLO for symbol detection, includes dataset info
 3.	“Understanding Optical Music Recognition”
-o	Calvo-Zaragoza et al., 2020
-o	General OMR overview (good context)
-Historical Document Detection (Techniques Transfer)
+	- Calvo-Zaragoza et al., 2020
+	- General OMR overview (good context)
+
+**Historical Document Detection (Techniques Transfer)**
+
 4.	“YOLO-HTR: Page-Level Recognition of Historical Handwritten Document Collections”
-o	Lomov et al., 2024
-o	Springer AIST 2024 proceedings
-o	Combines YOLO with text recognition for historical documents
+	- Lomov et al., 2024
+	- Springer AIST 2024 proceedings
+	- Combines YOLO with text recognition for historical documents
 5.	“A Historical Handwritten French Manuscripts Text Detection Method in Full Pages”
-o	MDPI Information, August 2024
-o	https://www.mdpi.com/2078-2489/15/8/483
-o	YOLOv8s modifications for complex/degraded text
-YOLO Evolution (Architecture Context)
+	- MDPI Information, August 2024
+	- https://www.mdpi.com/2078-2489/15/8/483
+	- YOLOv8s modifications for complex/degraded text
+
+**YOLO Evolution (Architecture Context)**
+
 6.	“Ultralytics YOLO Evolution: An Overview of YOLO26, YOLO11, YOLOv8, and YOLOv5”
-o	arXiv:2510.09653, 2025
-o	Recent architectural innovations: 
-	YOLO11: C3k2 bottlenecks, C2PSA attention (small object performance)
-	YOLO26: NMS-free inference, Progressive Loss Balancing, Small-Target-Aware Label Assignment
+	- arXiv:2510.09653, 2025
+	- Recent architectural innovations: 
+	- YOLO11: C3k2 bottlenecks, C2PSA attention (small object performance)
+	- YOLO26: NMS-free inference, Progressive Loss Balancing, Small-Target-Aware Label Assignment
 7.	“A Decade of You Only Look Once (YOLO) for Object Detection”
-o	arXiv review paper, 2025
-	https://arxiv.org/abs/2504.18586
-o	Comprehensive YOLO evolution overview
-OMR-Specific YOLO Applications
+	- arXiv review paper, 2025
+	- https://arxiv.org/abs/2504.18586
+	- Comprehensive YOLO evolution overview
+
+**OMR-Specific YOLO Applications**
+
 8.	“State-of-the-Art Model for Music Object Recognition with Deep Learning”
-o	MDPI Applied Sciences, 2019
-o	https://www.mdpi.com/2076-3417/9/13/2645
-o	YOLO/Darknet53 for note recognition, upsampling strategies
+	- MDPI Applied Sciences, 2019
+	- https://www.mdpi.com/2076-3417/9/13/2645
+	- YOLO/Darknet53 for note recognition, upsampling strategies
 9.	Pacha et al. - “Optical Music Recognition in Mensural Notation with Region-Based Convolutional Neural Networks”
-o	https://www.researchgate.net/publication/327962576_Optical_Music_Recognition_in_Mensural_Notation_with_Region-Based_Convolutional_Neural_Networks
-o	Used Faster R-CNN and YOLO for mensural notation (16th-18th c.)
-o	Treated OMR as object detection task
+	- https://www.researchgate.net/publication/327962576_Optical_Music_Recognition_in_Mensural_Notation_with_Region-Based_Convolutional_Neural_Networks
+	- Used Faster R-CNN and YOLO for mensural notation (16th-18th c.)
+	- Treated OMR as object detection task
  
 ### Additional Useful Information
-Key Advantage: We (Will) Have An Annotated Dataset
-Having your own annotated text-music-staves dataset is a major advantage. This means:
-•	Controlled evaluation: Can directly compare YOLO performance against Rodan’s current pipeline on the same data
-•	Flexibility: Can add more granular annotations incrementally if needed
+**Key Advantage: We (Will) Have An Annotated Dataset**
+
+Having our own annotated text-music-staves dataset is a major advantage. This means:
+- Controlled evaluation: Can directly compare YOLO performance against Rodan’s current pipeline on the same data
+- Flexibility: Can add more granular annotations incrementally if needed
+
 Critical first steps:
 1.	Verify annotation format (YOLO needs: class_id x_center y_center width height per line, normalized 0-1)
 	DONE
@@ -107,7 +118,7 @@ Critical first steps:
     This will be very important for validation. 
     If anyone needs help with this, please talk to Kyrie, or see this method from POSSUMM. Alternatively, use a chappy.
 
-Sample from produced YOLO.txt class file, from Mothra annotator:
+Sample from produced annotation.txt file, from Mothra annotator:
 
 ```
 0 0.139432 0.215570 0.094260 0.024340
@@ -122,10 +133,9 @@ For a sample of a fully annotated medieval music page, YOLO.txt output, and UI v
 
 ## Medieval-Specific Challenges
 ### Neume notation characteristics:
-•	Neumes represent melodic gestures (1+ notes per symbol)
-•	Spatial positioning on staff indicates pitch
-•	Square notation (12th-13th c. onward) vs. earlier staffless forms
-•	High variability in scribal hands, house styles, and regions
+	- Neumes represent melodic gestures (1+ notes per symbol)
+	- Square notation (12th-13th c. onward) vs. earlier staffless forms
+	- High variability in scribal hands, house styles, and regions
 ## Dataset Preparation
 ### Mothra annotated dataset:
 1) Verify annotation format compatibility with YOLO (YOLO expects: class_id, x_center, y_center, width, height - all normalized)
@@ -140,38 +150,38 @@ For a sample of a fully annotated medieval music page, YOLO.txt output, and UI v
         Mothra/annotator/json2yolo.py
     Ultralytics has built-in converters for common formats
 ### Dataset characteristics to document:
-•	Total pages/images
-•	Number of classes (text, music, staves, specific symbol types?)
-•	Annotation granularity (region-level vs. symbol-level)
-•	Manuscript types/periods covered
-•	Image resolution and quality variations
-•	Degradation patterns present
+	- Total pages/images
+	- Number of classes (text, music, staves, specific symbol types?)
+	- Annotation granularity (region-level vs. symbol-level)
+	- Manuscript types/periods covered
+	- Image resolution and quality variations
+	- Degradation patterns present
 
 ## Technical Recommendations
 **Architecture modifications to explore:**
-•	Attention mechanisms (YOLO11’s C2PSA) for fine-grained distinctions between similar neume types
-•	Small-target optimization (YOLO26’s STAL)
-•	Anchor-free detection (better for irregular neume shapes)
+- Attention mechanisms (YOLO11’s C2PSA) for fine-grained distinctions between similar neume types
+- Small-target optimization (YOLO26’s STAL)
+- Anchor-free detection (better for irregular neume shapes?)
 **Training strategies:**
-•	Adapt DocLayout-YOLO’s Mesh-candidate BestFit for synthetic data generation
-•	Augment with parchment-specific degradation (fading, bleed-through, tears)
-•	Implement manuscript-aware train/val splits
-•	Consider pre-training on DocSynth-300K before fine-tuning on medieval data
+- Adapt DocLayout-YOLO’s Mesh-candidate BestFit for synthetic data generation
+- Augment with parchment-specific degradation (fading, bleed-through, tears)
+- Implement manuscript-aware train/val splits
+- Consider pre-training on DocSynth-300K before fine-tuning on medieval data
 **Post-processing**:
-•	YOLO outputs bounding boxes + class predictions
-•	Add rule-based refinement using musicological constraints: 
-o	Neumes must align with staff lines
-o	Spatial relationships between clefs, neumes, text
-o	Melodic constraints (if incorporating domain knowledge)
+- YOLO outputs bounding boxes + class predictions
+- Add rule-based refinement using musicological constraints: 
+	- Neumes must align with staff lines
+	- Spatial relationships between clefs, neumes, text
+	- Melodic constraints (if incorporating domain knowledge)
 
 ### Evaluation Metrics
 **Standard object detection metrics:**
-•	mAP (mean Average Precision)
-•	Precision/Recall per class
-•	IoU (Intersection over Union)
+- mAP (mean Average Precision)
+- Precision/Recall per class
+- IoU (Intersection over Union)
 **OMR-specific (if extending to full transcription):**
-•	Symbol Error Rate
-•	Melody Accuracy Rate (mAR) - edit distance for melodic content
+- Symbol Error Rate
+- Melody Accuracy Rate (mAR) - edit distance for melodic content
 
 ## Development Path
 1.	Familiarization: Review DocLayout-YOLO architecture, run demos
@@ -185,23 +195,23 @@ o	Melodic constraints (if incorporating domain knowledge)
 1.	Clone DocLayout-YOLO: git clone https://github.com/opendatalab/DocLayout-YOLO
 2.	Review README and paper (arXiv:2410.12628)
 3.	Prepare your dataset: 
-        Convert annotations to YOLO format if needed
-        Organize into train/val/test splits (manuscript-aware)
-        Create dataset YAML config file
+        - Convert annotations to YOLO format if needed
+        - Organize into train/val/test splits (manuscript-aware)
+        - Create dataset YAML config file
 4.	Run baseline training on your annotated dataset
 5.	Evaluate performance and compare against current pipeline
 6.	Iterate on architecture/hyperparameters as needed
  
 ## Questions to Consider
-1) Dataset format•	: Are our annotations already in YOLO format, or do we need conversion scripts?
-    YES, they are in YOLO format, but the `Mothra` repo also has a JSON -> YOLO script if we have existing data that needs conversion.
+1) Dataset format: Are our annotations already in YOLO format, or do we need conversion scripts?
+	- YES, they are in YOLO format, but the `Mothra` repo also has a JSON -> YOLO script if we have existing data that needs conversion.
 2) Class definitions: Do our text-music-staves annotations map cleanly to what we want YOLO to detect? Do we need more granular symbol-level classes?
-    For our current purposes, TMS is working. Subject to change.
+	- For our current purposes, TMS is working. Subject to change.
 3) Dataset size: Is our current annotated dataset sufficient, or should we augment with synthetic data?
-    Our current goal is 500 musical glyphs/manuscript and corresponding text-stave ratio (whole page).
+	- Our current goal is 500 musical glyphs/manuscript and corresponding text-stave ratio (whole page).
 4) Pre-training: Should we pre-train on DocSynth-300K (general documents) before fine-tuning on our medieval manuscripts?
-    Let’s go as “out of the box” as we can initially to capture the real dis/advantages of either approach.
+	- Let’s go as “out of the box” as we can initially to capture the real dis/advantages of either approach.
 5) Evaluation strategy: How do we evaluate “success” compared to current pipeline? (Speed? Accuracy? Both? Specific error types?)
-    Speed is a not insignificant factor—the full Rodan pipeline particularly including the active training episode with the Interactive Classifier followed by Neon correction takes up an enormous amount of time. If YOLO can accelerate/bypass through separation and the IC that’s already an incredible progression. Accuracy, however, would need to make it worth it: **YOLO needs to be faster and more accurate than we could just manually encode in Neon.** In other words: is YOLO faster than Gen is? 
+	- Speed is a not insignificant factor—the full Rodan pipeline particularly including the active training episode with the Interactive Classifier followed by Neon correction takes up an enormous amount of time. If YOLO can accelerate/bypass through separation and the IC that’s already an incredible progression. Accuracy, however, would need to make it worth it: **YOLO needs to be faster and more accurate than we could just manually encode in Neon.** In other words: is YOLO faster than Gen is? 
 6) Annotation completeness: Do we need to expand annotations to include more detailed symbol classes for full OMR?
-    This would include labeling for neume types. Can we get away with `music`? Or possibly `music`, `clef`, `custode`, `divisio`? 
+	- This would include labeling for neume types. Can we get away with `music`? Or possibly `music`, `clef`, `custode`, `divisio`? 
