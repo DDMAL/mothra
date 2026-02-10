@@ -181,7 +181,7 @@ We are currently experimenting with using **[DocLayout-YOLO](https://github.com/
 
 **Alternative architectures considered:**
 - YOLO26 (STAL module for small targets) - may experiment if neume detection fails
-- Segmentation models (U-Net, Mask R-CNN) - deferred; boxes faster to annotate
+- Segmentation models (U-Net++, Mask R-CNN) - deferred; boxes faster to annotate
 
 ### Training Strategy
 
