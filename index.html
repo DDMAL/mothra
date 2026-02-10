@@ -312,7 +312,31 @@
             </div>
 
             <div class="control-group">
-                <h3>3. Actions</h3>
+                <h3>3. View Controls</h3>
+                <div style="margin-bottom: 10px;">
+                    <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <input type="checkbox" id="showLabelsToggle" checked>
+                        <span>Show Bounding Box Labels</span>
+                    </label>
+                    <label style="display: block; margin-bottom: 8px;">
+                        <span style="display: block; margin-bottom: 4px;">Box Opacity:</span>
+                        <input type="range" id="boxOpacitySlider" min="0.1" max="1.0" step="0.1" value="1.0" style="width: 100%;">
+                        <span id="opacityValue" style="font-size: 12px; color: #aaa;">100%</span>
+                    </label>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="zoomInBtn">🔍 Zoom In</button>
+                    <button class="btn btn-secondary" id="zoomOutBtn">🔍 Zoom Out</button>
+                    <button class="btn btn-secondary" id="resetZoomBtn">↻ Reset View</button>
+                </div>
+                <div class="keyboard-shortcuts">
+                    <strong>Zoom:</strong> <kbd>+</kbd> In | <kbd>-</kbd> Out | <kbd>0</kbd> Reset | 
+                    <strong>Pan:</strong> Click & drag (when zoomed)
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>4. Actions</h3>
                 <div class="action-buttons">
                     <button class="btn btn-secondary" id="undoBtn">↶ Undo (U)</button>
                     <button class="btn btn-danger" id="clearBtn">🗑️ Clear All</button>
@@ -323,7 +347,7 @@
             </div>
 
             <div class="control-group">
-                <h3>4. Download Annotations</h3>
+                <h3>5. Download Annotations</h3>
                 <div class="action-buttons">
                     <button class="btn btn-primary" id="downloadJsonBtn">📄 Download JSON</button>
                     <button class="btn btn-primary" id="downloadYoloBtn">📋 Download YOLO</button>
@@ -355,11 +379,12 @@
         </div>
 
         <div class="canvas-container">
-            <div style="position: relative; display: inline-block;">
+            <div style="position: relative; display: inline-block; overflow: auto; max-width: 100%; max-height: 800px; border: 2px solid #555; border-radius: 4px;" id="canvasWrapper">
                 <canvas id="annotationCanvas"></canvas>
                 <div class="overlay-info" id="overlayInfo">
                     Current: <span id="currentClass">Text</span> | 
-                    Mouse: <span id="mousePos">-</span>
+                    Mouse: <span id="mousePos">-</span> |
+                    Zoom: <span id="zoomLevel">100%</span>
                 </div>
             </div>
         </div>

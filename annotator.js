@@ -17,6 +17,7 @@ class AnnotationTool {
     constructor() {
         this.canvas = document.getElementById('annotationCanvas');
         this.ctx = this.canvas.getContext('2d');
+        this.canvasWrapper = document.getElementById('canvasWrapper');
         
         this.image = null;
         this.imageName = '';
@@ -25,8 +26,21 @@ class AnnotationTool {
         this.currentClass = 1;
         
         this.isDrawing = false;
+        this.isPanning = false;
         this.startPos = null;
         this.currentPos = null;
+        this.panStart = null;
+        
+        // Zoom and view controls
+        this.zoomLevel = 1.0;
+        this.minZoom = 0.5;
+        this.maxZoom = 5.0;
+        this.zoomStep = 0.25;
+        this.panOffset = { x: 0, y: 0 };
+        
+        // Display options
+        this.showLabels = true;
+        this.boxOpacity = 1.0;
         
         this.setupEventListeners();
         this.updateUI();
@@ -52,6 +66,23 @@ class AnnotationTool {
         document.getElementById('downloadJsonBtn').addEventListener('click', () => this.downloadJSON());
         document.getElementById('downloadYoloBtn').addEventListener('click', () => this.downloadYOLO());
         document.getElementById('downloadBothBtn').addEventListener('click', () => this.downloadBoth());
+        
+        // Zoom controls
+        document.getElementById('zoomInBtn').addEventListener('click', () => this.zoom(1));
+        document.getElementById('zoomOutBtn').addEventListener('click', () => this.zoom(-1));
+        document.getElementById('resetZoomBtn').addEventListener('click', () => this.resetZoom());
+        
+        // Display options
+        document.getElementById('showLabelsToggle').addEventListener('change', (e) => {
+            this.showLabels = e.target.checked;
+            this.render();
+        });
+        
+        document.getElementById('boxOpacitySlider').addEventListener('input', (e) => {
+            this.boxOpacity = parseFloat(e.target.value);
+            document.getElementById('opacityValue').textContent = Math.round(this.boxOpacity * 100) + '%';
+            this.render();
+        });
         
         // Canvas mouse events
         this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -86,7 +117,7 @@ class AnnotationTool {
     }
     
     setupCanvas() {
-        // Set canvas size to match image
+        // Set canvas size to match image (at current zoom level)
         const maxWidth = 1200;
         const maxHeight = 800;
         
@@ -100,12 +131,20 @@ class AnnotationTool {
             height = height * ratio;
         }
         
-        this.canvas.width = width;
-        this.canvas.height = height;
+        // Base canvas size (before zoom)
+        this.baseWidth = width;
+        this.baseHeight = height;
+        
+        // Apply zoom
+        this.canvas.width = width * this.zoomLevel;
+        this.canvas.height = height * this.zoomLevel;
         
         // Store scale factors for coordinate conversion
         this.scaleX = this.image.width / width;
         this.scaleY = this.image.height / height;
+        
+        // Update zoom level display
+        document.getElementById('zoomLevel').textContent = Math.round(this.zoomLevel * 100) + '%';
     }
     
     selectClass(classNum) {
@@ -125,16 +164,26 @@ class AnnotationTool {
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
-        return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
+        const x = (e.clientX - rect.left) / this.zoomLevel;
+        const y = (e.clientY - rect.top) / this.zoomLevel;
+        return { x, y };
     }
     
     onMouseDown(e) {
         if (!this.image) return;
         
         const pos = this.getMousePos(e);
+        
+        // Right click or Space+click = pan mode (when zoomed)
+        if (e.button === 2 || (e.button === 0 && e.shiftKey && this.zoomLevel > 1)) {
+            this.isPanning = true;
+            this.panStart = { x: e.clientX, y: e.clientY };
+            this.canvas.style.cursor = 'grabbing';
+            e.preventDefault();
+            return;
+        }
+        
+        // Left click = draw
         this.startPos = pos;
         this.currentPos = pos;
         this.isDrawing = true;
@@ -147,6 +196,19 @@ class AnnotationTool {
         document.getElementById('mousePos').textContent = 
             `${Math.round(pos.x)}, ${Math.round(pos.y)}`;
         
+        // Handle panning
+        if (this.isPanning && this.panStart) {
+            const dx = e.clientX - this.panStart.x;
+            const dy = e.clientY - this.panStart.y;
+            
+            this.canvasWrapper.scrollLeft -= dx;
+            this.canvasWrapper.scrollTop -= dy;
+            
+            this.panStart = { x: e.clientX, y: e.clientY };
+            return;
+        }
+        
+        // Handle drawing
         if (this.isDrawing) {
             this.currentPos = pos;
             this.render();
@@ -154,6 +216,15 @@ class AnnotationTool {
     }
     
     onMouseUp(e) {
+        // End panning
+        if (this.isPanning) {
+            this.isPanning = false;
+            this.panStart = null;
+            this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+            return;
+        }
+        
+        // End drawing
         if (!this.isDrawing || !this.image) return;
         
         const pos = this.getMousePos(e);
@@ -171,6 +242,12 @@ class AnnotationTool {
     }
     
     onMouseLeave() {
+        if (this.isPanning) {
+            this.isPanning = false;
+            this.panStart = null;
+            this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+        }
+        
         if (this.isDrawing) {
             // Cancel current drawing
             this.isDrawing = false;
@@ -281,6 +358,24 @@ class AnnotationTool {
             }
         }
         
+        // Zoom in (+/=)
+        else if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            this.zoom(1);
+        }
+        
+        // Zoom out (-)
+        else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            this.zoom(-1);
+        }
+        
+        // Reset zoom (0)
+        else if (e.key === '0') {
+            e.preventDefault();
+            this.resetZoom();
+        }
+        
         // Download JSON (j)
         else if (e.key === 'j' || e.key === 'J') {
             this.downloadJSON();
@@ -292,7 +387,7 @@ class AnnotationTool {
         }
         
         // Download both as ZIP (z)
-        else if (e.key === 'z' || e.key === 'Z') {
+        else if ((e.key === 'z' || e.key === 'Z') && !e.ctrlKey) {
             this.downloadBoth();
         }
     }
@@ -308,7 +403,7 @@ class AnnotationTool {
             return;
         }
         
-        // Draw image
+        // Draw image (scaled by zoom)
         this.ctx.drawImage(this.image, 0, 0, this.canvas.width, this.canvas.height);
         
         // Draw existing annotations
@@ -333,13 +428,16 @@ class AnnotationTool {
     }
     
     drawBox(bbox, classId, label, isDrawing = false) {
-        // Convert to canvas coordinates
-        const x1 = bbox[0] / this.scaleX;
-        const y1 = bbox[1] / this.scaleY;
-        const x2 = bbox[2] / this.scaleX;
-        const y2 = bbox[3] / this.scaleY;
+        // Convert to canvas coordinates (accounting for zoom)
+        const x1 = (bbox[0] / this.scaleX) * this.zoomLevel;
+        const y1 = (bbox[1] / this.scaleY) * this.zoomLevel;
+        const x2 = (bbox[2] / this.scaleX) * this.zoomLevel;
+        const y2 = (bbox[3] / this.scaleY) * this.zoomLevel;
         
         const color = CLASS_COLORS[classId];
+        
+        // Set global alpha for opacity control
+        this.ctx.globalAlpha = isDrawing ? 1.0 : this.boxOpacity;
         
         // Draw rectangle
         this.ctx.strokeStyle = color;
@@ -348,12 +446,13 @@ class AnnotationTool {
         this.ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
         this.ctx.setLineDash([]);
         
-        // Draw label background
-        if (label) {
-            this.ctx.font = '12px sans-serif';
+        // Draw label (only if showLabels is true)
+        if (label && this.showLabels) {
+            const fontSize = 12 * this.zoomLevel;
+            this.ctx.font = `${fontSize}px sans-serif`;
             const textMetrics = this.ctx.measureText(label);
             const textWidth = textMetrics.width;
-            const textHeight = 16;
+            const textHeight = fontSize + 4;
             
             this.ctx.fillStyle = color;
             this.ctx.fillRect(x1, y1 - textHeight - 2, textWidth + 8, textHeight + 2);
@@ -362,6 +461,9 @@ class AnnotationTool {
             this.ctx.fillStyle = '#fff';
             this.ctx.fillText(label, x1 + 4, y1 - 6);
         }
+        
+        // Reset global alpha
+        this.ctx.globalAlpha = 1.0;
     }
     
     updateUI() {
@@ -394,6 +496,40 @@ class AnnotationTool {
                 </div>
             `).join('');
         }
+    }
+    
+    
+    zoom(direction) {
+        if (!this.image) return;
+        
+        // direction: 1 = zoom in, -1 = zoom out
+        const oldZoom = this.zoomLevel;
+        this.zoomLevel += direction * this.zoomStep;
+        
+        // Clamp zoom level
+        this.zoomLevel = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoomLevel));
+        
+        if (this.zoomLevel === oldZoom) return; // No change
+        
+        // Update canvas size
+        this.setupCanvas();
+        
+        // Update cursor
+        this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+        
+        this.render();
+    }
+    
+    resetZoom() {
+        if (!this.image) return;
+        
+        this.zoomLevel = 1.0;
+        this.canvasWrapper.scrollLeft = 0;
+        this.canvasWrapper.scrollTop = 0;
+        
+        this.setupCanvas();
+        this.canvas.style.cursor = 'crosshair';
+        this.render();
     }
     
     downloadJSON() {
