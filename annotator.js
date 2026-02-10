@@ -169,9 +169,10 @@ class AnnotationTool {
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
         
-        // Get mouse position relative to canvas, accounting for zoom
-        const x = (e.clientX - rect.left) / this.zoomLevel;
-        const y = (e.clientY - rect.top) / this.zoomLevel;
+        // Canvas is already zoomed (canvas.width = baseWidth * zoomLevel)
+        // So we just get the direct pixel position on the canvas
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
         
         return { x, y };
     }
@@ -293,11 +294,12 @@ class AnnotationTool {
     createAnnotation() {
         if (!this.startPos || !this.currentPos) return;
         
-        // Calculate bounding box in original image coordinates
-        const x1 = Math.min(this.startPos.x, this.currentPos.x) * this.scaleX;
-        const y1 = Math.min(this.startPos.y, this.currentPos.y) * this.scaleY;
-        const x2 = Math.max(this.startPos.x, this.currentPos.x) * this.scaleX;
-        const y2 = Math.max(this.startPos.y, this.currentPos.y) * this.scaleY;
+        // startPos/currentPos are in zoomed canvas coordinates
+        // Convert to base canvas (divide by zoom), then to image coords (multiply by scale)
+        const x1 = Math.min(this.startPos.x, this.currentPos.x) / this.zoomLevel * this.scaleX;
+        const y1 = Math.min(this.startPos.y, this.currentPos.y) / this.zoomLevel * this.scaleY;
+        const x2 = Math.max(this.startPos.x, this.currentPos.x) / this.zoomLevel * this.scaleX;
+        const y2 = Math.max(this.startPos.y, this.currentPos.y) / this.zoomLevel * this.scaleY;
         
         const width = x2 - x1;
         const height = y2 - y1;
@@ -451,8 +453,13 @@ class AnnotationTool {
             const x2 = Math.max(this.startPos.x, this.currentPos.x);
             const y2 = Math.max(this.startPos.y, this.currentPos.y);
             
+            // startPos/currentPos are in zoomed canvas pixel coordinates
+            // Convert to base canvas coords (divide by zoom), then to image coords (multiply by scale)
             this.drawBox(
-                [x1 * this.scaleX, y1 * this.scaleY, x2 * this.scaleX, y2 * this.scaleY],
+                [(x1 / this.zoomLevel) * this.scaleX, 
+                 (y1 / this.zoomLevel) * this.scaleY, 
+                 (x2 / this.zoomLevel) * this.scaleX, 
+                 (y2 / this.zoomLevel) * this.scaleY],
                 this.currentClass,
                 'Drawing...',
                 true
