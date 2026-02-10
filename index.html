@@ -25,24 +25,28 @@
         }
 
         header {
-            background: #2d2d2d;
+            background: linear-gradient(135deg, #2a2520 0%, #1f1f1f 100%);
             padding: 20px;
             border-radius: 8px;
             margin-bottom: 20px;
+            border-bottom: 3px solid #B8860B;
         }
 
         h1 {
-            color: #4CAF50;
+            color: #D2A870;
             margin-bottom: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
         }
 
         .instructions {
-            background: #333;
+            background: #252525;
             padding: 15px;
             border-radius: 5px;
             margin-bottom: 20px;
             font-size: 14px;
             line-height: 1.6;
+            border-left: 3px solid #6B7A5A;
         }
 
         .controls-panel {
@@ -53,15 +57,19 @@
         }
 
         .control-group {
-            background: #2d2d2d;
+            background: #242424;
             padding: 15px;
             border-radius: 8px;
+            border: 1px solid #3a3a3a;
         }
 
         .control-group h3 {
             font-size: 16px;
             margin-bottom: 10px;
-            color: #4CAF50;
+            color: #D2A870;
+            font-weight: 600;
+            border-bottom: 1px solid #3a3a3a;
+            padding-bottom: 8px;
         }
 
         .class-buttons {
@@ -87,20 +95,21 @@
         }
 
         .class-btn.active {
-            border-color: #4CAF50;
-            background: #4CAF50;
-            color: #000;
+            border-color: #B8860B;
+            background: linear-gradient(135deg, #B8860B 0%, #9A7209 100%);
+            color: #fff;
             font-weight: bold;
+            box-shadow: 0 0 10px rgba(184, 134, 11, 0.5);
         }
 
-        .class-btn.class-1 { border-color: #2196F3; }
-        .class-btn.class-1.active { background: #2196F3; border-color: #2196F3; }
+        .class-btn.class-1 { border-color: #5B8FA3; }
+        .class-btn.class-1.active { background: linear-gradient(135deg, #5B8FA3 0%, #4A7289 100%); border-color: #5B8FA3; }
 
-        .class-btn.class-2 { border-color: #4CAF50; }
-        .class-btn.class-2.active { background: #4CAF50; border-color: #4CAF50; }
+        .class-btn.class-2 { border-color: #7A9B5F; }
+        .class-btn.class-2.active { background: linear-gradient(135deg, #7A9B5F 0%, #687F4F 100%); border-color: #7A9B5F; }
 
-        .class-btn.class-3 { border-color: #f44336; }
-        .class-btn.class-3.active { background: #f44336; border-color: #f44336; }
+        .class-btn.class-3 { border-color: #B8860B; }
+        .class-btn.class-3.active { background: linear-gradient(135deg, #B8860B 0%, #9A7209 100%); border-color: #B8860B; }
 
         .action-buttons {
             display: flex;
@@ -119,30 +128,30 @@
         }
 
         .btn-primary {
-            background: #4CAF50;
+            background: linear-gradient(135deg, #B8860B 0%, #9A7209 100%);
             color: white;
         }
 
         .btn-primary:hover {
-            background: #45a049;
+            background: linear-gradient(135deg, #D2A870 0%, #B8860B 100%);
         }
 
         .btn-secondary {
-            background: #555;
+            background: #3a3a3a;
             color: white;
         }
 
         .btn-secondary:hover {
-            background: #666;
+            background: #4a4a4a;
         }
 
         .btn-danger {
-            background: #f44336;
+            background: #7a4a40;
             color: white;
         }
 
         .btn-danger:hover {
-            background: #da190b;
+            background: #8f5a4e;
         }
 
         input[type="file"] {
@@ -152,7 +161,7 @@
         .file-upload-label {
             display: inline-block;
             padding: 10px 20px;
-            background: #2196F3;
+            background: linear-gradient(135deg, #B8860B 0%, #9A7209 100%);
             color: white;
             border-radius: 5px;
             cursor: pointer;
@@ -161,7 +170,7 @@
         }
 
         .file-upload-label:hover {
-            background: #0b7dda;
+            background: linear-gradient(135deg, #D2A870 0%, #B8860B 100%);
         }
 
         .canvas-container {
@@ -198,12 +207,13 @@
         }
 
         .stats {
-            background: #2d2d2d;
+            background: linear-gradient(135deg, #2a2520 0%, #1f1f1f 100%);
             padding: 15px;
             border-radius: 8px;
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 10px;
+            border: 1px solid #3a3a3a;
         }
 
         .stat-item {
@@ -213,7 +223,7 @@
         .stat-value {
             font-size: 24px;
             font-weight: bold;
-            color: #4CAF50;
+            color: #D2A870;
         }
 
         .stat-label {
@@ -247,7 +257,7 @@
         }
 
         .delete-btn {
-            background: #f44336;
+            background: #7a4a40;
             border: none;
             color: white;
             padding: 4px 8px;
@@ -257,7 +267,7 @@
         }
 
         .delete-btn:hover {
-            background: #da190b;
+            background: #8f5a4e;
         }
 
         .overlay-info {
@@ -280,10 +290,12 @@
         }
 
         .keyboard-shortcuts kbd {
-            background: #555;
+            background: #2a2a2a;
             padding: 2px 6px;
             border-radius: 3px;
+            border: 1px solid #444;
             font-family: monospace;
+            color: #D2A870;
         }
 
         @media (max-width: 768px) {
@@ -296,8 +308,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>YOLO Manuscript Annotator</h1>
-            <p>Create bounding box annotations for YOLO training - all in your browser</p>
+            <h1>YOLO Annotation Tool</h1>
+            <p style="color: #a89968; font-size: 14px;">Precision bounding box annotation for medieval manuscript OMR</p>
         </header>
 
         <div class="instructions">

@@ -8,9 +8,9 @@ const CLASS_NAMES = {
 };
 
 const CLASS_COLORS = {
-    1: "#2196F3",  // Blue for text
-    2: "#4CAF50",  // Green for music
-    3: "#f44336"   // Red for staves
+    1: "#5B8FA3",  // Muted blue-gray for text
+    2: "#7A9B5F",  // Olive green for music
+    3: "#B8860B"   // Bronze/gold for staves (Mothra's signature color)
 };
 
 class AnnotationTool {
