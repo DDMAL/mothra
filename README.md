@@ -30,18 +30,25 @@ This project challenges the existing [Rodan](https://github.com/DDMAL/Rodan) wor
 ---
 
 ## Repository Structure
-
+Assume the branch is `main` unless otherwise specified.
 ```
 mothra/
 ├── README.md                 # This file
 ├── annotator/                # Web-based annotation tool
-│   ├── index.html           # Main annotator interface
-│   ├── annotator.js         # Core annotation logic
+│   ├── index.html           # BRANCH: `mothra-ghpages` Main annotator interface
+│   ├── annotator.js         # BRANCH: `mothra-ghpages` Core annotation logic
+│   ├── annotate_yolo.py     # Locally run YOLO annotation tool
+│   ├── README.md            # Details on how to clone, YOLO annotation requirements, and how to move annotations forward for splitting
+│   ├── SAMPLE_WORKFLOW.md   # Sample head-to-tail annotation workflow
+│   ├── setup.sh             # Bash script for running the annotator using ios
+│   ├── setup.bat            # Bash script for running the annotator using windows
+│   ├── QUICK_REFERENCE.md   # Annotation guide 
 │   └── THEME_NOTES.md       # Design documentation
 ├── data/                     # Datasets (gitignored)
 │   ├── raw/                 # Original manuscript images
 │   ├── annotations/         # JSON and YOLO format labels
 │   └── splits/              # Train/val/test splits
+├── samples/                 # Sample images of a fully annotated image in mothra-annotator, a correct YOLO.txt file, and a screenshot of the complete UI
 ├── experiments/              # YOLO training experiments
 │   ├── doclayout-yolo/      # DocLayout-YOLO implementation
 │   ├── configs/             # Training configurations
@@ -49,8 +56,9 @@ mothra/
 ├── scripts/                  # Utility scripts
 │   ├── convert_to_yolo.py   # JSON → YOLO format converter
 │   └── split_dataset.py     # Manuscript-aware data splitting
-└── docs/                     # Additional documentation
+└── allons-y/                     # Additional documentation
     ├── ANNOTATION_GUIDE.md  # How to annotate manuscripts
+    ├── PLAN.md              # Central team docs for phases of process, needs, and questions
     └── ARCHITECTURE.md      # Technical decisions & comparisons
 ```
 
@@ -59,6 +67,7 @@ mothra/
 ## Part 1: Mothra Annotator
 
 A browser-based tool for creating YOLO training data. Designed for speed and precision when annotating hundreds of manuscript pages.
+Lives on the branch `mothra-ghpages`, inside `mothra/annotator`.
 
 ### Features
 
@@ -66,12 +75,13 @@ A browser-based tool for creating YOLO training data. Designed for speed and pre
 - **Zoom & pan**: Up to 500% zoom for tiny neumes
 - **Opacity controls**: Adjust box transparency to see underlying content
 - **Label toggle**: Hide labels when they obscure details
-- **Multiple export formats**: JSON, YOLO .txt, or both as ZIP
+- **Multiple export formats**: JSON, YOLO .txt, or both
 - **Keyboard shortcuts**: Rapid annotation workflow
 - **Client-side processing**: Zero backend required, runs entirely in browser
 - **Session persistence**: Annotations saved in browser storage
 
 ### Quick Start (Annotator)
+User annotators may proceed to **Annotation Workflow**. This documentation covers the available options for hosting and deploying the Mothra Annotator tool.
 
 #### Option 1: GitHub Pages (Recommended for Collaborators)
 
@@ -150,7 +160,7 @@ staves
 
 | Class | ID | Color | Description |
 |-------|----|----|-------------|
-| **Text** | 1 | Muted blue | Text blocks without musical notation |
+| **Text** | 1 | Muted blue | Text with or without music; rubrics and initials included |
 | **Music** | 2 | Olive green | Complete staff systems including neumes |
 | **Staves** | 3 | Bronze/gold | Staff lines (may overlap with music) |
 
@@ -162,7 +172,7 @@ staves
 
 ### Architecture Selection
 
-We use **[DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)** as our base model because:
+We are currently experimenting with using **[DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)** as our base model because:
 
 1. **Document-specific optimizations** - Designed for complex layouts, small text, varied scales
 2. **GL-CRM module** - Global-to-Local Controllable Receptive fields handle neumes → initials range
@@ -175,7 +185,7 @@ We use **[DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)** as ou
 
 ### Training Strategy
 
-**Phase 1: Layout Detection** (current focus)
+**Phase 1: Layout Detection** (*current focus*)
 - Train on text/music/staves classes
 - Goal: Robust region detection despite degradation
 - Success metric: mAP@0.5 > 0.85 on held-out manuscripts
@@ -195,7 +205,7 @@ We use **[DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)** as ou
 **Full dataset:**
 - 200-500 pages for production model
 - Multiple scribes, time periods, repositories
-- Synthetic augmentation of rare neume types
+- Synthetic augmentation of rarer neume types
 
 ### Data Splits
 
@@ -241,7 +251,7 @@ pip install --break-system-packages -r requirements.txt
 ```
 
 ### Training Your First Model
-
+**_subject to change_**
 ```bash
 # Organize data
 python scripts/convert_to_yolo.py --input data/annotations/ --output data/yolo/
@@ -341,7 +351,7 @@ See `docs/ANNOTATION_GUIDE.md` for detailed instructions on:
 
 ---
 
-**Key papers this builds on:**
+**Key papers this draws on:**
 
 - DocLayout-YOLO: [arXiv:2410.12628](https://arxiv.org/abs/2410.12628)
 - YOLO for Medieval Music: "Optical Medieval Music Recognition Using Background Knowledge" (MDPI 2022)
