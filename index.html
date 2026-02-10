@@ -172,12 +172,29 @@
             text-align: center;
         }
 
-        #annotationCanvas {
+        #canvasWrapper {
+            position: relative;
+            display: inline-block;
+            overflow: auto;
             max-width: 100%;
+            max-height: 800px;
             border: 2px solid #555;
             border-radius: 4px;
+            background: #000;
+        }
+
+        #annotationCanvas {
+            display: block;
             cursor: crosshair;
             background: #000;
+        }
+
+        #annotationCanvas.zoomed {
+            cursor: grab;
+        }
+
+        #annotationCanvas.panning {
+            cursor: grabbing;
         }
 
         .stats {
@@ -331,7 +348,7 @@
                 </div>
                 <div class="keyboard-shortcuts">
                     <strong>Zoom:</strong> <kbd>+</kbd> In | <kbd>-</kbd> Out | <kbd>0</kbd> Reset | 
-                    <strong>Pan:</strong> Click & drag (when zoomed)
+                    <strong>Pan:</strong> Shift + drag (when zoomed)
                 </div>
             </div>
 
@@ -379,8 +396,8 @@
         </div>
 
         <div class="canvas-container">
-            <div style="position: relative; display: inline-block; overflow: auto; max-width: 100%; max-height: 800px; border: 2px solid #555; border-radius: 4px;" id="canvasWrapper">
-                <canvas id="annotationCanvas"></canvas>
+            <div style="position: relative; display: inline-block; overflow: auto; max-width: 100%; max-height: 800px; border: 2px solid #555; border-radius: 4px; background: #000;" id="canvasWrapper">
+                <canvas id="annotationCanvas" style="display: block;"></canvas>
                 <div class="overlay-info" id="overlayInfo">
                     Current: <span id="currentClass">Text</span> | 
                     Mouse: <span id="mousePos">-</span> |

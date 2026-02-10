@@ -89,12 +89,16 @@ class AnnotationTool {
         this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.canvas.addEventListener('mouseleave', () => this.onMouseLeave());
+        this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         
         // Prevent context menu on canvas
         this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        
+        // Update cursor initially
+        this.updateCursor();
     }
     
     loadImage(file) {
@@ -164,9 +168,38 @@ class AnnotationTool {
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
+        
+        // Get mouse position relative to canvas, accounting for zoom
         const x = (e.clientX - rect.left) / this.zoomLevel;
         const y = (e.clientY - rect.top) / this.zoomLevel;
+        
         return { x, y };
+    }
+    
+    
+    updateCursor() {
+        if (!this.canvas) return;
+        
+        if (this.isPanning) {
+            this.canvas.style.cursor = 'grabbing';
+        } else if (this.zoomLevel > 1) {
+            this.canvas.style.cursor = 'grab';
+        } else {
+            this.canvas.style.cursor = 'crosshair';
+        }
+    }
+    
+    onWheel(e) {
+        if (!this.image) return;
+        
+        // Ctrl+wheel or just wheel to zoom
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            
+            // Zoom in/out based on wheel direction
+            const delta = e.deltaY < 0 ? 1 : -1;
+            this.zoom(delta);
+        }
     }
     
     onMouseDown(e) {
@@ -174,11 +207,11 @@ class AnnotationTool {
         
         const pos = this.getMousePos(e);
         
-        // Right click or Space+click = pan mode (when zoomed)
+        // Right click or Shift+click = pan mode (when zoomed)
         if (e.button === 2 || (e.button === 0 && e.shiftKey && this.zoomLevel > 1)) {
             this.isPanning = true;
             this.panStart = { x: e.clientX, y: e.clientY };
-            this.canvas.style.cursor = 'grabbing';
+            this.updateCursor();
             e.preventDefault();
             return;
         }
@@ -220,7 +253,7 @@ class AnnotationTool {
         if (this.isPanning) {
             this.isPanning = false;
             this.panStart = null;
-            this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+            this.updateCursor();
             return;
         }
         
@@ -245,7 +278,7 @@ class AnnotationTool {
         if (this.isPanning) {
             this.isPanning = false;
             this.panStart = null;
-            this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+            this.updateCursor();
         }
         
         if (this.isDrawing) {
@@ -269,9 +302,9 @@ class AnnotationTool {
         const width = x2 - x1;
         const height = y2 - y1;
         
-        // Validate minimum size
-        if (width < 10 || height < 10) {
-            console.log('Box too small, ignoring');
+        // Validate minimum size (5 pixels in original image space)
+        if (width < 5 || height < 5) {
+            console.log('Box too small (min 5x5 pixels), ignoring');
             return;
         }
         
@@ -441,14 +474,15 @@ class AnnotationTool {
         
         // Draw rectangle
         this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = isDrawing ? 3 : 2;
+        this.ctx.lineWidth = (isDrawing ? 3 : 2) * Math.max(0.5, Math.min(1.5, this.zoomLevel / 2));
         this.ctx.setLineDash(isDrawing ? [5, 5] : []);
         this.ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
         this.ctx.setLineDash([]);
         
         // Draw label (only if showLabels is true)
         if (label && this.showLabels) {
-            const fontSize = 12 * this.zoomLevel;
+            // Clamp font size between 10-16px regardless of zoom
+            const fontSize = Math.max(10, Math.min(16, 12 * this.zoomLevel));
             this.ctx.font = `${fontSize}px sans-serif`;
             const textMetrics = this.ctx.measureText(label);
             const textWidth = textMetrics.width;
@@ -515,7 +549,7 @@ class AnnotationTool {
         this.setupCanvas();
         
         // Update cursor
-        this.canvas.style.cursor = this.zoomLevel > 1 ? 'grab' : 'crosshair';
+        this.updateCursor();
         
         this.render();
     }
@@ -528,7 +562,7 @@ class AnnotationTool {
         this.canvasWrapper.scrollTop = 0;
         
         this.setupCanvas();
-        this.canvas.style.cursor = 'crosshair';
+        this.updateCursor();
         this.render();
     }
     
