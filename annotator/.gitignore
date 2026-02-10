@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Annotations (user-generated, don't commit to repo)
+annotations/
+*.json
+
+# Images (too large for git)
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# But DO include example files if you create them
+!examples/*.png
+!examples/*.jpg
