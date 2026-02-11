@@ -120,6 +120,7 @@ Critical first steps:
 
 Sample from produced annotation.txt file, from Mothra annotator:
 
+`class_id x_center y_center width height`
 ```
 0 0.139432 0.215570 0.094260 0.024340
 0 0.244700 0.216487 0.108447 0.022994
