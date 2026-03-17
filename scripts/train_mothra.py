@@ -59,7 +59,7 @@ class MothraTrainer:
             labels_dir: Directory containing YOLO .txt label files
             split_ratios: (train, val, test) ratios
         """
-        print("📚 Creating manuscript-aware data splits...")
+        print("Creating manuscript-aware data splits...")
         
         images_dir = Path(images_dir)
         labels_dir = Path(labels_dir)
@@ -124,30 +124,52 @@ class MothraTrainer:
     def extract_manuscript_id(self, filename):
         """
         Extract manuscript ID from filename
-        Customize this based on your naming convention
+        Handles various naming conventions including spaces
         
         Examples:
-          AM_194_8vo_01r.png -> AM_194_8vo
-          GKS_1812_4to_002v.png -> GKS_1812_4to
-          simple_page_001.png -> simple_page
+          "CH-Fco Ms. 2_006r copy.jpg" -> "CH-Fco Ms. 2"
+          "D-KNd 1161 032r.jpg" -> "D-KNd 1161"
+          "NZ-Wt MSR-03 013r.png" -> "NZ-Wt MSR-03"
+          "AM_194_8vo_01r.png" -> "AM_194_8vo"
         """
-        parts = filename.split('_')
+        stem = Path(filename).stem
         
-        # Strategy: Take first 3 parts if available, otherwise first 2, otherwise first 1
+        # Replace underscores with spaces for consistent splitting
+        stem_normalized = stem.replace('_', ' ')
+        parts = stem_normalized.split()
+        
+        # Strategy: Take parts until we hit a page number
+        # Page numbers look like: "006r", "032r", "112v", "p.100"
+        manuscript_parts = []
+        for part in parts:
+            # Stop at page number indicators
+            if part.lower() == 'copy':
+                break
+            if part.startswith('p.') and any(c.isdigit() for c in part):
+                break
+            # Check for page numbers like "032r", "112v"
+            if len(part) >= 3 and any(c.isdigit() for c in part):
+                if part[-1] in ['r', 'v'] or part[-2:] in ['rr', 'vv']:
+                    break
+            manuscript_parts.append(part)
+        
+        if manuscript_parts:
+            return ' '.join(manuscript_parts)
+        
+        # Fallback: first 2-3 parts
         if len(parts) >= 3:
-            return '_'.join(parts[:3])
+            return ' '.join(parts[:3])
         elif len(parts) >= 2:
-            return '_'.join(parts[:2])
+            return ' '.join(parts[:2])
         else:
-            # Fallback: use filename without extension as manuscript ID
-            return Path(filename).stem
+            return stem
     
     def organize_yolo_dataset(self, splits, output_dir, split_log):
         """
         Organize YOLO files (already in YOLO format) into train/val/test structure
         Copies images and labels to proper directories
         """
-        print("📂 Organizing YOLO dataset...")
+        print("Organizing YOLO dataset...")
         
         output_dir = Path(output_dir)
         
@@ -185,9 +207,9 @@ class MothraTrainer:
         with open(log_path, 'w') as f:
             json.dump(split_log, f, indent=2)
         
-        print(f"  ✅ YOLO dataset organized at: {output_dir}")
-        print(f"  ✅ data.yaml created at: {yaml_path}")
-        print(f"  ✅ Split log saved at: {log_path}")
+        print(f"  YOLO dataset organized at: {output_dir}")
+        print(f"  data.yaml created at: {yaml_path}")
+        print(f"  Split log saved at: {log_path}")
         
         return yaml_path
     
@@ -195,16 +217,16 @@ class MothraTrainer:
         """
         Train YOLOv8 model
         """
-        print("🎯 Starting training...")
+        print("Starting training...")
         
         # Load model
         model_size = self.config['model']['size']
         if resume and (self.output_root / 'runs' / 'detect' / 'train' / 'weights' / 'last.pt').exists():
             model = YOLO(str(self.output_root / 'runs' / 'detect' / 'train' / 'weights' / 'last.pt'))
-            print(f"  📂 Resuming from checkpoint")
+            print(f"  Resuming from checkpoint")
         else:
             model = YOLO(f'yolov8{model_size}.pt')  # n, s, m, l, x
-            print(f"  📦 Loading pretrained YOLOv8{model_size}")
+            print(f"  Loading pretrained YOLOv8{model_size}")
         
         # Training arguments
         train_args = {
@@ -248,14 +270,14 @@ class MothraTrainer:
         # Train
         results = model.train(**train_args)
         
-        print("  ✅ Training complete!")
+        print("  Training complete!")
         return results
     
     def evaluate(self, data_yaml_path, weights_path=None):
         """
         Evaluate trained model
         """
-        print("📊 Evaluating model...")
+        print("Evaluating model...")
         
         if weights_path is None:
             weights_path = self.output_root / 'runs' / 'detect' / 'train' / 'weights' / 'best.pt'
@@ -323,13 +345,13 @@ def main():
     
     if args.predict:
         # Prediction mode
-        print(f"🔮 Running prediction on: {args.predict}")
+        print(f"Running prediction on: {args.predict}")
         trainer.predict_sample(args.predict)
         return
     
     # Prepare data
     print("="*60)
-    print("🦋 MOTHRA - YOLO Training for Medieval Manuscripts")
+    print("MOTHRA - YOLO Training for Medieval Manuscripts")
     print("="*60)
     
     images_dir = trainer.data_root / 'images'
@@ -357,8 +379,8 @@ def main():
         # Evaluate
         trainer.evaluate(data_yaml_path)
     
-    print("\n✅ Done! Check results in:", trainer.output_root / 'runs')
-    print("📊 Dataset organized in:", dataset_dir)
+    print("\nDone! Check results in:", trainer.output_root / 'runs')
+    print("Dataset organized in:", dataset_dir)
 
 
 if __name__ == '__main__':
