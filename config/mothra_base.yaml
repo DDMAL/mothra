@@ -1,0 +1,58 @@
+# Mothra Base Configuration
+# YOLOv8 training for medieval manuscript layout detection
+
+# Project paths
+paths:
+  project_root: ./mothra
+  data_root: ./data  # Contains images/ and annotations/
+  output_root: ./outputs
+
+# Classes (in order - YOLO will use 0, 1, 2)
+classes:
+  - text      # 0: Text regions without music
+  - music     # 1: Music systems (staff + neumes)
+  - staves    # 2: Staff lines only
+
+# Model configuration
+model:
+  size: m  # n (nano), s (small), m (medium), l (large), x (xlarge)
+  # Medium is good balance for manuscript work
+  # Use 's' if GPU memory limited, 'l' if accuracy critical
+
+# Training parameters
+training:
+  epochs: 300
+  batch_size: 16  # Reduce to 8 or 4 if GPU memory issues
+  image_size: 640  # YOLO standard, can go up to 1280 for detail
+  learning_rate: 0.001
+  patience: 50  # Early stopping patience
+  save_period: 10  # Save checkpoint every N epochs
+  device: 0  # GPU 0, use 'cpu' if no GPU
+  workers: 8  # Data loading workers
+
+# Data augmentation (tuned for parchment manuscripts)
+augmentation:
+  # Color/brightness (simulate parchment variation, ink fading)
+  hsv_h: 0.01  # Hue shift (minimal - parchment is brownish)
+  hsv_s: 0.5   # Saturation (moderate - ink darkness varies)
+  hsv_v: 0.4   # Value/brightness (moderate - lighting varies)
+  
+  # Geometric (simulate photo angles, warping)
+  degrees: 5     # Rotation degrees (small - manuscripts mostly upright)
+  translate: 0.1 # Translation (10% of image)
+  scale: 0.3     # Scaling (±30%)
+  shear: 2.0     # Shear deformation
+  perspective: 0.0  # Don't use perspective (manuscripts are flat)
+  
+  # Flipping
+  flipud: 0.0  # Never flip vertically (text would be upside down)
+  fliplr: 0.0  # Never flip horizontally (text would be backwards)
+  
+  # Advanced
+  mosaic: 1.0  # Mosaic augmentation (mix 4 images)
+  mixup: 0.0   # Don't use mixup (confuses manuscript boundaries)
+
+# Evaluation
+evaluation:
+  confidence_threshold: 0.25
+  iou_threshold: 0.7  # Higher for overlapping boxes (staves + music)
