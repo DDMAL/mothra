@@ -1,0 +1,49 @@
+# Mothra Small Configuration
+# Fast training for quick experiments
+
+# Project paths
+paths:
+  project_root: ./mothra
+  data_root: ./data
+  output_root: ./outputs
+
+# Classes
+classes:
+  - text
+  - music
+  - staves
+
+# Model configuration
+model:
+  size: s  # Small model - faster training, less GPU memory
+
+# Training parameters
+training:
+  epochs: 150  # Fewer epochs for quick iteration
+  batch_size: 32  # Can use larger batch with smaller model
+  image_size: 512  # Smaller images = faster
+  learning_rate: 0.001
+  patience: 30
+  save_period: 10
+  device: 0
+  workers: 8
+
+# Augmentation (same as base)
+augmentation:
+  hsv_h: 0.01
+  hsv_s: 0.5
+  hsv_v: 0.4
+  degrees: 5
+  translate: 0.1
+  scale: 0.3
+  shear: 2.0
+  perspective: 0.0
+  flipud: 0.0
+  fliplr: 0.0
+  mosaic: 1.0
+  mixup: 0.0
+
+# Evaluation
+evaluation:
+  confidence_threshold: 0.25
+  iou_threshold: 0.7

@@ -1,0 +1,17 @@
+runs/
+outputs/
+predictions*/
+runs/
+outputs/
+predictions*/
+
+# Downloaded pretrained weights
+yolov8*.pt
+!models/**/*.pt
+
+# Training logs
+training_output.log
+*.log
+
+# Symlinks
+data/labels
