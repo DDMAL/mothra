@@ -1,2 +1,4 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
 models/**/*.pt filter=lfs diff=lfs merge=lfs -text
+mothra/data/holdout filter=lfs diff=lfs merge=lfs -text
+mothra/models/v1_predictions_heldout filter=lfs diff=lfs merge=lfs -text
