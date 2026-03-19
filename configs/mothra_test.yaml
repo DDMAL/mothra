@@ -1,0 +1,42 @@
+# Mothra Test Configuration - Small/Fast for Proof of Concept
+
+paths:
+  project_root: /Users/ekaterina/Documents/mothra
+  data_root: /Users/ekaterina/Documents/mothra/data
+  output_root: /Users/ekaterina/Documents/mothra/outputs
+
+classes:
+  - text
+  - music
+  - staves
+
+model:
+  size: n  # Nano - fastest for testing on CPU
+
+training:
+  epochs: 50        # Short run for proof of concept
+  batch_size: 4     # Small batch for CPU
+  image_size: 416   # Smaller images = faster on CPU
+  learning_rate: 0.001
+  patience: 20      # Early stopping
+  save_period: 10
+  device: cpu       # MacBook CPU
+  workers: 4        # CPU workers
+
+augmentation:
+  hsv_h: 0.01
+  hsv_s: 0.5
+  hsv_v: 0.4
+  degrees: 5
+  translate: 0.1
+  scale: 0.3
+  shear: 2.0
+  perspective: 0.0
+  flipud: 0.0
+  fliplr: 0.0
+  mosaic: 0.5   # Reduced for small dataset
+  mixup: 0.0
+
+evaluation:
+  confidence_threshold: 0.25
+  iou_threshold: 0.7

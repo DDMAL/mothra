@@ -1,0 +1,5381 @@
+{
+  "image_path": "D-KNd 1161 032r.jpg",
+  "image_width": 2000,
+  "image_height": 2500,
+  "timestamp": "2026-02-17T01:50:14.924Z",
+  "class_names": {
+    "1": "text",
+    "2": "music",
+    "3": "staves"
+  },
+  "annotations": [
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        305,
+        244,
+        325,
+        271
+      ],
+      "timestamp": "2026-02-17T01:13:36.152Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        311,
+        298,
+        323,
+        308
+      ],
+      "timestamp": "2026-02-17T01:13:38.503Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        327,
+        304,
+        360,
+        338
+      ],
+      "timestamp": "2026-02-17T01:13:41.079Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        379,
+        283,
+        413,
+        323
+      ],
+      "timestamp": "2026-02-17T01:13:43.536Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        417,
+        274,
+        467,
+        319
+      ],
+      "timestamp": "2026-02-17T01:13:46.367Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        473,
+        290,
+        502,
+        317
+      ],
+      "timestamp": "2026-02-17T01:13:47.736Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        527,
+        290,
+        550,
+        321
+      ],
+      "timestamp": "2026-02-17T01:13:49.855Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        572,
+        278,
+        603,
+        311
+      ],
+      "timestamp": "2026-02-17T01:13:52.486Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        620,
+        289,
+        658,
+        328
+      ],
+      "timestamp": "2026-02-17T01:13:55.720Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        657,
+        280,
+        707,
+        321
+      ],
+      "timestamp": "2026-02-17T01:14:09.704Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        715,
+        284,
+        752,
+        319
+      ],
+      "timestamp": "2026-02-17T01:14:14.254Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        778,
+        272,
+        813,
+        323
+      ],
+      "timestamp": "2026-02-17T01:14:17.574Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        830,
+        261,
+        851,
+        290
+      ],
+      "timestamp": "2026-02-17T01:14:20.311Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        850,
+        250,
+        877,
+        283
+      ],
+      "timestamp": "2026-02-17T01:14:22.783Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        891,
+        262,
+        908,
+        291
+      ],
+      "timestamp": "2026-02-17T01:14:25.983Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        930,
+        263,
+        947,
+        293
+      ],
+      "timestamp": "2026-02-17T01:14:28.145Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        961,
+        264,
+        998,
+        296
+      ],
+      "timestamp": "2026-02-17T01:14:31.071Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        307,
+        385,
+        325,
+        410
+      ],
+      "timestamp": "2026-02-17T01:14:37.845Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        310,
+        435,
+        323,
+        448
+      ],
+      "timestamp": "2026-02-17T01:14:39.694Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        332,
+        416,
+        372,
+        438
+      ],
+      "timestamp": "2026-02-17T01:14:42.407Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        397,
+        433,
+        420,
+        467
+      ],
+      "timestamp": "2026-02-17T01:14:44.839Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        419,
+        434,
+        458,
+        458
+      ],
+      "timestamp": "2026-02-17T01:14:47.303Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        487,
+        444,
+        513,
+        464
+      ],
+      "timestamp": "2026-02-17T01:14:49.624Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        544,
+        439,
+        576,
+        469
+      ],
+      "timestamp": "2026-02-17T01:14:53.183Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        574,
+        394,
+        591,
+        413
+      ],
+      "timestamp": "2026-02-17T01:14:55.583Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        593,
+        409,
+        627,
+        432
+      ],
+      "timestamp": "2026-02-17T01:14:58.526Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        623,
+        393,
+        650,
+        421
+      ],
+      "timestamp": "2026-02-17T01:15:01.519Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        668,
+        418,
+        691,
+        447
+      ],
+      "timestamp": "2026-02-17T01:15:04.191Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        707,
+        406,
+        745,
+        430
+      ],
+      "timestamp": "2026-02-17T01:15:07.727Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        743,
+        423,
+        762,
+        455
+      ],
+      "timestamp": "2026-02-17T01:15:10.144Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        767,
+        424,
+        785,
+        447
+      ],
+      "timestamp": "2026-02-17T01:15:13.216Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        783,
+        415,
+        813,
+        449
+      ],
+      "timestamp": "2026-02-17T01:15:15.775Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        813,
+        420,
+        838,
+        458
+      ],
+      "timestamp": "2026-02-17T01:15:17.696Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        840,
+        422,
+        864,
+        459
+      ],
+      "timestamp": "2026-02-17T01:15:19.904Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        863,
+        424,
+        887,
+        450
+      ],
+      "timestamp": "2026-02-17T01:15:21.711Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        928,
+        444,
+        948,
+        476
+      ],
+      "timestamp": "2026-02-17T01:15:27.904Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        963,
+        425,
+        1000,
+        454
+      ],
+      "timestamp": "2026-02-17T01:15:30.624Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1016,
+        413,
+        1040,
+        446
+      ],
+      "timestamp": "2026-02-17T01:15:32.808Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        307,
+        521,
+        328,
+        545
+      ],
+      "timestamp": "2026-02-17T01:15:37.047Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        312,
+        569,
+        327,
+        586
+      ],
+      "timestamp": "2026-02-17T01:15:38.735Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        330,
+        549,
+        373,
+        571
+      ],
+      "timestamp": "2026-02-17T01:15:41.263Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        387,
+        574,
+        400,
+        594
+      ],
+      "timestamp": "2026-02-17T01:15:42.768Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        412,
+        557,
+        450,
+        589
+      ],
+      "timestamp": "2026-02-17T01:15:46.087Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        458,
+        564,
+        484,
+        587
+      ],
+      "timestamp": "2026-02-17T01:15:48.089Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        532,
+        541,
+        552,
+        568
+      ],
+      "timestamp": "2026-02-17T01:15:50.344Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        563,
+        549,
+        587,
+        578
+      ],
+      "timestamp": "2026-02-17T01:15:53.277Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        593,
+        541,
+        647,
+        585
+      ],
+      "timestamp": "2026-02-17T01:15:55.991Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        646,
+        559,
+        669,
+        585
+      ],
+      "timestamp": "2026-02-17T01:15:57.903Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        670,
+        541,
+        700,
+        571
+      ],
+      "timestamp": "2026-02-17T01:16:00.448Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        702,
+        551,
+        720,
+        580
+      ],
+      "timestamp": "2026-02-17T01:16:02.655Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        743,
+        550,
+        762,
+        579
+      ],
+      "timestamp": "2026-02-17T01:16:05.495Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        775,
+        549,
+        794,
+        579
+      ],
+      "timestamp": "2026-02-17T01:16:08.591Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        805,
+        546,
+        829,
+        569
+      ],
+      "timestamp": "2026-02-17T01:16:10.383Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        842,
+        538,
+        877,
+        568
+      ],
+      "timestamp": "2026-02-17T01:16:13.727Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        898,
+        546,
+        922,
+        578
+      ],
+      "timestamp": "2026-02-17T01:16:16.254Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        944,
+        558,
+        967,
+        583
+      ],
+      "timestamp": "2026-02-17T01:16:18.776Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        967,
+        548,
+        990,
+        578
+      ],
+      "timestamp": "2026-02-17T01:16:20.503Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        308,
+        654,
+        327,
+        678
+      ],
+      "timestamp": "2026-02-17T01:16:24.200Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        315,
+        701,
+        325,
+        714
+      ],
+      "timestamp": "2026-02-17T01:16:25.977Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        324,
+        706,
+        347,
+        727
+      ],
+      "timestamp": "2026-02-17T01:16:31.669Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        347,
+        694,
+        380,
+        727
+      ],
+      "timestamp": "2026-02-17T01:16:34.439Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        383,
+        709,
+        408,
+        736
+      ],
+      "timestamp": "2026-02-17T01:16:35.999Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        482,
+        720,
+        502,
+        747
+      ],
+      "timestamp": "2026-02-17T01:16:38.576Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        701,
+        683,
+        717,
+        716
+      ],
+      "timestamp": "2026-02-17T01:16:41.456Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        733,
+        673,
+        753,
+        698
+      ],
+      "timestamp": "2026-02-17T01:16:47.383Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        756,
+        651,
+        779,
+        683
+      ],
+      "timestamp": "2026-02-17T01:16:52.759Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        816,
+        651,
+        834,
+        683
+      ],
+      "timestamp": "2026-02-17T01:16:59.400Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        860,
+        649,
+        913,
+        682
+      ],
+      "timestamp": "2026-02-17T01:17:02.064Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        915,
+        655,
+        939,
+        680
+      ],
+      "timestamp": "2026-02-17T01:17:03.792Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        953,
+        668,
+        975,
+        699
+      ],
+      "timestamp": "2026-02-17T01:17:05.631Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        998,
+        648,
+        1020,
+        680
+      ],
+      "timestamp": "2026-02-17T01:17:08.703Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        312,
+        799,
+        330,
+        824
+      ],
+      "timestamp": "2026-02-17T01:17:11.490Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        312,
+        846,
+        326,
+        861
+      ],
+      "timestamp": "2026-02-17T01:17:14.147Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        326,
+        826,
+        352,
+        850
+      ],
+      "timestamp": "2026-02-17T01:17:15.904Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        390,
+        799,
+        412,
+        833
+      ],
+      "timestamp": "2026-02-17T01:17:22.440Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        467,
+        798,
+        487,
+        828
+      ],
+      "timestamp": "2026-02-17T01:17:24.336Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        517,
+        786,
+        552,
+        823
+      ],
+      "timestamp": "2026-02-17T01:17:30.871Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        549,
+        816,
+        578,
+        853
+      ],
+      "timestamp": "2026-02-17T01:17:33.320Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        579,
+        818,
+        622,
+        848
+      ],
+      "timestamp": "2026-02-17T01:17:36.728Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        660,
+        797,
+        678,
+        828
+      ],
+      "timestamp": "2026-02-17T01:17:39.426Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        693,
+        798,
+        715,
+        826
+      ],
+      "timestamp": "2026-02-17T01:17:41.344Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        728,
+        793,
+        748,
+        825
+      ],
+      "timestamp": "2026-02-17T01:17:43.215Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        774,
+        793,
+        810,
+        831
+      ],
+      "timestamp": "2026-02-17T01:17:49.624Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        831,
+        793,
+        889,
+        835
+      ],
+      "timestamp": "2026-02-17T01:17:52.447Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        888,
+        811,
+        912,
+        838
+      ],
+      "timestamp": "2026-02-17T01:17:54.447Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        917,
+        789,
+        954,
+        828
+      ],
+      "timestamp": "2026-02-17T01:17:57.967Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        970,
+        782,
+        1009,
+        815
+      ],
+      "timestamp": "2026-02-17T01:18:04.376Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        308,
+        922,
+        328,
+        951
+      ],
+      "timestamp": "2026-02-17T01:18:08.327Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        336,
+        950,
+        363,
+        973
+      ],
+      "timestamp": "2026-02-17T01:18:10.088Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        361,
+        928,
+        396,
+        964
+      ],
+      "timestamp": "2026-02-17T01:18:12.992Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        397,
+        945,
+        421,
+        972
+      ],
+      "timestamp": "2026-02-17T01:18:14.673Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        480,
+        926,
+        516,
+        975
+      ],
+      "timestamp": "2026-02-17T01:18:17.535Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        532,
+        927,
+        554,
+        957
+      ],
+      "timestamp": "2026-02-17T01:18:20.256Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        580,
+        914,
+        612,
+        937
+      ],
+      "timestamp": "2026-02-17T01:18:22.752Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        608,
+        924,
+        662,
+        968
+      ],
+      "timestamp": "2026-02-17T01:18:26.279Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        677,
+        920,
+        716,
+        961
+      ],
+      "timestamp": "2026-02-17T01:18:28.944Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        762,
+        923,
+        777,
+        951
+      ],
+      "timestamp": "2026-02-17T01:18:30.802Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        796,
+        921,
+        812,
+        950
+      ],
+      "timestamp": "2026-02-17T01:18:33.808Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        838,
+        919,
+        855,
+        948
+      ],
+      "timestamp": "2026-02-17T01:18:35.918Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        868,
+        917,
+        887,
+        948
+      ],
+      "timestamp": "2026-02-17T01:18:38.311Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        895,
+        923,
+        922,
+        958
+      ],
+      "timestamp": "2026-02-17T01:18:40.440Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        928,
+        901,
+        965,
+        934
+      ],
+      "timestamp": "2026-02-17T01:18:44.160Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        983,
+        913,
+        1003,
+        944
+      ],
+      "timestamp": "2026-02-17T01:18:46.232Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        312,
+        972,
+        325,
+        986
+      ],
+      "timestamp": "2026-02-17T01:18:50.536Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        312,
+        1066,
+        330,
+        1090
+      ],
+      "timestamp": "2026-02-17T01:18:52.608Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        315,
+        1118,
+        326,
+        1129
+      ],
+      "timestamp": "2026-02-17T01:18:54.351Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        327,
+        1095,
+        357,
+        1129
+      ],
+      "timestamp": "2026-02-17T01:18:56.591Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        367,
+        1103,
+        385,
+        1135
+      ],
+      "timestamp": "2026-02-17T01:18:58.794Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        400,
+        1101,
+        418,
+        1136
+      ],
+      "timestamp": "2026-02-17T01:19:00.384Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        450,
+        1101,
+        467,
+        1135
+      ],
+      "timestamp": "2026-02-17T01:19:02.034Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        483,
+        1101,
+        501,
+        1134
+      ],
+      "timestamp": "2026-02-17T01:19:03.896Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        517,
+        1101,
+        536,
+        1133
+      ],
+      "timestamp": "2026-02-17T01:19:06.136Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        548,
+        1100,
+        565,
+        1134
+      ],
+      "timestamp": "2026-02-17T01:19:08.591Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        586,
+        1068,
+        635,
+        1111
+      ],
+      "timestamp": "2026-02-17T01:19:12.952Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        634,
+        1073,
+        663,
+        1102
+      ],
+      "timestamp": "2026-02-17T01:19:15.215Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        670,
+        1098,
+        693,
+        1129
+      ],
+      "timestamp": "2026-02-17T01:19:16.984Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        708,
+        1081,
+        743,
+        1115
+      ],
+      "timestamp": "2026-02-17T01:19:19.680Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        765,
+        1060,
+        794,
+        1095
+      ],
+      "timestamp": "2026-02-17T01:19:23.219Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        793,
+        1047,
+        850,
+        1095
+      ],
+      "timestamp": "2026-02-17T01:19:26.368Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        882,
+        1066,
+        935,
+        1101
+      ],
+      "timestamp": "2026-02-17T01:19:29.968Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        940,
+        1072,
+        966,
+        1100
+      ],
+      "timestamp": "2026-02-17T01:19:31.295Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        998,
+        1056,
+        1015,
+        1086
+      ],
+      "timestamp": "2026-02-17T01:19:32.942Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        314,
+        1249,
+        328,
+        1264
+      ],
+      "timestamp": "2026-02-17T01:19:38.896Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        310,
+        1194,
+        330,
+        1225
+      ],
+      "timestamp": "2026-02-17T01:19:40.416Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        341,
+        1235,
+        358,
+        1269
+      ],
+      "timestamp": "2026-02-17T01:19:42.280Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        387,
+        1234,
+        408,
+        1268
+      ],
+      "timestamp": "2026-02-17T01:19:44.167Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        420,
+        1233,
+        435,
+        1267
+      ],
+      "timestamp": "2026-02-17T01:19:45.928Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        445,
+        1222,
+        465,
+        1247
+      ],
+      "timestamp": "2026-02-17T01:19:49.167Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        463,
+        1208,
+        478,
+        1244
+      ],
+      "timestamp": "2026-02-17T01:19:51.382Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        507,
+        1230,
+        523,
+        1263
+      ],
+      "timestamp": "2026-02-17T01:19:53.768Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        552,
+        1229,
+        571,
+        1265
+      ],
+      "timestamp": "2026-02-17T01:19:55.712Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        588,
+        1229,
+        618,
+        1264
+      ],
+      "timestamp": "2026-02-17T01:19:57.720Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        617,
+        1195,
+        646,
+        1241
+      ],
+      "timestamp": "2026-02-17T01:20:00.208Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        647,
+        1215,
+        689,
+        1250
+      ],
+      "timestamp": "2026-02-17T01:20:02.024Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        697,
+        1193,
+        738,
+        1228
+      ],
+      "timestamp": "2026-02-17T01:20:04.166Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        755,
+        1181,
+        810,
+        1228
+      ],
+      "timestamp": "2026-02-17T01:20:12.566Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        819,
+        1192,
+        865,
+        1225
+      ],
+      "timestamp": "2026-02-17T01:20:15.727Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        906,
+        1202,
+        958,
+        1239
+      ],
+      "timestamp": "2026-02-17T01:20:19.783Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        961,
+        1211,
+        978,
+        1242
+      ],
+      "timestamp": "2026-02-17T01:20:22.264Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        982,
+        1203,
+        1025,
+        1236
+      ],
+      "timestamp": "2026-02-17T01:20:24.823Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        313,
+        1349,
+        335,
+        1373
+      ],
+      "timestamp": "2026-02-17T01:20:28.000Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        320,
+        1398,
+        332,
+        1411
+      ],
+      "timestamp": "2026-02-17T01:20:30.520Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        329,
+        1376,
+        355,
+        1401
+      ],
+      "timestamp": "2026-02-17T01:20:32.496Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        392,
+        1349,
+        425,
+        1397
+      ],
+      "timestamp": "2026-02-17T01:20:35.263Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        450,
+        1347,
+        482,
+        1371
+      ],
+      "timestamp": "2026-02-17T01:20:37.280Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        502,
+        1331,
+        534,
+        1371
+      ],
+      "timestamp": "2026-02-17T01:20:39.336Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        537,
+        1341,
+        579,
+        1393
+      ],
+      "timestamp": "2026-02-17T01:20:41.416Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        600,
+        1363,
+        649,
+        1402
+      ],
+      "timestamp": "2026-02-17T01:20:43.976Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        648,
+        1372,
+        668,
+        1404
+      ],
+      "timestamp": "2026-02-17T01:20:46.455Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        669,
+        1373,
+        693,
+        1399
+      ],
+      "timestamp": "2026-02-17T01:20:48.127Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        709,
+        1382,
+        725,
+        1414
+      ],
+      "timestamp": "2026-02-17T01:20:49.824Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        738,
+        1361,
+        766,
+        1386
+      ],
+      "timestamp": "2026-02-17T01:20:51.753Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        773,
+        1359,
+        790,
+        1389
+      ],
+      "timestamp": "2026-02-17T01:20:53.311Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        808,
+        1370,
+        825,
+        1398
+      ],
+      "timestamp": "2026-02-17T01:20:55.024Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        829,
+        1360,
+        860,
+        1393
+      ],
+      "timestamp": "2026-02-17T01:20:58.096Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        877,
+        1368,
+        892,
+        1401
+      ],
+      "timestamp": "2026-02-17T01:20:59.903Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        927,
+        1367,
+        945,
+        1400
+      ],
+      "timestamp": "2026-02-17T01:21:01.789Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        959,
+        1354,
+        995,
+        1387
+      ],
+      "timestamp": "2026-02-17T01:21:04.046Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        372,
+        1378,
+        393,
+        1388
+      ],
+      "timestamp": "2026-02-17T01:21:08.822Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        315,
+        1476,
+        336,
+        1503
+      ],
+      "timestamp": "2026-02-17T01:21:11.728Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        322,
+        1523,
+        335,
+        1541
+      ],
+      "timestamp": "2026-02-17T01:21:13.776Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        337,
+        1512,
+        358,
+        1535
+      ],
+      "timestamp": "2026-02-17T01:21:15.720Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        357,
+        1499,
+        383,
+        1538
+      ],
+      "timestamp": "2026-02-17T01:21:18.184Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        384,
+        1505,
+        398,
+        1542
+      ],
+      "timestamp": "2026-02-17T01:21:20.312Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        411,
+        1508,
+        437,
+        1534
+      ],
+      "timestamp": "2026-02-17T01:21:21.690Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        534,
+        1475,
+        562,
+        1523
+      ],
+      "timestamp": "2026-02-17T01:21:24.424Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        585,
+        1474,
+        604,
+        1503
+      ],
+      "timestamp": "2026-02-17T01:21:26.264Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        628,
+        1473,
+        653,
+        1499
+      ],
+      "timestamp": "2026-02-17T01:21:28.080Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        683,
+        1458,
+        710,
+        1486
+      ],
+      "timestamp": "2026-02-17T01:21:30.136Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        710,
+        1472,
+        752,
+        1504
+      ],
+      "timestamp": "2026-02-17T01:21:32.694Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        752,
+        1487,
+        771,
+        1514
+      ],
+      "timestamp": "2026-02-17T01:21:34.519Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        805,
+        1469,
+        841,
+        1509
+      ],
+      "timestamp": "2026-02-17T01:21:37.490Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        880,
+        1469,
+        898,
+        1496
+      ],
+      "timestamp": "2026-02-17T01:21:39.208Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        927,
+        1464,
+        948,
+        1496
+      ],
+      "timestamp": "2026-02-17T01:21:41.152Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        987,
+        1464,
+        1002,
+        1497
+      ],
+      "timestamp": "2026-02-17T01:21:42.854Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        318,
+        1618,
+        337,
+        1644
+      ],
+      "timestamp": "2026-02-17T01:21:46.296Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        317,
+        1664,
+        330,
+        1681
+      ],
+      "timestamp": "2026-02-17T01:21:48.336Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        331,
+        1644,
+        360,
+        1674
+      ],
+      "timestamp": "2026-02-17T01:21:51.481Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        372,
+        1648,
+        390,
+        1679
+      ],
+      "timestamp": "2026-02-17T01:21:53.824Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        420,
+        1649,
+        437,
+        1678
+      ],
+      "timestamp": "2026-02-17T01:21:56.008Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        464,
+        1644,
+        482,
+        1679
+      ],
+      "timestamp": "2026-02-17T01:21:57.577Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        519,
+        1613,
+        549,
+        1658
+      ],
+      "timestamp": "2026-02-17T01:22:00.312Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        548,
+        1619,
+        575,
+        1646
+      ],
+      "timestamp": "2026-02-17T01:22:01.976Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        598,
+        1643,
+        621,
+        1674
+      ],
+      "timestamp": "2026-02-17T01:22:04.336Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        633,
+        1631,
+        668,
+        1661
+      ],
+      "timestamp": "2026-02-17T01:22:09.791Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        680,
+        1609,
+        712,
+        1641
+      ],
+      "timestamp": "2026-02-17T01:22:13.024Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        712,
+        1595,
+        762,
+        1641
+      ],
+      "timestamp": "2026-02-17T01:22:15.536Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        774,
+        1615,
+        819,
+        1651
+      ],
+      "timestamp": "2026-02-17T01:22:19.230Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        819,
+        1622,
+        842,
+        1649
+      ],
+      "timestamp": "2026-02-17T01:22:20.488Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        877,
+        1646,
+        896,
+        1678
+      ],
+      "timestamp": "2026-02-17T01:22:22.352Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        903,
+        1627,
+        933,
+        1653
+      ],
+      "timestamp": "2026-02-17T01:22:23.893Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        947,
+        1624,
+        963,
+        1651
+      ],
+      "timestamp": "2026-02-17T01:22:26.462Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        973,
+        1631,
+        987,
+        1666
+      ],
+      "timestamp": "2026-02-17T01:22:27.552Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        319,
+        1743,
+        336,
+        1773
+      ],
+      "timestamp": "2026-02-17T01:22:30.608Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        322,
+        1789,
+        334,
+        1807
+      ],
+      "timestamp": "2026-02-17T01:22:32.783Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        344,
+        1777,
+        360,
+        1811
+      ],
+      "timestamp": "2026-02-17T01:22:36.360Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        385,
+        1778,
+        400,
+        1810
+      ],
+      "timestamp": "2026-02-17T01:22:39.047Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        430,
+        1784,
+        472,
+        1814
+      ],
+      "timestamp": "2026-02-17T01:22:41.554Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        488,
+        1773,
+        508,
+        1806
+      ],
+      "timestamp": "2026-02-17T01:22:43.886Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        525,
+        1778,
+        551,
+        1805
+      ],
+      "timestamp": "2026-02-17T01:22:45.232Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        562,
+        1807,
+        583,
+        1823
+      ],
+      "timestamp": "2026-02-17T01:22:47.112Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        598,
+        1808,
+        628,
+        1819
+      ],
+      "timestamp": "2026-02-17T01:22:48.808Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        648,
+        1758,
+        666,
+        1789
+      ],
+      "timestamp": "2026-02-17T01:22:51.126Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        674,
+        1760,
+        688,
+        1791
+      ],
+      "timestamp": "2026-02-17T01:22:53.473Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        698,
+        1768,
+        718,
+        1796
+      ],
+      "timestamp": "2026-02-17T01:22:57.968Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        737,
+        1779,
+        757,
+        1809
+      ],
+      "timestamp": "2026-02-17T01:23:00.161Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        762,
+        1759,
+        797,
+        1788
+      ],
+      "timestamp": "2026-02-17T01:23:02.848Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        805,
+        1766,
+        820,
+        1796
+      ],
+      "timestamp": "2026-02-17T01:23:04.544Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        882,
+        1774,
+        901,
+        1806
+      ],
+      "timestamp": "2026-02-17T01:23:06.608Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        900,
+        1764,
+        930,
+        1795
+      ],
+      "timestamp": "2026-02-17T01:23:09.168Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        938,
+        1765,
+        958,
+        1794
+      ],
+      "timestamp": "2026-02-17T01:23:11.088Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        965,
+        1754,
+        998,
+        1786
+      ],
+      "timestamp": "2026-02-17T01:23:13.072Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        321,
+        1891,
+        341,
+        1918
+      ],
+      "timestamp": "2026-02-17T01:23:16.560Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        325,
+        1941,
+        338,
+        1957
+      ],
+      "timestamp": "2026-02-17T01:23:21.112Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        346,
+        1929,
+        361,
+        1965
+      ],
+      "timestamp": "2026-02-17T01:23:22.799Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        378,
+        1929,
+        396,
+        1962
+      ],
+      "timestamp": "2026-02-17T01:23:24.281Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        419,
+        1894,
+        442,
+        1924
+      ],
+      "timestamp": "2026-02-17T01:23:26.488Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        449,
+        1893,
+        467,
+        1924
+      ],
+      "timestamp": "2026-02-17T01:23:27.720Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        476,
+        1901,
+        492,
+        1933
+      ],
+      "timestamp": "2026-02-17T01:23:29.624Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        511,
+        1890,
+        530,
+        1923
+      ],
+      "timestamp": "2026-02-17T01:23:31.384Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        540,
+        1909,
+        556,
+        1944
+      ],
+      "timestamp": "2026-02-17T01:23:36.808Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        570,
+        1919,
+        595,
+        1934
+      ],
+      "timestamp": "2026-02-17T01:23:38.880Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        641,
+        1888,
+        660,
+        1919
+      ],
+      "timestamp": "2026-02-17T01:23:41.297Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        683,
+        1883,
+        706,
+        1916
+      ],
+      "timestamp": "2026-02-17T01:23:43.576Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        717,
+        1891,
+        735,
+        1923
+      ],
+      "timestamp": "2026-02-17T01:23:45.568Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        754,
+        1879,
+        774,
+        1916
+      ],
+      "timestamp": "2026-02-17T01:23:47.424Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        788,
+        1899,
+        811,
+        1930
+      ],
+      "timestamp": "2026-02-17T01:23:49.281Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        817,
+        1911,
+        835,
+        1943
+      ],
+      "timestamp": "2026-02-17T01:23:50.993Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        846,
+        1889,
+        863,
+        1922
+      ],
+      "timestamp": "2026-02-17T01:23:52.856Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        885,
+        1888,
+        901,
+        1918
+      ],
+      "timestamp": "2026-02-17T01:23:54.912Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        918,
+        1876,
+        937,
+        1908
+      ],
+      "timestamp": "2026-02-17T01:23:56.432Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        947,
+        1899,
+        965,
+        1933
+      ],
+      "timestamp": "2026-02-17T01:23:58.408Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        981,
+        1906,
+        1008,
+        1930
+      ],
+      "timestamp": "2026-02-17T01:24:00.183Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        998,
+        265,
+        1028,
+        294
+      ],
+      "timestamp": "2026-02-17T01:24:08.016Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1029,
+        264,
+        1081,
+        293
+      ],
+      "timestamp": "2026-02-17T01:24:10.864Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1100,
+        284,
+        1127,
+        308
+      ],
+      "timestamp": "2026-02-17T01:24:13.105Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1149,
+        264,
+        1166,
+        292
+      ],
+      "timestamp": "2026-02-17T01:24:15.287Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1179,
+        261,
+        1213,
+        290
+      ],
+      "timestamp": "2026-02-17T01:24:17.167Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1219,
+        270,
+        1249,
+        304
+      ],
+      "timestamp": "2026-02-17T01:24:20.047Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1241,
+        248,
+        1261,
+        266
+      ],
+      "timestamp": "2026-02-17T01:24:21.415Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1251,
+        249,
+        1294,
+        289
+      ],
+      "timestamp": "2026-02-17T01:24:25.729Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1293,
+        249,
+        1324,
+        279
+      ],
+      "timestamp": "2026-02-17T01:24:28.343Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1333,
+        256,
+        1353,
+        286
+      ],
+      "timestamp": "2026-02-17T01:24:29.897Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1377,
+        254,
+        1394,
+        284
+      ],
+      "timestamp": "2026-02-17T01:24:31.312Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1056,
+        400,
+        1110,
+        446
+      ],
+      "timestamp": "2026-02-17T01:24:40.097Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1154,
+        422,
+        1193,
+        459
+      ],
+      "timestamp": "2026-02-17T01:24:43.017Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1198,
+        421,
+        1239,
+        456
+      ],
+      "timestamp": "2026-02-17T01:24:45.760Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1241,
+        411,
+        1277,
+        463
+      ],
+      "timestamp": "2026-02-17T01:24:47.960Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1278,
+        442,
+        1306,
+        464
+      ],
+      "timestamp": "2026-02-17T01:24:49.683Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1316,
+        419,
+        1351,
+        449
+      ],
+      "timestamp": "2026-02-17T01:24:54.312Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1359,
+        404,
+        1384,
+        439
+      ],
+      "timestamp": "2026-02-17T01:24:56.153Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1388,
+        396,
+        1433,
+        425
+      ],
+      "timestamp": "2026-02-17T01:24:58.840Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1019,
+        555,
+        1045,
+        581
+      ],
+      "timestamp": "2026-02-17T01:25:01.703Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1079,
+        556,
+        1101,
+        588
+      ],
+      "timestamp": "2026-02-17T01:25:03.656Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1124,
+        556,
+        1157,
+        592
+      ],
+      "timestamp": "2026-02-17T01:25:09.304Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1179,
+        556,
+        1198,
+        591
+      ],
+      "timestamp": "2026-02-17T01:25:11.584Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1221,
+        554,
+        1238,
+        586
+      ],
+      "timestamp": "2026-02-17T01:25:14.240Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1239,
+        544,
+        1296,
+        579
+      ],
+      "timestamp": "2026-02-17T01:25:17.088Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1311,
+        544,
+        1330,
+        577
+      ],
+      "timestamp": "2026-02-17T01:25:18.936Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1366,
+        530,
+        1418,
+        563
+      ],
+      "timestamp": "2026-02-17T01:25:25.327Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1032,
+        650,
+        1072,
+        678
+      ],
+      "timestamp": "2026-02-17T01:25:28.528Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1070,
+        659,
+        1110,
+        689
+      ],
+      "timestamp": "2026-02-17T01:25:31.095Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1125,
+        664,
+        1159,
+        693
+      ],
+      "timestamp": "2026-02-17T01:25:33.095Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1179,
+        669,
+        1198,
+        694
+      ],
+      "timestamp": "2026-02-17T01:25:35.014Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1224,
+        647,
+        1285,
+        681
+      ],
+      "timestamp": "2026-02-17T01:25:37.712Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1299,
+        676,
+        1316,
+        709
+      ],
+      "timestamp": "2026-02-17T01:25:39.720Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1356,
+        651,
+        1411,
+        691
+      ],
+      "timestamp": "2026-02-17T01:25:45.182Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1413,
+        659,
+        1431,
+        694
+      ],
+      "timestamp": "2026-02-17T01:25:47.120Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1031,
+        789,
+        1054,
+        812
+      ],
+      "timestamp": "2026-02-17T01:25:50.873Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1091,
+        789,
+        1109,
+        819
+      ],
+      "timestamp": "2026-02-17T01:25:52.888Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1131,
+        791,
+        1164,
+        823
+      ],
+      "timestamp": "2026-02-17T01:26:02.042Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1169,
+        788,
+        1199,
+        818
+      ],
+      "timestamp": "2026-02-17T01:26:04.152Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1202,
+        806,
+        1223,
+        832
+      ],
+      "timestamp": "2026-02-17T01:26:06.335Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1228,
+        784,
+        1244,
+        828
+      ],
+      "timestamp": "2026-02-17T01:26:08.976Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1241,
+        803,
+        1265,
+        834
+      ],
+      "timestamp": "2026-02-17T01:26:11.026Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1263,
+        794,
+        1304,
+        820
+      ],
+      "timestamp": "2026-02-17T01:26:13.386Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1310,
+        805,
+        1375,
+        849
+      ],
+      "timestamp": "2026-02-17T01:26:16.560Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1388,
+        811,
+        1426,
+        848
+      ],
+      "timestamp": "2026-02-17T01:26:20.592Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1029,
+        912,
+        1047,
+        942
+      ],
+      "timestamp": "2026-02-17T01:26:25.065Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1068,
+        921,
+        1092,
+        952
+      ],
+      "timestamp": "2026-02-17T01:26:28.039Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1096,
+        909,
+        1125,
+        942
+      ],
+      "timestamp": "2026-02-17T01:26:30.393Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1131,
+        920,
+        1165,
+        953
+      ],
+      "timestamp": "2026-02-17T01:26:33.721Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1168,
+        931,
+        1189,
+        956
+      ],
+      "timestamp": "2026-02-17T01:26:35.921Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1188,
+        919,
+        1211,
+        953
+      ],
+      "timestamp": "2026-02-17T01:26:38.153Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1217,
+        928,
+        1241,
+        953
+      ],
+      "timestamp": "2026-02-17T01:26:39.777Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1254,
+        938,
+        1268,
+        973
+      ],
+      "timestamp": "2026-02-17T01:26:41.704Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1274,
+        937,
+        1308,
+        969
+      ],
+      "timestamp": "2026-02-17T01:26:43.967Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1336,
+        937,
+        1356,
+        969
+      ],
+      "timestamp": "2026-02-17T01:26:46.047Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1393,
+        936,
+        1411,
+        971
+      ],
+      "timestamp": "2026-02-17T01:26:48.104Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1061,
+        1053,
+        1078,
+        1084
+      ],
+      "timestamp": "2026-02-17T01:26:50.736Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1303,
+        1078,
+        1329,
+        1100
+      ],
+      "timestamp": "2026-02-17T01:26:53.400Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1332,
+        1066,
+        1347,
+        1101
+      ],
+      "timestamp": "2026-02-17T01:26:54.904Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1365,
+        1078,
+        1382,
+        1104
+      ],
+      "timestamp": "2026-02-17T01:26:57.112Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1398,
+        1064,
+        1434,
+        1094
+      ],
+      "timestamp": "2026-02-17T01:26:59.480Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1030,
+        1234,
+        1057,
+        1248
+      ],
+      "timestamp": "2026-02-17T01:27:02.913Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1088,
+        1211,
+        1104,
+        1243
+      ],
+      "timestamp": "2026-02-17T01:27:05.296Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1132,
+        1178,
+        1165,
+        1203
+      ],
+      "timestamp": "2026-02-17T01:27:10.904Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1173,
+        1188,
+        1200,
+        1224
+      ],
+      "timestamp": "2026-02-17T01:27:12.599Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1226,
+        1175,
+        1258,
+        1212
+      ],
+      "timestamp": "2026-02-17T01:27:15.121Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1271,
+        1174,
+        1309,
+        1207
+      ],
+      "timestamp": "2026-02-17T01:27:18.121Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1314,
+        1173,
+        1333,
+        1212
+      ],
+      "timestamp": "2026-02-17T01:27:20.889Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1333,
+        1170,
+        1359,
+        1210
+      ],
+      "timestamp": "2026-02-17T01:27:25.047Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1364,
+        1183,
+        1423,
+        1226
+      ],
+      "timestamp": "2026-02-17T01:27:28.255Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1429,
+        1199,
+        1440,
+        1234
+      ],
+      "timestamp": "2026-02-17T01:27:29.633Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1011,
+        1373,
+        1036,
+        1398
+      ],
+      "timestamp": "2026-02-17T01:27:33.846Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1040,
+        1364,
+        1076,
+        1412
+      ],
+      "timestamp": "2026-02-17T01:27:37.067Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1079,
+        1353,
+        1129,
+        1408
+      ],
+      "timestamp": "2026-02-17T01:27:39.381Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1136,
+        1371,
+        1183,
+        1419
+      ],
+      "timestamp": "2026-02-17T01:27:42.384Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1180,
+        1379,
+        1210,
+        1405
+      ],
+      "timestamp": "2026-02-17T01:27:44.416Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1205,
+        1347,
+        1251,
+        1379
+      ],
+      "timestamp": "2026-02-17T01:27:47.658Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1250,
+        1348,
+        1279,
+        1381
+      ],
+      "timestamp": "2026-02-17T01:27:49.843Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1282,
+        1354,
+        1298,
+        1390
+      ],
+      "timestamp": "2026-02-17T01:27:51.764Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1306,
+        1341,
+        1339,
+        1374
+      ],
+      "timestamp": "2026-02-17T01:27:54.413Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1339,
+        1325,
+        1371,
+        1359
+      ],
+      "timestamp": "2026-02-17T01:28:04.168Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1369,
+        1322,
+        1417,
+        1358
+      ],
+      "timestamp": "2026-02-17T01:28:11.585Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1036,
+        1465,
+        1052,
+        1494
+      ],
+      "timestamp": "2026-02-17T01:28:14.417Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1087,
+        1464,
+        1105,
+        1494
+      ],
+      "timestamp": "2026-02-17T01:28:16.785Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1133,
+        1471,
+        1154,
+        1508
+      ],
+      "timestamp": "2026-02-17T01:28:20.642Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1174,
+        1459,
+        1204,
+        1489
+      ],
+      "timestamp": "2026-02-17T01:28:22.761Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1212,
+        1468,
+        1245,
+        1498
+      ],
+      "timestamp": "2026-02-17T01:28:25.250Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1252,
+        1467,
+        1296,
+        1500
+      ],
+      "timestamp": "2026-02-17T01:28:28.329Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1307,
+        1473,
+        1331,
+        1500
+      ],
+      "timestamp": "2026-02-17T01:28:30.082Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1346,
+        1484,
+        1366,
+        1514
+      ],
+      "timestamp": "2026-02-17T01:28:32.130Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1377,
+        1482,
+        1410,
+        1511
+      ],
+      "timestamp": "2026-02-17T01:28:34.706Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1318,
+        1633,
+        1336,
+        1668
+      ],
+      "timestamp": "2026-02-17T01:28:38.379Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1348,
+        1618,
+        1378,
+        1643
+      ],
+      "timestamp": "2026-02-17T01:28:40.123Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1406,
+        1615,
+        1423,
+        1644
+      ],
+      "timestamp": "2026-02-17T01:28:41.649Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1021,
+        1740,
+        1038,
+        1776
+      ],
+      "timestamp": "2026-02-17T01:28:46.330Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1075,
+        1739,
+        1089,
+        1774
+      ],
+      "timestamp": "2026-02-17T01:28:48.025Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1134,
+        1736,
+        1155,
+        1772
+      ],
+      "timestamp": "2026-02-17T01:28:49.835Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1193,
+        1734,
+        1216,
+        1770
+      ],
+      "timestamp": "2026-02-17T01:28:51.506Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1238,
+        1735,
+        1259,
+        1771
+      ],
+      "timestamp": "2026-02-17T01:28:53.402Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1272,
+        1751,
+        1285,
+        1787
+      ],
+      "timestamp": "2026-02-17T01:28:54.731Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1326,
+        1730,
+        1349,
+        1778
+      ],
+      "timestamp": "2026-02-17T01:28:57.426Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1374,
+        1737,
+        1398,
+        1776
+      ],
+      "timestamp": "2026-02-17T01:28:59.019Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1039,
+        1897,
+        1078,
+        1929
+      ],
+      "timestamp": "2026-02-17T01:29:02.675Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1100,
+        1893,
+        1118,
+        1928
+      ],
+      "timestamp": "2026-02-17T01:29:04.995Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1158,
+        1905,
+        1182,
+        1923
+      ],
+      "timestamp": "2026-02-17T01:29:06.339Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1193,
+        1872,
+        1207,
+        1907
+      ],
+      "timestamp": "2026-02-17T01:29:10.955Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1223,
+        1874,
+        1241,
+        1903
+      ],
+      "timestamp": "2026-02-17T01:29:12.819Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1251,
+        1890,
+        1268,
+        1923
+      ],
+      "timestamp": "2026-02-17T01:29:14.403Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1285,
+        1870,
+        1302,
+        1904
+      ],
+      "timestamp": "2026-02-17T01:29:17.931Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1319,
+        1856,
+        1333,
+        1896
+      ],
+      "timestamp": "2026-02-17T01:29:20.034Z"
+    },
+    {
+      "class_id": 2,
+      "class_name": "music",
+      "bbox": [
+        1352,
+        1866,
+        1369,
+        1899
+      ],
+      "timestamp": "2026-02-17T01:29:22.235Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        317,
+        346,
+        380,
+        389
+      ],
+      "timestamp": "2026-02-17T01:29:39.284Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        380,
+        334,
+        419,
+        382
+      ],
+      "timestamp": "2026-02-17T01:29:41.555Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        452,
+        338,
+        513,
+        380
+      ],
+      "timestamp": "2026-02-17T01:29:44.163Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        515,
+        333,
+        618,
+        383
+      ],
+      "timestamp": "2026-02-17T01:29:47.419Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        619,
+        332,
+        784,
+        378
+      ],
+      "timestamp": "2026-02-17T01:29:51.476Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        785,
+        337,
+        826,
+        369
+      ],
+      "timestamp": "2026-02-17T01:29:53.148Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        827,
+        331,
+        957,
+        369
+      ],
+      "timestamp": "2026-02-17T01:29:55.956Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        959,
+        331,
+        1145,
+        373
+      ],
+      "timestamp": "2026-02-17T01:30:10.132Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        321,
+        481,
+        443,
+        526
+      ],
+      "timestamp": "2026-02-17T01:30:16.970Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        452,
+        477,
+        538,
+        513
+      ],
+      "timestamp": "2026-02-17T01:30:22.292Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        540,
+        474,
+        639,
+        511
+      ],
+      "timestamp": "2026-02-17T01:30:24.515Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        654,
+        460,
+        798,
+        509
+      ],
+      "timestamp": "2026-02-17T01:30:27.107Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        821,
+        467,
+        872,
+        503
+      ],
+      "timestamp": "2026-02-17T01:30:28.920Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        879,
+        454,
+        959,
+        513
+      ],
+      "timestamp": "2026-02-17T01:30:36.140Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        960,
+        462,
+        1009,
+        500
+      ],
+      "timestamp": "2026-02-17T01:30:39.076Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1012,
+        454,
+        1102,
+        501
+      ],
+      "timestamp": "2026-02-17T01:30:42.571Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        323,
+        602,
+        502,
+        649
+      ],
+      "timestamp": "2026-02-17T01:30:52.939Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        496,
+        594,
+        525,
+        642
+      ],
+      "timestamp": "2026-02-17T01:30:55.356Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        518,
+        594,
+        603,
+        645
+      ],
+      "timestamp": "2026-02-17T01:30:57.396Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        623,
+        608,
+        718,
+        642
+      ],
+      "timestamp": "2026-02-17T01:31:00.580Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        725,
+        590,
+        881,
+        639
+      ],
+      "timestamp": "2026-02-17T01:31:13.092Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        889,
+        591,
+        942,
+        636
+      ],
+      "timestamp": "2026-02-17T01:31:20.701Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        944,
+        601,
+        1079,
+        642
+      ],
+      "timestamp": "2026-02-17T01:31:25.043Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        323,
+        746,
+        421,
+        784
+      ],
+      "timestamp": "2026-02-17T01:31:30.349Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        420,
+        729,
+        529,
+        779
+      ],
+      "timestamp": "2026-02-17T01:31:33.325Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        528,
+        737,
+        568,
+        808
+      ],
+      "timestamp": "2026-02-17T01:31:37.901Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        568,
+        683,
+        687,
+        818
+      ],
+      "timestamp": "2026-02-17T01:31:47.035Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        719,
+        729,
+        854,
+        778
+      ],
+      "timestamp": "2026-02-17T01:31:50.413Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        861,
+        724,
+        907,
+        765
+      ],
+      "timestamp": "2026-02-17T01:31:52.661Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        912,
+        723,
+        1017,
+        771
+      ],
+      "timestamp": "2026-02-17T01:32:00.293Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        320,
+        892,
+        366,
+        924
+      ],
+      "timestamp": "2026-02-17T01:32:06.189Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        369,
+        886,
+        507,
+        934
+      ],
+      "timestamp": "2026-02-17T01:32:16.165Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        507,
+        879,
+        574,
+        927
+      ],
+      "timestamp": "2026-02-17T01:32:18.933Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        648,
+        871,
+        827,
+        915
+      ],
+      "timestamp": "2026-02-17T01:32:24.718Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        830,
+        866,
+        882,
+        910
+      ],
+      "timestamp": "2026-02-17T01:32:27.134Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        898,
+        869,
+        1124,
+        906
+      ],
+      "timestamp": "2026-02-17T01:32:32.166Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        322,
+        1016,
+        426,
+        1054
+      ],
+      "timestamp": "2026-02-17T01:32:36.204Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        421,
+        999,
+        457,
+        1047
+      ],
+      "timestamp": "2026-02-17T01:32:38.414Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        459,
+        990,
+        633,
+        1046
+      ],
+      "timestamp": "2026-02-17T01:32:43.293Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        656,
+        1005,
+        734,
+        1055
+      ],
+      "timestamp": "2026-02-17T01:32:45.959Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        743,
+        994,
+        1008,
+        1045
+      ],
+      "timestamp": "2026-02-17T01:32:55.854Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1012,
+        997,
+        1048,
+        1034
+      ],
+      "timestamp": "2026-02-17T01:32:57.885Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        322,
+        1156,
+        424,
+        1192
+      ],
+      "timestamp": "2026-02-17T01:33:02.934Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        426,
+        1150,
+        639,
+        1195
+      ],
+      "timestamp": "2026-02-17T01:33:06.446Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        644,
+        1145,
+        829,
+        1181
+      ],
+      "timestamp": "2026-02-17T01:33:09.797Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        887,
+        1133,
+        961,
+        1181
+      ],
+      "timestamp": "2026-02-17T01:33:13.061Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        964,
+        1131,
+        1111,
+        1185
+      ],
+      "timestamp": "2026-02-17T01:33:15.740Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        325,
+        1295,
+        382,
+        1341
+      ],
+      "timestamp": "2026-02-17T01:33:19.948Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        384,
+        1289,
+        489,
+        1336
+      ],
+      "timestamp": "2026-02-17T01:33:22.804Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        493,
+        1291,
+        626,
+        1333
+      ],
+      "timestamp": "2026-02-17T01:33:25.063Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        684,
+        1287,
+        780,
+        1327
+      ],
+      "timestamp": "2026-02-17T01:33:27.285Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        911,
+        1285,
+        955,
+        1320
+      ],
+      "timestamp": "2026-02-17T01:42:11.292Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        977,
+        1284,
+        1018,
+        1318
+      ],
+      "timestamp": "2026-02-17T01:42:12.965Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1026,
+        1279,
+        1068,
+        1315
+      ],
+      "timestamp": "2026-02-17T01:42:15.588Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        325,
+        1433,
+        436,
+        1472
+      ],
+      "timestamp": "2026-02-17T01:42:19.341Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        439,
+        1424,
+        536,
+        1468
+      ],
+      "timestamp": "2026-02-17T01:42:25.045Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        607,
+        1429,
+        653,
+        1463
+      ],
+      "timestamp": "2026-02-17T01:42:26.692Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        664,
+        1429,
+        687,
+        1462
+      ],
+      "timestamp": "2026-02-17T01:42:28.084Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        695,
+        1415,
+        909,
+        1458
+      ],
+      "timestamp": "2026-02-17T01:42:31.901Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        913,
+        1419,
+        959,
+        1456
+      ],
+      "timestamp": "2026-02-17T01:42:34.434Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        959,
+        1411,
+        1084,
+        1456
+      ],
+      "timestamp": "2026-02-17T01:42:40.029Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1084,
+        1416,
+        1130,
+        1448
+      ],
+      "timestamp": "2026-02-17T01:42:41.821Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        328,
+        1566,
+        366,
+        1606
+      ],
+      "timestamp": "2026-02-17T01:42:45.067Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        374,
+        1572,
+        461,
+        1605
+      ],
+      "timestamp": "2026-02-17T01:42:51.341Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        458,
+        1549,
+        489,
+        1601
+      ],
+      "timestamp": "2026-02-17T01:42:53.373Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        500,
+        1536,
+        535,
+        1601
+      ],
+      "timestamp": "2026-02-17T01:42:58.797Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        536,
+        1560,
+        739,
+        1601
+      ],
+      "timestamp": "2026-02-17T01:43:07.245Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        823,
+        1549,
+        961,
+        1592
+      ],
+      "timestamp": "2026-02-17T01:43:10.149Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        970,
+        1549,
+        1123,
+        1597
+      ],
+      "timestamp": "2026-02-17T01:43:21.054Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        325,
+        1706,
+        457,
+        1742
+      ],
+      "timestamp": "2026-02-17T01:43:27.398Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        464,
+        1698,
+        545,
+        1739
+      ],
+      "timestamp": "2026-02-17T01:43:29.526Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        587,
+        1696,
+        727,
+        1733
+      ],
+      "timestamp": "2026-02-17T01:43:32.550Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        780,
+        1691,
+        843,
+        1731
+      ],
+      "timestamp": "2026-02-17T01:43:34.622Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        845,
+        1673,
+        1007,
+        1724
+      ],
+      "timestamp": "2026-02-17T01:43:38.558Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1002,
+        1649,
+        1055,
+        1728
+      ],
+      "timestamp": "2026-02-17T01:43:41.694Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1064,
+        1654,
+        1085,
+        1676
+      ],
+      "timestamp": "2026-02-17T01:43:43.446Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1055,
+        1685,
+        1102,
+        1723
+      ],
+      "timestamp": "2026-02-17T01:43:45.462Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        335,
+        1837,
+        483,
+        1881
+      ],
+      "timestamp": "2026-02-17T01:43:54.334Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        483,
+        1840,
+        552,
+        1877
+      ],
+      "timestamp": "2026-02-17T01:43:56.462Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        555,
+        1839,
+        635,
+        1874
+      ],
+      "timestamp": "2026-02-17T01:43:58.780Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        641,
+        1833,
+        822,
+        1871
+      ],
+      "timestamp": "2026-02-17T01:44:07.958Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        820,
+        1813,
+        852,
+        1863
+      ],
+      "timestamp": "2026-02-17T01:44:10.526Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        855,
+        1804,
+        1006,
+        1861
+      ],
+      "timestamp": "2026-02-17T01:44:17.318Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        336,
+        1990,
+        416,
+        2024
+      ],
+      "timestamp": "2026-02-17T01:44:20.550Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        419,
+        1986,
+        601,
+        2020
+      ],
+      "timestamp": "2026-02-17T01:44:23.742Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        598,
+        1963,
+        630,
+        2013
+      ],
+      "timestamp": "2026-02-17T01:44:26.092Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        625,
+        1960,
+        681,
+        2033
+      ],
+      "timestamp": "2026-02-17T01:44:30.102Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        682,
+        1978,
+        745,
+        2013
+      ],
+      "timestamp": "2026-02-17T01:44:32.598Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        745,
+        1971,
+        875,
+        2010
+      ],
+      "timestamp": "2026-02-17T01:44:37.143Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        873,
+        1963,
+        1036,
+        2004
+      ],
+      "timestamp": "2026-02-17T01:44:41.958Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1150,
+        317,
+        1217,
+        363
+      ],
+      "timestamp": "2026-02-17T01:44:50.013Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1217,
+        317,
+        1297,
+        362
+      ],
+      "timestamp": "2026-02-17T01:44:52.391Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1314,
+        322,
+        1422,
+        374
+      ],
+      "timestamp": "2026-02-17T01:44:54.798Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1102,
+        454,
+        1257,
+        497
+      ],
+      "timestamp": "2026-02-17T01:44:58.487Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1268,
+        456,
+        1311,
+        492
+      ],
+      "timestamp": "2026-02-17T01:45:00.863Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1313,
+        448,
+        1451,
+        492
+      ],
+      "timestamp": "2026-02-17T01:45:08.871Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1077,
+        584,
+        1196,
+        644
+      ],
+      "timestamp": "2026-02-17T01:45:18.862Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1204,
+        592,
+        1275,
+        631
+      ],
+      "timestamp": "2026-02-17T01:45:21.335Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1294,
+        588,
+        1350,
+        627
+      ],
+      "timestamp": "2026-02-17T01:45:23.223Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1366,
+        587,
+        1409,
+        628
+      ],
+      "timestamp": "2026-02-17T01:45:29.891Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1016,
+        722,
+        1405,
+        760
+      ],
+      "timestamp": "2026-02-17T01:45:36.336Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1129,
+        860,
+        1300,
+        911
+      ],
+      "timestamp": "2026-02-17T01:45:51.419Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1305,
+        858,
+        1450,
+        910
+      ],
+      "timestamp": "2026-02-17T01:45:56.280Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1052,
+        991,
+        1241,
+        1032
+      ],
+      "timestamp": "2026-02-17T01:46:02.007Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1241,
+        992,
+        1316,
+        1031
+      ],
+      "timestamp": "2026-02-17T01:46:08.837Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1316,
+        991,
+        1382,
+        1036
+      ],
+      "timestamp": "2026-02-17T01:46:11.381Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1382,
+        981,
+        1443,
+        1026
+      ],
+      "timestamp": "2026-02-17T01:46:17.410Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1134,
+        1132,
+        1187,
+        1177
+      ],
+      "timestamp": "2026-02-17T01:46:20.924Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1189,
+        1077,
+        1304,
+        1185
+      ],
+      "timestamp": "2026-02-17T01:46:27.316Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1316,
+        1129,
+        1393,
+        1164
+      ],
+      "timestamp": "2026-02-17T01:46:29.682Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1395,
+        1128,
+        1453,
+        1161
+      ],
+      "timestamp": "2026-02-17T01:46:31.388Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1068,
+        1273,
+        1222,
+        1323
+      ],
+      "timestamp": "2026-02-17T01:46:38.843Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1226,
+        1267,
+        1395,
+        1311
+      ],
+      "timestamp": "2026-02-17T01:46:43.315Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1148,
+        1418,
+        1180,
+        1449
+      ],
+      "timestamp": "2026-02-17T01:46:45.899Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1198,
+        1404,
+        1241,
+        1448
+      ],
+      "timestamp": "2026-02-17T01:46:50.970Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1261,
+        1412,
+        1297,
+        1461
+      ],
+      "timestamp": "2026-02-17T01:46:53.818Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1300,
+        1414,
+        1343,
+        1447
+      ],
+      "timestamp": "2026-02-17T01:46:55.728Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1123,
+        1547,
+        1211,
+        1585
+      ],
+      "timestamp": "2026-02-17T01:47:00.267Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1209,
+        1539,
+        1418,
+        1590
+      ],
+      "timestamp": "2026-02-17T01:47:05.091Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1120,
+        1678,
+        1177,
+        1721
+      ],
+      "timestamp": "2026-02-17T01:47:10.042Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1136,
+        1649,
+        1156,
+        1668
+      ],
+      "timestamp": "2026-02-17T01:47:11.833Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1191,
+        1666,
+        1227,
+        1712
+      ],
+      "timestamp": "2026-02-17T01:47:14.539Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1280,
+        1640,
+        1322,
+        1708
+      ],
+      "timestamp": "2026-02-17T01:47:18.379Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1321,
+        1664,
+        1450,
+        1709
+      ],
+      "timestamp": "2026-02-17T01:47:26.099Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1013,
+        1815,
+        1184,
+        1857
+      ],
+      "timestamp": "2026-02-17T01:47:29.979Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1183,
+        1816,
+        1228,
+        1851
+      ],
+      "timestamp": "2026-02-17T01:47:32.163Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1229,
+        1808,
+        1308,
+        1849
+      ],
+      "timestamp": "2026-02-17T01:47:34.985Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1311,
+        1801,
+        1422,
+        1845
+      ],
+      "timestamp": "2026-02-17T01:47:37.883Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1039,
+        1959,
+        1184,
+        1997
+      ],
+      "timestamp": "2026-02-17T01:47:41.315Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1191,
+        1953,
+        1380,
+        1989
+      ],
+      "timestamp": "2026-02-17T01:47:44.899Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        287,
+        235,
+        1462,
+        333
+      ],
+      "timestamp": "2026-02-17T01:48:16.348Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        293,
+        382,
+        1481,
+        469
+      ],
+      "timestamp": "2026-02-17T01:48:28.939Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        296,
+        514,
+        1471,
+        600
+      ],
+      "timestamp": "2026-02-17T01:48:34.052Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        299,
+        646,
+        1484,
+        736
+      ],
+      "timestamp": "2026-02-17T01:48:43.844Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        289,
+        789,
+        1456,
+        879
+      ],
+      "timestamp": "2026-02-17T01:48:52.033Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        279,
+        909,
+        1494,
+        1006
+      ],
+      "timestamp": "2026-02-17T01:49:00.252Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        290,
+        1043,
+        1478,
+        1155
+      ],
+      "timestamp": "2026-02-17T01:49:06.523Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        299,
+        1189,
+        1491,
+        1285
+      ],
+      "timestamp": "2026-02-17T01:49:14.147Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        293,
+        1320,
+        1475,
+        1432
+      ],
+      "timestamp": "2026-02-17T01:49:23.931Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        301,
+        1459,
+        1503,
+        1560
+      ],
+      "timestamp": "2026-02-17T01:49:32.620Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        308,
+        1597,
+        1495,
+        1698
+      ],
+      "timestamp": "2026-02-17T01:49:38.459Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        308,
+        1724,
+        1488,
+        1831
+      ],
+      "timestamp": "2026-02-17T01:49:45.765Z"
+    },
+    {
+      "class_id": 3,
+      "class_name": "staves",
+      "bbox": [
+        311,
+        1870,
+        1497,
+        1977
+      ],
+      "timestamp": "2026-02-17T01:49:53.244Z"
+    },
+    {
+      "class_id": 1,
+      "class_name": "text",
+      "bbox": [
+        1526,
+        1173,
+        1636,
+        1255
+      ],
+      "timestamp": "2026-02-17T01:50:11.443Z"
+    }
+  ]
+}
