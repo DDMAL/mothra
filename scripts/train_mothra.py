@@ -7,6 +7,7 @@ The Mothra annotator exports YOLO format directly, so this script:
 - Organizes existing YOLO files into train/val/test splits
 - Supports manuscript-aware or random splitting strategies
 - Trains YOLOv8 on your parchment manuscripts
+- Exports predictions as JSON (bounding box coordinates)
 
 Usage:
     # Default: manuscript-aware splitting on color images
@@ -20,6 +21,12 @@ Usage:
     
     # Resume training
     python train_mothra.py --config configs/mothra_small.yaml --resume
+    
+    # Run prediction on single image (saves visualization)
+    python train_mothra.py --config configs/mothra_base.yaml --predict path/to/image.jpg
+    
+    # Run prediction and export bounding boxes to JSON
+    python train_mothra.py --config configs/mothra_base.yaml --predict path/to/image.jpg --predict-json
 """
 
 import argparse
@@ -410,9 +417,18 @@ class MothraTrainer:
         
         return metrics
     
-    def predict_sample(self, image_path, weights_path=None, save=True):
+    def predict_sample(self, image_path, weights_path=None, save=True, export_json=True):
         """
-        Run inference on a sample image
+        Run inference on a sample image and optionally export predictions to JSON
+        
+        Args:
+            image_path: Path to the image file
+            weights_path: Path to model weights (default: best.pt)
+            save: Whether to save prediction visualizations
+            export_json: Whether to export bounding boxes to JSON file
+            
+        Returns:
+            results: YOLOv8 prediction results
         """
         if weights_path is None:
             weights_path = self.output_root / 'runs' / 'detect' / 'weights' / 'best.pt'
@@ -429,7 +445,79 @@ class MothraTrainer:
             exist_ok=True,
         )
         
+        # Export predictions to JSON if requested
+        if export_json:
+            self.export_predictions_to_json(results, image_path)
+        
         return results
+    
+    def export_predictions_to_json(self, results, image_path):
+        """
+        Export predicted bounding boxes to JSON format
+        
+        Args:
+            results: YOLOv8 prediction results
+            image_path: Path to the original image (used for output naming)
+        # Basic prediction (saves visualization only)
+            python train_mothra.py --config configs/mothra_base.yaml --predict path/to/image.jpg
+
+        # Prediction with JSON export (recommended)
+        python train_mothra.py --config configs/mothra_base.yaml --predict path/to/image.jpg --predict-json
+        """
+        image_path = Path(image_path)
+        predictions_dir = self.output_root / 'predictions' / 'sample'
+        predictions_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Prepare JSON output
+        output_data = {
+            'image': image_path.name,
+            'image_path': str(image_path),
+            'predictions': [],
+            'timestamp': datetime.now().isoformat(),
+        }
+        
+        # Extract results for each result object (in case there are multiple)
+        for result in results:
+            # Get image dimensions
+            output_data['image_height'] = result.orig_shape[0] if result.orig_shape else None
+            output_data['image_width'] = result.orig_shape[1] if result.orig_shape else None
+            
+            # Extract boxes
+            if result.boxes is not None:
+                for box in result.boxes:
+                    # Get coordinates
+                    xyxy = box.xyxy[0].tolist() if box.xyxy is not None else None  # [x1, y1, x2, y2]
+                    xywh = box.xywh[0].tolist() if box.xywh is not None else None  # [x_center, y_center, width, height]
+                    conf = box.conf[0].item() if box.conf is not None else None
+                    cls_id = int(box.cls[0].item()) if box.cls is not None else None
+                    cls_name = result.names.get(cls_id, 'unknown') if cls_id is not None else 'unknown'
+                    
+                    prediction = {
+                        'class_id': cls_id,
+                        'class_name': cls_name,
+                        'confidence': round(conf, 4) if conf else None,
+                        'bbox_xyxy': {
+                            'x1': round(xyxy[0], 2),
+                            'y1': round(xyxy[1], 2),
+                            'x2': round(xyxy[2], 2),
+                            'y2': round(xyxy[3], 2),
+                        } if xyxy else None,
+                        'bbox_xywh': {
+                            'x_center': round(xywh[0], 2),
+                            'y_center': round(xywh[1], 2),
+                            'width': round(xywh[2], 2),
+                            'height': round(xywh[3], 2),
+                        } if xywh else None,
+                    }
+                    output_data['predictions'].append(prediction)
+        
+        # Save to JSON file
+        json_output_path = predictions_dir / f"{image_path.stem}_predictions.json"
+        with open(json_output_path, 'w') as f:
+            json.dump(output_data, f, indent=2)
+        
+        print(f"  ✅ Predictions exported to JSON: {json_output_path}")
+        print(f"     Total predictions: {len(output_data['predictions'])}")
 
 
 def main():
@@ -438,6 +526,7 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Resume training from checkpoint')
     parser.add_argument('--eval-only', action='store_true', help='Only run evaluation')
     parser.add_argument('--predict', type=str, help='Run prediction on single image')
+    parser.add_argument('--predict-json', action='store_true', help='Export predictions to JSON (only with --predict)')
     parser.add_argument('--images-dir', type=str, default='images', 
                         help='Images subdirectory name (default: images). Use "greyscale" for greyscale images.')
     parser.add_argument('--split-type', type=str, default='manuscript', choices=['manuscript', 'random'],
@@ -454,7 +543,7 @@ def main():
     if args.predict:
         # Prediction mode
         print(f"🔮 Running prediction on: {args.predict}")
-        trainer.predict_sample(args.predict)
+        trainer.predict_sample(args.predict, export_json=args.predict_json)
         return
     
     # Prepare data
