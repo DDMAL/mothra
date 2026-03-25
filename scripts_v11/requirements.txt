@@ -1,0 +1,19 @@
+# Mothra Training Requirements
+# YOLOv11 for Medieval Manuscript OMR
+
+# Core dependencies
+ultralytics>=8.4.0       # YOLO framework (YOLOv11 weights/models)
+opencv-python>=4.8.0     # Image processing
+pyyaml>=6.0             # Config files
+numpy>=1.24.0           # Numerical operations
+
+# Optional but recommended
+tensorboard>=2.14.0     # Training visualization
+matplotlib>=3.7.0       # Plotting
+pillow>=10.0.0          # Image loading
+tqdm>=4.65.0           # Progress bars
+
+# For GPU support (install separately if needed)
+# torch>=2.0.0
+# torchvision>=0.15.0
+
