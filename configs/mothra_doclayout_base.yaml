@@ -1,0 +1,57 @@
+# Mothra Base Configuration (DocLayout-YOLO / YOLOv10)
+#
+# Use with:
+#   python scripts_doc/train_mothra_doclayout.py --config configs/mothra_doclayout_base.yaml
+
+paths:
+  # Repository root (this folder contains DocLayout-YOLO/)
+  project_root: .
+  # Your dataset root. Expected layout matches existing Mothra scripts:
+  #   data/images/...
+  #   data/yolo_labels/*.txt
+  data_root: ./data
+  output_root: ./outputs/doclayout_yolo
+
+classes:
+  - text
+  - music
+  - staves
+
+training:
+  epochs: 300
+  batch_size: 16
+  image_size: 640
+  learning_rate: 0.02
+  patience: 100
+  save_period: 10
+  device: "0"
+  workers: 4
+
+augmentation:
+  mosaic: 1.0
+
+# DocLayout-YOLO specific knobs
+doclayout:
+  # Model selector.
+  # Options:
+  # - "n" / "s" / "m" / "l" / "x" / "b"  -> uses yolov10{size}.pt or .yaml
+  # - an explicit yaml file name (advanced), e.g. "yolov10m-doclayout.yaml"
+  model: "m"
+
+  # Pretraining:
+  # - null: train from yaml arch (random init unless DocLayout-YOLO has defaults)
+  # - "coco": load yolov10{model}.pt
+  # - "/path/to/weights.pt": load custom weights
+  # pretrain: "coco"
+  pretrain: "./yolov10m.pt"
+
+  optimizer: "auto"
+  momentum: 0.9
+  warmup_epochs: 3.0
+
+  # Training-time behavior inside DocLayout-YOLO
+  val: true
+  val_period: 1
+  plots: false
+  exist_ok: true
+
