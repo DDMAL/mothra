@@ -16,3 +16,23 @@ training_output.log
 
 # Symlinks
 data/labels
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Model weights
+*.pt
+
+# Optuna databases
+*.db
+
+# Output directories
+logs/
+models/
+
+# Third-party (handle separately)
+DocLayout-YOLO/
+
+# Local model checkpoints in scripts
+scripts_v11/models/
