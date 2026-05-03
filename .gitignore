@@ -16,3 +16,5 @@ training_output.log
 
 # Symlinks
 data/labels
+
+mothra/.claude/
