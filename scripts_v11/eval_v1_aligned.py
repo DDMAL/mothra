@@ -60,9 +60,13 @@ from ultralytics import YOLO
 
 # ── constants ──────────────────────────────────────────────────────────────────
 
-# These match mothra_base11.yaml evaluation defaults and v1's inference settings.
+# These match mothra_base11.yaml evaluation defaults and v1's *inference* settings.
 DEFAULT_CONF = 0.25
 DEFAULT_IOU = 0.7
+# Ultralytics' internal default for model.val(). Using a higher conf in val
+# truncates the PR curve and under-reports AP. Keep this independent of DEFAULT_CONF,
+# which is the inference-time threshold used for visualisation.
+VAL_CONF = 0.001
 
 # YOLO class index (0-based) → mothra-annotator classId (1-based)
 YOLO_TO_ANNOTATOR_CLASS = {0: 1, 1: 2, 2: 3}
@@ -123,7 +127,7 @@ def run_eval(
     metrics = model.val(
         data=str(data_yaml),
         split=split,
-        conf=conf,
+        conf=VAL_CONF,
         iou=iou,
         imgsz=imgsz,
         device=device,
@@ -135,10 +139,17 @@ def run_eval(
     map50_95  = metrics.box.map
     precision = metrics.box.mp
     recall    = metrics.box.mr
-    # per-class AP@50 — metrics.box.maps is indexed by class
-    per_class_ap50 = list(metrics.box.maps)
+    # per-class AP@50. metrics.box.maps is per-class mAP@50-95 (NOT what v1 reports).
+    # ap50 is ordered by ap_class_index; classes with 0 GT are absent.
+    ap50_arr = list(metrics.box.ap50)
+    class_idx = list(metrics.box.ap_class_index)
+    per_class_ap50 = [float("nan")] * len(class_names)
+    for slot, cls_i in enumerate(class_idx):
+        if 0 <= int(cls_i) < len(class_names):
+            per_class_ap50[int(cls_i)] = float(ap50_arr[slot])
 
     print(f"\n{'─'*40}")
+    print(f"  (val conf={VAL_CONF}; iou={iou})")
     print(f"  Overall mAP@50    : {map50:.4f}")
     print(f"  Overall mAP@50-95 : {map50_95:.4f}  (stricter; not reported by v1)")
     print(f"  Precision         : {precision:.4f}")
@@ -157,7 +168,8 @@ def run_eval(
         ["metric", "value"],
         ["split", split],
         ["weights", str(weights)],
-        ["conf", conf],
+        ["conf_val", VAL_CONF],
+        ["conf_infer", conf],
         ["iou", iou],
         ["imgsz", imgsz],
         ["map50_overall", f"{map50:.4f}"],
