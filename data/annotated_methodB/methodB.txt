@@ -1,0 +1,14 @@
+These files are those annotated following the "method B" annotation protocol. 
+
+This protocol is largely made up of the fact it is only paying attention to two things: 
+
+- the larger musical sections on the page
+- the actual chant texts
+
+You can refer to this sample image in the mothra discussion thread:
+https://github.com/DDMAL/mothra/discussions/5#discussioncomment-16935923
+
+Note how the text are all included in one box, and the decorated initial is excluded. 
+Additionally, note how the rubric is also excluded: text that is not beneath music is excluded. 
+
+Marginalia are excluded, unless there's music, in which case follow the annotation protocol (even if there are no stafflines)
