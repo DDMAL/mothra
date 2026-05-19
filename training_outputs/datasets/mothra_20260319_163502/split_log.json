@@ -1,0 +1,33 @@
+{
+  "split_type": "random_page_level",
+  "warning": "Pages from same manuscript may appear in different splits - DATA LEAKAGE POSSIBLE",
+  "train_images": [
+    "D1161_210404_gthc.jpg",
+    "CH-Fco2_002v_sqr.jpg",
+    "Antiphonal_44v_hfngl.jpg",
+    "F-Pn Latin 15181 169v bigger.png",
+    "D1161_210546_gthc.jpg",
+    "NZ-Wt MSR-03 109v.png",
+    "Antiphonal_12v_hfngl.jpg",
+    "CH-Fco Ms.2 108v.jpg",
+    "CH-Fco Ms. 2_006r copy.jpg",
+    "CH-P 18 p.100.jpg",
+    "D-KNd 1161 032r.jpg"
+  ],
+  "val_images": [
+    "Antiphonal_1v_hfngl.jpg",
+    "CH-P18_288_mssn.jpg"
+  ],
+  "test_images": [
+    "CH-Fco2_009v_sqr.jpg.jpg",
+    "CH-P18_061_mssn.jpg.jpg",
+    "NZ-Wt MSR-03 013r.png",
+    "NZ-Wt MSR-03 065r.png"
+  ],
+  "split_ratios": [
+    0.7,
+    0.15,
+    0.15
+  ],
+  "timestamp": "2026-03-19T16:35:02.793331"
+}

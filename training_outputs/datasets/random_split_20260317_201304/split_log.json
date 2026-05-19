@@ -1,0 +1,24 @@
+{
+  "split_type": "random_page_level",
+  "warning": "Pages from same manuscript may appear in different splits",
+  "train_images": [
+    "NZ-Wt MSR-03 065r.png",
+    "F-Pn Latin 15181 169v bigger.png",
+    "CH-Fco Ms.2 108v.jpg",
+    "NZ-Wt MSR-03 109v.png",
+    "D-KNd 1161 032r.jpg"
+  ],
+  "val_images": [
+    "CH-Fco Ms. 2_006r copy.jpg"
+  ],
+  "test_images": [
+    "NZ-Wt MSR-03 013r.png",
+    "CH-P 18 p.100.jpg"
+  ],
+  "split_ratios": [
+    0.7,
+    0.15,
+    0.15
+  ],
+  "timestamp": "2026-03-17T20:13:04.450899"
+}

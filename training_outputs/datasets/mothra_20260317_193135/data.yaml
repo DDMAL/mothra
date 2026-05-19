@@ -1,0 +1,9 @@
+names:
+- text
+- music
+- staves
+nc: 3
+path: /Users/ekaterina/Documents/mothra/outputs/datasets/mothra_20260317_193135
+test: test/images
+train: train/images
+val: val/images

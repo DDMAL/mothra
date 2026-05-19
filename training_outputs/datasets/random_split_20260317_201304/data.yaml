@@ -1,0 +1,9 @@
+names:
+- text
+- music
+- staves
+nc: 3
+path: /Users/ekaterina/Documents/mothra/outputs/datasets/random_split_20260317_201304
+test: test/images
+train: train/images
+val: val/images
