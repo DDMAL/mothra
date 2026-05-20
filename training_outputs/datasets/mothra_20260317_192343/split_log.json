@@ -1,0 +1,19 @@
+{
+  "train_manuscripts": [
+    "F-Pn Latin 15181",
+    "CH-P 18",
+    "D-KNd 1161",
+    "CH-Fco Ms. 2"
+  ],
+  "val_manuscripts": [],
+  "test_manuscripts": [
+    "NZ-Wt MSR-03",
+    "CH-Fco Ms.2"
+  ],
+  "split_ratios": [
+    0.7,
+    0.15,
+    0.15
+  ],
+  "timestamp": "2026-03-17T19:23:43.938725"
+}
