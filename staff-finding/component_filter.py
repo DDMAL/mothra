@@ -6,6 +6,9 @@ isolate the connected component most likely to be the staffline itself.
 Output is consumed by the curve-fitting step (not implemented here).
 
 See ADR-001 for design decisions and rationale.
+
+On my mini, use this path for the BGR model: 
+`/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts/quickstart_outputs/best_model_14april.pth`
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +24,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 # Aspect-ratio floor: components must be at least this many times wider than tall.
-ASPECT_RATIO_FLOOR = 2.0
+ASPECT_RATIO_FLOOR = 3.0 #default was 2.0, relaxed to 3.0 to allow for more variability in staffline thickness and detection boxes.
 
 # Minimum component size, in multiples of the scale unit h (page-level median
 # staffline thickness). Components smaller than MIN_COMPONENT_SIZE_MULTIPLIER * h
