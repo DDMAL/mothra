@@ -39,6 +39,7 @@ import numpy as np
 import torch
 
 from component_filter import filter_components
+from fit_centerline import fit_centerline
 from yolo_io import parse_yolo_txt, filter_to_class, YoloDetection
 from bgr_adapter import (
     load_bgr_model,
@@ -120,11 +121,22 @@ def process_page(
     bgr_stride: int = DEFAULT_BGR_STRIDE,
     bgr_confidence: float = DEFAULT_BGR_CONFIDENCE,
     use_bgr: bool = True,
+    merge_components: bool = True,
+    binarization: str = "otsu",
 ) -> None:
     """Run the full page pipeline. See module docstring for sequence."""
     page_name = page_path.stem
-    # Tag output dir with the BGR/no-BGR variant so the two coexist.
-    variant_suffix = "" if use_bgr else "_no_bgr"
+    # Tag output dir with the BGR/no-BGR, merge/no-merge, and binarization
+    # variants so multiple runs with different settings coexist. Defaults
+    # (BGR on, merge on, Sauvola) produce an untagged directory.
+    variant_parts = []
+    if not use_bgr:
+        variant_parts.append("no_bgr")
+    if not merge_components:
+        variant_parts.append("no_merge")
+    if binarization != "sauvola":
+        variant_parts.append(binarization)
+    variant_suffix = ("_" + "_".join(variant_parts)) if variant_parts else ""
     page_output_dir = output_dir / f"{page_name}{variant_suffix}"
     page_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -189,6 +201,17 @@ def process_page(
             crop=crop,
             scale_unit=h_scale,
             save_path=diag_path,
+            merge_components=merge_components,
+            binarization=binarization,
+        )
+
+        # Fit a centerline to the kept pixels. Diagnostic goes to its own PNG.
+        fit_diag_path = page_output_dir / f"box_{idx:04d}_fit.png"
+        fit_result = fit_centerline(
+            filter_result=result,
+            scale_unit=h_scale,
+            crop=crop,
+            save_path=fit_diag_path,
         )
 
         summary_rows.append({
@@ -202,6 +225,12 @@ def process_page(
             "n_discarded": len(result.discarded),
             "top_score": _top_score_of(result),
             "diagnostic_path": str(diag_path.relative_to(output_dir)),
+            "fit_x_start": fit_result.x_start,
+            "fit_x_end": fit_result.x_end,
+            "fit_residual_mean": round(fit_result.residual_mean, 3),
+            "fit_residual_max": round(fit_result.residual_max, 3),
+            "fit_flags": ";".join(fit_result.flags),
+            "fit_diagnostic_path": str(fit_diag_path.relative_to(output_dir)),
         })
 
     # --- Write summary CSV ---
@@ -210,6 +239,9 @@ def process_page(
         "box_index", "ulx", "uly", "lrx", "lry",
         "n_kept_pixels", "flags", "n_discarded", "top_score",
         "diagnostic_path",
+        "fit_x_start", "fit_x_end",
+        "fit_residual_mean", "fit_residual_max",
+        "fit_flags", "fit_diagnostic_path",
     ]
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -252,9 +284,17 @@ def main():
     parser.add_argument("--bgr-confidence", type=float, default=DEFAULT_BGR_CONFIDENCE)
     parser.add_argument("--no-bgr", action="store_true",
                         help="Skip BGR preprocessing entirely; crop directly from original page.")
+    parser.add_argument("--no-merge", action="store_true",
+                        help="Disable component merging; fit to the single highest-scoring "
+                             "connected component instead of the merged cluster.")
+    parser.add_argument("--otsu", action="store_true",
+                        help="Use Otsu global thresholding instead of the default Sauvola. "
+                             "Retained for comparison; Sauvola is preferred on most manuscripts.")
     args = parser.parse_args()
 
     use_bgr = not args.no_bgr
+    merge_components = not args.no_merge
+    binarization = "otsu" if args.otsu else "sauvola"
     if use_bgr and args.bgr_model is None:
         parser.error("--bgr-model is required unless --no-bgr is set.")
 
@@ -270,6 +310,8 @@ def main():
         bgr_stride=args.bgr_stride,
         bgr_confidence=args.bgr_confidence,
         use_bgr=use_bgr,
+        merge_components=merge_components,
+        binarization=binarization,
     )
 
 
