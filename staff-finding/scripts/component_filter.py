@@ -6,9 +6,6 @@ isolate the connected component most likely to be the staffline itself.
 Output is consumed by the curve-fitting step (not implemented here).
 
 See ADR-001 for design decisions and rationale.
-
-If using on the mini, here's the path to the BGR model:
-``/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts/quickstart_outputs/best_model_14april.pth``
 """
 
 from dataclasses import dataclass, field
@@ -468,7 +465,17 @@ def _save_diagnostic(
 
     has_merge_panels = merge_clusters is not None
     n_panels = 6 if has_merge_panels else 4
-    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 5))
+
+    # Vertical stack: each panel gets the full figure width, with a fixed
+    # height per panel. Crops are wide-and-short, so this produces a tall
+    # narrow figure that the user can scroll through. Panels are
+    # readable per-panel without zooming.
+    panel_height_in = 3.0
+    figure_width_in = 16.0
+    fig, axes = plt.subplots(
+        n_panels, 1,
+        figsize=(figure_width_in, panel_height_in * n_panels),
+    )
 
     # Panel 1: original
     if crop.ndim == 3:

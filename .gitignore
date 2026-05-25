@@ -19,3 +19,7 @@ training_output.log
 data/labels
 
 mothra/.claude/
+
+#any kind of config file
+*.yaml
+.hfconfig

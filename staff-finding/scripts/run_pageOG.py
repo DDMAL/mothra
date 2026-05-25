@@ -31,6 +31,7 @@ See ADR-001 for component-filter design decisions.
 
 import argparse
 import csv
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -39,13 +40,20 @@ import numpy as np
 import torch
 
 from component_filter import filter_components
-from yolo_io import parse_yolo_txt, filter_to_class, YoloDetection
-from bgr_adapter import (
-    load_bgr_model,
-    run_bgr_inference,
-    DEFAULT_BGR_WINDOW_SIZE,
-    DEFAULT_BGR_STRIDE,
-    DEFAULT_BGR_CONFIDENCE,
+
+# Adapter pulls helpers from the existing inference script. The path below is a
+# placeholder — adjust to wherever inference_simple.py lives in your environment,
+# or pip-install it as a package and import normally.
+import sys
+INFERENCE_SCRIPT_DIR = "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts"
+# mini: /Users/kyriebouressa/Documents/muscrat/layer_sep/scripts
+# macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
+sys.path.insert(0, INFERENCE_SCRIPT_DIR)
+from inference_simple import (  # noqa: E402  (sys.path insertion above)
+    load_model,
+    sliding_window_inference,
+    post_process_ink,
+    separate_layers,
 )
 
 
@@ -55,6 +63,100 @@ from bgr_adapter import (
 
 DEFAULT_STAFFLINE_CLASS = 2
 DEFAULT_CROP_PADDING_PX = 2  # small margin around YOLO box; see driver plan
+DEFAULT_BGR_WINDOW_SIZE = 512
+DEFAULT_BGR_STRIDE = 256
+DEFAULT_BGR_CONFIDENCE = 0.5
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class YoloDetection:
+    """One detection parsed from a YOLO-format .txt line."""
+    class_id: int
+    x_center_norm: float
+    y_center_norm: float
+    width_norm: float
+    height_norm: float
+
+    def to_pixel_box(self, image_width: int, image_height: int) -> tuple[int, int, int, int]:
+        """Convert normalized coords to pixel (ulx, uly, lrx, lry)."""
+        cx = self.x_center_norm * image_width
+        cy = self.y_center_norm * image_height
+        w = self.width_norm * image_width
+        h = self.height_norm * image_height
+        ulx = int(round(cx - w / 2))
+        uly = int(round(cy - h / 2))
+        lrx = int(round(cx + w / 2))
+        lry = int(round(cy + h / 2))
+        return ulx, uly, lrx, lry
+
+
+# ---------------------------------------------------------------------------
+# YOLO parsing
+# ---------------------------------------------------------------------------
+
+def parse_yolo_txt(yolo_path: Path) -> list[YoloDetection]:
+    """Parse a YOLO .txt file. One detection per line: class cx cy w h."""
+    detections = []
+    with yolo_path.open("r") as f:
+        for line_num, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 5:
+                print(f"  Skipping malformed line {line_num} in {yolo_path}: {line!r}")
+                continue
+            try:
+                detections.append(YoloDetection(
+                    class_id=int(parts[0]),
+                    x_center_norm=float(parts[1]),
+                    y_center_norm=float(parts[2]),
+                    width_norm=float(parts[3]),
+                    height_norm=float(parts[4]),
+                ))
+            except ValueError:
+                print(f"  Skipping unparseable line {line_num} in {yolo_path}: {line!r}")
+    return detections
+
+
+def filter_to_class(
+    detections: list[YoloDetection],
+    class_id: int,
+) -> list[YoloDetection]:
+    return [d for d in detections if d.class_id == class_id]
+
+
+# ---------------------------------------------------------------------------
+# BGR adapter
+# ---------------------------------------------------------------------------
+
+def run_bgr_inference(
+    model,
+    image_rgb: np.ndarray,
+    window_size: int = DEFAULT_BGR_WINDOW_SIZE,
+    stride: int = DEFAULT_BGR_STRIDE,
+    confidence: float = DEFAULT_BGR_CONFIDENCE,
+    device: str = "cpu",
+) -> np.ndarray:
+    """Run the BGR model on a full RGB page and return the ink-on-white layer.
+
+    This is the in-memory equivalent of inference_simple.process_image, without
+    the disk writes or the parchment/comparison outputs. We want the ink layer
+    only.
+    """
+    probability_map = sliding_window_inference(
+        model, image_rgb,
+        window_size=window_size,
+        stride=stride,
+        device=device,
+    )
+    ink_mask = post_process_ink(probability_map, confidence_threshold=confidence)
+    ink_layer, _parchment_layer = separate_layers(image_rgb, ink_mask)
+    return ink_layer
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +258,7 @@ def process_page(
         if bgr_model_path is None:
             raise ValueError("BGR is enabled but no --bgr-model was provided.")
         print(f"Loading BGR model: {bgr_model_path}")
-        bgr_model = load_bgr_model(str(bgr_model_path), device)
+        bgr_model = load_model(str(bgr_model_path), device)
         print("Running BGR inference (this can take a minute on CPU)...")
         page_for_crops = run_bgr_inference(
             bgr_model, page_rgb,
