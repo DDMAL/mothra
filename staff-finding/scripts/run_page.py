@@ -1,14 +1,15 @@
 """
 Page-level driver for the Stage 1 component filter.
 
-Given a page image, its YOLO detection output, and the BGR (background removal)
-model checkpoint, this script:
+Given a page image, its YOLO detection output, and (optionally) the BGR
+(background removal) model checkpoint, this script:
 
   1. Loads the page (RGB).
-  2. Runs BGR inference once on the full page, producing an ink-on-white image.
+  2. Optionally runs BGR inference once on the full page, producing an
+     ink-on-white image. With --no-bgr, the original page is used directly.
   3. Parses the YOLO .txt detections and filters to the staffline class.
-  4. For each staffline detection: crops the BGR-processed page, runs the
-     component filter, saves a diagnostic PNG.
+  4. For each staffline detection: crops the (BGR-processed or raw) page, runs
+     the component filter, saves a diagnostic PNG.
   5. Writes a per-page summary CSV.
 
 Usage:
@@ -19,7 +20,11 @@ Usage:
         --output /path/to/output_dir \\
         [--staffline-class 2] \\
         [--crop-padding 2] \\
-        [--device cpu]
+        [--device cpu] \\
+        [--no-bgr]
+
+When --no-bgr is set, --bgr-model is not required and BGR is skipped entirely.
+Output goes to <output>/<page_name>_no_bgr/ so it doesn't clobber a BGR run.
 
 See ADR-001 for component-filter design decisions.
 """
@@ -42,7 +47,7 @@ from component_filter import filter_components
 import sys
 INFERENCE_SCRIPT_DIR = "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts"
 # mini: /Users/kyriebouressa/Documents/muscrat/layer_sep/scripts
-#macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
+# macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
 sys.path.insert(0, INFERENCE_SCRIPT_DIR)
 from inference_simple import (  # noqa: E402  (sys.path insertion above)
     load_model,
@@ -208,7 +213,7 @@ def compute_page_scale_unit(
 def process_page(
     page_path: Path,
     yolo_path: Path,
-    bgr_model_path: Path,
+    bgr_model_path: Optional[Path],
     output_dir: Path,
     staffline_class: int = DEFAULT_STAFFLINE_CLASS,
     crop_padding: int = DEFAULT_CROP_PADDING_PX,
@@ -216,10 +221,13 @@ def process_page(
     bgr_window_size: int = DEFAULT_BGR_WINDOW_SIZE,
     bgr_stride: int = DEFAULT_BGR_STRIDE,
     bgr_confidence: float = DEFAULT_BGR_CONFIDENCE,
+    use_bgr: bool = True,
 ) -> None:
     """Run the full page pipeline. See module docstring for sequence."""
     page_name = page_path.stem
-    page_output_dir = output_dir / page_name
+    # Tag output dir with the BGR/no-BGR variant so the two coexist.
+    variant_suffix = "" if use_bgr else "_no_bgr"
+    page_output_dir = output_dir / f"{page_name}{variant_suffix}"
     page_output_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Load page ---
@@ -245,29 +253,34 @@ def process_page(
     h_scale = compute_page_scale_unit(stafflines, w, h)
     print(f"  Page scale unit h (median staffline box height): {h_scale:.1f} px")
 
-    # --- Load BGR model and run inference ---
-    print(f"Loading BGR model: {bgr_model_path}")
-    bgr_model = load_model(str(bgr_model_path), device)
-    print("Running BGR inference (this can take a minute on CPU)...")
-    page_bgr = run_bgr_inference(
-        bgr_model, page_rgb,
-        window_size=bgr_window_size,
-        stride=bgr_stride,
-        confidence=bgr_confidence,
-        device=device,
-    )
-
-    # Save the BGR-processed page for inspection.
-    bgr_save_path = page_output_dir / f"{page_name}_bgr.png"
-    cv2.imwrite(str(bgr_save_path), cv2.cvtColor(page_bgr, cv2.COLOR_RGB2BGR))
-    print(f"  Saved BGR-processed page to {bgr_save_path}")
+    # --- BGR or skip ---
+    if use_bgr:
+        if bgr_model_path is None:
+            raise ValueError("BGR is enabled but no --bgr-model was provided.")
+        print(f"Loading BGR model: {bgr_model_path}")
+        bgr_model = load_model(str(bgr_model_path), device)
+        print("Running BGR inference (this can take a minute on CPU)...")
+        page_for_crops = run_bgr_inference(
+            bgr_model, page_rgb,
+            window_size=bgr_window_size,
+            stride=bgr_stride,
+            confidence=bgr_confidence,
+            device=device,
+        )
+        # Save the BGR-processed page for inspection.
+        processed_save_path = page_output_dir / f"{page_name}_bgr.png"
+        cv2.imwrite(str(processed_save_path), cv2.cvtColor(page_for_crops, cv2.COLOR_RGB2BGR))
+        print(f"  Saved BGR-processed page to {processed_save_path}")
+    else:
+        print("BGR disabled (--no-bgr): cropping directly from original page.")
+        page_for_crops = page_rgb
 
     # --- Per-box processing ---
     summary_rows = []
     print(f"Processing {len(stafflines)} staffline boxes...")
     for idx, detection in enumerate(stafflines):
         box = detection.to_pixel_box(w, h)
-        crop, actual_box = crop_with_padding(page_bgr, box, crop_padding)
+        crop, actual_box = crop_with_padding(page_for_crops, box, crop_padding)
 
         if crop.size == 0:
             print(f"  Box {idx}: degenerate crop (empty), skipping.")
@@ -326,7 +339,8 @@ def main():
     )
     parser.add_argument("--page", type=Path, required=True, help="Page image path")
     parser.add_argument("--yolo", type=Path, required=True, help="YOLO .txt path")
-    parser.add_argument("--bgr-model", type=Path, required=True, help="BGR model checkpoint")
+    parser.add_argument("--bgr-model", type=Path, required=False,
+                        help="BGR model checkpoint (required unless --no-bgr is set)")
     parser.add_argument("--output", type=Path, required=True, help="Output directory root")
     parser.add_argument("--staffline-class", type=int, default=DEFAULT_STAFFLINE_CLASS,
                         help=f"YOLO class id for stafflines (default: {DEFAULT_STAFFLINE_CLASS})")
@@ -338,7 +352,13 @@ def main():
     parser.add_argument("--bgr-window-size", type=int, default=DEFAULT_BGR_WINDOW_SIZE)
     parser.add_argument("--bgr-stride", type=int, default=DEFAULT_BGR_STRIDE)
     parser.add_argument("--bgr-confidence", type=float, default=DEFAULT_BGR_CONFIDENCE)
+    parser.add_argument("--no-bgr", action="store_true",
+                        help="Skip BGR preprocessing entirely; crop directly from original page.")
     args = parser.parse_args()
+
+    use_bgr = not args.no_bgr
+    if use_bgr and args.bgr_model is None:
+        parser.error("--bgr-model is required unless --no-bgr is set.")
 
     process_page(
         page_path=args.page,
@@ -351,6 +371,7 @@ def main():
         bgr_window_size=args.bgr_window_size,
         bgr_stride=args.bgr_stride,
         bgr_confidence=args.bgr_confidence,
+        use_bgr=use_bgr,
     )
 
 
