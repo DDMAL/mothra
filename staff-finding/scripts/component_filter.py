@@ -55,6 +55,26 @@ MERGE_Y_CENTER_DISTANCE_MULTIPLIER = 0.5
 # spacing.
 MERGE_X_GAP_MULTIPLIER = 5.0
 
+# --- Sauvola binarization (see ADR-002) ---
+# Window size for local adaptive thresholding, expressed as a multiple of h.
+# Large enough to capture both line and surrounding parchment in local stats;
+# small enough to remain locally adaptive. Rounded to nearest odd integer at
+# use time.
+SAUVOLA_WINDOW_MULTIPLIER = 9
+# default was 15
+
+# Threshold coefficient k. Lower k = more aggressive (more ink retained,
+# including potential noise); higher k = more conservative. Literature
+# default 0.2; lowered to 0.15 experimentally to recover more faint ink.
+# further lowered to .1 for faintness test, but that may be too aggressive for general use.
+SAUVOLA_K = 0.1
+
+# Minimum Sauvola window size in pixels. Guards against degenerate tiny
+# windows when scale_unit is very small.
+# small test = 8; large test=15; 15 is safer for general use to avoid tiny windows that overfit noise.
+# current use: 5, due to some very small scale_unit cases in the calibration corpus, but may be too aggressive for general use.
+SAUVOLA_MIN_WINDOW = 5
+
 
 # ---------------------------------------------------------------------------
 # Output type
@@ -65,25 +85,41 @@ class ComponentFilterResult:
     """
     Output of the component filter.
 
+    The primary fields (coords, mask, flags) reflect the *active* mode. When
+    the filter is called with merge_components=True (default), they reflect
+    the merged cluster; with merge_components=False, they reflect the single
+    highest-scoring connected component.
+
+    The no_merge_* fields always carry the no-merge result regardless of mode,
+    for inspection and downstream comparison.
+
     Attributes:
-        coords: List of (x, y) tuples of pixels belonging to the kept component.
-            Empty if no component survived filtering.
+        coords: List of (x, y) tuples of pixels belonging to the kept (active)
+            component or cluster. Empty if no component survived filtering.
         mask: Boolean array, same height/width as the input crop. True where
-            the kept component's pixels are. Empty array if no component survived.
-        score_breakdown: Per-candidate scoring details for the kept component
-            and all evaluated candidates. Keys map candidate ids to their
-            sub-scores and total score.
-        discarded: List of dicts describing components that were considered but
-            not kept. Each includes the component's stats and reason for
-            rejection or its (lower) score.
+            the kept pixels are.
+        score_breakdown: Per-candidate scoring details (from no-merge scoring).
+        discarded: List of dicts describing components that were considered
+            but not kept by the no-merge scoring.
         flags: Strings indicating notable conditions, e.g.
-            'multiple_components_kept', 'no_components_survived'.
+            'multiple_components_kept', 'multiple_clusters_kept',
+            'no_components_survived'.
+        no_merge_coords: List of (x, y) tuples from the no-merge winner.
+            Same as `coords` when merge_components=False.
+        no_merge_mask: Boolean mask of the no-merge winner. Same as `mask`
+            when merge_components=False.
+        merged_cluster_labels: List of connected-component labels that were
+            merged into the active cluster (when merge_components=True);
+            empty list otherwise.
     """
     coords: list[tuple[int, int]] = field(default_factory=list)
     mask: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=bool))
     score_breakdown: dict = field(default_factory=dict)
     discarded: list[dict] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    no_merge_coords: list[tuple[int, int]] = field(default_factory=list)
+    no_merge_mask: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=bool))
+    merged_cluster_labels: list[int] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -94,25 +130,38 @@ def filter_components(
     crop: np.ndarray,
     scale_unit: float = DEFAULT_SCALE_UNIT,
     save_path: Optional[Path] = None,
+    merge_components: bool = True,
+    binarization: str = "sauvola",
 ) -> ComponentFilterResult:
     """
-    Isolate the staffline-bearing connected component from a BGR-preprocessed crop.
+    Isolate the staffline-bearing connected component(s) from a BGR-preprocessed
+    crop.
 
     Args:
         crop: BGR-preprocessed image of a single detected bounding box. RGB on a
             white background (output of the upstream BGR script). Shape (H, W, 3)
             or (H, W) if already grayscale.
         scale_unit: Page-level median staffline thickness in pixels. Used to
-            size the minimum-component-size noise floor. See ADR-001 §10.
+            size the minimum-component-size noise floor, the merge thresholds,
+            and (when applicable) the Sauvola window. See ADR-001 §10.
         save_path: If provided, a diagnostic visualization is saved here as PNG.
             If None, no visualization is produced.
+        merge_components: When True (default), the active output reflects the
+            merged cluster (multiple fragments stitched into one). When False,
+            the active output is the single highest-scoring connected component.
+            The no-merge result is always recorded in the result's no_merge_*
+            fields regardless of this setting.
+        binarization: 'sauvola' (default) or 'otsu'. Sauvola is a local
+            adaptive method better suited to faint or unevenly-contrasted
+            ink; Otsu is retained for comparison and as a fallback. See
+            ADR-002.
 
     Returns:
         ComponentFilterResult. If no component survives filtering, the result
         carries the 'no_components_survived' flag and empty coords/mask.
     """
     # --- Binarize ---
-    binary = _binarize(crop)
+    binary = _binarize(crop, method=binarization, scale_unit=scale_unit)
 
     # --- Find connected components ---
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
@@ -163,31 +212,31 @@ def filter_components(
     if not survivors:
         result = ComponentFilterResult(
             mask=np.zeros_like(binary, dtype=bool),
+            no_merge_mask=np.zeros_like(binary, dtype=bool),
             discarded=discarded,
             flags=["no_components_survived"],
         )
         if save_path is not None:
             _save_diagnostic(crop, binary, labels, kept_label=None,
                              discarded_labels=[d["label"] for d in discarded],
-                             save_path=save_path)
+                             save_path=save_path,
+                             binarization_method=binarization)
         return result
 
-    # --- Rank and pick the winner ---
+    # --- Rank and pick the no-merge winner ---
     survivors.sort(key=lambda s: s[1], reverse=True)
     winner_label, winner_score, winner_sub_scores, winner_stats = survivors[0]
 
-    # Check for ambiguity (multiple_components_kept flag).
-    flags = []
+    # Check for no-merge ambiguity (multiple_components_kept flag).
+    no_merge_flags = []
     if len(survivors) > 1:
         runner_up_score = survivors[1][1]
-        # Avoid division by zero on degenerate cases.
         if winner_score > 0:
             relative_gap = (winner_score - runner_up_score) / winner_score
             if relative_gap < COMPARABLE_SCORE_THRESHOLD:
-                flags.append("multiple_components_kept")
+                no_merge_flags.append("multiple_components_kept")
 
-    # Record all surviving candidates (including the winner) in score_breakdown
-    # so downstream logging can inspect the full ranking.
+    # Record all surviving candidates (including the winner) in score_breakdown.
     score_breakdown = {
         s[3]["label"]: {
             "total": s[1],
@@ -198,8 +247,7 @@ def filter_components(
         for s in survivors
     }
 
-    # Non-winning survivors also go into 'discarded' with their scores, so the
-    # caller has one consolidated record of everything that didn't win.
+    # Non-winning survivors also go into 'discarded' with their scores.
     for s in survivors[1:]:
         discarded.append({
             **s[3],
@@ -208,33 +256,61 @@ def filter_components(
             "sub_scores": s[2],
         })
 
-    # --- Build the kept-component mask and coord list ---
-    mask = (labels == winner_label)
-    ys, xs = np.where(mask)
-    coords = list(zip(xs.tolist(), ys.tolist()))
+    # --- Build the no-merge mask and coord list ---
+    no_merge_mask = (labels == winner_label)
+    ys, xs = np.where(no_merge_mask)
+    no_merge_coords = list(zip(xs.tolist(), ys.tolist()))
+
+    # --- Compute merge clusters and merged-winner data (always, cheap) ---
+    merge_clusters = _compute_merge_groups(survivors, scale_unit)
+    merged_scored = []
+    for cluster in merge_clusters:
+        m_score, m_sub_scores, m_stats = _score_merged_cluster(
+            cluster, stats, box_width, box_height,
+        )
+        merged_scored.append((cluster, m_score, m_sub_scores, m_stats))
+    merged_scored.sort(key=lambda m: m[1], reverse=True)
+    merged_winner_labels = merged_scored[0][0] if merged_scored else []
+
+    # Merge-ambiguity flag: do multiple clusters score comparably?
+    merge_flags = []
+    if len(merged_scored) > 1:
+        m_top_score = merged_scored[0][1]
+        m_runner_up = merged_scored[1][1]
+        if m_top_score > 0:
+            m_relative_gap = (m_top_score - m_runner_up) / m_top_score
+            if m_relative_gap < COMPARABLE_SCORE_THRESHOLD:
+                merge_flags.append("multiple_clusters_kept")
+
+    # Build the merged-winner mask and coord list.
+    merged_mask = np.zeros_like(labels, dtype=bool)
+    for lbl in merged_winner_labels:
+        merged_mask |= (labels == lbl)
+    m_ys, m_xs = np.where(merged_mask)
+    merged_coords = list(zip(m_xs.tolist(), m_ys.tolist()))
+
+    # --- Choose active outputs based on the mode ---
+    if merge_components:
+        active_coords = merged_coords
+        active_mask = merged_mask
+        active_flags = merge_flags
+    else:
+        active_coords = no_merge_coords
+        active_mask = no_merge_mask
+        active_flags = no_merge_flags
 
     result = ComponentFilterResult(
-        coords=coords,
-        mask=mask,
+        coords=active_coords,
+        mask=active_mask,
         score_breakdown=score_breakdown,
         discarded=discarded,
-        flags=flags,
+        flags=active_flags,
+        no_merge_coords=no_merge_coords,
+        no_merge_mask=no_merge_mask,
+        merged_cluster_labels=[int(lbl) for lbl in merged_winner_labels] if merge_components else [],
     )
 
     if save_path is not None:
-        # Compute merge clusters and the would-be winner if merging were used.
-        # This is advisory only — the actual returned result is unchanged.
-        merge_clusters = _compute_merge_groups(survivors, scale_unit)
-
-        merged_scored = []
-        for cluster in merge_clusters:
-            m_score, m_sub_scores, m_stats = _score_merged_cluster(
-                cluster, stats, box_width, box_height,
-            )
-            merged_scored.append((cluster, m_score, m_sub_scores, m_stats))
-        merged_scored.sort(key=lambda m: m[1], reverse=True)
-        merged_winner_labels = merged_scored[0][0] if merged_scored else []
-
         _save_diagnostic(
             crop=crop,
             binary=binary,
@@ -244,6 +320,7 @@ def filter_components(
             merge_clusters=merge_clusters,
             merged_winner_labels=merged_winner_labels,
             save_path=save_path,
+            binarization_method=binarization,
         )
 
     return result
@@ -253,22 +330,57 @@ def filter_components(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _binarize(crop: np.ndarray) -> np.ndarray:
-    """Convert RGB (or grayscale) crop to a binary image via Otsu.
+def _binarize(
+    crop: np.ndarray,
+    method: str = "sauvola",
+    scale_unit: float = DEFAULT_SCALE_UNIT,
+) -> np.ndarray:
+    """Convert RGB (or grayscale) crop to a binary image.
 
-    Returns a uint8 array with foreground=255, background=0, suitable for
-    cv2.connectedComponentsWithStats.
+    Args:
+        crop: RGB or grayscale image.
+        method: 'sauvola' (default) or 'otsu'. Sauvola is a local adaptive
+            method better suited to faint or unevenly-contrasted ink. Otsu
+            is a single global threshold, retained for comparison and
+            fallback. See ADR-002.
+        scale_unit: Page-level h, used to size the Sauvola window when
+            method='sauvola'. Ignored for Otsu.
+
+    Returns:
+        uint8 array with foreground=255, background=0, suitable for
+        cv2.connectedComponentsWithStats.
     """
     if crop.ndim == 3:
         gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     else:
         gray = crop
 
-    # THRESH_BINARY_INV: ink (dark) becomes foreground (255), parchment becomes 0.
-    _, binary = cv2.threshold(
-        gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
-    return binary
+    if method == "otsu":
+        # THRESH_BINARY_INV: ink (dark) becomes foreground (255), parchment 0.
+        _, binary = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        return binary
+
+    if method == "sauvola":
+        # Import locally so the module can be imported without scikit-image
+        # in environments that don't need Sauvola.
+        from skimage.filters import threshold_sauvola
+
+        # Window size: scale-relative, odd, no smaller than a sane floor.
+        raw_window = int(round(SAUVOLA_WINDOW_MULTIPLIER * scale_unit))
+        window_size = max(SAUVOLA_MIN_WINDOW, raw_window)
+        # Sauvola requires an odd window.
+        if window_size % 2 == 0:
+            window_size += 1
+
+        thresh_map = threshold_sauvola(gray, window_size=window_size, k=SAUVOLA_K)
+        # Ink (dark) is foreground; same convention as Otsu output above.
+        binary = ((gray < thresh_map).astype(np.uint8)) * 255
+        return binary
+
+    raise ValueError(f"Unknown binarization method: {method!r}. "
+                     "Expected 'otsu' or 'sauvola'.")
 
 
 def _score_component(
@@ -445,12 +557,13 @@ def _save_diagnostic(
     save_path: Path,
     merge_clusters: Optional[list[list[int]]] = None,
     merged_winner_labels: Optional[list[int]] = None,
+    binarization_method: str = "sauvola",
 ) -> None:
     """Render and save a multi-panel diagnostic figure.
 
     Panels (without merge comparison):
         1. Original BGR-preprocessed crop.
-        2. Binarized image (Otsu output).
+        2. Binarized image (Otsu or Sauvola, as configured).
         3. Components: kept (green), discarded (red), other (gray).
         4. Kept-component mask alone.
 
@@ -485,9 +598,9 @@ def _save_diagnostic(
     axes[0].set_title("BGR-preprocessed crop")
     axes[0].axis("off")
 
-    # Panel 2: binarized
+    # Panel 2: binarized (method shown in title)
     axes[1].imshow(binary, cmap="gray")
-    axes[1].set_title("Binarized (Otsu)")
+    axes[1].set_title(f"Binarized ({binarization_method.capitalize()})")
     axes[1].axis("off")
 
     # Panel 3: components with kept/discarded coloring (no merge)
