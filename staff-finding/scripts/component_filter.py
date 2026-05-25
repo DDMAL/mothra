@@ -6,6 +6,9 @@ isolate the connected component most likely to be the staffline itself.
 Output is consumed by the curve-fitting step (not implemented here).
 
 See ADR-001 for design decisions and rationale.
+
+If using on the mini, here's the path to the BGR model:
+``/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts/quickstart_outputs/best_model_14april.pth``
 """
 
 from dataclasses import dataclass, field

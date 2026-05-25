@@ -40,7 +40,9 @@ from component_filter import filter_components
 # placeholder — adjust to wherever inference_simple.py lives in your environment,
 # or pip-install it as a package and import normally.
 import sys
-INFERENCE_SCRIPT_DIR = "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
+INFERENCE_SCRIPT_DIR = "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts"
+# mini: /Users/kyriebouressa/Documents/muscrat/layer_sep/scripts
+#macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
 sys.path.insert(0, INFERENCE_SCRIPT_DIR)
 from inference_simple import (  # noqa: E402  (sys.path insertion above)
     load_model,

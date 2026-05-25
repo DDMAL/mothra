@@ -1,0 +1,7 @@
+box_index,ulx,uly,lrx,lry,n_kept_pixels,flags,n_discarded,top_score,diagnostic_path
+0,135,106,588,178,0,no_components_survived,0,,NZ-Wt MSR-03 013r/box_0000.png
+1,132,234,598,313,2715,,18,0.8809148693431846,NZ-Wt MSR-03 013r/box_0001.png
+2,134,364,596,441,1287,,21,0.49242424242424243,NZ-Wt MSR-03 013r/box_0002.png
+3,134,497,594,580,1525,,28,0.7470403352540598,NZ-Wt MSR-03 013r/box_0003.png
+4,128,627,601,706,0,no_components_survived,34,,NZ-Wt MSR-03 013r/box_0004.png
+5,128,748,597,830,838,,31,0.5253783348068022,NZ-Wt MSR-03 013r/box_0005.png
