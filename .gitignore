@@ -6,6 +6,7 @@ runs/
 outputs/
 predictions*/
 staff-finding/page_tests
+staff-finding/scripts/__pycache__/
 
 # Downloaded pretrained weights
 yolov8*.pt
@@ -23,3 +24,7 @@ mothra/.claude/
 #any kind of config file
 *.yaml
 .hfconfig
+
+# artifacts from component filtering
+*.pyc
+
