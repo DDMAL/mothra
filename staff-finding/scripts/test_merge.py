@@ -48,7 +48,7 @@ def make_two_lines_crop(width=400, height=120, y_top=30, y_bottom=90, thickness=
 
 def test_fragmented_line_merges():
     crop = make_fragmented_line_crop()
-    save_path = Path("/tmp/merge_test_fragmented.png")
+    save_path = Path("mergetests/merge_test_fragmented.png")
     if save_path.exists():
         save_path.unlink()
     result = filter_components(crop, scale_unit=4.0, save_path=save_path)
@@ -67,7 +67,7 @@ def test_fragmented_line_merges():
 
 def test_two_lines_do_not_merge():
     crop = make_two_lines_crop()
-    save_path = Path("/tmp/merge_test_two_lines.png")
+    save_path = Path("mergetests/merge_test_two_lines.png")
     if save_path.exists():
         save_path.unlink()
     result = filter_components(crop, scale_unit=4.0, save_path=save_path)
