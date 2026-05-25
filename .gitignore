@@ -5,6 +5,7 @@ predictions*/
 runs/
 outputs/
 predictions*/
+staff-finding/page_tests
 
 # Downloaded pretrained weights
 yolov8*.pt
