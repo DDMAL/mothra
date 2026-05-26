@@ -6,6 +6,7 @@ runs/
 outputs/
 predictions*/
 staff-finding/page_tests
+staff-finding/grouping_tests
 staff-finding/scripts/__pycache__/
 
 # Downloaded pretrained weights
