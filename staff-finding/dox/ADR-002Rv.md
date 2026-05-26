@@ -99,16 +99,18 @@ Per §Escalation, adoption required: "Fit step in place; fitted centerlines on f
 Both clauses were observed:
 
 - With the fit step in place, faint-line failure cases produced fits that covered only the small portions of the line that survived Otsu's threshold, with the rest of the line unrecovered despite being visibly present in the original crops.
-- Side-by-side comparison on the same pages (Otsu in `<page>/`, Sauvola in `<page>_sauvola/`) showed Sauvola recovering substantially more line ink on faint cases. A brief tuning pass (`k = 0.15` rather than the literature default of 0.2) further improved recovery without introducing noticeable parchment-noise regressions on clean cases.
+- Side-by-side comparison on the same pages (Otsu in `<page>/`, Sauvola in `<page>_sauvola/`) showed Sauvola recovering substantially more line ink on faint cases. A tuning pass (starting at `k = 0.15`, then `k = 0.1`) further improved recovery without introducing noticeable parchment-noise regressions on clean cases.
 
 ### 3. Final parameters
 
 Settled during the comparison experiment, all tunable constants at the top of `component_filter.py`:
 
-- `SAUVOLA_WINDOW_MULTIPLIER = 8 (window size = 15 × h, rounded to nearest odd integer)
-- `SAUVOLA_K = 0.1` (lowered from the literature 0.2 to recover more faint ink)
+- `SAUVOLA_WINDOW_MULTIPLIER = 9` (window size = 9 × h, rounded to nearest odd integer; tuned down from an initial 15× default during comparison runs)
+- `SAUVOLA_K = 0.1` (lowered from the literature default of 0.2, then again from the initial 0.15 tuning value, to recover more faint ink)
 - `SAUVOLA_MIN_WINDOW = 5` (floor, in pixels, for very small scale units)
-These are severe, and may need lightening for future general use. 
+
+These values are aggressive. The low `k` and window multiplier recover faint ink well on the tested pages but may over-threshold on cleaner manuscripts; treat as a starting point for broader corpus testing.
+
 ### 4. Interface changes
 
 - `filter_components(binarization=...)` parameter default flipped from `"otsu"` to `"sauvola"`.
