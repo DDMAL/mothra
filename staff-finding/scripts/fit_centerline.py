@@ -70,6 +70,7 @@ class FitResult:
     residual_mean: float = 0.0
     residual_max: float = 0.0
     n_pixels_used: int = 0
+    n_pixels_total: int = 0
     flags: list[str] = field(default_factory=list)
 
 
@@ -141,6 +142,7 @@ def fit_centerline(
             x_start=x_start,
             x_end=x_end,
             n_pixels_used=len(filter_result.coords),
+            n_pixels_total=len(filter_result.coords),
             flags=["fit_did_not_converge", f"reason:{type(e).__name__}"],
         )
         if save_path is not None and crop is not None:
@@ -164,6 +166,7 @@ def fit_centerline(
         residual_mean=float(abs_residuals.mean()),
         residual_max=float(abs_residuals.max()),
         n_pixels_used=len(filter_result.coords),
+        n_pixels_total=len(filter_result.coords),
         flags=[] if ls_result.success else ["fit_did_not_converge"],
     )
 

@@ -31,6 +31,7 @@ See ADR-001 for component-filter design decisions.
 
 import argparse
 import csv
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -40,6 +41,7 @@ import torch
 
 from component_filter import filter_components
 from fit_centerline import fit_centerline
+from group_staves import group_staves
 from yolo_io import parse_yolo_txt, filter_to_class, YoloDetection
 from bgr_adapter import (
     load_bgr_model,
@@ -122,7 +124,7 @@ def process_page(
     bgr_confidence: float = DEFAULT_BGR_CONFIDENCE,
     use_bgr: bool = True,
     merge_components: bool = True,
-    binarization: str = "otsu",
+    binarization: str = "sauvola",
 ) -> None:
     """Run the full page pipeline. See module docstring for sequence."""
     page_name = page_path.stem
@@ -187,6 +189,7 @@ def process_page(
 
     # --- Per-box processing ---
     summary_rows = []
+    fit_results = [] #collected for stage 2 grouping after the per-box loop!
     print(f"Processing {len(stafflines)} staffline boxes...")
     for idx, detection in enumerate(stafflines):
         box = detection.to_pixel_box(w, h)
@@ -213,7 +216,7 @@ def process_page(
             crop=crop,
             save_path=fit_diag_path,
         )
-
+        fit_results.append(fit_result)
         summary_rows.append({
             "box_index": idx,
             "ulx": actual_box[0],
@@ -231,7 +234,120 @@ def process_page(
             "fit_residual_max": round(fit_result.residual_max, 3),
             "fit_flags": ";".join(fit_result.flags),
             "fit_diagnostic_path": str(fit_diag_path.relative_to(output_dir)),
+            "stave_id": None,  # to be filled in by stage 2
+            "within_stave_index": None,  # to be filled in by stage 2
+            "grouping_flags": None,  # to be filled in by stage 2
         })
+    # --- Stage 2: stave grouping ---
+    grouping_diag_path = page_output_dir / f"{page_name}_stave_grouping.png"
+    grouping_result = group_staves(
+        fits=fit_results,
+        scale_unit=h_scale,
+        save_path=grouping_diag_path,
+        page_size=(w, h),
+        page_image=bgr_loaded,  # Pass the full page image (BGR format for cv2) for visualization
+    )
+    print(f"  Stave grouping: mode={grouping_result.mode_lines_per_stave} "
+          f"lines/stave, distribution={grouping_result.line_count_distribution}, "
+          f"flags={grouping_result.flags}")
+    
+    # Print detailed stave assignments with evidence
+    if grouping_result.assignments:
+        print(f"  Cut threshold: {grouping_result.cut_threshold_px:.1f} px "
+              f"(gaps >= this → inter-stave boundary)")
+        if grouping_result.gap_distribution:
+            print(f"  Gaps between consecutive fits: {[f'{g:.0f}' for g in grouping_result.gap_distribution]}")
+        
+        print("  Stave assignments:")
+        by_stave = {}
+        for asg in grouping_result.assignments:
+            if asg.stave_id is not None:
+                if asg.stave_id not in by_stave:
+                    by_stave[asg.stave_id] = []
+                by_stave[asg.stave_id].append(asg)
+        
+        # Print grouped staves with y-positions
+        for stave_id in sorted(by_stave.keys()):
+            assignments_in_stave = sorted(by_stave[stave_id], key=lambda a: a.within_stave_index)
+            fit_indices = [str(a.fit_index) for a in assignments_in_stave]
+            y_positions = [f"{a.y_at_center:.0f}px" if a.y_at_center is not None else "?" for a in assignments_in_stave]
+            print(f"    Stave {stave_id}: fits [{', '.join(fit_indices)}]")
+            print(f"               y-positions: [{', '.join(y_positions)}]")
+        
+        # Print unassigned fits if any
+        unassigned = [a for a in grouping_result.assignments if a.stave_id is None]
+        if unassigned:
+            print(f"    Unassigned: fits [{', '.join(str(a.fit_index) for a in unassigned)}]")
+            for a in unassigned:
+                flags_str = f" ({', '.join(a.flags)})" if a.flags else ""
+                print(f"               fit {a.fit_index}{flags_str}")
+
+    # Fold stave assignments back into the summary rows.
+    for asg in grouping_result.assignments:
+        if asg.fit_index < len(summary_rows):
+            summary_rows[asg.fit_index]["stave_id"] = asg.stave_id
+            summary_rows[asg.fit_index]["within_stave_index"] = asg.within_stave_index
+            summary_rows[asg.fit_index]["grouping_flags"] = ";".join(asg.flags)
+
+    # --- Write detailed grouping report ---
+    grouping_report_path = page_output_dir / "stave_grouping_report.txt"
+    with open(grouping_report_path, "w") as f:
+        f.write("STAVE GROUPING REPORT\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Page: {page_name}\n")
+        f.write(f"Mode lines per stave: {grouping_result.mode_lines_per_stave}\n")
+        f.write(f"Line count distribution: {grouping_result.line_count_distribution}\n")
+        f.write(f"Cut threshold (px): {grouping_result.cut_threshold_px:.1f}\n")
+        f.write(f"Flags: {', '.join(grouping_result.flags) if grouping_result.flags else 'none'}\n\n")
+        
+        f.write("GAPS BETWEEN CONSECUTIVE FITS:\n")
+        f.write("-" * 60 + "\n")
+        if grouping_result.gap_distribution:
+            for i, gap in enumerate(grouping_result.gap_distribution):
+                marker = ">>> INTER-STAVE <<<" if gap >= grouping_result.cut_threshold_px else ""
+                f.write(f"  Gap {i}: {gap:.1f} px  {marker}\n")
+        else:
+            f.write("  (No gaps; 0 or 1 fit)\n")
+        
+        f.write("\nSTAVE ASSIGNMENTS:\n")
+        f.write("-" * 60 + "\n")
+        
+        by_stave = {}
+        for asg in grouping_result.assignments:
+            if asg.stave_id is not None:
+                if asg.stave_id not in by_stave:
+                    by_stave[asg.stave_id] = []
+                by_stave[asg.stave_id].append(asg)
+        
+        for stave_id in sorted(by_stave.keys()):
+            assignments_in_stave = sorted(by_stave[stave_id], key=lambda a: a.within_stave_index)
+            f.write(f"\nStave {stave_id}:\n")
+            for asg in assignments_in_stave:
+                y_str = f"{asg.y_at_center:.1f}" if asg.y_at_center is not None else "unknown"
+                flags_str = f" [{', '.join(asg.flags)}]" if asg.flags else ""
+                f.write(f"  Fit {asg.fit_index}: line {asg.within_stave_index}, y={y_str}px{flags_str}\n")
+        
+        unassigned = [a for a in grouping_result.assignments if a.stave_id is None]
+        if unassigned:
+            f.write(f"\nUnassigned fits:\n")
+            for asg in unassigned:
+                flags_str = f" [{', '.join(asg.flags)}]" if asg.flags else ""
+                f.write(f"  Fit {asg.fit_index}{flags_str}\n")
+
+    # --- Write JSOMR JSON (per-line schema, design doc §5.8) ---
+    jsomr_path = page_output_dir / f"{page_name}_stafflines.json"
+    _write_jsomr_json(
+        page_name=page_name,
+        stafflines=stafflines,
+        summary_rows=summary_rows,
+        fit_results=fit_results,
+        grouping_result=grouping_result,
+        scale_unit=h_scale,
+        image_width=w,
+        image_height=h,
+        save_path=jsomr_path,
+    )
+    print(f"Wrote JSOMR stafflines: {jsomr_path}")
 
     # --- Write summary CSV ---
     summary_path = page_output_dir / "summary.csv"
@@ -242,6 +358,7 @@ def process_page(
         "fit_x_start", "fit_x_end",
         "fit_residual_mean", "fit_residual_max",
         "fit_flags", "fit_diagnostic_path",
+        "stave_id", "within_stave_index", "grouping_flags"
     ]
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -249,6 +366,80 @@ def process_page(
         writer.writerows(summary_rows)
     print(f"Wrote per-page summary: {summary_path}")
     print(f"Outputs under: {page_output_dir}")
+
+
+def _write_jsomr_json(
+    page_name: str,
+    stafflines: list,
+    summary_rows: list[dict],
+    fit_results: list,
+    grouping_result,
+    scale_unit: float,
+    image_width: int,
+    image_height: int,
+    save_path: Path,
+) -> None:
+    """Write per-line JSOMR records matching the design doc §5.8 schema.
+
+    Each record has: id, source, bounding_box, centerline, fit, quality,
+    scale_unit, column_id, stave_id.  Stave assignments are folded in from
+    the grouping result.  Interpolated lines are not yet emitted (deferred
+    per design doc §6.3).
+    """
+    # Build a stave-assignment lookup keyed by fit index.
+    asg_by_fit: dict[int, object] = {
+        a.fit_index: a for a in grouping_result.assignments
+    }
+
+    records = []
+    for row_idx, row in enumerate(summary_rows):
+        fit = fit_results[row_idx]
+        asg = asg_by_fit.get(row_idx)
+
+        stave_id = asg.stave_id if asg else None
+        grouping_flags = asg.flags if asg else []
+
+        all_flags = (
+            [f for f in row["flags"].split(";") if f]
+            + [f for f in row["fit_flags"].split(";") if f]
+            + grouping_flags
+        )
+
+        record = {
+            "id": f"{page_name}_line{row_idx:04d}",
+            "source": "detected",
+            "bounding_box": {
+                "ulx": row["ulx"],
+                "uly": row["uly"],
+                "lrx": row["lrx"],
+                "lry": row["lry"],
+            },
+            "centerline": {
+                "x_start": fit.x_start,
+                "x_end": fit.x_end,
+                "y_values": fit.y_values,
+            },
+            "fit": {
+                "method": "quadratic_huber",
+                "coefficients": fit.coefficients,
+                "residual_mean": round(fit.residual_mean, 3),
+                "residual_max": round(fit.residual_max, 3),
+                "n_pixels_used": fit.n_pixels_used,
+                "n_pixels_total": fit.n_pixels_total,
+            },
+            "quality": {
+                "confidence": None,  # not yet computed; placeholder per §5.8
+                "flags": all_flags,
+            },
+            "scale_unit": scale_unit,
+            "column_id": None,
+            "stave_id": stave_id,
+            "within_stave_index": asg.within_stave_index if asg else None,
+        }
+        records.append(record)
+
+    with save_path.open("w") as f:
+        json.dump(records, f, indent=2)
 
 
 def _top_score_of(result) -> Optional[float]:
