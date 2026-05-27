@@ -1,10 +1,15 @@
 # Adjust this as necessary while project evolves
+
+# macOS metadata — never track these
+.DS_Store
+**/.DS_Store
+
 runs/
 outputs/
 predictions*/
-runs/
-outputs/
-predictions*/
+staff-finding/page_tests
+staff-finding/grouping_tests
+staff-finding/scripts/__pycache__/
 
 # Downloaded pretrained weights
 yolov8*.pt
@@ -18,3 +23,11 @@ training_output.log
 data/labels
 
 mothra/.claude/
+
+#any kind of config file
+*.yaml
+.hfconfig
+
+# artifacts from component filtering
+*.pyc
+

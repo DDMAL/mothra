@@ -11,7 +11,9 @@
       "Bash(mkdir -p /tmp/mothra_new_images)",
       "Bash(ln -sf __CMDSUB_OUTPUT__/data/images/__TRACKED_VAR__ /tmp/mothra_new_images/__TRACKED_VAR__)",
       "Read(//tmp/**)",
-      "Bash(conda run *)"
+      "Bash(conda run *)",
+      "Bash(find /Users/kyriebouressa/Documents/muscrat -name \"inference_simple.py\" 2>/dev/null)",
+      "Read(//Users/kyriebouressa/Documents/muscrat/**)"
     ]
   }
 }
