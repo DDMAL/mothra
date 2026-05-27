@@ -216,6 +216,10 @@ def process_page(
             crop=crop,
             save_path=fit_diag_path,
         )
+        # Record the crop's page-absolute origin so downstream grouping and
+        # visualization can convert crop-local coords to page-absolute.
+        fit_result.x_page_offset = float(actual_box[0])   # ulx
+        fit_result.y_page_offset = float(actual_box[1])   # uly
         fit_results.append(fit_result)
         summary_rows.append({
             "box_index": idx,

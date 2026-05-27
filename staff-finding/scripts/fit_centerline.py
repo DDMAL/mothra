@@ -42,6 +42,35 @@ MAX_FIT_ITERATIONS = 100
 # doc §5.4 — sufficient for square notation; revisit for thinner scripts.
 Y_SAMPLE_DECIMALS = 1
 
+# Line-following: triggered when the initial Huber fit's mean residual exceeds
+# this multiple of h. At 1.0 * h the fit is already off by a full line
+# thickness on average — a strong signal that the box contains more than one
+# staffline.
+REFIT_TRIGGER_MULTIPLIER = 1.0
+
+# Half-width of the sliding band that follows the current estimated y (pixels,
+# expressed as a multiple of h). 1.5 * h gives one full line thickness of
+# tolerance on each side, letting the trace follow typical curvature while
+# refusing to jump to a neighbouring staffline.
+LINE_FOLLOW_BAND_MULTIPLIER = 1.5
+
+# Sliding window width for the trace = scale_unit / this divisor (min 5 px).
+# Divisor 2 → roughly half a line-thickness per window; fine-grained enough to
+# track gentle curves without being so narrow that sparse pixels dominate.
+LINE_FOLLOW_WINDOW_DIVISOR = 2
+
+# Minimum number of window medians before a polynomial refit is attempted.
+# Below this the polynomial is ill-conditioned.
+LINE_FOLLOW_MIN_TRACE_POINTS = 5
+
+# Polynomial degree for the line-following refit — separate from the global
+# POLY_DEGREE=2 for the initial Huber fit.  Cubic (3) can represent both
+# C-shaped arches (page curvature) and S-shaped waves (parchment warping in
+# two spots), without material overfitting risk when gated on enough trace
+# points. Falls back to POLY_DEGREE if fewer than 2*(degree+1) = 8 trace
+# points are available.
+LINE_FOLLOW_POLY_DEGREE = 3
+
 
 # ---------------------------------------------------------------------------
 # Output type
@@ -51,17 +80,34 @@ Y_SAMPLE_DECIMALS = 1
 class FitResult:
     """Output of the centerline fit.
 
+    Coordinate convention
+    ---------------------
+    x_start, x_end, and y_values are all in **crop-local** coordinates — the
+    origin is the top-left corner of the YOLO bounding box that was cropped
+    before fitting. To convert to page-absolute coordinates add x_page_offset
+    (for x) or y_page_offset (for y). These offsets are populated by run_page.py
+    from the YOLO bounding box (ulx, uly) and default to 0 for synthetic data
+    used in unit tests.
+
     Attributes:
-        x_start: First x of the sampled centerline (integer pixel).
-        x_end: Last x of the sampled centerline (integer pixel; inclusive).
-        y_values: One y per integer x in [x_start, x_end]. Empty when no fit
-            was produced.
-        coefficients: Polynomial coefficients [a, b, c] for y = a*x^2 + b*x + c.
-            Empty when no fit was produced.
+        x_start: First x of the sampled centerline (crop-local integer pixel).
+        x_end: Last x of the sampled centerline (crop-local integer pixel; inclusive).
+        y_values: One y per integer x in [x_start, x_end], crop-local. Empty
+            when no fit was produced.
+        coefficients: Polynomial coefficients for the fitted curve. Empty when
+            no fit was produced.
         residual_mean: Mean absolute deviation of fitted curve from kept pixels.
         residual_max: Max absolute deviation.
         n_pixels_used: Number of kept-coord pixels fed to the fit.
-        flags: Notable conditions, e.g. 'no_fit_attempted', 'fit_did_not_converge'.
+        n_pixels_total: Total pixels in the kept component (same as n_pixels_used
+            while Huber down-weights rather than drops; field exists for schema
+            compliance and future RANSAC / hard-rejection modes).
+        x_page_offset: Page-absolute x of the crop's left edge (ulx). Add to
+            x_start/x_end to get page coordinates.
+        y_page_offset: Page-absolute y of the crop's top edge (uly). Add to
+            y_values to get page coordinates.
+        flags: Notable conditions, e.g. 'no_fit_attempted', 'fit_did_not_converge',
+            'line_following_applied:deg3'.
     """
     x_start: int = 0
     x_end: int = 0
@@ -71,6 +117,8 @@ class FitResult:
     residual_max: float = 0.0
     n_pixels_used: int = 0
     n_pixels_total: int = 0
+    x_page_offset: float = 0.0
+    y_page_offset: float = 0.0
     flags: list[str] = field(default_factory=list)
 
 
@@ -153,6 +201,48 @@ def fit_centerline(
     final_residuals = np.polyval(fitted_coeffs, xs) - ys
     abs_residuals = np.abs(final_residuals)
 
+    # --- Line-following refinement (high-residual case) ---
+    # When the initial Huber fit's mean residual exceeds REFIT_TRIGGER_MULTIPLIER * h
+    # the box likely contains multiple arching stafflines (e.g. page-curvature makes
+    # two adjacent lines bow together). Trace a single line left-to-right from the
+    # box vertical center, then refit using only those trace medians. The trace
+    # itself follows any shape (arch, S-wave, etc.); the polynomial degree controls
+    # how smoothly the final curve is expressed.
+    line_follow_flags: list[str] = []
+    trace_xs_out: np.ndarray = np.array([], dtype=np.float64)
+    trace_ys_out: np.ndarray = np.array([], dtype=np.float64)
+
+    if float(abs_residuals.mean()) > REFIT_TRIGGER_MULTIPLIER * scale_unit:
+        seed_y = (float(crop.shape[0]) / 2.0) if crop is not None \
+                  else float((ys.min() + ys.max()) / 2.0)
+        trace_xs_arr, trace_ys_arr = _trace_line(
+            xs, ys, x_start, x_end, scale_unit, seed_y
+        )
+        if len(trace_xs_arr) >= LINE_FOLLOW_MIN_TRACE_POINTS:
+            try:
+                # Use cubic when we have enough points; otherwise quadratic.
+                # Rule of thumb: need at least 2*(degree+1) points for a stable fit.
+                refit_degree = (LINE_FOLLOW_POLY_DEGREE
+                                if len(trace_xs_arr) >= 2 * (LINE_FOLLOW_POLY_DEGREE + 1)
+                                else POLY_DEGREE)
+                refined_coeffs = np.polyfit(trace_xs_arr, trace_ys_arr, deg=refit_degree)
+                refined_residuals = np.abs(
+                    np.polyval(refined_coeffs, trace_xs_arr) - trace_ys_arr
+                )
+                if refined_residuals.mean() < abs_residuals.mean():
+                    fitted_coeffs = refined_coeffs
+                    # Report residuals over the trace points (the set we optimised for).
+                    abs_residuals = refined_residuals
+                    line_follow_flags.append(f"line_following_applied:deg{refit_degree}")
+                    trace_xs_out = trace_xs_arr
+                    trace_ys_out = trace_ys_arr
+                else:
+                    line_follow_flags.append("line_following_no_improvement")
+            except np.linalg.LinAlgError:
+                line_follow_flags.append("line_following_refit_failed")
+        else:
+            line_follow_flags.append("line_following_insufficient_trace")
+
     # --- Sample at integer x ---
     sample_xs = np.arange(x_start, x_end + 1)
     sample_ys = np.polyval(fitted_coeffs, sample_xs)
@@ -167,13 +257,67 @@ def fit_centerline(
         residual_max=float(abs_residuals.max()),
         n_pixels_used=len(filter_result.coords),
         n_pixels_total=len(filter_result.coords),
-        flags=[] if ls_result.success else ["fit_did_not_converge"],
+        flags=([] if ls_result.success else ["fit_did_not_converge"]) + line_follow_flags,
     )
 
     if save_path is not None and crop is not None:
-        _save_fit_diagnostic(crop, result, save_path)
+        _save_fit_diagnostic(crop, result, save_path,
+                             trace_xs=trace_xs_out, trace_ys=trace_ys_out)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Line-following helper
+# ---------------------------------------------------------------------------
+
+def _trace_line(
+    xs: np.ndarray,
+    ys: np.ndarray,
+    x_start: int,
+    x_end: int,
+    scale_unit: float,
+    seed_y: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Walk left-to-right collecting one median y per sliding window.
+
+    Keeps only pixels within LINE_FOLLOW_BAND_MULTIPLIER * h of the current
+    estimated y. Each window's median becomes the next window's center, so the
+    trace naturally follows the staffline's curve — arch, S-wave, or straight —
+    while refusing to hop to an adjacent line.
+
+    Args:
+        xs: x-coordinates of all kept pixels (from ComponentFilterResult).
+        ys: Corresponding y-coordinates.
+        x_start: Left edge of the horizontal extent.
+        x_end: Right edge (inclusive).
+        scale_unit: Page-level scale unit h.
+        seed_y: Starting y estimate (box vertical center recommended).
+
+    Returns:
+        (trace_xs, trace_ys): Representative x/y pairs, one per window that
+        contained at least 2 in-band pixels. Both arrays are empty if no
+        windows qualified.
+    """
+    band_half = LINE_FOLLOW_BAND_MULTIPLIER * scale_unit
+    window_width = max(5, int(scale_unit / LINE_FOLLOW_WINDOW_DIVISOR))
+    trace_xs: list[float] = []
+    trace_ys: list[float] = []
+    current_y = seed_y
+
+    for win_start in range(x_start, x_end + 1, window_width):
+        win_end = min(win_start + window_width, x_end + 1)
+        in_window = (xs >= win_start) & (xs < win_end)
+        in_band = in_window & (np.abs(ys - current_y) <= band_half)
+        if in_band.sum() >= 2:
+            window_y = float(np.median(ys[in_band]))
+            trace_xs.append((win_start + win_end) / 2.0)
+            trace_ys.append(window_y)
+            current_y = window_y
+        # If no pixels land in the band this window, current_y holds —
+        # the band stays centred where we last found the line.
+
+    return np.array(trace_xs, dtype=np.float64), np.array(trace_ys, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +328,14 @@ def _save_fit_diagnostic(
     crop: np.ndarray,
     fit_result: FitResult,
     save_path: Path,
+    trace_xs: Optional[np.ndarray] = None,
+    trace_ys: Optional[np.ndarray] = None,
 ) -> None:
     """Save a single-panel figure: the original crop with the fitted centerline
     overlaid as a bright line, plus markers at x_start and x_end.
+
+    If line-following was applied, cyan scatter dots show the sliding-window
+    trace points used for the refit.
 
     If the fit produced no y_values (empty input or failure), the panel still
     renders the crop and a "no fit" annotation.
@@ -199,6 +348,8 @@ def _save_fit_diagnostic(
     else:
         ax.imshow(crop, cmap="gray")
 
+    has_legend = False
+
     if fit_result.y_values:
         xs = np.arange(fit_result.x_start, fit_result.x_end + 1)
         ys = np.asarray(fit_result.y_values)
@@ -210,6 +361,14 @@ def _save_fit_diagnostic(
                 [ys[0], ys[-1]],
                 marker="o", linestyle="none", color=(1.0, 0.2, 0.7),
                 markersize=6)
+        has_legend = True
+
+        # Line-following trace points — cyan scatter.
+        if trace_xs is not None and len(trace_xs) > 0:
+            ax.scatter(trace_xs, trace_ys,
+                       color=(0.2, 0.8, 1.0), s=25, zorder=5,
+                       label="Trace points (line-following)")
+
         title = (
             f"Fitted centerline | "
             f"residual mean={fit_result.residual_mean:.2f}, "
@@ -223,8 +382,10 @@ def _save_fit_diagnostic(
         if fit_result.flags:
             title += f" ({','.join(fit_result.flags)})"
 
-    ax.set_title(title)
+    ax.set_title(title, fontsize=8)
     ax.axis("off")
+    if has_legend:
+        ax.legend(loc="upper right", fontsize=7)
 
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)

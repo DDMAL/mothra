@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from component_filter import filter_components, ComponentFilterResult
 from fit_centerline import fit_centerline
 
@@ -80,9 +80,59 @@ def test_sloped_line_fit():
     assert 47 <= y_at_end <= 52
 
 
+def test_two_line_box_line_following():
+    """Line-following isolates the nearer staffline when the kept-pixel set
+    contains two lines (e.g. because connected-component merging joined them).
+
+    The component filter is bypassed here — we construct a ComponentFilterResult
+    directly with pixels from both lines so that the test exercises only the
+    line-following logic inside fit_centerline.
+
+    Geometry (scale_unit=15, realistic for square-notation manuscripts):
+      - OLS puts initial guess at y~50 (midpoint of 30 and 70)
+      - Both lines are ~20 px from that midpoint, both in the linear Huber
+        regime (f_scale = 0.5*15 = 7.5 px)
+      - With equal pixel counts both sides cancel -> Huber stays near y=50,
+        residual_mean ~ 20 px >> trigger (1.0*15 = 15 px) -> line-following fires
+      - seed = crop vertical center = 40 px
+      - band_half = 1.5*15 = 22.5 px -> band [17.5, 62.5]
+      - inner line (y~30) IS in band; outer line (y~70) is NOT -> trace locks y~30
+    """
+    scale_unit = 15.0
+    crop = np.full((80, 400, 3), 255, dtype=np.uint8)
+    crop[28:32, :] = 30   # inner line at y~30 (10 px from seed=40)
+    crop[68:72, :] = 30   # outer line at y~70 (30 px from seed=40, outside band)
+
+    # Build a filter result containing pixels from BOTH lines, replicating the
+    # scenario where two lines end up in the same kept-pixel set.
+    coords: list[tuple[int, int]] = []
+    for x in range(400):
+        for y in [28, 29, 30, 31]:  # inner line rows
+            coords.append((x, y))
+        for y in [68, 69, 70, 71]:  # outer line rows
+            coords.append((x, y))
+    filter_result = ComponentFilterResult(coords=coords)
+
+    fit_result = fit_centerline(filter_result, scale_unit=scale_unit,
+                                crop=crop,
+                                save_path=Path("/tmp/fit_two_line.png"))
+    median_y = float(np.median(fit_result.y_values))
+    print(f"two-line box: median_y={median_y:.2f}, "
+          f"residual_mean={fit_result.residual_mean:.3f}, "
+          f"flags={fit_result.flags}")
+    assert any("line_following_applied" in f for f in fit_result.flags), \
+        f"expected line_following_applied in flags; got {fit_result.flags}"
+    # Trace should lock onto the inner line (y~30, inside the initial band).
+    assert 27 <= median_y <= 33, \
+        f"expected fit near y=30 (inner line); got median_y={median_y:.2f}"
+    assert fit_result.residual_mean < 3.0, \
+        f"expected tight refit (< 3 px); got residual_mean={fit_result.residual_mean:.3f}"
+
+
 if __name__ == "__main__":
     test_clean_line_fit()
     test_line_with_neume_fit()
     test_empty_filter_result_fit()
     test_sloped_line_fit()
+    test_two_line_box_line_following()
     print("\nAll fit_centerline sanity checks passed.")

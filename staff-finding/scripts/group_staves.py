@@ -315,14 +315,15 @@ def group_staves(
 # ---------------------------------------------------------------------------
 
 def _y_at_fit_center(fit: FitResult) -> Optional[float]:
-    """Return the y-value at the horizontal midpoint of a fit's x-range.
+    """Return the page-absolute y at the horizontal midpoint of a fit's x-range.
 
     Returns None if the fit has no y_values (empty or failed fit).
 
-    Design doc §6.1: Extract a single representative y-position per fit
-    for gap analysis. Using the horizontal center is robust to local skew
-    and gives a stable ordering for grouping. If the fit failed or has no
-    y_values, None signals exclusion from grouping logic.
+    Design doc §6.1: Extract a single representative y-position per fit for
+    gap analysis. Using the horizontal center is robust to local skew and gives
+    a stable ordering for grouping. The result is page-absolute (fit.y_page_offset
+    added) so that gaps between staves are real pixel distances on the page rather
+    than crop-local values that cluster near 0.
     """
     if not fit.y_values:
         return None
@@ -335,7 +336,8 @@ def _y_at_fit_center(fit: FitResult) -> Optional[float]:
     # Clamp to valid range (should be unnecessary, but safe).
     center_idx = max(0, min(center_idx, len(fit.y_values) - 1))
 
-    return fit.y_values[center_idx]
+    # y_values are crop-local; add y_page_offset to get the page-absolute y.
+    return fit.y_page_offset + fit.y_values[center_idx]
 
 
 def _compute_gap_distribution(y_positions: list[float]) -> list[float]:
@@ -465,8 +467,10 @@ def _save_grouping_diagnostic(
         if not fit.y_values or fit.x_start > fit.x_end:
             continue
 
-        xs = np.arange(fit.x_start, fit.x_end + 1)
-        ys = np.array(fit.y_values)
+        # Convert crop-local coords to page-absolute before drawing on the
+        # full-page canvas.
+        xs = np.arange(fit.x_start, fit.x_end + 1) + int(fit.x_page_offset)
+        ys = np.array(fit.y_values) + fit.y_page_offset
 
         mask = (xs >= 0) & (xs < canvas_w) & (ys >= 0) & (ys < canvas_h)
         xs = xs[mask]
@@ -482,6 +486,40 @@ def _save_grouping_diagnostic(
         color_bgr = tuple(int(c * 255) for c in reversed(color_rgb))
 
         cv2.polylines(canvas_uint8, [points], False, color_bgr, thickness=2)
+
+    # --- Draw stave bounding boxes (red rectangles) ---
+    # Collect fits per stave, then compute the page-absolute bounding box
+    # enclosing all lines in that stave.
+    stave_fits: dict[int, list] = {}
+    for assignment in result.assignments:
+        if assignment.stave_id is None:
+            continue
+        fit_idx = assignment.fit_index
+        if fit_idx >= len(fits):
+            continue
+        fit = fits[fit_idx]
+        if not fit.y_values:
+            continue
+        stave_fits.setdefault(assignment.stave_id, []).append(fit)
+
+    BOX_PAD = 12   # px of breathing room around each stave's extent
+    for stave_id, stave_fit_list in stave_fits.items():
+        left_x  = int(min(f.x_page_offset + f.x_start          for f in stave_fit_list)) - BOX_PAD
+        right_x = int(max(f.x_page_offset + f.x_end            for f in stave_fit_list)) + BOX_PAD
+        top_y   = int(min(f.y_page_offset + min(f.y_values)     for f in stave_fit_list)) - BOX_PAD
+        bot_y   = int(max(f.y_page_offset + max(f.y_values)     for f in stave_fit_list)) + BOX_PAD
+        # Clamp to canvas.
+        left_x  = max(0, left_x)
+        right_x = min(canvas_w - 1, right_x)
+        top_y   = max(0, top_y)
+        bot_y   = min(canvas_h - 1, bot_y)
+        cv2.rectangle(canvas_uint8, (left_x, top_y), (right_x, bot_y),
+                      (220, 30, 30), thickness=3)
+        cv2.putText(canvas_uint8, f"S{stave_id}",
+                    (left_x + 6, top_y + 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.8,
+                    color=(220, 30, 30), thickness=2,
+                    lineType=cv2.LINE_AA)
 
     # --- Create a figure with subplots ---
     fig, axes = plt.subplots(
