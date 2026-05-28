@@ -10,10 +10,11 @@ predictions*/
 staff-finding/page_tests
 staff-finding/grouping_tests
 staff-finding/scripts/__pycache__/
-
+staff-finding/models/
 # Downloaded pretrained weights
 yolov8*.pt
 !models/**/*.pt
+*.pt
 
 # Training logs
 training_output.log
