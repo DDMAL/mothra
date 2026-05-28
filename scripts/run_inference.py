@@ -30,7 +30,7 @@ def collect_images(images_dir: Path) -> list[Path]:
     for ext in IMAGE_EXTENSIONS:
         images.extend(images_dir.rglob(f"*{ext}"))
         images.extend(images_dir.rglob(f"*{ext.upper()}"))
-    return sorted(set(images))
+    return sorted(p for p in set(images) if not p.name.startswith("._"))
 
 
 def yolo_box_to_annotator_bbox(box_xywhn, img_w: int, img_h: int) -> list[int]:
@@ -66,13 +66,17 @@ def run_inference(
         image_out_dir = output_dir / stem
         image_out_dir.mkdir(parents=True, exist_ok=True)
 
-        results = model.predict(
-            source=str(image_path),
-            conf=conf_threshold,
-            iou=iou_threshold,
-            save=False,
-            verbose=False,
-        )
+        try:
+            results = model.predict(
+                source=str(image_path),
+                conf=conf_threshold,
+                iou=iou_threshold,
+                save=False,
+                verbose=False,
+            )
+        except Exception as e:
+            print(f"Skipping {image_path.name}: {e}")
+            continue
 
         result = results[0]
         img_h, img_w = result.orig_shape
