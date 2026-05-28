@@ -44,16 +44,40 @@ DEFAULT_SCALE_UNIT = 10.0
 
 # --- Merge step (experimental; see Option B run for comparison) ---
 # Two components are candidates for merging if their y-center distance is below
-# this multiple of h. Strict enough to avoid bridging to neighbouring stafflines
-# (which are several h away vertically) but generous enough to tolerate slight
-# wobble in fragment y-centers.
-MERGE_Y_CENTER_DISTANCE_MULTIPLIER = 0.5
+# this multiple of h.
+#
+# Original default: 0.5 — conservative, intended to prevent bridging to
+# neighbouring stafflines. Raised to 1.0 because page arch causes distant
+# fragments of the same staffline to have y-centers > 0.5h apart, causing them
+# to land in separate merge clusters and ultimately be discarded. Adjacent
+# stafflines are typically separated by much more than 1h, so the risk of a
+# false cross-line merge is low; the x-gap check provides a second guard.
+# Revert toward 0.5 if false merges appear between parallel lines.
+MERGE_Y_CENTER_DISTANCE_MULTIPLIER = 1.0
 
 # Two components are candidates for merging if the horizontal gap between them
-# is below this multiple of h. Generous enough to bridge small ink gaps and
-# moderately wide neume interruptions; still small relative to inter-stave
-# spacing.
-MERGE_X_GAP_MULTIPLIER = 5.0
+# is below this multiple of h.
+#
+# Original default: 5.0 — sufficient for small neume interruptions. Raised to
+# 10.0 because large decorated initials and majuscule letters can create gaps
+# well beyond 5h between the left and right fragments of a staffline (at h≈15
+# a gap of 10h = 150 px; at h≈20 a gap of 10h = 200 px). These fragments are
+# still clearly part of the same line and should merge. Revert toward 5.0 if
+# unrelated blobs from adjacent staves start merging horizontally.
+MERGE_X_GAP_MULTIPLIER = 10.0
+
+# Minimum score for a discarded "not_top_scoring" component to be retained as
+# a companion. Set conservatively so only plausible line fragments are kept,
+# not noise blobs. The companion must also have a non-overlapping x-range with
+# the active winner (i.e. it must be a horizontal continuation, not a parallel
+# duplicate or adjacent staffline fragment).
+#
+# Original default: n/a — companion retention did not exist. Added because even
+# after loosening merge thresholds, some staffline fragments end up in separate
+# clusters and only the highest-scoring cluster survives. The companion floor
+# ensures high-scoring continuations are still included in coords/mask even
+# when the merge logic cannot unite them.
+COMPANION_SCORE_FLOOR = 0.25
 
 # --- Sauvola binarization (see ADR-002) ---
 # Window size for local adaptive thresholding, expressed as a multiple of h.
@@ -120,6 +144,7 @@ class ComponentFilterResult:
     no_merge_coords: list[tuple[int, int]] = field(default_factory=list)
     no_merge_mask: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=bool))
     merged_cluster_labels: list[int] = field(default_factory=list)
+    companion_labels: list[int] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -289,15 +314,74 @@ def filter_components(
     m_ys, m_xs = np.where(merged_mask)
     merged_coords = list(zip(m_xs.tolist(), m_ys.tolist()))
 
+    # --- Companion retention ---
+    # Scan "not_top_scoring" losers. Keep any that:
+    #   (a) score >= COMPANION_SCORE_FLOOR, and
+    #   (b) have non-overlapping x-range with the active winner
+    #       (horizontal continuation, not a parallel duplicate / adjacent line).
+    # Companion pixels are added to both the no-merge and merge coord/mask sets
+    # so the downstream fit sees the full staffline extent.
+
+    no_merge_win_x_start = winner_stats["x"]
+    no_merge_win_x_end   = winner_stats["x"] + winner_stats["w"]
+
+    if merged_scored:
+        m_stats_top = merged_scored[0][3]  # (cluster, score, sub_scores, stats)
+        merge_win_x_start = m_stats_top["x"]
+        merge_win_x_end   = m_stats_top["x"] + m_stats_top["w"]
+    else:
+        merge_win_x_start = no_merge_win_x_start
+        merge_win_x_end   = no_merge_win_x_end
+
+    merged_winner_set = set(int(lbl) for lbl in merged_winner_labels)
+
+    no_merge_companion_labels: list[int] = []
+    no_merge_companion_coords: list[tuple[int, int]] = []
+    no_merge_companion_mask = np.zeros_like(labels, dtype=bool)
+
+    merge_companion_labels: list[int] = []
+    merge_companion_coords: list[tuple[int, int]] = []
+    merge_companion_mask = np.zeros_like(labels, dtype=bool)
+
+    for s in survivors[1:]:
+        s_label, s_score, _s_sub, s_stats = s
+        if s_score < COMPANION_SCORE_FLOOR:
+            continue
+        comp_x = s_stats["x"]
+        comp_w = s_stats["w"]
+        comp_mask = (labels == s_label)
+        c_ys, c_xs = np.where(comp_mask)
+        comp_pixels = list(zip(c_xs.tolist(), c_ys.tolist()))
+
+        # No-merge companion: non-overlapping with no-merge winner bbox.
+        no_overlap_no_merge = (comp_x + comp_w <= no_merge_win_x_start) or \
+                              (comp_x >= no_merge_win_x_end)
+        if no_overlap_no_merge:
+            no_merge_companion_labels.append(int(s_label))
+            no_merge_companion_mask |= comp_mask
+            no_merge_companion_coords.extend(comp_pixels)
+
+        # Merge companion: must not already be in merged winner; non-overlapping
+        # with merged winner's combined bbox.
+        if int(s_label) not in merged_winner_set:
+            no_overlap_merge = (comp_x + comp_w <= merge_win_x_start) or \
+                               (comp_x >= merge_win_x_end)
+            if no_overlap_merge:
+                merge_companion_labels.append(int(s_label))
+                merge_companion_mask |= comp_mask
+                merge_companion_coords.extend(comp_pixels)
+
     # --- Choose active outputs based on the mode ---
     if merge_components:
-        active_coords = merged_coords
-        active_mask = merged_mask
+        active_coords = merged_coords + merge_companion_coords
+        active_mask = merged_mask | merge_companion_mask
         active_flags = merge_flags
+        active_companion_labels = merge_companion_labels
     else:
-        active_coords = no_merge_coords
-        active_mask = no_merge_mask
+        active_coords = no_merge_coords + no_merge_companion_coords
+        active_mask = no_merge_mask | no_merge_companion_mask
         active_flags = no_merge_flags
+        active_companion_labels = no_merge_companion_labels
 
     result = ComponentFilterResult(
         coords=active_coords,
@@ -308,6 +392,7 @@ def filter_components(
         no_merge_coords=no_merge_coords,
         no_merge_mask=no_merge_mask,
         merged_cluster_labels=[int(lbl) for lbl in merged_winner_labels] if merge_components else [],
+        companion_labels=active_companion_labels,
     )
 
     if save_path is not None:
@@ -317,6 +402,7 @@ def filter_components(
             labels=labels,
             kept_label=winner_label,
             discarded_labels=[d["label"] for d in discarded],
+            companion_labels=active_companion_labels,
             merge_clusters=merge_clusters,
             merged_winner_labels=merged_winner_labels,
             save_path=save_path,
@@ -555,6 +641,7 @@ def _save_diagnostic(
     kept_label: Optional[int],
     discarded_labels: list[int],
     save_path: Path,
+    companion_labels: Optional[list[int]] = None,
     merge_clusters: Optional[list[list[int]]] = None,
     merged_winner_labels: Optional[list[int]] = None,
     binarization_method: str = "sauvola",
@@ -604,22 +691,28 @@ def _save_diagnostic(
     axes[1].axis("off")
 
     # Panel 3: components with kept/discarded coloring (no merge)
+    # Color order matters: gray → red → cyan → green (each overwrites the last).
     color_img = np.zeros((*labels.shape, 3), dtype=np.uint8)
     color_img[labels > 0] = [128, 128, 128]  # gray for any survivors-not-evaluated
     for d_label in discarded_labels:
         color_img[labels == d_label] = [200, 60, 60]  # red for discarded
+    for comp_label in (companion_labels or []):
+        color_img[labels == comp_label] = [0, 200, 200]  # cyan for companions
     if kept_label is not None:
         color_img[labels == kept_label] = [60, 180, 75]  # green for kept
 
     axes[2].imshow(color_img)
-    axes[2].set_title("No-merge: kept (green) vs. discarded (red)")
+    axes[2].set_title("No-merge: kept (green), companions (cyan), discarded (red)")
     axes[2].axis("off")
 
-    # Panel 4: kept mask alone (no merge)
+    # Panel 4: kept + companion mask (no merge)
     if kept_label is not None:
         kept_mask = (labels == kept_label)
+        for comp_label in (companion_labels or []):
+            kept_mask = kept_mask | (labels == comp_label)
         axes[3].imshow(kept_mask, cmap="gray")
-        axes[3].set_title("No-merge: kept mask")
+        title_suffix = f" + {len(companion_labels or [])} companion(s)" if companion_labels else ""
+        axes[3].set_title(f"No-merge: kept mask{title_suffix}")
     else:
         axes[3].imshow(np.zeros_like(binary), cmap="gray")
         axes[3].set_title("No-merge: no component kept")
@@ -647,8 +740,11 @@ def _save_diagnostic(
                 non_winner_idx += 1
             for lbl in cluster:
                 merge_color_img[labels == lbl] = color
+        # Overlay companions in cyan on top of cluster colors.
+        for comp_label in (companion_labels or []):
+            merge_color_img[labels == comp_label] = [0, 200, 200]
         axes[4].imshow(merge_color_img)
-        axes[4].set_title("With-merge: clusters (green=would-be winner)")
+        axes[4].set_title("With-merge: clusters (green=winner, cyan=companions)")
         axes[4].axis("off")
 
         # Panel 6: merged-winner mask alone
