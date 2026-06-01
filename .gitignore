@@ -31,3 +31,5 @@ mothra/.claude/
 # artifacts from component filtering
 *.pyc
 
+#dependencies
+landing-page/node_modules
