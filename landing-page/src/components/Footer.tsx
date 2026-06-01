@@ -1,18 +1,21 @@
+import schulichLogo from '../../assets/schulich_logo.png';
+import ddmalLogo from '../../assets/Ddmal_logo_transp-bg_no-border_1600w.png';
+
 export default function Footer() {
   return (
-    <footer className="scroll-fade fade-target bg-[#1E6B70] py-6 px-6 mt-auto">
-      <p className="text-white text-sm font-medium mb-1">
-        made by ddmal etc etc sponsored by quebec etc ec
-      </p>
-      <p className="text-white text-sm">
-        <a
-          href="#"
-          onClick={(e) => e.preventDefault()}
-          className="hover:opacity-70 transition-opacity"
-        >
-          contact us!
-        </a>
-      </p>
+    <footer className="scroll-fade fade-target bg-white border-t border-gray-200 py-8 px-6">
+      <div className="max-w-4xl mx-auto flex items-center justify-center gap-16">
+        <img
+          src={schulichLogo}
+          alt="Schulich School of Music, McGill University"
+          className="h-10 object-contain"
+        />
+        <img
+          src={ddmalLogo}
+          alt="DDMAL - Distributed Digital Music Archives and Libraries Lab"
+          className="h-7 object-contain"
+        />
+      </div>
     </footer>
   );
 }

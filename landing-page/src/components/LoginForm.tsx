@@ -18,14 +18,14 @@ export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
       />
       <button
         onClick={(e) => e.preventDefault()}
-        className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity"
+        className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
       >
         log in
       </button>
       <hr className="border-[#1D3335]/20" />
       <button
         onClick={onSwitchToRegister}
-        className="text-sm text-[#1D3335] text-center hover:opacity-70 transition-opacity"
+        className="text-sm text-[#1D3335] text-center hover:opacity-70 transition-opacity cursor-pointer"
       >
         new user? register for an account
       </button>

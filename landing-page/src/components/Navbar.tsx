@@ -11,14 +11,14 @@ export default function Navbar({ onLogin, onGetStarted }: NavbarProps) {
                 <a
                     href="#"
                     onClick={(e) => e.preventDefault()}
-                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity"
+                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     about mothra
                 </a>
                 <a
                     href="#"
                     onClick={(e) => e.preventDefault()}
-                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity"
+                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     documentation / walkthrough
                 </a>
@@ -26,13 +26,13 @@ export default function Navbar({ onLogin, onGetStarted }: NavbarProps) {
             <div className="flex items-center gap-4">
                 <button
                     onClick={onLogin}
-                    className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity"
+                    className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     log in
                 </button>
                 <button
                     onClick={onGetStarted}
-                    className="px-5 py-2 bg-[#4AADAA] text-white text-sm rounded-full hover:opacity-90 transition-opacity"
+                    className="px-5 py-2 bg-[#4AADAA] text-white text-sm rounded-full hover:opacity-90 transition-opacity cursor-pointer"
                 >
                     get started
                 </button>
