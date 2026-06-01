@@ -1,16 +1,15 @@
 import { useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
+import type { Project } from '../App';
 
-interface Project {
-  name: string;
-  user: string;
-  images: number;
+interface MyProjectsProps {
+  projects: Project[];
+  setProjects: Dispatch<SetStateAction<Project[]>>;
+  onSelectProject: (name: string) => void;
 }
 
-export default function MyProjects() {
-  const [projects, setProjects] = useState<Project[]>([
-    { name: 'project alpha', user: 'username', images: 3 },
-    { name: 'project beta', user: 'username', images: 7 },
-  ]);
+
+export default function MyProjects({ projects, setProjects, onSelectProject }: MyProjectsProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
@@ -75,10 +74,13 @@ export default function MyProjects() {
           }}
           className="bg-white rounded-lg px-3 py-1 text-[#1D3335] outline-none text-sm w-2/3" />
         ) : (
-          <span>{p.name}</span>
+          <span
+            onClick={() => onSelectProject(p.name)}
+            className="cursor-pointer hover:underline"
+          >{p.name}</span>
         )}
             <span>{p.user}</span>
-            <span>{p.images}</span>
+            <span>{p.images.length}</span>
             <div className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.name ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
               <button
                 onClick={() => { setRenamingRow(p.name); setRenameName(p.name); }}
@@ -118,7 +120,7 @@ export default function MyProjects() {
             <button
               onClick={() => {
                 if (!newName.trim()) return;
-                setProjects((prev) => [...prev, { name: newName.trim(), user: 'username', images: 0 }]);
+                setProjects((prev) => [...prev, { name: newName.trim(), user: 'username', images: [] }]);
                 setNewName('');
                 setShowCreate(false);
               }}
