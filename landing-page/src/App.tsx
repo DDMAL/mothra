@@ -4,14 +4,18 @@ import Hero from './components/Hero';
 import Features from './components/Features';
 import Footer from'./components/Footer';
 import AuthPage from './components/AuthPage';
+import MyProjects from './components/MyProjects';
 
-type View = 'landing' | 'login' | 'register';
+type View = 'landing' | 'login' | 'register' | 'projects';
 
 export default function App() {
     const [view, setView] = useState<View>('landing');
 
     useEffect(() => {
-        if (view !== 'landing') return;
+        if (view !== 'landing') {
+            document.querySelectorAll('.fade-target').forEach((el) => el.classList.add('visible'));
+            return;
+        }
 
         const heroTargets = document.querySelectorAll('.hero-fade');
         const timer = setTimeout(() => {
@@ -40,15 +44,20 @@ export default function App() {
 
     return (
         <div className="min-h-screen flex flex-col">
-            <Navbar 
+            <Navbar
                 onLogin={() => setView('login')}
                 onGetStarted={() => setView('register')}
+                onMyProjects={() => setView('projects')}
+                loggedIn={view === 'projects'}
+                onLogout={() => setView('landing')}
             />
             {view === 'landing' ? (
                 <main>
                     <Hero />
                     <Features />
                 </main>
+            ) : view === 'projects' ? (
+                <MyProjects />
             ) : (
                 <AuthPage mode={view} onSwitchMode={(m) => setView(m)} />
             )}
