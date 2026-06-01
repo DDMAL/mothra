@@ -1,4 +1,9 @@
-export default function Navbar() {
+interface NavbarProps {
+    onLogin?: () => void;
+    onGetStarted?: () => void;
+}
+
+export default function Navbar({ onLogin, onGetStarted }: NavbarProps) {
     return (
         <nav className="sticky top-0 z-50 bg-[#F5F7F7] border-b border-gray-200 h-14 flex items-center px-6">
             <span className="text-[#1D3335] font-medium text-lg mr-8">mothra</span>
@@ -19,15 +24,14 @@ export default function Navbar() {
                 </a>
             </div>
             <div className="flex items-center gap-4">
-                <a
-                    href="#"
-                    onClick={(e) => e.preventDefault()}
+                <button
+                    onClick={onLogin}
                     className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity"
                 >
                     log in
-                </a>
+                </button>
                 <button
-                    onClick={(e) => e.preventDefault()}
+                    onClick={onGetStarted}
                     className="px-5 py-2 bg-[#4AADAA] text-white text-sm rounded-full hover:opacity-90 transition-opacity"
                 >
                     get started
