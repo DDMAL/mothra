@@ -4,7 +4,8 @@ Stave grouping for Stage 2 of the staff detection pipeline.
 
 Given the FitResults produced by Stage 1 on a single page (or within a single
 layout region of a page), groups them into staves using ratio-based gap
-analysis on the fitted centerlines' y-positions.
+analysis on the fitted centerlines' y-positions, then delegates line synthesis
+to interpolate_staves.py.
 
 Outputs per-fit stave assignments, a per-page log of grouping evidence, and
 optionally synthesized interpolated lines where a stave appears to be missing
@@ -22,6 +23,13 @@ import cv2
 import numpy as np
 
 from fit_centerline import FitResult
+# InterpolatedLine lives in interpolate_staves; re-exported here so existing
+# callers (shared_utils, tests) can continue importing it from group_staves.
+from interpolate_staves import (  # noqa: F401
+    InterpolatedLine,
+    INTERPOLATION_GAP_MULTIPLIER,
+    interpolate_missing_lines,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +46,13 @@ CUT_THRESHOLD_MULTIPLIER = 1.5
 # count. Flag the missing lines instead. Override per-call via the
 # interpolate_missing parameter.
 DEFAULT_INTERPOLATE_MISSING = False
+
+# Minimum gap multiplier on scale_unit.  Gaps smaller than
+# scale_unit * MIN_GAP_MULTIPLIER are considered sub-spacing noise (e.g. from
+# near-duplicate detections or near-zero intra-stave overlaps) and are
+# excluded from the periodicity / h_est calculation.  Also shown as the lower
+# bound on the gap distribution chart so the "live" spacing zone is clear.
+MIN_GAP_MULTIPLIER = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -68,31 +83,6 @@ class StaveAssignment:
 
 
 @dataclass
-class InterpolatedLine:
-    """A synthesized line filling a presumed gap in a stave.
-
-    Only produced when interpolate_missing=True. Carries enough information
-    to be appended to the page's line stream with source='interpolated'.
-
-    Attributes:
-        stave_id: Which stave this line belongs to.
-        within_stave_index: 0-based position within that stave.
-        x_start: First x of the synthesized centerline.
-        x_end: Last x (inclusive).
-        y_values: Interpolated y per integer x in [x_start, x_end], computed
-            by interpolating between neighboring detected lines at each x.
-        neighbor_fit_indices: The two detected FitResults whose centerlines
-            were interpolated between.
-    """
-    stave_id: int
-    within_stave_index: int
-    x_start: int
-    x_end: int
-    y_values: list[float] = field(default_factory=list)
-    neighbor_fit_indices: tuple[int, int] = (0, 0)
-
-
-@dataclass
 class StaveGroupingResult:
     """Output of group_staves.
 
@@ -116,8 +106,11 @@ class StaveGroupingResult:
     mode_lines_per_stave: Optional[int] = None
     line_count_distribution: dict[int, int] = field(default_factory=dict)
     cut_threshold_px: float = 0.0
+    min_threshold_px: float = 0.0
     gap_distribution: list[float] = field(default_factory=list)
     interpolated_lines: list[InterpolatedLine] = field(default_factory=list)
+    interpolation_max_gap_px: Optional[float] = None
+    rhythm_anomalies: dict[int, dict] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)
 
 
@@ -129,9 +122,11 @@ def group_staves(
     fits: list[FitResult],
     scale_unit: float,
     interpolate_missing: bool = DEFAULT_INTERPOLATE_MISSING,
+    interpolation_max_gap: Optional[float] = None,
     save_path: Optional[Path] = None,
     page_size: Optional[tuple[int, int]] = None,
     page_image: Optional[np.ndarray] = None,
+    use_valley_threshold: bool = False,
 ) -> StaveGroupingResult:
     """Group fitted centerlines into staves on a single page or region.
 
@@ -142,13 +137,15 @@ def group_staves(
         scale_unit: Page-level scale unit h. Used as a sanity floor on the
             grouping gap threshold (a cut threshold smaller than h is
             implausible).
-        interpolate_missing: When True, synthesize centerlines for staves
-            that have fewer than the page's modal line count. Each
-            synthesized line is interpolated between the two neighboring
-            detected lines at each x and carries source='interpolated' for
-            downstream rendering. Default False per Stage 1 design §6.3:
-            for the proof of concept, flag missing lines without
-            synthesizing, so QA can correct them manually.
+        interpolate_missing: When True, synthesize centerlines where a gap
+            between two consecutive detected lines in the same stave falls
+            in [cut_threshold, interpolation_max_gap].  Each synthesized
+            line is interpolated between its two detected neighbours and
+            carries source='interpolated'.  Default False.
+        interpolation_max_gap: Upper gap bound (pixels) for the
+            interpolation trigger.  Gaps above this are treated as
+            inter-stave spacing and are not filled.  Defaults to
+            cut_threshold * INTERPOLATION_GAP_MULTIPLIER when None.
         save_path: If provided, render a page-level diagnostic showing each
             fit colored by its stave assignment, plus annotations of gap
             distribution and cut threshold.
@@ -157,6 +154,14 @@ def group_staves(
         page_image: The full page (or the BGR-processed page) to overlay
             stave assignments onto in the diagnostic. Optional; if absent,
             the diagnostic falls back to a blank canvas of page_size.
+        use_valley_threshold: When True, use _find_valley_threshold() instead
+            of the default median-based _determine_cut_threshold().  The valley
+            method finds the largest gap between consecutive distinct gap values
+            and places the cut at the midpoint of that gap, making it robust when
+            intra-stave line spacing is close to scale_unit h (which causes the
+            median-based threshold to land inside the intra-stave cluster).
+            Falls back to the median method if no clear valley is found.
+            Default False so existing pipeline behaviour is unchanged.
 
     Returns:
         StaveGroupingResult carrying per-fit assignments and a per-page
@@ -215,8 +220,16 @@ def group_staves(
 
     # --- Stage 3: Determine cut threshold ---
     # Design doc §6.1: Ratio-based threshold; floored at scale_unit.
-    cut_threshold = _determine_cut_threshold(gaps, scale_unit)
+    if use_valley_threshold:
+        cut_threshold = _find_valley_threshold(gaps, scale_unit)
+    else:
+        cut_threshold = _determine_cut_threshold(gaps, scale_unit)
     result.cut_threshold_px = cut_threshold
+
+    # Minimum gap: sub-spacing noise floor.  Gaps below this are excluded from
+    # the periodicity (h_est) calculation and displayed on the diagnostic chart.
+    min_threshold = scale_unit * MIN_GAP_MULTIPLIER
+    result.min_threshold_px = min_threshold
 
     # --- Stage 4 & 5: Assign stave IDs and within-stave indices ---
     # Design doc §6.1: Gaps >= cut_threshold are inter-stave boundaries.
@@ -292,13 +305,46 @@ def group_staves(
                     asg.flags.append("gap_near_threshold")
                     break
 
-    # --- Stage 7: Synthesize missing lines (if requested) ---
-    # Design doc §6.3: Default is False (flag for QA); set True to interpolate.
+    # --- Stage 6c: Rhythm / periodicity anomaly detection ---
+    # Checks whether each stave's intra-stave gap count and spacing consistency
+    # match the page's expected periodicity (mode_lines_per_stave).  Staves that
+    # fall outside the expected pattern are flagged as "under_populated" or
+    # "over_populated" so downstream code and QA can treat them differently from
+    # ordinary short staves.
+    if result.mode_lines_per_stave is not None:
+        result.rhythm_anomalies = _check_stave_rhythm(
+            gaps=gaps,
+            raw_assignments_sorted=raw_assignments,
+            cut_threshold=cut_threshold,
+            min_threshold=min_threshold,
+            mode_n=result.mode_lines_per_stave,
+        )
+        # Propagate rhythm flags to individual assignments so per-line QA
+        # records carry the stave-level anomaly label.
+        for asg in result.assignments:
+            if asg.stave_id is not None:
+                ra = result.rhythm_anomalies.get(asg.stave_id, {})
+                if ra.get("status", "normal") != "normal":
+                    asg.flags.append(f"rhythm_{ra['status']}")
+
+    # --- Stage 7: Synthesise missing lines (if requested) ---
+    # Full algorithm in interpolate_staves.py.  This stage is the call site
+    # only; see that module for trigger A/B details and territory logic.
     if interpolate_missing and result.mode_lines_per_stave is not None:
-        for stave_id, count in stave_line_counts.items():
-            if count < result.mode_lines_per_stave:
-                # TODO: Implement interpolation logic (not critical for MVP).
-                pass
+        interp_lines, max_gap = interpolate_missing_lines(
+            fits=fits,
+            assignments=result.assignments,
+            rhythm_anomalies=result.rhythm_anomalies,
+            scale_unit=scale_unit,
+            min_threshold=min_threshold,
+            cut_threshold=cut_threshold,
+            mode_n=result.mode_lines_per_stave,
+            interpolation_max_gap=interpolation_max_gap,
+            all_gaps=gaps,
+        )
+        result.interpolated_lines.extend(interp_lines)
+        result.interpolation_max_gap_px = max_gap
+        _reindex_stave_lines(result.assignments, result.interpolated_lines)
 
     # --- Stage 8: Generate diagnostic image (if requested) ---
     # Design doc §6.6: Diagnostic preserves all grouping evidence for QA.
@@ -311,10 +357,42 @@ def group_staves(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers (signatures only)
+# Internal helpers
 # ---------------------------------------------------------------------------
 
-def _y_at_fit_center(fit: FitResult) -> Optional[float]:
+def _reindex_stave_lines(
+    assignments: list[StaveAssignment],
+    interpolated_lines: list[InterpolatedLine],
+) -> None:
+    """Re-sort within_stave_index for every stave after interpolation.
+
+    Merges detected assignments and newly synthesised lines for each stave,
+    sorts all by y-position, and assigns consecutive 0-based indices.  Called
+    once at the end of Stage 7 so both detected and interpolated lines carry
+    correct, non-overlapping within_stave_index values.
+    """
+    stave_ids = {a.stave_id for a in assignments if a.stave_id is not None}
+    for stave_id in stave_ids:
+        entries: list[tuple[float, str, int]] = []
+        for asg in assignments:
+            if asg.stave_id == stave_id:
+                entries.append((asg.y_at_center or 0.0, "det", asg.fit_index))
+        for k, il in enumerate(interpolated_lines):
+            if il.stave_id == stave_id:
+                yc = il.y_values[len(il.y_values) // 2] if il.y_values else 0.0
+                entries.append((yc, "interp", k))
+        entries.sort(key=lambda e: e[0])
+        for new_idx, (_, kind, obj_idx) in enumerate(entries):
+            if kind == "det":
+                for asg in assignments:
+                    if asg.fit_index == obj_idx:
+                        asg.within_stave_index = new_idx
+                        break
+            else:
+                interpolated_lines[obj_idx].within_stave_index = new_idx
+
+
+def _y_at_fit_center(fit: "FitResult") -> Optional[float]:
     """Return the page-absolute y at the horizontal midpoint of a fit's x-range.
 
     Returns None if the fit has no y_values (empty or failed fit).
@@ -353,6 +431,7 @@ def _compute_gap_distribution(y_positions: list[float]) -> list[float]:
     return gaps
 
 
+
 def _determine_cut_threshold(gaps: list[float], scale_unit: float) -> float:
     """Find the y-gap threshold separating intra-stave from inter-stave gaps.
 
@@ -370,6 +449,169 @@ def _determine_cut_threshold(gaps: list[float], scale_unit: float) -> float:
     median_gap = float(np.median(gaps))
     cut_threshold = median_gap * CUT_THRESHOLD_MULTIPLIER
     return max(cut_threshold, scale_unit)
+
+
+def _find_valley_threshold(gaps: list[float], scale_unit: float) -> float:
+    """Find the cut threshold separating intra-stave from inter-stave gaps.
+
+    Uses a 1-D Otsu criterion: sweep all candidate thresholds and pick the one
+    that maximises inter-class variance between the "small gap" and "large gap"
+    clusters.  This is equivalent to minimising the weighted within-class
+    variance, and is robust to outlier gaps in the upper tail — unlike a simple
+    "largest jump" heuristic, which is easily misled by a single outlier gap at
+    the top of the inter-stave distribution.
+
+    The gap distribution for a page with multiple staves is bimodal: a dense
+    cluster of small intra-stave gaps (lines within the same stave) and a
+    sparser cluster of larger inter-stave gaps (space between staves).  The
+    Otsu criterion naturally finds this boundary regardless of whether the upper
+    cluster has a tight or diffuse spread.
+
+    Falls back to the median-based threshold when fewer than 4 gaps are
+    available (not enough data to fit two meaningful clusters), or if the
+    optimal split would leave only a single gap in the upper class (likely a
+    lone outlier rather than a true inter-stave cluster).
+
+    Floored at scale_unit for the same reason as _determine_cut_threshold.
+    """
+    if not gaps:
+        return scale_unit
+    if len(gaps) < 4:
+        return _determine_cut_threshold(gaps, scale_unit)
+
+    gaps_arr = np.array(sorted(gaps))
+    n = len(gaps_arr)
+
+    # Sweep every unique gap value as a candidate split point, pick the one
+    # that maximises inter-class variance (Otsu 1-D).
+    best_var = -1.0
+    best_threshold = None
+
+    for t in np.unique(gaps_arr)[:-1]:  # exclude the very last value
+        below = gaps_arr[gaps_arr <= t]
+        above = gaps_arr[gaps_arr > t]
+        if len(below) == 0 or len(above) == 0:
+            continue
+        w1 = len(below) / n
+        w2 = len(above) / n
+        inter_var = w1 * w2 * (float(below.mean()) - float(above.mean())) ** 2
+        if inter_var > best_var:
+            best_var = inter_var
+            best_threshold = float(t)
+
+    if best_threshold is None:
+        return _determine_cut_threshold(gaps, scale_unit)
+
+    # Place the threshold just above the Otsu split point so that the split
+    # value itself falls in the lower (intra-stave) class.
+    threshold = best_threshold + 0.5
+
+    # Require at least 2 gaps in the upper class; a single gap is more likely
+    # a lone outlier than a genuine inter-stave cluster.
+    if np.sum(gaps_arr > threshold) < 2:
+        return _determine_cut_threshold(gaps, scale_unit)
+
+    return max(threshold, scale_unit)
+
+
+def _check_stave_rhythm(
+    gaps: list[float],
+    raw_assignments_sorted: list[tuple[int, int, int]],
+    cut_threshold: float,
+    min_threshold: float,
+    mode_n: int,
+) -> dict[int, dict]:
+    """Detect staves whose gap pattern deviates from the page's expected periodicity.
+
+    Walks the sorted gap sequence and, for each stave, measures:
+
+    * **intra_count**: how many consecutive intra-stave gaps the stave produced
+      (= detected_line_count − 1).  Expected value is ``mode_n − 1``.
+    * **gap_cv**: coefficient of variation of intra-stave gap sizes, using only
+      gaps in ``[min_threshold, cut_threshold]``.  Low = consistent period;
+      high = chaotic spacing.
+
+    Classification:
+        ``"under_populated"`` — ``intra_count < mode_n // 2``.  The stave has
+        fewer than half the expected lines.  Could be a split stave, a grouper
+        error, or a non-musical section (rubric / lesson text).
+        ``"over_populated"``  — ``intra_count > mode_n + 1``.  More lines than
+        expected; two staves may have been merged.
+        ``"normal"``          — within ±1 of ``mode_n − 1``.
+
+    Returns:
+        dict mapping stave_id → {
+            "status":                 str,
+            "lines_observed":         int,   # detected_count
+            "lines_expected":         int,   # mode_n
+            "intra_count_observed":   int,   # detected_count − 1
+            "intra_count_expected":   int,   # mode_n − 1
+            "gap_cv":                 float | None,
+            "gap_index_range":        [int, int],  # indices into gap_distribution
+        }
+    """
+    if not gaps or mode_n < 2 or not raw_assignments_sorted:
+        return {}
+
+    # Build stave → (start_pos, end_pos) in the sorted fit sequence.
+    # start_pos and end_pos are 0-based indices into raw_assignments_sorted.
+    stave_ranges: dict[int, tuple[int, int]] = {}
+    for pos, (_, stave_id, _) in enumerate(raw_assignments_sorted):
+        if stave_id not in stave_ranges:
+            stave_ranges[stave_id] = (pos, pos)
+        else:
+            s, _ = stave_ranges[stave_id]
+            stave_ranges[stave_id] = (s, pos)
+
+    expected_intra = mode_n - 1
+    result: dict[int, dict] = {}
+
+    for stave_id, (start, end) in stave_ranges.items():
+        intra_count = end - start  # = detected_line_count − 1
+
+        # Collect intra-stave gap values for this stave's position range,
+        # filtering out noise gaps below min_threshold.
+        intra_gap_vals = [
+            gaps[k]
+            for k in range(start, end)
+            if k < len(gaps) and min_threshold <= gaps[k] < cut_threshold
+        ]
+
+        if len(intra_gap_vals) >= 2:
+            mean_g = float(np.mean(intra_gap_vals))
+            std_g  = float(np.std(intra_gap_vals))
+            gap_cv = std_g / mean_g if mean_g > 0 else float("inf")
+        elif len(intra_gap_vals) == 1:
+            gap_cv = 0.0
+        else:
+            gap_cv = None
+
+        # Classify rhythm status.
+        if intra_count < mode_n // 2:
+            status = "under_populated"
+        elif intra_count > mode_n + 1:
+            status = "over_populated"
+        else:
+            status = "normal"
+
+        # Gap index range: intra-stave bars in the gap distribution chart.
+        # Use [start-1, end] so the bounding inter-stave spikes are included
+        # in the shaded region, making the anomaly visually obvious even when
+        # a stave has zero intra-stave gaps.
+        chart_start = max(0, start - 1)
+        chart_end   = min(len(gaps) - 1, end)
+
+        result[stave_id] = {
+            "status":               status,
+            "lines_observed":       intra_count + 1,
+            "lines_expected":       mode_n,
+            "intra_count_observed": intra_count,
+            "intra_count_expected": expected_intra,
+            "gap_cv":               round(gap_cv, 3) if gap_cv is not None else None,
+            "gap_index_range":      [chart_start, chart_end],
+        }
+
+    return result
 
 
 def _assign_staves(
@@ -487,6 +729,36 @@ def _save_grouping_diagnostic(
 
         cv2.polylines(canvas_uint8, [points], False, color_bgr, thickness=2)
 
+    # --- Overlay interpolated lines (dashed, same stave color but lighter) ---
+    for interp in result.interpolated_lines:
+        if interp.stave_id not in stave_colors:
+            continue
+        if not interp.y_values:
+            continue
+
+        xs = np.arange(interp.x_start, interp.x_end + 1)
+        ys = np.array(interp.y_values)
+        mask = (xs >= 0) & (xs < canvas_w) & (ys >= 0) & (ys < canvas_h)
+        xs = xs[mask].astype(np.int32)
+        ys = ys[mask].astype(np.int32)
+        if len(xs) < 2:
+            continue
+
+        color_rgba = stave_colors[interp.stave_id]
+        color_rgb = color_rgba[:3]
+        # Lighten the color by blending toward white (0.55 original + 0.45 white)
+        light_rgb = tuple(min(1.0, c * 0.55 + 0.45) for c in color_rgb)
+        color_bgr = tuple(int(c * 255) for c in reversed(light_rgb))
+
+        # Draw as a dashed line: alternate 10-pixel drawn / 6-pixel gap segments.
+        DASH, GAP = 10, 6
+        i = 0
+        while i < len(xs) - 1:
+            j = min(i + DASH, len(xs) - 1)
+            seg = np.column_stack([xs[i:j+1], ys[i:j+1]])
+            cv2.polylines(canvas_uint8, [seg], False, color_bgr, thickness=2)
+            i += DASH + GAP
+
     # --- Draw stave bounding boxes (red rectangles) ---
     # Collect fits per stave, then compute the page-absolute bounding box
     # enclosing all lines in that stave.
@@ -535,20 +807,111 @@ def _save_grouping_diagnostic(
     axes[0].set_xlabel("x (pixels)")
     axes[0].set_ylabel("y (pixels)")
 
-    # --- Right panel: gap distribution and threshold ---
+    # --- Right panel: gap distribution and thresholds ---
     if result.gap_distribution:
-        axes[1].bar(range(len(result.gap_distribution)), result.gap_distribution)
+        # Color each bar by stave; anomalous staves get warning colors so the
+        # rhythm irregularities are immediately visible in the bar chart.
+        n_gaps = len(result.gap_distribution)
+        bar_colors = ["steelblue"] * n_gaps
+
+        if result.rhythm_anomalies:
+            for sid, ra in result.rhythm_anomalies.items():
+                if ra["status"] == "normal":
+                    continue
+                c = stave_colors.get(sid, None)
+                if ra["status"] == "under_populated":
+                    fill = "tomato"
+                else:  # over_populated
+                    fill = "mediumpurple"
+                gi0, gi1 = ra["gap_index_range"]
+                for k in range(gi0, min(gi1 + 1, n_gaps)):
+                    bar_colors[k] = fill
+
+        axes[1].bar(range(n_gaps), result.gap_distribution,
+                    color=bar_colors, zorder=2)
+
+        # Shade the noise zone below min_threshold (gaps too small to be real
+        # staffline spacing — excluded from periodicity calculations).
+        if result.min_threshold_px > 0:
+            axes[1].axhspan(
+                0,
+                result.min_threshold_px,
+                alpha=0.12,
+                color="gray",
+                label="_nolegend_",
+                zorder=1,
+            )
+            axes[1].axhline(
+                y=result.min_threshold_px,
+                color="gray",
+                linestyle=":",
+                linewidth=1.8,
+                label=f"Min Gap / Noise Floor ({result.min_threshold_px:.1f} px)",
+                zorder=3,
+            )
+
         axes[1].axhline(
             y=result.cut_threshold_px,
             color="r",
             linestyle="--",
             linewidth=2,
             label=f"Cut Threshold ({result.cut_threshold_px:.1f} px)",
+            zorder=4,
         )
-        axes[1].set_title("Gap Distribution (Consecutive Fits)")
+
+        if result.interpolation_max_gap_px is not None:
+            # Shade the interpolation window between cut and max thresholds.
+            axes[1].axhspan(
+                result.cut_threshold_px,
+                result.interpolation_max_gap_px,
+                alpha=0.10,
+                color="orange",
+                label="_nolegend_",
+                zorder=1,
+            )
+            axes[1].axhline(
+                y=result.interpolation_max_gap_px,
+                color="darkorange",
+                linestyle="--",
+                linewidth=2,
+                label=f"Max Interp Gap / Mean Inter-Stave ({result.interpolation_max_gap_px:.1f} px)",
+                zorder=4,
+            )
+
+        # --- Annotate anomalous staves ---
+        if result.rhythm_anomalies and result.gap_distribution:
+            y_max = max(result.gap_distribution)
+            for sid, ra in result.rhythm_anomalies.items():
+                if ra["status"] == "normal":
+                    continue
+                gi0, gi1 = ra["gap_index_range"]
+                mid_x = (gi0 + gi1) / 2.0
+                label_color = "tomato" if ra["status"] == "under_populated" else "mediumpurple"
+                symbol = "▼" if ra["status"] == "under_populated" else "▲"
+                axes[1].text(
+                    mid_x, y_max * 1.04,
+                    f"S{sid}{symbol}",
+                    ha="center", va="bottom",
+                    fontsize=7, color=label_color, fontweight="bold",
+                    clip_on=False,
+                )
+                # Small note showing observed vs expected
+                axes[1].text(
+                    mid_x, y_max * 1.01,
+                    f"{ra['lines_observed']}/{ra['lines_expected']}",
+                    ha="center", va="bottom",
+                    fontsize=6, color=label_color,
+                    clip_on=False,
+                )
+
+        axes[1].set_title(
+            "Gap Distribution (Consecutive Fits)\n"
+            "Gray zone = noise floor  |  Orange zone = missing-line trigger  |  "
+            "Red/purple bars = rhythm anomaly"
+        )
         axes[1].set_xlabel("Gap Index")
         axes[1].set_ylabel("Gap (pixels)")
-        axes[1].legend()
+        axes[1].legend(fontsize=8)
     else:
         axes[1].text(0.5, 0.5, "No gaps (0 or 1 fit)", ha="center", va="center")
         axes[1].set_title("Gap Distribution")
@@ -563,6 +926,10 @@ def _save_grouping_diagnostic(
             0.5, -0.02
         )
     )
+
+    # --- Save full-resolution stave overlay ---
+    hq_path = save_path.with_name(save_path.stem + "_hq.png")
+    cv2.imwrite(str(hq_path), cv2.cvtColor(canvas_uint8, cv2.COLOR_RGB2BGR))
 
     # --- Save figure ---
     plt.tight_layout()
