@@ -4,7 +4,7 @@ interface LoginFormProps {
 
 export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
     return (
-    <div className="bg-[#C8E6E3] rounded-3xl p-10 flex flex-col gap-4">
+    <div className="bg-[#C8E6E3] rounded-3xl p-6 sm:p-10 flex flex-col gap-4">
       <h2 className="text-2xl text-[#1D3335] text-center mb-2">log in</h2>
       <input
         type="text"

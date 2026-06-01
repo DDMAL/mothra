@@ -7,12 +7,12 @@ export default function Features() {
         <h2 className="scroll-fade fade-target text-3xl font-bold italic text-center text-white mb-10">
           what mothra can do
         </h2>
-        <div className="scroll-fade fade-target border-2 border-white rounded-3xl p-8">
-          <div className="flex justify-around gap-4">
+        <div className="scroll-fade fade-target border-2 border-white rounded-3xl p-6 sm:p-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 place-items-center">
             {FEATURES.map((label) => (
               <div
                 key={label}
-                className="w-36 h-36 rounded-full bg-[#1E6B70] flex items-center justify-center text-center text-white text-sm px-4"
+                className="w-32 h-32 sm:w-36 sm:h-36 rounded-full bg-[#1E6B70] flex items-center justify-center text-center text-white text-sm px-4"
               >
                 {label}
               </div>

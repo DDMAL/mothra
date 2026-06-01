@@ -45,16 +45,14 @@ export default function App() {
                 onGetStarted={() => setView('register')}
             />
             {view === 'landing' ? (
-                <>
-                    <main>
-                        <Hero />
-                        <Features />
-                    </main>
-                    <Footer />
-                </>
+                <main>
+                    <Hero />
+                    <Features />
+                </main>
             ) : (
-                <AuthPage mode ={view} onSwitchMode={(m) => setView(m)} />
-            )} 
+                <AuthPage mode={view} onSwitchMode={(m) => setView(m)} />
+            )}
+            <Footer />
         </div>
     );
 }

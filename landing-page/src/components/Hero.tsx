@@ -1,14 +1,14 @@
 export default function Hero() {
     return (
-        <section className="bg-[#4AADAA] py-16">
+        <section className="bg-[#4AADAA] py-16 px-4">
             <div className="max-w-4xl mx-auto text-center">
-                <h1 className="hero-fade fade-target text-4xl font-bold italic text-white mb-3">
+                <h1 className="hero-fade fade-target text-3xl sm:text-4xl font-bold italic text-white mb-3">
                     welcome to mothra!
                 </h1>
                 <p className="hero-fade fade-target text-lg text-[#1D3335] mb-8">
                     a project created by the DDMAL Lab at McGill University
                 </p>
-                <div className="hero-fade fade-target flex items-center justify-center gap-4 mb-12">
+                <div className="hero-fade fade-target flex flex-wrap items-center justify-center gap-4 mb-12">
                     <button
                         onClick={(e) => e.preventDefault()}
                         className="px-6 py-2.5 bg-white text-[#1D3335] text-sm rounded-full hover:opacity-90 transition-opacity cursor-pointer"

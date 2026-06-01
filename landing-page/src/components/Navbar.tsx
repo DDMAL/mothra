@@ -6,24 +6,24 @@ interface NavbarProps {
 export default function Navbar({ onLogin, onGetStarted }: NavbarProps) {
     return (
         <nav className="sticky top-0 z-50 bg-[#F5F7F7] border-b border-gray-200 h-14 flex items-center px-6">
-            <span className="text-[#1D3335] font-medium text-lg mr-8">mothra</span>
-            <div className="flex items-center gap-6 flex-1">
+            <span className="text-[#1D3335] font-large text-lg mr-8">mothra</span>
+            <div className="hidden sm:flex items-center gap-6 flex-1">
                 <a
                     href="#"
                     onClick={(e) => e.preventDefault()}
-                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
+                    className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     about mothra
                 </a>
                 <a
                     href="#"
                     onClick={(e) => e.preventDefault()}
-                    className="text=sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
+                    className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     documentation / walkthrough
                 </a>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 ml-auto">
                 <button
                     onClick={onLogin}
                     className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
