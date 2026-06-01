@@ -6,14 +6,19 @@ interface NavbarProps {
     onMyProjects?: () => void;
     loggedIn?: boolean;
     onLogout?: () => void;
+    onHome?: () => void;
 }
 
-export default function Navbar({ onLogin, onGetStarted, onMyProjects, loggedIn, onLogout }: NavbarProps) {
+export default function Navbar({ onLogin, onGetStarted, onMyProjects, loggedIn, onLogout, onHome }: NavbarProps) {
     const [showDropdown, setShowDropdown] = useState(false);
 
     return (
         <nav className="sticky top-0 z-50 bg-[#F5F7F7] border-b border-gray-200 h-14 flex items-center px-6">
-            <span className="text-[#1D3335] font-large text-lg mr-8">mothra</span>
+            <button 
+                onClick={onHome}
+                className="text-[#1D3335] font-large text-lg mr-8 hover:opacity-70 transition-opacity cursor-pointer">
+                mothra
+            </button>
             <div className="hidden sm:flex items-center gap-6 flex-1">
                 <a
                     href="#"

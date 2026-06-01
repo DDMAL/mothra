@@ -1,4 +1,6 @@
-export default function Hero() {
+interface HeroProps { onGetStarted?: () => void; }
+
+export default function Hero({ onGetStarted }: HeroProps) {
     return (
         <section className="bg-[#4AADAA] py-16 px-4">
             <div className="max-w-4xl mx-auto text-center">
@@ -16,7 +18,7 @@ export default function Hero() {
                         view walkthrough
                     </button>
                     <button
-                        onClick={(e) => e.preventDefault()}
+                        onClick={onGetStarted}
                         className="px-6 py-2.5 bg-[#4AADAA] text-white text-sm rounded-full border border-white hover:opacity-90 transition-opacity cursor-pointer"
                     >
                         get started now

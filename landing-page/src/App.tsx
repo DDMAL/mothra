@@ -49,11 +49,14 @@ export default function App() {
                 onGetStarted={() => setView('register')}
                 onMyProjects={() => setView('projects')}
                 loggedIn={view === 'projects'}
+                onHome={() => setView('landing')}
                 onLogout={() => setView('landing')}
             />
             {view === 'landing' ? (
                 <main>
-                    <Hero />
+                    <Hero 
+                        onGetStarted={() => setView('register')}
+                    />
                     <Features />
                 </main>
             ) : view === 'projects' ? (
