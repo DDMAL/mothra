@@ -6,8 +6,9 @@ import Footer from'./components/Footer';
 import AuthPage from './components/AuthPage';
 import MyProjects from './components/MyProjects';
 import ProjectDetail from './components/ProjectDetail';
+import About from './components/About';
 
-type View = 'landing' | 'login' | 'register' | 'projects' | 'project';
+type View = 'landing' | 'about' | 'login' | 'register' | 'projects' | 'project';
 
 export interface ProjectImage { id: string; name: string; src?: string; }
 export interface Project { name: string; user: string; images: ProjectImage[]; }
@@ -23,15 +24,18 @@ export default function App() {
     const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
     useEffect(() => {
-        if (view !== 'landing') {
+        if (view !== 'landing' && view !== 'about') {
             document.querySelectorAll('.fade-target').forEach((el) => el.classList.add('visible'));
             return;
         }
 
-        const heroTargets = document.querySelectorAll('.hero-fade');
-        const timer = setTimeout(() => {
-            heroTargets.forEach((el) => el.classList.add('visible'));
-        }, 100);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        if (view === 'landing') {
+            const heroTargets = document.querySelectorAll('.hero-fade');
+            timer = setTimeout(() => {
+                heroTargets.forEach((el) => el.classList.add('visible'));
+            }, 100);
+        }
 
         const observer = new IntersectionObserver(
             (entries) => {
@@ -48,7 +52,7 @@ export default function App() {
         document.querySelectorAll('.scroll-fade').forEach((el) => observer.observe(el));
 
         return () => {
-            clearTimeout(timer);
+            if (timer) clearTimeout(timer);
             observer.disconnect();
         };
     }, [view]);
@@ -59,6 +63,7 @@ export default function App() {
                 onLogin={() => setView('login')}
                 onGetStarted={() => setView('register')}
                 onMyProjects={() => setView('projects')}
+                onAbout={() => setView('about')}
                 loggedIn={view === 'projects' || view === 'project'}
                 onHome={() => setView('landing')}
                 onLogout={() => setView('landing')}
@@ -70,6 +75,8 @@ export default function App() {
                     />
                     <Features />
                 </main>
+            ) : view === 'about' ? (
+                <About />
             ) : view === 'projects' ? (
                 <MyProjects 
                     projects={projects}

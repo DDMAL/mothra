@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../App'
+import * as pdfjsLib from 'pdfjs-dist';
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url,
+).href;
 
 
 interface ProjectDetailProps {
@@ -16,6 +21,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
     const [dragging, setDragging] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
+    const [converting, setConverting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -52,20 +58,47 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
         setRenameModal(null);
     };
 
-    const handleFiles = (files: FileList | File[]) => {
-        const images = Array.from(files).filter(f => f.type.startsWith('image/'));
-        if (images.length === 0) return;
+    const pdfToImages = async (file: File): Promise<{ name: string; src: string }[]> => {
+        const baseName = file.name.replace(/\.pdf$/i, '');
+        const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+        const results: { name: string; src: string }[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: canvas.getContext('2d')!, canvas, viewport }).promise;
+            const blob = await new Promise<Blob>(res => canvas.toBlob(b => res(b!), 'image/png'));
+            results.push({ name: `${baseName} (page${i}).png`, src: URL.createObjectURL(blob) });
+        }
+        return results;
+    };
+
+    const handleFiles = async (files: FileList | File[]) => {
+        const all = Array.from(files);
+        const imageFiles = all.filter(f => f.type.startsWith('image/'));
+        const pdfFiles = all.filter(f => f.type === 'application/pdf');
+        if (imageFiles.length === 0 && pdfFiles.length === 0) return;
+
+        setConverting(true);
+
+        const imageEntries = imageFiles.map(f => ({
+            id: crypto.randomUUID(),
+            name: f.name,
+            src: URL.createObjectURL(f),
+        }));
+        
+        const pdfEntries = (await Promise.all(pdfFiles.map(pdfToImages)))
+            .flat()
+            .map(({ name, src }) => ({ id: crypto.randomUUID(), name, src }));
+
+
         onUpdateProject({
             ...project,
-            images: [
-                ...project.images, 
-                ...images.map(f => ({
-                id: crypto.randomUUID(),
-                name: f.name,
-                src: URL.createObjectURL(f),
-            })),
-            ],
+            images: [ ...project.images, ...imageEntries, ...pdfEntries ]
         });
+        setConverting(false);
         setUploadModal(false);
         setDragging(false);
     };
@@ -96,7 +129,9 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
     };
 
     return (
-        <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48">
+        <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48 relative">
+            <div className={`absolute inset-0 z-30 bg-black/30 transition-opacity pointer-events-none
+                            ${(uploadModal || !!renameModal || !!imageMenu) ? 'opacity-100' : 'opacity-0'}`} />
             <div className="max-w-5xl mx-auto flex items-center gap-4 mb-8">
                 <button
                     onClick={onBack}
@@ -226,7 +261,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                                 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
 
                     <button
-                        onClick={() => { setUploadModal(false); setDragging(false); }}
+                        onClick={() => { if (!converting) {setUploadModal(false); setDragging(false); } }}
                         className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer">
                         x
                     </button>
@@ -234,7 +269,13 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                     <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
 
                     {/* drop zone */}
-                    <div
+                    { converting ? (
+                        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed
+                                        border-[#1D3335]/30 bg-white/40 py-12">
+                            <p className="text-sm text-[#1D3335] text-center"> converting PDF pages... </p>
+                        </div>                    
+                    ) : (
+                        <div
                         onClick={() => fileInputRef.current?.click()}
                         onDragOver={(e) => {e.preventDefault(); setDragging(true); }}
                         onDragEnter={(e) => {e.preventDefault(); setDragging(true); }}
@@ -250,7 +291,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                                 : 'border-[#1D3335]/30 bg-white/40 hover:bg-white/60'}`}>
                         <span className="text-3xl">↑</span>
                         <p className="text-sm text-[#1D3335] text-center">
-                            drag & drop images or a folder here
+                            drag & drop images, folders, or PDFs here
                         </p>
                         <div className="flex gap-4 text-sm text-[#1D3335]">
                             <button
@@ -267,10 +308,13 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                     </div>
                     </div>
 
+                )}
+                    
+
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,application/pdf"
                         multiple
                         className="hidden"
                         onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}/>

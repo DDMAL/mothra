@@ -4,12 +4,13 @@ interface NavbarProps {
     onLogin?: () => void;
     onGetStarted?: () => void;
     onMyProjects?: () => void;
+    onAbout?: () => void;
     loggedIn?: boolean;
     onLogout?: () => void;
     onHome?: () => void;
 }
 
-export default function Navbar({ onLogin, onGetStarted, onMyProjects, loggedIn, onLogout, onHome }: NavbarProps) {
+export default function Navbar({ onLogin, onGetStarted, onMyProjects, onAbout, loggedIn, onLogout, onHome }: NavbarProps) {
     const [showDropdown, setShowDropdown] = useState(false);
 
     return (
@@ -22,7 +23,7 @@ export default function Navbar({ onLogin, onGetStarted, onMyProjects, loggedIn, 
             <div className="hidden sm:flex items-center gap-6 flex-1">
                 <a
                     href="#"
-                    onClick={(e) => e.preventDefault()}
+                    onClick={(e) => { e.preventDefault(); onAbout?.(); }}
                     className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                 >
                     about mothra

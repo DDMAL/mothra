@@ -18,7 +18,9 @@ export default function MyProjects({ projects, setProjects, onSelectProject }: M
   const [renameName, setRenameName] = useState('');
 
   return (
-    <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 py-10">
+    <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 py-10 relative">
+      <div className={`absolute inset-0 z-30 bg-black/30 transition-opacity pointer-events-none
+                      ${(showCreate || !!deletePopup) ? 'opacity-100' : 'opacity-0'}`} />
       <div className="max-w-4xl mx-auto flex items-center gap-6 mb-8">
         <h1 className="text-4xl font-bold italic text-white">My Projects</h1>
         <button
