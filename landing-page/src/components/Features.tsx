@@ -1,7 +1,7 @@
-const FEATURES = ['feature 1', 'feature 2', 'feature 3', 'feature 4'];
+const FEATURES = ["feature 1", "feature 2", "feature 3", "feature 4"];
 
 export default function Features() {
-    return (
+  return (
     <section className="bg-[#4AADAA] py-16 px-6">
       <div className="max-w-4xl mx-auto">
         <h2 className="scroll-fade fade-target text-3xl font-bold italic text-center text-white mb-10">

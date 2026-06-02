@@ -1,9 +1,9 @@
 interface RegisterFormProps {
-    onSwitchToLogin: () => void;
+  onSwitchToLogin: () => void;
 }
 
 export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
-    return (
+  return (
     <div className="bg-[#C8E6E3] rounded-3xl p-6 sm:p-10 flex flex-col gap-4">
       <h2 className="text-xl text-[#1D3335] text-center mb-2">
         new to mothra? create an account:

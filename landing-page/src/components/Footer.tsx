@@ -1,5 +1,5 @@
-import schulichLogo from '../../assets/schulich_logo.png';
-import ddmalLogo from '../../assets/Ddmal_logo_transp-bg_no-border_1600w.png';
+import schulichLogo from "../../assets/schulich_logo.png";
+import ddmalLogo from "../../assets/Ddmal_logo_transp-bg_no-border_1600w.png";
 
 export default function Footer() {
   return (
