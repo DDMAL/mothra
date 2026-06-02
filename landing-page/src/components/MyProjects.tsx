@@ -122,7 +122,7 @@ export default function MyProjects({ projects, setProjects, onSelectProject }: M
             <button
               onClick={() => {
                 if (!newName.trim()) return;
-                setProjects((prev) => [...prev, { name: newName.trim(), user: 'username', images: [] }]);
+                setProjects((prev) => [...prev, { name: newName.trim(), user: 'username', images: [], models: [] }]);
                 setNewName('');
                 setShowCreate(false);
               }}

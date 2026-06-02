@@ -88,7 +88,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
             name: f.name,
             src: URL.createObjectURL(f),
         }));
-        
+
         const pdfEntries = (await Promise.all(pdfFiles.map(pdfToImages)))
             .flat()
             .map(({ name, src }) => ({ id: crypto.randomUUID(), name, src }));
@@ -131,7 +131,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
     return (
         <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48 relative">
             <div className={`absolute inset-0 z-30 bg-black/30 transition-opacity pointer-events-none
-                            ${(uploadModal || !!renameModal || !!imageMenu) ? 'opacity-100' : 'opacity-0'}`} />
+                            ${(uploadModal || !!renameModal) ? 'opacity-100' : 'opacity-0'}`} />
             <div className="max-w-5xl mx-auto flex items-center gap-4 mb-8">
                 <button
                     onClick={onBack}
@@ -187,7 +187,6 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                                         className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0">
                                         ⋮
                                     </button>
-                                    
                                 </div>
                             </div>
                         ))}
@@ -198,14 +197,14 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
             {imageMenu && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setImageMenu(null)} />
-                    <div 
+                    <div
                         className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
                         style={{ top: imageMenu.y + 8, left: imageMenu.x - 80 }}
                     >
                         <button className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer">
                             Use Image
                         </button>
-                        <button 
+                        <button
                             onClick={() => deleteImage(imageMenu.id)}
                             className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer">
                             Delete Image
@@ -255,7 +254,6 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
         {uploadModal && (
             <>
                 <div className="fixed inset-0 z-40" onClick={() => {setUploadModal(false); setDragging(false); }} />
-                {/* dialog */}
 
                 <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
                                 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
@@ -268,12 +266,11 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
 
                     <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
 
-                    {/* drop zone */}
                     { converting ? (
                         <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed
                                         border-[#1D3335]/30 bg-white/40 py-12">
                             <p className="text-sm text-[#1D3335] text-center"> converting PDF pages... </p>
-                        </div>                    
+                        </div>
                     ) : (
                         <div
                         onClick={() => fileInputRef.current?.click()}
@@ -307,9 +304,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                             </button>
                     </div>
                     </div>
-
                 )}
-                    
 
                     <input
                         ref={fileInputRef}
@@ -318,7 +313,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                         multiple
                         className="hidden"
                         onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}/>
-                    <input 
+                    <input
                         ref={folderInputRef}
                         type="file"
                         // @ts-expect-error
@@ -330,5 +325,5 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
         )}
         </div>
     );
-        
+
 }
