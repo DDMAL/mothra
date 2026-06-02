@@ -9,7 +9,7 @@ import ProjectDetail from './components/ProjectDetail';
 
 type View = 'landing' | 'login' | 'register' | 'projects' | 'project';
 
-export interface ProjectImage { id: string; name: string; }
+export interface ProjectImage { id: string; name: string; src?: string; }
 export interface Project { name: string; user: string; images: ProjectImage[]; }
 
 export default function App() {

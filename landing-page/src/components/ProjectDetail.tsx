@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../App'
+
 
 interface ProjectDetailProps {
     project: Project;
@@ -11,15 +12,30 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
     const [imageMenu, setImageMenu] = useState<{id: string; x: number; y: number } | null>(null);
     const [renameModal, setRenameModal] = useState<{id: string} | null>(null);
     const [renameName, setRenameName] = useState('');
+    const [uploadModal, setUploadModal] = useState(false);
+    const [dragging, setDragging] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const folderInputRef = useRef<HTMLInputElement>(null);
 
-    useEffect (() => {
+    useEffect(() => {
         const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') { setImageMenu(null); setRenameModal(null);}
-
+            if (e.key === 'Escape') {
+                setImageMenu(null);
+                setRenameModal(null);
+                setSelectedIds(new Set());
+                setLastSelectedIdx(null);
+            }
+            if (e.key === 'Delete' && selectedIds.size > 0) {
+                onUpdateProject({ ...project, images: project.images.filter(img => !selectedIds.has(img.id)) });
+                setSelectedIds(new Set());
+                setLastSelectedIdx(null);
+            }
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, []);
+    }, [selectedIds, project, onUpdateProject]);
 
     const deleteImage = (id: string) => {
         onUpdateProject({ ...project, images: project.images.filter((img) => img.id !== id) });
@@ -36,16 +52,51 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
         setRenameModal(null);
     };
 
-    const addImage = () => {
-        const n = project.images.length + 1;
+    const handleFiles = (files: FileList | File[]) => {
+        const images = Array.from(files).filter(f => f.type.startsWith('image/'));
+        if (images.length === 0) return;
         onUpdateProject({
             ...project,
-            images: [...project.images, { id: crypto.randomUUID(), name: `image ${n}`}],
+            images: [
+                ...project.images, 
+                ...images.map(f => ({
+                id: crypto.randomUUID(),
+                name: f.name,
+                src: URL.createObjectURL(f),
+            })),
+            ],
         });
+        setUploadModal(false);
+        setDragging(false);
+    };
+
+    const handleImageClick = (e: React.MouseEvent, id: string, idx: number) => {
+        if (e.shiftKey) {
+            e.preventDefault();
+            setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (lastSelectedIdx !== null && lastSelectedIdx !== idx) {
+                    const lo = Math.min(lastSelectedIdx, idx);
+                    const hi = Math.max(lastSelectedIdx, idx);
+                    project.images.slice(lo, hi + 1).forEach(img => next.add(img.id));
+                } else {
+                    next.has(id) ? next.delete(id) : next.add(id);
+                }
+                return next;
+            });
+            setLastSelectedIdx(idx);
+        } else {
+            if (selectedIds.has(id)) {
+                setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+            } else {
+                setSelectedIds(new Set([id]));
+                setLastSelectedIdx(idx);
+            }
+        }
     };
 
     return (
-        <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 py-10">
+        <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48">
             <div className="max-w-5xl mx-auto flex items-center gap-4 mb-8">
                 <button
                     onClick={onBack}
@@ -54,10 +105,27 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                 </button>
                 <h1 className="text-4xl font-bold italic text-white">{project.name}</h1>
                 <button
-                    onClick={addImage}
+                    onClick={() => setUploadModal(true)}
                     className="ml-4 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer">
                     + new image
                 </button>
+                {selectedIds.size > 0 && (
+                    <>
+                        <button
+                            className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+                            use {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}
+                        </button>
+                        <button
+                            onClick={() => {
+                                onUpdateProject({ ...project, images: project.images.filter(img => !selectedIds.has(img.id)) });
+                                setSelectedIds(new Set());
+                                setLastSelectedIdx(null);
+                            }}
+                            className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+                            delete {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}
+                        </button>
+                    </>
+                )}
             </div>
 
             <div className="max-w-5xl mx-auto">
@@ -65,10 +133,18 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                 {project.images.length === 0 ? (
                     <p className="text-white/70 text-sm">no images yet</p>
                 ) : (
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-                        {project.images.map((img) => (
+                    <div
+                        className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4"
+                        onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}>
+                        {project.images.map((img, idx) => (
                             <div key={img.id} className="flex flex-col gap-2">
-                                <div className="aspect-square bg-[#C8E6E3]/40 rounded-xl" />
+                                <div
+                                    className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer
+                                                transition-shadow
+                                                ${selectedIds.has(img.id) ? 'ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]' : ''}`}
+                                    onClick={(e) => handleImageClick(e, img.id, idx)}>
+                                    {img.src && <img src={img.src} alt={img.name} className="w-full h-full object-cover" />}
+                                </div>
                                 <div className="flex items-center justify-between gap-1">
                                     <span className="text-sm text-white truncate">{img.name}</span>
                                     <button
@@ -76,6 +152,7 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
                                         className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0">
                                         ⋮
                                     </button>
+                                    
                                 </div>
                             </div>
                         ))}
@@ -115,21 +192,21 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
             {renameModal && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setRenameModal(null)} />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-4 relative shadow-2xl">
-            <button
-              onClick={() => setRenameModal(null)}
-              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-            >
-              ✕
-            </button>
-            <h2 className="text-xl text-[#1D3335] text-center">rename image</h2>
-            <input
-              autoFocus
-              value={renameName}
-              onChange={(e) => setRenameName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') renameImage(); }}
-              className="bg-white rounded-2xl px-6 py-3 text-center text-[#1D3335] outline-none text-sm"
-            />
+                        <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-4 relative shadow-2xl">
+                            <button
+                            onClick={() => setRenameModal(null)}
+                            className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
+                            >
+                            ✕
+                            </button>
+                            <h2 className="text-xl text-[#1D3335] text-center">rename image</h2>
+                            <input
+                            autoFocus
+                            value={renameName}
+                            onChange={(e) => setRenameName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') renameImage(); }}
+                            className="bg-white rounded-2xl px-6 py-3 text-center text-[#1D3335] outline-none text-sm"
+                            />
             <button
               onClick={renameImage}
               className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
@@ -138,6 +215,74 @@ export default function ProjectDetail({ project, onBack, onUpdateProject }: Proj
             </button>
           </div>
                 </>
+        )}
+
+        {uploadModal && (
+            <>
+                <div className="fixed inset-0 z-40" onClick={() => {setUploadModal(false); setDragging(false); }} />
+                {/* dialog */}
+
+                <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+                                w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
+
+                    <button
+                        onClick={() => { setUploadModal(false); setDragging(false); }}
+                        className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer">
+                        x
+                    </button>
+
+                    <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
+
+                    {/* drop zone */}
+                    <div
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(e) => {e.preventDefault(); setDragging(true); }}
+                        onDragEnter={(e) => {e.preventDefault(); setDragging(true); }}
+                        onDragLeave={() => setDragging(false)}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            handleFiles(e.dataTransfer.files);
+                        }}
+                        className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed
+                            py-12 cursor-pointer transition-colors
+                            ${dragging
+                                ? 'border-[#1E6B70] bg-[#1E6B70]/10'
+                                : 'border-[#1D3335]/30 bg-white/40 hover:bg-white/60'}`}>
+                        <span className="text-3xl">↑</span>
+                        <p className="text-sm text-[#1D3335] text-center">
+                            drag & drop images or a folder here
+                        </p>
+                        <div className="flex gap-4 text-sm text-[#1D3335]">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                                className="underline hover:opacity-70 cursor-pointer">
+                                select files
+                            </button>
+                            <span className="text-[#1D3335]/40">or</span>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                                className="underline hover:opacity-70 cursor-pointer">
+                                select folder
+                            </button>
+                    </div>
+                    </div>
+
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}/>
+                    <input 
+                        ref={folderInputRef}
+                        type="file"
+                        // @ts-expect-error
+                        webkitdirectory=""
+                        className="hidden"
+                        onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}/>
+                </div>
+            </>
         )}
         </div>
     );
