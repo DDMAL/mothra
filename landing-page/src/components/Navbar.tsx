@@ -4,7 +4,6 @@ interface NavbarProps {
   onLogin?: () => void;
   onGetStarted?: () => void;
   onMyProjects?: () => void;
-  onMyModels?: () => void;
   onAbout?: () => void;
   loggedIn?: boolean;
   onLogout?: () => void;
@@ -15,7 +14,6 @@ export default function Navbar({
   onLogin,
   onGetStarted,
   onMyProjects,
-  onMyModels,
   onAbout,
   loggedIn,
   onLogout,
@@ -67,12 +65,6 @@ export default function Navbar({
           className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
         >
           my projects
-        </button>
-        <button
-          onClick={onMyModels}
-          className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
-        >
-          my models
         </button>
 
         {loggedIn ? (

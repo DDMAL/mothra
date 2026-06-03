@@ -5,7 +5,6 @@ import Features from "./components/Features";
 import Footer from "./components/Footer";
 import AuthPage from "./components/AuthPage";
 import MyProjects from "./components/MyProjects";
-import MyModels from "./components/MyModels";
 import ProjectDetail from "./components/ProjectDetail";
 import About from "./components/About";
 
@@ -15,8 +14,7 @@ type View =
   | "login"
   | "register"
   | "projects"
-  | "project"
-  | "models";
+  | "project";
 
 export interface ProjectImage {
   id: string;
@@ -27,6 +25,7 @@ export interface Project {
   name: string;
   user: string;
   images: ProjectImage[];
+  models: ProjectModel[];
 }
 export interface ProjectModel {
   id: string;
@@ -44,6 +43,7 @@ export default function App() {
         { id: "2", name: "image 2" },
         { id: "3", name: "image 3" },
       ],
+      models: [],
     },
     {
       name: "project beta",
@@ -52,9 +52,9 @@ export default function App() {
         id: String(i + 1),
         name: `image ${i + 1}`,
       })),
+      models: [],
     },
   ]);
-  const [models, setModels] = useState<ProjectModel[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,10 +101,9 @@ export default function App() {
         onLogin={() => setView("login")}
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
-        onMyModels={() => setView("models")}
         onAbout={() => setView("about")}
         loggedIn={
-          view === "projects" || view === "project" || view === "models"
+          view === "projects" || view === "project"
         }
         onHome={() => setView("landing")}
         onLogout={() => setView("landing")}
@@ -135,8 +134,6 @@ export default function App() {
             )
           }
         />
-      ) : view === "models" ? (
-        <MyModels models={models} onUpdateModels={setModels} />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}
