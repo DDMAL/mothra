@@ -33,6 +33,8 @@ export default function ProjectDetail({
   const [dragging, setDragging] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
+  const [usedImageNames, setUsedImageNames] = useState<string[]>([]);
+  const [usedModelNames, setUsedModelNames] = useState<string[]>([]);
   const [converting, setConverting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -317,8 +319,12 @@ export default function ProjectDetail({
                             ${uploadModal || !!renameModal || modelUploadModal || !!modelRenameModal ? "opacity-100" : "opacity-0"}`}
       />
 
+      {/* main layout */}
+      <div className="flex gap-8 max-w-6xl mx-auto">
+      <div className="flex-1 min-w-0">
+
       {/* header */}
-      <div className="max-w-5xl mx-auto flex items-center gap-4 mb-8">
+      <div className="flex items-center gap-4 mb-8">
         <button
           onClick={onBack}
           className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer"
@@ -345,7 +351,20 @@ export default function ProjectDetail({
 
         {activeTab === "images" && selectedIds.size > 0 && (
           <>
-            <button className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+            <button
+              onClick={() => {
+                const names = project.images
+                  .filter((img) => selectedIds.has(img.id))
+                  .map((img) => img.name);
+                setUsedImageNames((prev) => [
+                  ...prev,
+                  ...names.filter((n) => !prev.includes(n)),
+                ]);
+                setSelectedIds(new Set());
+                setLastSelectedIdx(null);
+              }}
+              className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+            >
               use {selectedIds.size} image{selectedIds.size > 1 ? "s" : ""}
             </button>
             <button
@@ -368,7 +387,20 @@ export default function ProjectDetail({
 
         {activeTab === "models" && selectedModelIds.size > 0 && (
           <>
-            <button className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+            <button
+              onClick={() => {
+                const names = project.models
+                  .filter((m) => selectedModelIds.has(m.id))
+                  .map((m) => m.name);
+                setUsedModelNames((prev) => [
+                  ...prev,
+                  ...names.filter((n) => !prev.includes(n)),
+                ]);
+                setSelectedModelIds(new Set());
+                setLastSelectedModelIdx(null);
+              }}
+              className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+            >
               use {selectedModelIds.size} model
               {selectedModelIds.size > 1 ? "s" : ""}
             </button>
@@ -393,7 +425,7 @@ export default function ProjectDetail({
       </div>
 
       {/* tab bar + content */}
-      <div className="max-w-5xl mx-auto">
+      <div>
         <div className="flex items-end">
           {(["images", "models"] as const).map((tab, i) => (
             <button
@@ -439,8 +471,9 @@ export default function ProjectDetail({
                         <div
                           className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer
                                                 transition-shadow
-                                                ${selectedIds.has(img.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
-                          onClick={(e) => handleImageClick(e, img.id, idx)}
+                                                ${selectedIds.has(img.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
+                                                ${usedImageNames.includes(img.name) ? "opacity-40 cursor-default" : ""}`}
+                          onClick={(e) => { if (!usedImageNames.includes(img.name)) handleImageClick(e, img.id, idx); }}
                         >
                           {img.src && (
                             <img
@@ -451,22 +484,24 @@ export default function ProjectDetail({
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm text-white truncate">
+                          <span className={`text-sm text-white truncate ${usedImageNames.includes(img.name) ? "opacity-40" : ""}`}>
                             {img.name}
                           </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setImageMenu({
-                                id: img.id,
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            }}
-                            className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                          >
-                            ⋮
-                          </button>
+                          {!usedImageNames.includes(img.name) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setImageMenu({
+                                  id: img.id,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              }}
+                              className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
+                            >
+                              ⋮
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -530,8 +565,10 @@ export default function ProjectDetail({
                         <div
                           className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer
                             transition-shadow flex items-center justify-center
-                            ${selectedModelIds.has(model.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
-                          onClick={(e) => handleModelClick(e, model.id, idx)}
+                            ${selectedModelIds.has(model.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
+                            ${usedModelNames.includes(model.name) ? "opacity-40 cursor-default" : ""}
+                            `}
+                          onClick={(e) => { if (!usedModelNames.includes(model.name)) handleModelClick(e, model.id, idx); }}
                         >
                           <svg
                             width="56"
@@ -564,22 +601,24 @@ export default function ProjectDetail({
                           </svg>
                         </div>
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm text-white truncate">
+                          <span className={`text-sm text-white truncate ${usedModelNames.includes(model.name) ? "opacity-40" : ""}`}>
                             {model.name}
                           </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setModelMenu({
-                                id: model.id,
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            }}
-                            className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                          >
-                            ⋮
-                          </button>
+                          {!usedModelNames.includes(model.name) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setModelMenu({
+                                  id: model.id,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              }}
+                              className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
+                            >
+                              ⋮
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -617,6 +656,44 @@ export default function ProjectDetail({
           </div>
         )}
       </div>
+      </div>{/* end left column */}
+
+      {/* right sidebar */}
+      <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
+        <button
+          onClick={() => {}}
+          className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer text-right"
+        >
+          ready? -&gt;
+        </button>
+        <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
+          <span className="text-white/80">selected:</span>
+          {usedModelNames.map((name) => (
+            <div key={name} className="flex items-center justify-between">
+              <span className="truncate flex-1 mr-2">{name}</span>
+              <button
+                onClick={() => setUsedModelNames((prev) => prev.filter((n) => n !== name))}
+                className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <hr className="border-white/40 my-1" />
+          {usedImageNames.map((name) => (
+            <div key={name} className="flex items-center justify-between">
+              <span className="truncate flex-1 mr-2">{name}</span>
+              <button
+                onClick={() => setUsedImageNames((prev) => prev.filter((n) => n !== name))}
+                className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      </div>{/* end flex layout */}
 
       {/* image context menu */}
       {imageMenu && (
@@ -629,7 +706,15 @@ export default function ProjectDetail({
             className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
             style={{ top: imageMenu.y + 8, left: imageMenu.x - 80 }}
           >
-            <button className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer">
+            <button 
+              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+              onClick={() => {
+                const img = project.images.find(i => i.id === imageMenu!.id);
+                if (img && !usedImageNames.includes(img.name)) {
+                  setUsedImageNames(prev => [...prev, img.name]);
+                }
+                setImageMenu(null);
+              }}>
               Use Image
             </button>
             <button
@@ -664,7 +749,15 @@ export default function ProjectDetail({
             className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
             style={{ top: modelMenu.y + 8, left: modelMenu.x - 80 }}
           >
-            <button className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer">
+            <button 
+              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+              onClick={() => {
+                const model = project.models.find(m => m.id === modelMenu!.id);
+                if (model && !usedModelNames.includes(model.name)) {
+                  setUsedModelNames(prev => [...prev, model.name]);
+                }
+                setModelMenu(null);
+              }}>
               Use Model
             </button>
             <button
