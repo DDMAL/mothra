@@ -7,6 +7,8 @@ import AuthPage from "./components/AuthPage";
 import MyProjects from "./components/MyProjects";
 import ProjectDetail from "./components/ProjectDetail";
 import About from "./components/About";
+import ProcessingPage from "./components/workflow/ProcessingPage";
+import CompletionPage from "./components/workflow/CompletionPage";
 
 type View =
   | "landing"
@@ -14,7 +16,9 @@ type View =
   | "login"
   | "register"
   | "projects"
-  | "project";
+  | "project"
+  | "processing"
+  | "completion";
 
 export interface ProjectImage {
   id: string;
@@ -56,6 +60,11 @@ export default function App() {
     },
   ]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [usedNames, setUsedNames] = useState<{
+    images: string[];
+    models: string[];
+  }>({ images: [], models: [] });
+  const [stepsUnlocked, setStepsUnlocked] = useState(0);
 
   useEffect(() => {
     if (view !== "landing" && view !== "about") {
@@ -102,9 +111,7 @@ export default function App() {
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
         onAbout={() => setView("about")}
-        loggedIn={
-          view === "projects" || view === "project"
-        }
+        loggedIn={view === "projects" || view === "project"}
         onHome={() => setView("landing")}
         onLogout={() => setView("landing")}
       />
@@ -128,12 +135,25 @@ export default function App() {
         <ProjectDetail
           project={projects.find((p) => p.name === selectedProject)!}
           onBack={() => setView("projects")}
+          onContinue={() => setView("processing")}
           onUpdateProject={(updated) =>
             setProjects((prev) =>
               prev.map((p) => (p.name === updated.name ? updated : p)),
             )
           }
+          usedNames={usedNames}
+          onUsedNamesChange={setUsedNames}
+          stepsUnlocked={stepsUnlocked}
         />
+      ) : view === "processing" ? (
+        <ProcessingPage 
+          onBack={() => setView("project")}
+          onComplete={() => {
+            setStepsUnlocked((s) => Math.max(s, 1));
+            setView("completion");
+          }} />
+      ) : view === "completion" ? (
+        <CompletionPage onContinue={() => setView("project")} />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}

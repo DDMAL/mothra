@@ -8,20 +8,35 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).href;
 
+const STEPS = [
+  "interactive classifier",
+  "encoding",
+  "neon.js",
+  "send to cantus ultimus",
+];
+
 interface ProjectDetailProps {
   project: Project;
   onBack: () => void;
+  onContinue: () => void;
   onUpdateProject: (updated: Project) => void;
+  usedNames: { images: string[]; models: string[] };
+  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  stepsUnlocked: number;
 }
 
 export default function ProjectDetail({
   project,
   onBack,
+  onContinue,
   onUpdateProject,
+  usedNames,
+  onUsedNamesChange,
+  stepsUnlocked,
 }: ProjectDetailProps) {
-  const [activeTab, setActiveTab] = useState<"images" | "models">("images");
-  const [usedImageNames, setUsedImageNames] = useState<string[]>([]);
-  const [usedModelNames, setUsedModelNames] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<
+    "images" | "models" | "annotations"
+  >("images");
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -32,13 +47,19 @@ export default function ProjectDetail({
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
 
-  const switchTab = (tab: "images" | "models") => {
+  const switchTab = (tab: "images" | "models" | "annotations") => {
     setActiveTab(tab);
     imgSection.clearSelection();
     mdlSection.clearSelection();
     imgSection.setPage(0);
     mdlSection.setPage(0);
   };
+
+  const tabs = [
+    "images",
+    "models",
+    ...(stepsUnlocked >= 1 ? ["annotations"] : []),
+  ] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -51,24 +72,42 @@ export default function ProjectDetail({
         mdlSection.clearSelection();
         setQuickLookId(null);
       }
-      if (e.key === "Delete" && activeTab === "images" && imgSection.selectedIds.size > 0) {
+      if (
+        e.key === "Delete" &&
+        activeTab === "images" &&
+        imgSection.selectedIds.size > 0
+      ) {
         onUpdateProject({
           ...project,
-          images: project.images.filter((img) => !imgSection.selectedIds.has(img.id)),
+          images: project.images.filter(
+            (img) => !imgSection.selectedIds.has(img.id),
+          ),
         });
         imgSection.clearSelection();
       }
-      if (e.key === "Delete" && activeTab === "models" && mdlSection.selectedIds.size > 0) {
+      if (
+        e.key === "Delete" &&
+        activeTab === "models" &&
+        mdlSection.selectedIds.size > 0
+      ) {
         onUpdateProject({
           ...project,
-          models: project.models.filter((m) => !mdlSection.selectedIds.has(m.id)),
+          models: project.models.filter(
+            (m) => !mdlSection.selectedIds.has(m.id),
+          ),
         });
         mdlSection.clearSelection();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [imgSection.selectedIds, mdlSection.selectedIds, activeTab, project, onUpdateProject]);
+  }, [
+    imgSection.selectedIds,
+    mdlSection.selectedIds,
+    activeTab,
+    project,
+    onUpdateProject,
+  ]);
 
   // image actions
   const deleteImage = (id: string) => {
@@ -80,7 +119,9 @@ export default function ProjectDetail({
   };
 
   const renameImage = () => {
-    const current = project.images.find((img) => img.id === imgSection.renameModal?.id);
+    const current = project.images.find(
+      (img) => img.id === imgSection.renameModal?.id,
+    );
     onUpdateProject({
       ...project,
       images: project.images.map((img) =>
@@ -92,9 +133,12 @@ export default function ProjectDetail({
     imgSection.setRenameModal(null);
   };
 
-  const pdfToImages = async (file: File): Promise<{ name: string; src: string }[]> => {
+  const pdfToImages = async (
+    file: File,
+  ): Promise<{ name: string; src: string }[]> => {
     const baseName = file.name.replace(/\.pdf$/i, "");
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
+      .promise;
     const results: { name: string; src: string }[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -102,9 +146,18 @@ export default function ProjectDetail({
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext("2d")!, canvas, viewport }).promise;
-      const blob = await new Promise<Blob>((res) => canvas.toBlob((b) => res(b!), "image/png"));
-      results.push({ name: `${baseName} (page${i}).png`, src: URL.createObjectURL(blob) });
+      await page.render({
+        canvasContext: canvas.getContext("2d")!,
+        canvas,
+        viewport,
+      }).promise;
+      const blob = await new Promise<Blob>((res) =>
+        canvas.toBlob((b) => res(b!), "image/png"),
+      );
+      results.push({
+        name: `${baseName} (page${i}).png`,
+        src: URL.createObjectURL(blob),
+      });
     }
     return results;
   };
@@ -123,7 +176,10 @@ export default function ProjectDetail({
     const pdfEntries = (await Promise.all(pdfFiles.map(pdfToImages)))
       .flat()
       .map(({ name, src }) => ({ id: crypto.randomUUID(), name, src }));
-    onUpdateProject({ ...project, images: [...project.images, ...imageEntries, ...pdfEntries] });
+    onUpdateProject({
+      ...project,
+      images: [...project.images, ...imageEntries, ...pdfEntries],
+    });
     setConverting(false);
     imgSection.setUploadModal(false);
     imgSection.setDragging(false);
@@ -139,7 +195,9 @@ export default function ProjectDetail({
   };
 
   const renameModel = () => {
-    const current = project.models.find((m) => m.id === mdlSection.renameModal?.id);
+    const current = project.models.find(
+      (m) => m.id === mdlSection.renameModal?.id,
+    );
     onUpdateProject({
       ...project,
       models: project.models.map((m) =>
@@ -154,7 +212,10 @@ export default function ProjectDetail({
   const handleModelFiles = (files: FileList | File[]) => {
     const valid = Array.from(files).filter((f) => /\.(h5|hdf5)$/i.test(f.name));
     if (valid.length === 0) return;
-    const entries: ProjectModel[] = valid.map((f) => ({ id: crypto.randomUUID(), name: f.name }));
+    const entries: ProjectModel[] = valid.map((f) => ({
+      id: crypto.randomUUID(),
+      name: f.name,
+    }));
     onUpdateProject({ ...project, models: [...project.models, ...entries] });
     mdlSection.setUploadModal(false);
     mdlSection.setDragging(false);
@@ -181,6 +242,31 @@ export default function ProjectDetail({
 
       {/* main layout */}
       <div className="flex gap-8 max-w-6xl mx-auto">
+        {/* progress sidebar */}
+        <div className="w-48 shrink-0 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start mt-[4.5rem]">
+          <span className="text-white/60 text-sm font-medium mb-1">
+            progress:
+          </span>
+          {STEPS.map((label, i) => {
+            const stepNum = i + 1;
+            const unlocked = stepsUnlocked >= stepNum;
+            return (
+              <button
+                key={stepNum}
+                disabled={!unlocked}
+                onClick={() => {}}
+                className={`text-left text-sm px-3 py-2 rounded-xl transition-opacity ${
+                  unlocked
+                    ? "text-white hover:bg-white/10 cursor-pointer"
+                    : "text-white/30 cursor-not-allowed"
+                }`}
+              >
+                {stepNum}) {label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex-1 min-w-0">
           {/* header */}
           <div className="flex items-center gap-4 mb-8">
@@ -190,7 +276,9 @@ export default function ProjectDetail({
             >
               ←
             </button>
-            <h1 className="text-4xl font-bold italic text-white">{project.name}</h1>
+            <h1 className="text-4xl font-bold italic text-white">
+              {project.name}
+            </h1>
 
             {activeTab === "images" ? (
               <button
@@ -215,25 +303,35 @@ export default function ProjectDetail({
                     const names = project.images
                       .filter((img) => imgSection.selectedIds.has(img.id))
                       .map((img) => img.name);
-                    setUsedImageNames((prev) => [...prev, ...names.filter((n) => !prev.includes(n))]);
+                    onUsedNamesChange({
+                      ...usedNames,
+                      images: [
+                        ...usedNames.images,
+                        ...names.filter((n) => !usedNames.images.includes(n)),
+                      ],
+                    });
                     imgSection.clearSelection();
                     setValidationError(null);
                   }}
                   className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
                 >
-                  use {imgSection.selectedIds.size} image{imgSection.selectedIds.size > 1 ? "s" : ""}
+                  use {imgSection.selectedIds.size} image
+                  {imgSection.selectedIds.size > 1 ? "s" : ""}
                 </button>
                 <button
                   onClick={() => {
                     onUpdateProject({
                       ...project,
-                      images: project.images.filter((img) => !imgSection.selectedIds.has(img.id)),
+                      images: project.images.filter(
+                        (img) => !imgSection.selectedIds.has(img.id),
+                      ),
                     });
                     imgSection.clearSelection();
                   }}
                   className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
                 >
-                  delete {imgSection.selectedIds.size} image{imgSection.selectedIds.size > 1 ? "s" : ""}
+                  delete {imgSection.selectedIds.size} image
+                  {imgSection.selectedIds.size > 1 ? "s" : ""}
                 </button>
               </>
             )}
@@ -245,25 +343,35 @@ export default function ProjectDetail({
                     const names = project.models
                       .filter((m) => mdlSection.selectedIds.has(m.id))
                       .map((m) => m.name);
-                    setUsedModelNames((prev) => [...prev, ...names.filter((n) => !prev.includes(n))]);
+                    onUsedNamesChange({
+                      ...usedNames,
+                      models: [
+                        ...usedNames.models,
+                        ...names.filter((n) => !usedNames.models.includes(n)),
+                      ],
+                    });
                     mdlSection.clearSelection();
                     setValidationError(null);
                   }}
                   className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
                 >
-                  use {mdlSection.selectedIds.size} model{mdlSection.selectedIds.size > 1 ? "s" : ""}
+                  use {mdlSection.selectedIds.size} model
+                  {mdlSection.selectedIds.size > 1 ? "s" : ""}
                 </button>
                 <button
                   onClick={() => {
                     onUpdateProject({
                       ...project,
-                      models: project.models.filter((m) => !mdlSection.selectedIds.has(m.id)),
+                      models: project.models.filter(
+                        (m) => !mdlSection.selectedIds.has(m.id),
+                      ),
                     });
                     mdlSection.clearSelection();
                   }}
                   className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
                 >
-                  delete {mdlSection.selectedIds.size} model{mdlSection.selectedIds.size > 1 ? "s" : ""}
+                  delete {mdlSection.selectedIds.size} model
+                  {mdlSection.selectedIds.size > 1 ? "s" : ""}
                 </button>
               </>
             )}
@@ -272,14 +380,18 @@ export default function ProjectDetail({
           {/* tab bar + content */}
           <div>
             <div className="flex items-end">
-              {(["images", "models"] as const).map((tab, i) => (
+              {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() => switchTab(tab)}
+                  onClick={() =>
+                    switchTab(tab as "images" | "models" | "annotations")
+                  }
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
-                    ${activeTab === tab
-                      ? "text-white border border-white/50 border-b-0 bg-[#4AADAA] z-10"
-                      : "text-white/50 hover:text-white/70 border border-transparent"}
+                    ${
+                      activeTab === tab
+                        ? "text-white border border-white/50 border-b-0 bg-[#4AADAA] z-10"
+                        : "text-white/50 hover:text-white/70 border border-transparent"
+                    }
                     ${i > 0 ? "-ml-px" : ""}`}
                 >
                   {tab}
@@ -297,7 +409,9 @@ export default function ProjectDetail({
                   <>
                     <div
                       className="grid grid-cols-5 gap-4"
-                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                      onMouseDown={(e) => {
+                        if (e.shiftKey) e.preventDefault();
+                      }}
                     >
                       {pagedImages.map((img, pageIdx) => {
                         const idx = imgSection.page * ITEMS_PER_PAGE + pageIdx;
@@ -306,25 +420,35 @@ export default function ProjectDetail({
                             <div
                               className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow
                                 ${imgSection.selectedIds.has(img.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                                ${usedImageNames.includes(img.name) ? "opacity-40 cursor-default" : ""}`}
+                                ${usedNames.images.includes(img.name) ? "opacity-40 cursor-default" : ""}`}
                               onClick={(e) => {
-                                if (!usedImageNames.includes(img.name))
+                                if (!usedNames.images.includes(img.name))
                                   imgSection.handleClick(e, img.id, idx);
                               }}
                             >
                               {img.src && (
-                                <img src={img.src} alt={img.name} className="w-full h-full object-cover" />
+                                <img
+                                  src={img.src}
+                                  alt={img.name}
+                                  className="w-full h-full object-cover"
+                                />
                               )}
                             </div>
                             <div className="flex items-center justify-between gap-1">
-                              <span className={`text-sm text-white truncate ${usedImageNames.includes(img.name) ? "opacity-40" : ""}`}>
+                              <span
+                                className={`text-sm text-white truncate ${usedNames.images.includes(img.name) ? "opacity-40" : ""}`}
+                              >
                                 {img.name}
                               </span>
-                              {!usedImageNames.includes(img.name) && (
+                              {!usedNames.images.includes(img.name) && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    imgSection.setMenu({ id: img.id, x: e.clientX, y: e.clientY });
+                                    imgSection.setMenu({
+                                      id: img.id,
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                    });
                                   }}
                                   className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
                                 >
@@ -345,7 +469,9 @@ export default function ProjectDetail({
                         >
                           ←
                         </button>
-                        <span>page {imgSection.page + 1} of {totalImagePages}</span>
+                        <span>
+                          page {imgSection.page + 1} of {totalImagePages}
+                        </span>
                         <button
                           onClick={() => imgSection.setPage((p) => p + 1)}
                           disabled={imgSection.page === totalImagePages - 1}
@@ -369,7 +495,9 @@ export default function ProjectDetail({
                   <>
                     <div
                       className="grid grid-cols-5 gap-4"
-                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                      onMouseDown={(e) => {
+                        if (e.shiftKey) e.preventDefault();
+                      }}
                     >
                       {pagedModels.map((model, pageIdx) => {
                         const idx = mdlSection.page * ITEMS_PER_PAGE + pageIdx;
@@ -379,27 +507,57 @@ export default function ProjectDetail({
                               className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer
                                 transition-shadow flex items-center justify-center
                                 ${mdlSection.selectedIds.has(model.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                                ${usedModelNames.includes(model.name) ? "opacity-40 cursor-default" : ""}`}
+                                ${usedNames.models.includes(model.name) ? "opacity-40 cursor-default" : ""}`}
                               onClick={(e) => {
-                                if (!usedModelNames.includes(model.name))
+                                if (!usedNames.models.includes(model.name))
                                   mdlSection.handleClick(e, model.id, idx);
                               }}
                             >
-                              <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
-                                <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
-                                <text x="28" y="46" textAnchor="middle" fill="white" fontSize="16" fontWeight="bold" fontFamily="monospace">H5</text>
+                              <svg
+                                width="56"
+                                height="64"
+                                viewBox="0 0 56 64"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                              >
+                                <path
+                                  d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z"
+                                  fill="white"
+                                  fillOpacity="0.25"
+                                />
+                                <path
+                                  d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z"
+                                  fill="white"
+                                  fillOpacity="0.45"
+                                />
+                                <text
+                                  x="28"
+                                  y="46"
+                                  textAnchor="middle"
+                                  fill="white"
+                                  fontSize="16"
+                                  fontWeight="bold"
+                                  fontFamily="monospace"
+                                >
+                                  H5
+                                </text>
                               </svg>
                             </div>
                             <div className="flex items-center justify-between gap-1">
-                              <span className={`text-sm text-white truncate ${usedModelNames.includes(model.name) ? "opacity-40" : ""}`}>
+                              <span
+                                className={`text-sm text-white truncate ${usedNames.models.includes(model.name) ? "opacity-40" : ""}`}
+                              >
                                 {model.name}
                               </span>
-                              {!usedModelNames.includes(model.name) && (
+                              {!usedNames.models.includes(model.name) && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    mdlSection.setMenu({ id: model.id, x: e.clientX, y: e.clientY });
+                                    mdlSection.setMenu({
+                                      id: model.id,
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                    });
                                   }}
                                   className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
                                 >
@@ -420,7 +578,9 @@ export default function ProjectDetail({
                         >
                           ←
                         </button>
-                        <span>page {mdlSection.page + 1} of {totalModelPages}</span>
+                        <span>
+                          page {mdlSection.page + 1} of {totalModelPages}
+                        </span>
                         <button
                           onClick={() => mdlSection.setPage((p) => p + 1)}
                           disabled={mdlSection.page === totalModelPages - 1}
@@ -434,6 +594,12 @@ export default function ProjectDetail({
                 )}
               </div>
             )}
+
+            {activeTab === "annotations" && (
+              <div className="flex-1 flex items-center justify-center text-white/40 text-sm italic">
+                annotations coming soon!
+              </div>
+            )}
           </div>
         </div>
         {/* end left column */}
@@ -442,12 +608,13 @@ export default function ProjectDetail({
         <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
           <button
             onClick={() => {
-              if (usedModelNames.length === 0) {
+              if (usedNames.models.length === 0) {
                 setValidationError("must select at least one model!");
-              } else if (usedImageNames.length === 0) {
+              } else if (usedNames.images.length === 0) {
                 setValidationError("must select at least one image!");
               } else {
                 setValidationError(null);
+                onContinue();
               }
             }}
             className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
@@ -456,11 +623,16 @@ export default function ProjectDetail({
           </button>
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
             <span className="text-white/80">selected:</span>
-            {usedModelNames.map((name) => (
+            {usedNames.models.map((name) => (
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() => setUsedModelNames((prev) => prev.filter((n) => n !== name))}
+                  onClick={() =>
+                    onUsedNamesChange({
+                      ...usedNames,
+                      models: usedNames.models.filter((n) => n !== name),
+                    })
+                  }
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×
@@ -468,11 +640,16 @@ export default function ProjectDetail({
               </div>
             ))}
             <hr className="border-white/40 my-1" />
-            {usedImageNames.map((name) => (
+            {usedNames.images.map((name) => (
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() => setUsedImageNames((prev) => prev.filter((n) => n !== name))}
+                  onClick={() =>
+                    onUsedNamesChange({
+                      ...usedNames,
+                      images: usedNames.images.filter((n) => n !== name),
+                    })
+                  }
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×
@@ -490,7 +667,10 @@ export default function ProjectDetail({
       {/* image context menu */}
       {imgSection.menu && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => imgSection.setMenu(null)} />
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => imgSection.setMenu(null)}
+          />
           <div
             className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
             style={{ top: imgSection.menu.y + 8, left: imgSection.menu.x - 80 }}
@@ -507,9 +687,14 @@ export default function ProjectDetail({
             <button
               className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
               onClick={() => {
-                const img = project.images.find((i) => i.id === imgSection.menu!.id);
-                if (img && !usedImageNames.includes(img.name)) {
-                  setUsedImageNames((prev) => [...prev, img.name]);
+                const img = project.images.find(
+                  (i) => i.id === imgSection.menu!.id,
+                );
+                if (img && !usedNames.images.includes(img.name)) {
+                  onUsedNamesChange({
+                    ...usedNames,
+                    images: [...usedNames.images, img.name],
+                  });
                 }
                 imgSection.setMenu(null);
                 setValidationError(null);
@@ -525,7 +710,9 @@ export default function ProjectDetail({
             </button>
             <button
               onClick={() => {
-                const img = project.images.find((i) => i.id === imgSection.menu!.id)!;
+                const img = project.images.find(
+                  (i) => i.id === imgSection.menu!.id,
+                )!;
                 imgSection.setRenameModal({ id: imgSection.menu!.id });
                 imgSection.setRenameName(img.name);
                 imgSection.setMenu(null);
@@ -541,7 +728,10 @@ export default function ProjectDetail({
       {/* model context menu */}
       {mdlSection.menu && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => mdlSection.setMenu(null)} />
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => mdlSection.setMenu(null)}
+          />
           <div
             className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
             style={{ top: mdlSection.menu.y + 8, left: mdlSection.menu.x - 80 }}
@@ -549,9 +739,14 @@ export default function ProjectDetail({
             <button
               className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
               onClick={() => {
-                const model = project.models.find((m) => m.id === mdlSection.menu!.id);
-                if (model && !usedModelNames.includes(model.name)) {
-                  setUsedModelNames((prev) => [...prev, model.name]);
+                const model = project.models.find(
+                  (m) => m.id === mdlSection.menu!.id,
+                );
+                if (model && !usedNames.models.includes(model.name)) {
+                  onUsedNamesChange({
+                    ...usedNames,
+                    models: [...usedNames.models, model.name],
+                  });
                 }
                 mdlSection.setMenu(null);
                 setValidationError(null);
@@ -567,7 +762,9 @@ export default function ProjectDetail({
             </button>
             <button
               onClick={() => {
-                const m = project.models.find((m) => m.id === mdlSection.menu!.id)!;
+                const m = project.models.find(
+                  (m) => m.id === mdlSection.menu!.id,
+                )!;
                 mdlSection.setRenameModal({ id: mdlSection.menu!.id });
                 mdlSection.setRenameName(m.name);
                 mdlSection.setMenu(null);
@@ -601,62 +798,87 @@ export default function ProjectDetail({
       )}
 
       {/* quick look modal */}
-      {quickLookId && (() => {
-        const img = project.images.find((i) => i.id === quickLookId)!;
-        const isUsed = usedImageNames.includes(img.name);
-        return (
-          <>
-            <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setQuickLookId(null)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-              <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
-                <button
-                  onClick={() => setQuickLookId(null)}
-                  className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer"
-                >
-                  ×
-                </button>
-                <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
-                  {img.src
-                    ? <img src={img.src} alt={img.name} className="object-contain max-h-[60vh] w-full" />
-                    : <span className="text-white/40 text-sm py-16">{img.name}</span>
-                  }
-                </div>
-                <div className="flex gap-3 justify-center">
-                  {!isUsed && (
+      {quickLookId &&
+        (() => {
+          const img = project.images.find((i) => i.id === quickLookId)!;
+          const isUsed = usedNames.images.includes(img.name);
+          return (
+            <>
+              <div
+                className="fixed inset-0 z-40 bg-black/60"
+                onClick={() => setQuickLookId(null)}
+              />
+              <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+                <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
+                  <button
+                    onClick={() => setQuickLookId(null)}
+                    className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer"
+                  >
+                    ×
+                  </button>
+                  <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
+                    {img.src ? (
+                      <img
+                        src={img.src}
+                        alt={img.name}
+                        className="object-contain max-h-[60vh] w-full"
+                      />
+                    ) : (
+                      <span className="text-white/40 text-sm py-16">
+                        {img.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-3 justify-center">
+                    {!isUsed && (
+                      <button
+                        onClick={() => {
+                          onUsedNamesChange({
+                            ...usedNames,
+                            images: [...usedNames.images, img.name],
+                          });
+                          setValidationError(null);
+                          setQuickLookId(null);
+                        }}
+                        className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
+                      >
+                        Use Image
+                      </button>
+                    )}
                     <button
                       onClick={() => {
-                        setUsedImageNames((prev) => [...prev, img.name]);
-                        setValidationError(null);
+                        deleteImage(quickLookId);
                         setQuickLookId(null);
                       }}
-                      className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
+                      className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
                     >
-                      Use Image
+                      Delete Image
                     </button>
-                  )}
-                  <button
-                    onClick={() => { deleteImage(quickLookId); setQuickLookId(null); }}
-                    className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
-                  >
-                    Delete Image
-                  </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </>
-        );
-      })()}
+            </>
+          );
+        })()}
 
       {/* image upload modal */}
       {imgSection.uploadModal && (
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={() => { imgSection.setUploadModal(false); imgSection.setDragging(false); }}
+            onClick={() => {
+              imgSection.setUploadModal(false);
+              imgSection.setDragging(false);
+            }}
           />
           <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
             <button
-              onClick={() => { if (!converting) { imgSection.setUploadModal(false); imgSection.setDragging(false); } }}
+              onClick={() => {
+                if (!converting) {
+                  imgSection.setUploadModal(false);
+                  imgSection.setDragging(false);
+                }
+              }}
               className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
             >
               x
@@ -664,30 +886,49 @@ export default function ProjectDetail({
             <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
             {converting ? (
               <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
-                <p className="text-sm text-[#1D3335] text-center">converting PDF pages...</p>
+                <p className="text-sm text-[#1D3335] text-center">
+                  converting PDF pages...
+                </p>
               </div>
             ) : (
               <div
                 onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
-                onDragEnter={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  imgSection.setDragging(true);
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  imgSection.setDragging(true);
+                }}
                 onDragLeave={() => imgSection.setDragging(false)}
-                onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleFiles(e.dataTransfer.files);
+                }}
                 className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
                   ${imgSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
               >
                 <span className="text-3xl">↑</span>
-                <p className="text-sm text-[#1D3335] text-center">drag & drop images, folders, or PDFs here</p>
+                <p className="text-sm text-[#1D3335] text-center">
+                  drag & drop images, folders, or PDFs here
+                </p>
                 <div className="flex gap-4 text-sm text-[#1D3335]">
                   <button
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
                     className="underline hover:opacity-70 cursor-pointer"
                   >
                     select files
                   </button>
                   <span className="text-[#1D3335]/40">or</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      folderInputRef.current?.click();
+                    }}
                     className="underline hover:opacity-70 cursor-pointer"
                   >
                     select folder
@@ -695,12 +936,26 @@ export default function ProjectDetail({
                 </div>
               </div>
             )}
-            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
-              onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }} />
-            <input ref={folderInputRef} type="file"
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleFiles(e.target.files);
+              }}
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
               // @ts-expect-error
-              webkitdirectory="" className="hidden"
-              onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }} />
+              webkitdirectory=""
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleFiles(e.target.files);
+              }}
+            />
           </div>
         </>
       )}
@@ -710,11 +965,17 @@ export default function ProjectDetail({
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={() => { mdlSection.setUploadModal(false); mdlSection.setDragging(false); }}
+            onClick={() => {
+              mdlSection.setUploadModal(false);
+              mdlSection.setDragging(false);
+            }}
           />
           <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
             <button
-              onClick={() => { mdlSection.setUploadModal(false); mdlSection.setDragging(false); }}
+              onClick={() => {
+                mdlSection.setUploadModal(false);
+                mdlSection.setDragging(false);
+              }}
               className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
             >
               x
@@ -722,24 +983,46 @@ export default function ProjectDetail({
             <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
             <div
               onClick={() => modelFileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
-              onDragEnter={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                mdlSection.setDragging(true);
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                mdlSection.setDragging(true);
+              }}
               onDragLeave={() => mdlSection.setDragging(false)}
-              onDrop={(e) => { e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleModelFiles(e.dataTransfer.files);
+              }}
               className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
                 ${mdlSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
             >
               <span className="text-3xl">↑</span>
-              <p className="text-sm text-[#1D3335] text-center">drag & drop .h5 or .hdf5 files here</p>
+              <p className="text-sm text-[#1D3335] text-center">
+                drag & drop .h5 or .hdf5 files here
+              </p>
               <button
-                onClick={(e) => { e.stopPropagation(); modelFileInputRef.current?.click(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  modelFileInputRef.current?.click();
+                }}
                 className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
               >
                 select files
               </button>
             </div>
-            <input ref={modelFileInputRef} type="file" accept=".h5,.hdf5" multiple className="hidden"
-              onChange={(e) => { if (e.target.files) handleModelFiles(e.target.files); }} />
+            <input
+              ref={modelFileInputRef}
+              type="file"
+              accept=".h5,.hdf5"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleModelFiles(e.target.files);
+              }}
+            />
           </div>
         </>
       )}

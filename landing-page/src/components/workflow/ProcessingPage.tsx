@@ -1,0 +1,142 @@
+import { useEffect, useRef, useState } from "react";
+
+interface Stage {
+  text: boolean;
+  check: boolean;
+}
+
+interface ProcessingPageProps {
+  onBack: () => void;
+  onComplete: () => void;
+}
+
+const STAGE_LABELS = ["checking", "validating", "processing"];
+
+export default function ProcessingPage({
+  onBack,
+  onComplete,
+}: ProcessingPageProps) {
+  const [progress, setProgress] = useState(0);
+  const [stages, setStages] = useState<Stage[]>([
+    { text: false, check: false },
+    { text: false, check: false },
+    { text: false, check: false },
+  ]);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [cancelPrompt, setCancelPrompt] = useState(false);
+  const pausedRef = useRef(false);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    pausedRef.current = cancelPrompt;
+  }, [cancelPrompt]);
+
+  useEffect(() => {
+    const reveal = (stageIdx: number, key: keyof Stage, ms: number) =>
+      setTimeout(
+        () =>
+          setStages((prev) =>
+            prev.map((s, i) => (i === stageIdx ? { ...s, [key]: true } : s)),
+          ),
+        ms,
+      );
+
+    const timers = [
+      // hardcoded rnw for testing
+      reveal(0, "text", 2000),
+      reveal(0, "check", 3000),
+      reveal(1, "text", 5000),
+      reveal(1, "check", 6000),
+      reveal(2, "text", 7000),
+      reveal(2, "check", 8000),
+    ];
+
+    // fills to 100 over 10 s; pauses while cancel prompt is open
+    const interval = setInterval(() => {
+      if (!pausedRef.current) {
+        setProgress((p) => {
+          const next = Math.min(100, p + 1);
+          if (next === 100 && !completedRef.current) {
+            completedRef.current = true;
+            setTimeout(onComplete, 400);
+          }
+          return next;
+        });
+      }
+    }, 100);
+
+    return () => {
+      timers.forEach(clearTimeout);
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
+      <div className="w-full max-w-2xl">
+        {STAGE_LABELS.map((label, i) => (
+          <div
+            key={label}
+            className={`text-4xl font-bold italic text-white transition-opacity duration-500 leading-snug
+                            ${stages[i].text ? "opacity-100" : "opacity-0"}`}
+          >
+            {label}...{" "}
+            <span
+              className={`transition-opacity duration-500 ${stages[i].check ? "opacity-100" : "opacity-0"}`}
+            >
+              [√]
+            </span>
+          </div>
+        ))}
+
+        {/* progress bar */}
+        <div className="mt-8 w-full bg-white/30 rounded-full h-6 overflow-hidden">
+          <div
+            className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
+        {/* cancel */}
+        <div className="mt-4">
+          {!cancelPrompt ? (
+            <button
+              onClick={() => setCancelPrompt(true)}
+              className="text-white/50 text-sm hover:text-white cursor-pointer"
+            >
+              cancel
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 text-sm text-white">
+              <span> are you sure? </span>
+              <button
+                onClick={onBack}
+                className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
+              >
+                yes
+              </button>
+              <button
+                onClick={() => setCancelPrompt(false)}
+                className="px-3 py-1 border border-white/40 text-white rounded-lg hover:opacity-90 cursor-pointer"
+              >
+                no
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <button
+            onClick={() => setLogsOpen((o) => !o)}
+            className="text-white/60 text-sm hover:text-white cursor-pointer select-none"
+          >
+            {logsOpen ? "v" : ">"} view logs
+          </button>
+          {logsOpen && (
+            <div className="mt-2  bg-[#1D3335] rounded-xl h-32 w-full" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
