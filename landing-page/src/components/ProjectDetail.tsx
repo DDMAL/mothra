@@ -35,6 +35,7 @@ export default function ProjectDetail({
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
   const [usedImageNames, setUsedImageNames] = useState<string[]>([]);
   const [usedModelNames, setUsedModelNames] = useState<string[]>([]);
+  const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -85,6 +86,7 @@ export default function ProjectDetail({
         setModelRenameModal(null);
         setSelectedModelIds(new Set());
         setLastSelectedModelIdx(null);
+        setQuickLookId(null);
       }
       if (
         e.key === "Delete" &&
@@ -162,7 +164,7 @@ export default function ProjectDetail({
     const results: { name: string; src: string }[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 1.5 });
+      const viewport = page.getViewport({ scale: 300 / 72 });
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
@@ -743,6 +745,14 @@ export default function ProjectDetail({
             <button
               className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
               onClick={() => {
+                setQuickLookId(imageMenu!.id);
+                setImageMenu(null);
+              }}>
+              Quick Look
+            </button>
+            <button
+              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+              onClick={() => {
                 const img = project.images.find((i) => i.id === imageMenu!.id);
                 if (img && !usedImageNames.includes(img.name)) {
                   setUsedImageNames((prev) => [...prev, img.name]);
@@ -855,6 +865,61 @@ export default function ProjectDetail({
         </>
       )}
 
+      {quickLookId && (() => {
+        const img = project.images.find((i) => i.id === quickLookId)!;
+        const isUsed = usedImageNames.includes(img.name);
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/60"
+              onClick={() => setQuickLookId(null)}
+            />
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
+                {/* × close button */}
+                <button
+                  onClick={() => setQuickLookId(null)}
+                  className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer"
+                >
+                  ×
+                </button>
+                {/* image */}
+                <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
+                  {img.src
+                    ? <img src={img.src} alt={img.name} className="object-contain max-h-[60vh] w-full" />
+                    : <span className="text-white/40 text-sm py-16">{img.name}</span>
+                  }
+                </div>
+                {/* action buttons */}
+                <div className="flex gap-3 justify-center">
+                  {!isUsed && (
+                    <button
+                      onClick={() => {
+                        setUsedImageNames((prev) => [...prev, img.name]);
+                        setValidationError(null);
+                        setQuickLookId(null);
+                      }}
+                      className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
+                    >
+                      Use Image
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      deleteImage(quickLookId);
+                      setQuickLookId(null);
+                    }}
+                    className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
+                  >
+                    Delete Image
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+      
       {/* model rename modal */}
       {modelRenameModal && (
         <>
