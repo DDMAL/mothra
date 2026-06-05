@@ -9,6 +9,7 @@ import ProjectDetail from "./components/ProjectDetail";
 import About from "./components/About";
 import ProcessingPage from "./components/workflow/ProcessingPage";
 import CompletionPage from "./components/workflow/CompletionPage";
+import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 
 type View =
   | "landing"
@@ -18,7 +19,12 @@ type View =
   | "projects"
   | "project"
   | "processing"
-  | "completion";
+  | "completion"
+  | "ic"
+  | "ic-processing"
+  | "ic-completion"
+  | "encoding-processing"
+  | "encoding-completion";
 
 export interface ProjectImage {
   id: string;
@@ -30,10 +36,19 @@ export interface Project {
   user: string;
   images: ProjectImage[];
   models: ProjectModel[];
+  annotations: AnnotationSet[];
 }
 export interface ProjectModel {
   id: string;
   name: string;
+}
+
+export interface AnnotationSet {
+  id: string;
+  imageName: string;
+  imageSrc?: string;
+  jsonName: string;
+  txtName: string;
 }
 
 export default function App() {
@@ -48,6 +63,7 @@ export default function App() {
         { id: "3", name: "image 3" },
       ],
       models: [],
+      annotations: []
     },
     {
       name: "project beta",
@@ -57,6 +73,7 @@ export default function App() {
         name: `image ${i + 1}`,
       })),
       models: [],
+      annotations: []
     },
   ]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -135,12 +152,22 @@ export default function App() {
         <ProjectDetail
           project={projects.find((p) => p.name === selectedProject)!}
           onBack={() => setView("projects")}
-          onContinue={() => setView("processing")}
+          onContinue={() => {
+            if (stepsUnlocked >= 3) window.open("https://ddmal.ca/Neon/", "_blank");
+            else if (stepsUnlocked >= 2) setView("ic-completion");
+            else if (stepsUnlocked >= 1) setView("ic");
+            else setView("processing");
+          }}
           onUpdateProject={(updated) =>
             setProjects((prev) =>
               prev.map((p) => (p.name === updated.name ? updated : p)),
             )
           }
+          onStepClick={(step) => {
+            if (step === 1) setView("ic");
+            else if (step === 2) setView("ic-completion");
+            else if (step === 3) window.open("https://ddmal.ca/Neon/");
+          }}
           usedNames={usedNames}
           onUsedNamesChange={setUsedNames}
           stepsUnlocked={stepsUnlocked}
@@ -153,7 +180,53 @@ export default function App() {
             setView("completion");
           }} />
       ) : view === "completion" ? (
-        <CompletionPage onContinue={() => setView("project")} />
+        <CompletionPage
+          onContinue={() => setView("ic")}
+          onBackToProject={() => setView("project")}
+          logsFileName="annotatorlogs.txt" />
+      ) : view === "ic" && selectedProject ? (
+          <InteractiveClassifier
+            images={
+              projects
+                .find((p) => p.name === selectedProject)!
+                .images.filter((img) => usedNames.images.includes(img.name))
+            }
+            onProcessAll={() => setView("ic-processing")}
+          />
+      ) : view === "ic-processing" ? (
+          <ProcessingPage
+            onBack={() => setView("ic")}
+            onComplete={() => {
+              setStepsUnlocked((s) => Math.max(s, 2));
+              setView("ic-completion");
+            }}
+            singleLabel="classifying all pages"
+            intervalMs={60}
+            completionDelayMs={4000}/>
+      ) : view === "ic-completion" ? (
+          <CompletionPage
+            description="all images successfully classified!"
+            continueLabel="let's encode"
+            logsFileName="iclogs.txt"
+            onContinue={() => setView("encoding-processing")}
+            onBackToProject={() => setView("project")} />
+      ) : view === "encoding-processing" ? (
+          <ProcessingPage
+            onBack={() => setView("ic-completion")}
+            onComplete={() => {
+              setStepsUnlocked((s) => Math.max(s, 3));
+              setView("encoding-completion");
+            }}
+            singleLabel="processing"
+            intervalMs={60}
+            completionDelayMs={4000} />
+      ) : view === "encoding-completion" ? (
+        <CompletionPage
+          description="encoding successfully completed"
+          continueLabel="correction"
+          continueHref="https://ddmal.ca/Neon/"
+          logsFileName="encodinglogs.txt"
+          onBackToProject={() => setView("project")} />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}

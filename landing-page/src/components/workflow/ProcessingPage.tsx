@@ -8,6 +8,9 @@ interface Stage {
 interface ProcessingPageProps {
   onBack: () => void;
   onComplete: () => void;
+  singleLabel?: string;
+  intervalMs?: number;
+  completionDelayMs?: number;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -15,7 +18,11 @@ const STAGE_LABELS = ["checking", "validating", "processing"];
 export default function ProcessingPage({
   onBack,
   onComplete,
+  singleLabel,
+  intervalMs = 100,
+  completionDelayMs = 400,
 }: ProcessingPageProps) {
+  const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stages, setStages] = useState<Stage[]>([
     { text: false, check: false },
@@ -41,7 +48,7 @@ export default function ProcessingPage({
         ms,
       );
 
-    const timers = [
+    const timers = singleLabel ? [] : [
       // hardcoded rnw for testing
       reveal(0, "text", 2000),
       reveal(0, "check", 3000),
@@ -58,12 +65,13 @@ export default function ProcessingPage({
           const next = Math.min(100, p + 1);
           if (next === 100 && !completedRef.current) {
             completedRef.current = true;
-            setTimeout(onComplete, 400);
+            if (singleLabel) setDone(true);
+            setTimeout(onComplete, completionDelayMs);
           }
           return next;
         });
       }
-    }, 100);
+    }, intervalMs);
 
     return () => {
       timers.forEach(clearTimeout);
@@ -74,7 +82,14 @@ export default function ProcessingPage({
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
       <div className="w-full max-w-2xl">
-        {STAGE_LABELS.map((label, i) => (
+
+        {singleLabel ? (
+          <div className="text-4xl font-bold italic text-white leading-snug">
+            {singleLabel}...{" "}
+            <span className={`transition-opacity duration-500 ${done ? "opacity-100" : "opacity-0"}`}>[√]</span>
+          </div>
+        ) : (
+          STAGE_LABELS.map((label, i) => (
           <div
             key={label}
             className={`text-4xl font-bold italic text-white transition-opacity duration-500 leading-snug
@@ -87,7 +102,8 @@ export default function ProcessingPage({
               [√]
             </span>
           </div>
-        ))}
+          ))
+        )}
 
         {/* progress bar */}
         <div className="mt-8 w-full bg-white/30 rounded-full h-6 overflow-hidden">

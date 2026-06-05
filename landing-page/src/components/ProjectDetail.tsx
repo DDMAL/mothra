@@ -23,6 +23,7 @@ interface ProjectDetailProps {
   usedNames: { images: string[]; models: string[] };
   onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
   stepsUnlocked: number;
+  onStepClick: (step: number) => void;
 }
 
 export default function ProjectDetail({
@@ -33,6 +34,7 @@ export default function ProjectDetail({
   usedNames,
   onUsedNamesChange,
   stepsUnlocked,
+  onStepClick,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations"
@@ -254,7 +256,7 @@ export default function ProjectDetail({
               <button
                 key={stepNum}
                 disabled={!unlocked}
-                onClick={() => {}}
+                onClick={() => onStepClick(stepNum)}
                 className={`text-left text-sm px-3 py-2 rounded-xl transition-opacity ${
                   unlocked
                     ? "text-white hover:bg-white/10 cursor-pointer"
@@ -287,14 +289,14 @@ export default function ProjectDetail({
               >
                 + new image
               </button>
-            ) : (
+            ) : activeTab === "models" ? (
               <button
                 onClick={() => mdlSection.setUploadModal(true)}
                 className="ml-4 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer"
               >
                 + upload model
               </button>
-            )}
+            ) : null}
 
             {activeTab === "images" && imgSection.selectedIds.size > 0 && (
               <>
@@ -596,8 +598,41 @@ export default function ProjectDetail({
             )}
 
             {activeTab === "annotations" && (
-              <div className="flex-1 flex items-center justify-center text-white/40 text-sm italic">
-                annotations coming soon!
+              <div className="mt-6">
+                {project.annotations.length === 0 ? (
+                  <p className="text-white/70 text-sm">no annotations yet</p>
+                ) : (
+                  <div className="grid grid-cols-5 gap-4">
+                    {project.annotations.map((set) => (
+                      <div key={set.id} className="flex flex-col gap-2">
+                        <div className="relative aspect-square">
+                          {/* bottom: txt */}
+                          <div className="absolute inset-0 translate-x-2 translate-y-2 bg-[#C8E6E3]/25 rounded-xl flex items-end justify-start p-2">
+                            <span className="text-[10px] text-white/50 font-mono">.txt</span>
+                          </div>
+                          {/* middle: json */}
+                          <div className="absolute inset-0 translate-x-1 translate-y-1 bg-[#C8E6E3]/35 rounded-xl flex items-end justify-start p-2">
+                            <span className="text-[10px] text-white/60 font-mono">.json</span>
+                          </div>
+                          {/* top: image */}
+                          <div className="absolute inset-0 bg-[#C8E6E3]/50 rounded-xl overflow-hidden flex items-end justify-start p-2">
+                            {set.imageSrc && (
+                              <img
+                                src={set.imageSrc}
+                                alt={set.imageName}
+                                className="absolute inset-0 w-full h-full object-cover opacity-60"
+                              />
+                            )}
+                            <span className="relative text-[10px] text-white/80 font-mono z-10">.png</span>
+                          </div>
+                        </div>
+                        <span className="text-sm text-white truncate">
+                          {set.imageName.replace(/\.[^.]+$/, "")}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -608,18 +643,22 @@ export default function ProjectDetail({
         <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
           <button
             onClick={() => {
-              if (usedNames.models.length === 0) {
-                setValidationError("must select at least one model!");
-              } else if (usedNames.images.length === 0) {
-                setValidationError("must select at least one image!");
-              } else {
+              if (stepsUnlocked === 0) {
+                if (usedNames.models.length === 0) {
+                  setValidationError("must select at least one model!");
+                  return;
+                }
+                if (usedNames.images.length === 0) {
+                  setValidationError("must select at least one image!");
+                  return;
+                }
                 setValidationError(null);
-                onContinue();
               }
+              onContinue();
             }}
             className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
           >
-            continue &rarr;
+            {stepsUnlocked === 0 ? "begin" : "continue"} &rarr;
           </button>
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
             <span className="text-white/80">selected:</span>

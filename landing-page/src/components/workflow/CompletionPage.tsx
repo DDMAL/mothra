@@ -1,14 +1,26 @@
 interface CompletionPageProps {
-  onContinue: () => void;
+  onContinue?: () => void;
+  continueHref?: string;
+  onBackToProject: () => void;
+  description?: string;
+  continueLabel?: string;
+  logsFileName?: string;
 }
 
-export default function CompletionPage({ onContinue }: CompletionPageProps) {
+export default function CompletionPage({
+  onContinue,
+  continueHref,
+  onBackToProject,
+  description = "images have successfully been normalized and initially annotated",
+  continueLabel = "continue to IC",
+  logsFileName,
+}: CompletionPageProps) {
   const handleDownloadLogs = () => {
     const blob = new Blob([""], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "logs.txt";
+    a.download = logsFileName!;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -17,22 +29,42 @@ export default function CompletionPage({ onContinue }: CompletionPageProps) {
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48 relative">
       <div className="flex flex-col items-center gap-6">
         <h1 className="text-5xl font-bold italic text-white">ta-da!</h1>
-        <p className="text-xl text-[#1D3335]">
-          images have successfully been normalized and initially annotated
-        </p>
-        <button
-          onClick={onContinue}
-          className="mt-2 px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
-        >
-          continue to IC
-        </button>
+        <p className="text-xl text-[#1D3335]">{description}</p>
+        <p className="text-sm text-white/70 -mt-3">progress saved</p>
+        <div className="flex items-center gap-4">
+          {continueHref ? (
+            <a
+              href={continueHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+            >
+              {continueLabel}
+            </a>
+          ) : (
+            <button
+              onClick={onContinue}
+              className="px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+            >
+              {continueLabel}
+            </button>
+          )}
+          <button
+            onClick={onBackToProject}
+            className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+          >
+            back to project
+          </button>
+        </div>
       </div>
-      <button
-        onClick={handleDownloadLogs}
-        className="absolute bottom-8 left-8 text-white/60 text-sm hover:text-white cursor-pointer"
-      >
-        &gt; download logs.txt
-      </button>
+      {logsFileName && (
+        <button
+          onClick={handleDownloadLogs}
+          className="absolute bottom-8 left-8 text-white/60 text-sm hover:text-white cursor-pointer"
+        >
+          &gt; download {logsFileName}
+        </button>
+      )}
     </div>
   );
 }
