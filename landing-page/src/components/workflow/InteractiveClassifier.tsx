@@ -12,6 +12,19 @@ export default function InteractiveClassifier({
 }: InteractiveClassifierProps) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
+
+  const markProcessed = () => {
+    const next = new Set(processedIds);
+    next.add(images[currentIdx].id);
+    setProcessedIds(next);
+    for (let i = currentIdx + 1; i < images.length; i++) {
+      if (!next.has(images[i].id)) { setCurrentIdx(i); return; }
+    }
+    for (let i = 0; i < currentIdx; i++) {
+      if (!next.has(images[i].id)) { setCurrentIdx(i); return; }
+    }
+  };
 
   const img = images[currentIdx];
 
@@ -100,46 +113,61 @@ export default function InteractiveClassifier({
           )}
         </div>
 
-        {/* filmstrip */}
+        {/* filmstrip + mark button */}
 
         {images.length > 0 && (
-          <div className="flex items-center justify-center gap-3 px-6 pb-6">
+          <div className="flex items-center px-6 pb-6 gap-4">
             <button
-              onClick={() => setCurrentIdx((i) => i - 1)}
-              disabled={currentIdx === 0}
-              className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
+              onClick={markProcessed}
+              disabled={processedIds.has(images[currentIdx].id)}
+              className="px-4 py-2 border-2 border-white text-white text-sm rounded-xl hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
             >
-              &lt;
+              {processedIds.has(images[currentIdx].id) ? "processed [√]" : "mark image as processed"}
             </button>
-            {visibleImages.map((thumb, i) => {
-              const globalIdx = start + i;
-              const active = globalIdx === currentIdx;
-              return (
-                <button
-                  key={thumb.id}
-                  onClick={() => setCurrentIdx(globalIdx)}
-                  className={`w-16 aspect-square rounded-lg overflow-hidden flex-shrink-0 cursor-pointer transition-all
-                                    ${active ? "ring-2 ring-white ring-offset-2 ring-offset-[#1D3335]" : "opacity-50 hover:opacity-80"}`}
-                >
-                  {thumb.src ? (
-                    <img
-                      src={thumb.src}
-                      alt={thumb.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-[#2A4A4D]" />
-                  )}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setCurrentIdx((i) => i + 1)}
-              disabled={currentIdx === images.length - 1}
-              className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
-            >
-              &gt;
-            </button>
+            <div className="flex-1 flex items-center justify-center gap-3">
+              <button
+                onClick={() => setCurrentIdx((i) => i - 1)}
+                disabled={currentIdx === 0}
+                className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
+              >
+                &lt;
+              </button>
+              {visibleImages.map((thumb, i) => {
+                const globalIdx = start + i;
+                const active = globalIdx === currentIdx;
+                const processed = processedIds.has(thumb.id);
+                return (
+                  <button
+                    key={thumb.id}
+                    onClick={() => setCurrentIdx(globalIdx)}
+                    className={`relative w-16 aspect-square rounded-lg overflow-hidden flex-shrink-0 cursor-pointer transition-all
+                      ${active ? "ring-2 ring-white ring-offset-2 ring-offset-[#1D3335]" : "opacity-50 hover:opacity-80"}`}
+                  >
+                    {thumb.src ? (
+                      <img
+                        src={thumb.src}
+                        alt={thumb.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-[#2A4A4D]" />
+                    )}
+                    {processed && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <span className="text-white text-lg font-bold">[√]</span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setCurrentIdx((i) => i + 1)}
+                disabled={currentIdx === images.length - 1}
+                className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
+              >
+                &gt;
+              </button>
+            </div>
           </div>
         )}
       </div>

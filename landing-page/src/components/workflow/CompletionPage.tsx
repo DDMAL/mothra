@@ -11,7 +11,7 @@ export default function CompletionPage({
   onContinue,
   continueHref,
   onBackToProject,
-  description = "images have successfully been normalized and initially annotated",
+  description = "images have successfully been normalized and initially annotated. you can now view annotations on the project page!",
   continueLabel = "continue to IC",
   logsFileName,
 }: CompletionPageProps) {

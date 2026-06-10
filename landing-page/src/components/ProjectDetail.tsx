@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Project, ProjectModel } from "../App";
+import type { Project, ProjectModel, MeiFile } from "../App";
 import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import * as pdfjsLib from "pdfjs-dist";
@@ -37,7 +37,7 @@ export default function ProjectDetail({
   onStepClick,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations"
+    "images" | "models" | "annotations" | "mei produced"
   >("images");
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
@@ -48,11 +48,15 @@ export default function ProjectDetail({
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
+  const meiSection = useAssetSection(project.meiFiles);
+  
+  const [meiLookId, setMeiLookId] = useState<string | null>(null);
 
-  const switchTab = (tab: "images" | "models" | "annotations") => {
+  const switchTab = (tab: "images" | "models" | "annotations" | "mei produced") => {
     setActiveTab(tab);
     imgSection.clearSelection();
     mdlSection.clearSelection();
+    meiSection.clearSelection();
     imgSection.setPage(0);
     mdlSection.setPage(0);
   };
@@ -61,6 +65,7 @@ export default function ProjectDetail({
     "images",
     "models",
     ...(stepsUnlocked >= 1 ? ["annotations"] : []),
+    ...(stepsUnlocked >= 3 ? ["mei produced"] : []),
   ] as const;
 
   useEffect(() => {
@@ -72,6 +77,9 @@ export default function ProjectDetail({
         mdlSection.setMenu(null);
         mdlSection.setRenameModal(null);
         mdlSection.clearSelection();
+        meiSection.setMenu(null);
+        meiSection.clearSelection();
+        setMeiLookId(null);
         setQuickLookId(null);
       }
       if (
@@ -223,6 +231,16 @@ export default function ProjectDetail({
     mdlSection.setDragging(false);
   };
 
+  const handleExportMei = (file: MeiFile) => {
+    const blob = new Blob([file.xmlContent ?? ""], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const totalImagePages = Math.ceil(project.images.length / ITEMS_PER_PAGE);
   const pagedImages = project.images.slice(
     imgSection.page * ITEMS_PER_PAGE,
@@ -233,6 +251,12 @@ export default function ProjectDetail({
   const pagedModels = project.models.slice(
     mdlSection.page * ITEMS_PER_PAGE,
     (mdlSection.page + 1) * ITEMS_PER_PAGE,
+  );
+
+  const totalMeiPages = Math.ceil(project.meiFiles.length / ITEMS_PER_PAGE);
+  const pagedMei = project.meiFiles.slice(
+    meiSection.page * ITEMS_PER_PAGE,
+    (meiSection.page + 1) * ITEMS_PER_PAGE,
   );
 
   return (
@@ -635,31 +659,108 @@ export default function ProjectDetail({
                 )}
               </div>
             )}
+
+
+            {activeTab === "mei produced" && (
+              <div className="mt-6" onClick={() => meiSection.clearSelection()}>
+                {project.meiFiles.length === 0 ? (
+                  <p className="text-white/70 text-sm"> no mei files yet </p>
+                ) : (
+                  <>
+                    <div
+                      className="grid grid-cols-5 gap-4"
+                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                    >
+                      {pagedMei.map((file, pageIdx) => {
+                        const idx = meiSection.page * ITEMS_PER_PAGE + pageIdx;
+                        const selected = meiSection.selectedIds.has(file.id);
+                        return (
+                        <div key={file.id} className="flex flex-col gap-2">
+                          <div
+                            className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer transition-shadow
+                              ${selected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
+                            onClick={(e) => meiSection.handleClick(e, file.id, idx)}
+                          >
+                            <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
+                              <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
+                              <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
+                            </svg>
+                          </div>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-sm text-white truncate">{file.name}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                meiSection.setMenu({ id: file.id, x: e.clientX, y: e.clientY });
+                              }}
+                              className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0">
+                                ⋮
+                            </button>
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                    {totalMeiPages > 1 && (
+                      <div className="flex items-center justify-center gap-4 mt-6 text-white text-sm">
+                        <button
+                          onClick={() => meiSection.setPage((p) => p - 1 )}
+                          disabled={meiSection.page === 0}
+                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer">
+                            ←
+                        </button>
+                        <span>page {meiSection.page + 1} of {totalMeiPages}</span>
+                        <button
+                          onClick={() => meiSection.setPage((p) => p + 1)}
+                          disabled = {meiSection.page === totalMeiPages - 1}
+                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer">
+                          →
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                </div>
+            )}
           </div>
         </div>
         {/* end left column */}
 
         {/* right sidebar */}
         <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
-          <button
-            onClick={() => {
-              if (stepsUnlocked === 0) {
-                if (usedNames.models.length === 0) {
-                  setValidationError("must select at least one model!");
-                  return;
+          {meiSection.selectedIds.size > 0 ? (
+            <button
+              onClick={() => {
+                imgSection.clearSelection();
+                mdlSection.clearSelection();
+                meiSection.clearSelection();
+              }}
+              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+            >
+              send to cantus ultimus &rarr;
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (stepsUnlocked === 0) {
+                  if (usedNames.models.length === 0) {
+                    setValidationError("must select at least one model!");
+                    return;
+                  }
+                  if (usedNames.images.length === 0) {
+                    setValidationError("must select at least one image!");
+                    return;
+                  }
+                  setValidationError(null);
                 }
-                if (usedNames.images.length === 0) {
-                  setValidationError("must select at least one image!");
-                  return;
-                }
-                setValidationError(null);
-              }
-              onContinue();
-            }}
-            className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
-          >
-            {stepsUnlocked === 0 ? "begin" : "continue"} &rarr;
-          </button>
+                onContinue();
+              }}
+              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+            >
+              {stepsUnlocked === 0 ? "begin" : "continue"} &rarr;
+            </button>
+          )}
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
             <span className="text-white/80">selected:</span>
             {usedNames.models.map((name) => (
@@ -816,6 +917,35 @@ export default function ProjectDetail({
         </>
       )}
 
+      {meiSection.menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => meiSection.setMenu(null)}/>
+          <div
+            className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
+            style={{ top: meiSection.menu.y + 8, left: meiSection.menu.x - 80 }}>
+              <button
+                className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+                onClick={() => {
+                  setMeiLookId(meiSection.menu!.id);
+                  meiSection.setMenu(null);
+                }}>
+                  View
+              </button>
+              <button
+                className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+                onClick={() => {
+                  const file = project.meiFiles.find((f) => f.id === meiSection.menu!.id)!;
+                  handleExportMei(file);
+                  meiSection.setMenu(null);
+                }}>
+                  Export
+              </button>
+          </div>
+        </>
+      )}
+
       {/* rename modals */}
       {imgSection.renameModal && (
         <RenameModal
@@ -900,6 +1030,37 @@ export default function ProjectDetail({
           );
         })()}
 
+
+      {meiLookId && (() => {
+        const file = project.meiFiles.find((f) => f.id === meiLookId)!;
+        return (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/60"
+              onClick={() => setMeiLookId(null)} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
+                <button
+                  onClick={() => setMeiLookId(null)}
+                  className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer">
+                    ×
+                </button>
+                <p className="text-white font-mono text-sm">{file.name}</p>
+                <pre className="text-white/80 text-xs font-mono overflow-auto max-h-[60vh] whitespace-pre-wrap bg-black/20 rounded-xl p-4">
+                  {file.xmlContent ?? "(no content)"}
+                </pre>
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => handleExportMei(file)}
+                    className="px-5 py-2 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
+                      export
+                    </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
       {/* image upload modal */}
       {imgSection.uploadModal && (
         <>

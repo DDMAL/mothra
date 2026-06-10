@@ -37,6 +37,7 @@ export interface Project {
   images: ProjectImage[];
   models: ProjectModel[];
   annotations: AnnotationSet[];
+  meiFiles: MeiFile[];
 }
 export interface ProjectModel {
   id: string;
@@ -51,6 +52,12 @@ export interface AnnotationSet {
   txtName: string;
 }
 
+export interface MeiFile {
+  id: string;
+  name: string;
+  xmlContent?: string;
+}
+
 export default function App() {
   const [view, setView] = useState<View>("landing");
   const [projects, setProjects] = useState<Project[]>([
@@ -63,7 +70,8 @@ export default function App() {
         { id: "3", name: "image 3" },
       ],
       models: [],
-      annotations: []
+      annotations: [],
+      meiFiles: []
     },
     {
       name: "project beta",
@@ -73,7 +81,8 @@ export default function App() {
         name: `image ${i + 1}`,
       })),
       models: [],
-      annotations: []
+      annotations: [],
+      meiFiles: []
     },
   ]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -222,7 +231,7 @@ export default function App() {
             completionDelayMs={4000} />
       ) : view === "encoding-completion" ? (
         <CompletionPage
-          description="encoding successfully completed"
+          description="encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."
           continueLabel="correction"
           continueHref="https://ddmal.ca/Neon/"
           logsFileName="encodinglogs.txt"
