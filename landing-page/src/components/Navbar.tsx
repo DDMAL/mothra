@@ -8,6 +8,7 @@ interface NavbarProps {
   loggedIn?: boolean;
   onLogout?: () => void;
   onHome?: () => void;
+  onDocs?: () => void;
 }
 
 export default function Navbar({
@@ -18,6 +19,7 @@ export default function Navbar({
   loggedIn,
   onLogout,
   onHome,
+  onDocs,
 }: NavbarProps) {
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -42,7 +44,7 @@ export default function Navbar({
         </a>
         <a
           href="#"
-          onClick={(e) => e.preventDefault()}
+          onClick={(e) => { e.preventDefault(); onDocs?.(); }}
           className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
         >
           documentation / walkthrough

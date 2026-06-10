@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Project, ProjectModel, MeiFile } from "../App";
 import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
+import DeleteProjectModal from "./DeleteProjectModal";
 import * as pdfjsLib from "pdfjs-dist";
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -24,6 +25,8 @@ interface ProjectDetailProps {
   onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
+  onSendToCantus: () => void;
+  onRenameProject: (newName: string) => void;
 }
 
 export default function ProjectDetail({
@@ -35,9 +38,11 @@ export default function ProjectDetail({
   onUsedNamesChange,
   stepsUnlocked,
   onStepClick,
+  onSendToCantus,
+  onRenameProject,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei produced"
+    "images" | "models" | "annotations" | "mei files"
   >("images");
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
@@ -51,9 +56,15 @@ export default function ProjectDetail({
   const meiSection = useAssetSection(project.meiFiles);
   
   const [meiLookId, setMeiLookId] = useState<string | null>(null);
+  const [meiSubTab, setMeiSubTab] = useState<"mei produced" | "mei corrected">("mei produced");
+  const [projectMenu, setProjectMenu] = useState(false);
+  const [projectRenameModal, setProjectRenameModal] = useState(false);
+  const [projectRenameName, setProjectRenameName] = useState("");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const switchTab = (tab: "images" | "models" | "annotations" | "mei produced") => {
+  const switchTab = (tab: "images" | "models" | "annotations" | "mei files") => {
     setActiveTab(tab);
+    setMeiSubTab("mei produced");
     imgSection.clearSelection();
     mdlSection.clearSelection();
     meiSection.clearSelection();
@@ -61,11 +72,17 @@ export default function ProjectDetail({
     mdlSection.setPage(0);
   };
 
+  const switchMeiSubTab = (tab: "mei produced" | "mei corrected") => {
+    setMeiSubTab(tab);
+    meiSection.clearSelection();
+    meiSection.setPage(0);
+  }
+
   const tabs = [
     "images",
     "models",
     ...(stepsUnlocked >= 1 ? ["annotations"] : []),
-    ...(stepsUnlocked >= 3 ? ["mei produced"] : []),
+    ...(stepsUnlocked >= 3 ? ["mei files"] : []),
   ] as const;
 
   useEffect(() => {
@@ -253,8 +270,11 @@ export default function ProjectDetail({
     (mdlSection.page + 1) * ITEMS_PER_PAGE,
   );
 
-  const totalMeiPages = Math.ceil(project.meiFiles.length / ITEMS_PER_PAGE);
-  const pagedMei = project.meiFiles.slice(
+  const meiProduced = project.meiFiles.filter(f => !f.corrected);
+  const meiCorrected = project.meiFiles.filter(f => !!f.corrected);
+  const activeMeiFiles = meiSubTab === "mei produced" ? meiProduced : meiCorrected;
+  const totalMeiPages = Math.ceil(activeMeiFiles.length / ITEMS_PER_PAGE);
+  const pagedMei = activeMeiFiles.slice(
     meiSection.page * ITEMS_PER_PAGE,
     (meiSection.page + 1) * ITEMS_PER_PAGE,
   );
@@ -305,6 +325,40 @@ export default function ProjectDetail({
             <h1 className="text-4xl font-bold italic text-white">
               {project.name}
             </h1>
+            <div className="relative">
+              <button
+                onClick={() => setProjectMenu((v) => !v)}
+                className="text-white text-2xl hover:opacity-70 cursor-pointer leading-none"
+              >
+                ⋮
+              </button>
+              {projectMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setProjectMenu(false)} />
+                  <div className="absolute z-50 top-full left-0 mt-1 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-1 min-w-[160px]">
+                    <button
+                      onClick={() => {
+                        setProjectRenameName(project.name);
+                        setProjectRenameModal(true);
+                        setProjectMenu(false);
+                      }}
+                      className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+                    >
+                      rename
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowDeleteModal(true);
+                        setProjectMenu(false);
+                      }}
+                      className="text-sm text-red-500 text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+                    >
+                      delete project
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
 
             {activeTab === "images" ? (
               <button
@@ -410,7 +464,7 @@ export default function ProjectDetail({
                 <button
                   key={tab}
                   onClick={() =>
-                    switchTab(tab as "images" | "models" | "annotations")
+                    switchTab(tab as "images" | "models" | "annotations" | "mei files")
                   }
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
@@ -661,10 +715,24 @@ export default function ProjectDetail({
             )}
 
 
-            {activeTab === "mei produced" && (
+            {activeTab === "mei files" && (
               <div className="mt-6" onClick={() => meiSection.clearSelection()}>
-                {project.meiFiles.length === 0 ? (
-                  <p className="text-white/70 text-sm"> no mei files yet </p>
+                <div className="flex gap-2 mb-4">
+                  {(["mei produced", "mei corrected"] as const).map((sub) => (
+                    <button
+                      key={sub}
+                      onClick={(e) => { e.stopPropagation(); switchMeiSubTab(sub); }}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer
+                        ${meiSubTab === sub ? "bg-white text-[#4AADAA]" : "text-white/60 hover:text-white/90"}`}
+                    >
+                      {sub}
+                    </button>
+                  ))}
+                </div>
+                {activeMeiFiles.length === 0 ? (
+                  <p className="text-white/70 text-sm">
+                    {meiSubTab === "mei produced" ? "no mei files yet" : "no corrected mei files yet"}
+                  </p>
                 ) : (
                   <>
                     <div
@@ -675,53 +743,56 @@ export default function ProjectDetail({
                         const idx = meiSection.page * ITEMS_PER_PAGE + pageIdx;
                         const selected = meiSection.selectedIds.has(file.id);
                         return (
-                        <div key={file.id} className="flex flex-col gap-2">
-                          <div
-                            className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer transition-shadow
-                              ${selected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
-                            onClick={(e) => meiSection.handleClick(e, file.id, idx)}
-                          >
-                            <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
-                              <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
-                              <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
-                            </svg>
-                          </div>
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-sm text-white truncate">{file.name}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                meiSection.setMenu({ id: file.id, x: e.clientX, y: e.clientY });
-                              }}
-                              className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0">
+                          <div key={file.id} className="flex flex-col gap-2">
+                            <div
+                              className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer transition-shadow
+                                ${selected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
+                              onClick={(e) => meiSection.handleClick(e, file.id, idx)}
+                            >
+                              <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
+                                <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
+                                <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
+                              </svg>
+                            </div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-sm text-white truncate">{file.name}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  meiSection.setMenu({ id: file.id, x: e.clientX, y: e.clientY });
+                                }}
+                                className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
+                              >
                                 ⋮
-                            </button>
+                              </button>
+                            </div>
                           </div>
-                        </div>
                         );
                       })}
                     </div>
                     {totalMeiPages > 1 && (
                       <div className="flex items-center justify-center gap-4 mt-6 text-white text-sm">
                         <button
-                          onClick={() => meiSection.setPage((p) => p - 1 )}
+                          onClick={() => meiSection.setPage((p) => p - 1)}
                           disabled={meiSection.page === 0}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer">
-                            ←
+                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
+                        >
+                          ←
                         </button>
                         <span>page {meiSection.page + 1} of {totalMeiPages}</span>
                         <button
                           onClick={() => meiSection.setPage((p) => p + 1)}
-                          disabled = {meiSection.page === totalMeiPages - 1}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer">
+                          disabled={meiSection.page === totalMeiPages - 1}
+                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
+                        >
                           →
                         </button>
                       </div>
                     )}
                   </>
                 )}
-                </div>
+              </div>
             )}
           </div>
         </div>
@@ -729,12 +800,13 @@ export default function ProjectDetail({
 
         {/* right sidebar */}
         <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
-          {meiSection.selectedIds.size > 0 ? (
+          {meiSection.selectedIds.size > 0 && meiSubTab === "mei corrected" ? (
             <button
               onClick={() => {
                 imgSection.clearSelection();
                 mdlSection.clearSelection();
                 meiSection.clearSelection();
+                onSendToCantus();
               }}
               className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
             >
@@ -963,6 +1035,28 @@ export default function ProjectDetail({
           onChange={mdlSection.setRenameName}
           onSubmit={renameModel}
           onClose={() => mdlSection.setRenameModal(null)}
+        />
+      )}
+      {projectRenameModal && (
+        <RenameModal
+          label="project"
+          value={projectRenameName}
+          onChange={setProjectRenameName}
+          onSubmit={() => {
+            onRenameProject(projectRenameName.trim() || project.name);
+            setProjectRenameModal(false);
+          }}
+          onClose={() => setProjectRenameModal(false)}
+        />
+      )}
+      {showDeleteModal && (
+        <DeleteProjectModal
+          project={project}
+          onConfirm={() => {
+            onUpdateProject({ ...project, deletedAt: Date.now() });
+            onBack();
+          }}
+          onCancel={() => setShowDeleteModal(false)}
         />
       )}
 

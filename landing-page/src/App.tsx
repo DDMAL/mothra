@@ -10,12 +10,14 @@ import About from "./components/About";
 import ProcessingPage from "./components/workflow/ProcessingPage";
 import CompletionPage from "./components/workflow/CompletionPage";
 import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
+import Documentation from "./components/documentation/Documentation";
 
 type View =
   | "landing"
   | "about"
   | "login"
   | "register"
+  | "docs"
   | "projects"
   | "project"
   | "processing"
@@ -24,7 +26,9 @@ type View =
   | "ic-processing"
   | "ic-completion"
   | "encoding-processing"
-  | "encoding-completion";
+  | "encoding-completion"
+  | "sending"
+  | "send-completion";
 
 export interface ProjectImage {
   id: string;
@@ -38,6 +42,7 @@ export interface Project {
   models: ProjectModel[];
   annotations: AnnotationSet[];
   meiFiles: MeiFile[];
+  deletedAt?: number;
 }
 export interface ProjectModel {
   id: string;
@@ -56,6 +61,7 @@ export interface MeiFile {
   id: string;
   name: string;
   xmlContent?: string;
+  corrected?: boolean;
 }
 
 export default function App() {
@@ -137,13 +143,14 @@ export default function App() {
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
         onAbout={() => setView("about")}
+        onDocs={() => setView("docs")}
         loggedIn={view === "projects" || view === "project"}
         onHome={() => setView("landing")}
         onLogout={() => setView("landing")}
       />
       {view === "landing" ? (
         <main>
-          <Hero onGetStarted={() => setView("register")} />
+          <Hero onGetStarted={() => setView("register")} onViewWalkthrough={() => setView("docs")} />
           <Features />
         </main>
       ) : view === "about" ? (
@@ -176,6 +183,13 @@ export default function App() {
             if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
             else if (step === 3) window.open("https://ddmal.ca/Neon/");
+          }}
+          onSendToCantus={() => setView("sending")}
+          onRenameProject={(newName) => {
+            setProjects((prev) =>
+              prev.map((p) => (p.name === selectedProject ? { ...p, name: newName } : p)),
+            );
+            setSelectedProject(newName);
           }}
           usedNames={usedNames}
           onUsedNamesChange={setUsedNames}
@@ -236,6 +250,24 @@ export default function App() {
           continueHref="https://ddmal.ca/Neon/"
           logsFileName="encodinglogs.txt"
           onBackToProject={() => setView("project")} />
+      ) : view === "sending" ? (
+        <ProcessingPage 
+          onBack={() => setView("project")}
+          onComplete={() => setView("send-completion")}
+          singleLabel="sending..."
+          intervalMs={60}
+          completionDelayMs={4000}
+          />
+      ) : view === "send-completion" ? (
+        <CompletionPage
+          description="voila, sent to cantus ultimus!"
+          logsFileName="sendlogs.txt"
+          continueHref="https://cantus.simssa.ca/"
+          continueLabel="view on cantus ultimus"
+          onBackToProject={() => setView("project")}
+        />
+      ) : view === "docs" ? (
+        <Documentation onHome={() => setView("landing")} />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}
