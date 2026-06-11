@@ -17,7 +17,7 @@ import base64
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -67,6 +67,7 @@ class StaveBbox:
     uly: int
     lrx: int
     lry: int
+    line_ys: list[float] = field(default_factory=list)
 
     @property
     def cy(self) -> float:
@@ -209,12 +210,15 @@ def estimate_staves_from_glyphs(
     pad = max(5, int(avg_h * 0.3))
     staves = []
     for i, row in enumerate(rows):
+        h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
+        est_uly = max(0, min(g.uly for g in row) - pad)
         staves.append(StaveBbox(
             id=f"auto-{i}",
             ulx=max(0, min(g.ulx for g in row) - pad),
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
+            line_ys=[est_uly + h * i / 3 for i in range(4)],
         ))
     return staves
 
@@ -276,6 +280,7 @@ def _staves_from_staff_lines(
             uly=max(0, top_y - pad),
             lrx=min(page_w, max(g.lrx for g in cluster)),
             lry=min(page_h, bot_y + pad),
+            line_ys=sorted(g.cy for g in cluster),
         ))
     return staves
 
@@ -283,34 +288,35 @@ def _staves_from_staff_lines(
 class _NcSpec:
     tilt: str = ""       # "" plain | "n" virga stem | "se" inclinatum diamond
     quilisma: bool = False
+    y_fraction: float = 0.5
 
 # Ordered nc specs per neume type (one entry = one note component).
 # Ichiro appends variant codes (e.g. "clivis2a") — _nc_specs_for strips them.
 _NEUME_NC_MAP: dict[str, list[_NcSpec]] = {
     # ── single-note ────────────────────────────────────────────────────────
-    "punctum":              [_NcSpec()],
-    "virga":                [_NcSpec(tilt="n")],
-    "quilisma":             [_NcSpec(quilisma=True)],
-    "inclinatum":           [_NcSpec(tilt="se")],
-    "oriscus":              [_NcSpec()],
+    "punctum":              [_NcSpec(y_fraction=0.5)],
+    "virga":                [_NcSpec(tilt="n", y_fraction=0.5)],
+    "quilisma":             [_NcSpec(quilisma=True, y_fraction=0.5)],
+    "inclinatum":           [_NcSpec(tilt="se", y_fraction=0.5)],
+    "oriscus":              [_NcSpec(y_fraction=0.5)],
     # ── two-note ───────────────────────────────────────────────────────────
-    "podatus":              [_NcSpec(), _NcSpec()],          # ascending (= pes)
-    "pes":                  [_NcSpec(), _NcSpec()],
-    "clivis":               [_NcSpec(), _NcSpec()],          # descending
-    "distropha":            [_NcSpec(), _NcSpec()],
-    "bivirga":              [_NcSpec(tilt="n"), _NcSpec(tilt="n")],
+    "podatus":              [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],          # ascending (= pes)
+    "pes":                  [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "clivis":               [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],          # descending
+    "distropha":            [_NcSpec(y_fraction=0.4), _NcSpec(y_fraction=0.6)],
+    "bivirga":              [_NcSpec(tilt="n", y_fraction=0.4), _NcSpec(tilt="n", y_fraction=0.6)],
     # ── three-note ─────────────────────────────────────────────────────────
-    "torculus":             [_NcSpec(), _NcSpec(), _NcSpec()],
-    "porrectus":            [_NcSpec(), _NcSpec(), _NcSpec()],
-    "scandicus":            [_NcSpec(), _NcSpec(), _NcSpec(tilt="n")],
-    "climacus":             [_NcSpec(), _NcSpec(tilt="se"), _NcSpec(tilt="se")],
-    "tristropha":           [_NcSpec(), _NcSpec(), _NcSpec()],
-    "trivirga":             [_NcSpec(tilt="n"), _NcSpec(tilt="n"), _NcSpec(tilt="n")],
+    "torculus":             [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
+    "porrectus":            [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "scandicus":            [_NcSpec(y_fraction=0.83), _NcSpec(y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.17)],
+    "climacus":             [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83)],
+    "tristropha":           [_NcSpec(y_fraction=0.33), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.67)],
+    "trivirga":             [_NcSpec(tilt="n", y_fraction=0.33), _NcSpec(tilt="n", y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.67)],
     # ── four-note ──────────────────────────────────────────────────────────
-    "torculusresupinus":    [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
-    "porrectusflexus":      [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
-    "scandicusflexus":      [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
-    "climacusresupinus":    [_NcSpec(), _NcSpec(tilt="se"), _NcSpec(tilt="se"), _NcSpec()],
+    "torculusresupinus":    [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "porrectusflexus":      [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
+    "scandicusflexus":      [_NcSpec(y_fraction=0.8), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.2), _NcSpec(y_fraction=0.5)],
+    "climacusresupinus":    [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83), _NcSpec(y_fraction=0.5)],
 }
 
 _NEUME_PREFIXES = ("neume--", "neume.", "neume_", "neume/")
@@ -330,6 +336,30 @@ def _nc_specs_for(class_name: str) -> list[_NcSpec]:
     base = re.sub(r"\d+[a-z]?$", "", name).strip("_.-")
     return _NEUME_NC_MAP.get(name) or _NEUME_NC_MAP.get(base) or [_NcSpec()]
 
+_PITCH_NOTES = ["c", "d", "e", "f", "g", "a", "b"]
+
+def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tuple[str, str]:
+    """Diatonic step offset from clef note → (pname, oct).
+    Positive step = below clef (lower pitch); negative = above (higher pitch).
+    """
+    clef_abs = clef_oct * 7 + _PITCH_NOTES.index(clef_note)
+    note_abs = clef_abs - step
+    return _PITCH_NOTES[note_abs % 7], str(note_abs // 7)
+
+def _nc_pitch(nc_cy: float, line_ys: list[float], clef_line: int = 3) -> tuple[str, str]:
+    """Return (pname, oct) for a note at nc_cy given staff line Y positions.
+
+    line_ys must be sorted ascending (smallest Y = top of image = highest pitch).
+    Falls back to ("a", "3") when line data is unavailable.
+    """
+    if len(line_ys) < 2:
+        return "a", "3"
+    spacings = [line_ys[i+1] - line_ys[i] for i in range(len(line_ys) - 1)]
+    line_spacing = sum(spacings) / len(spacings)
+    clef_idx = len(line_ys) - clef_line
+    clef_y = line_ys[clef_idx]
+    step = round((nc_cy - clef_y) / (line_spacing / 2))
+    return _pitch_from_step(step)
 
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
@@ -478,13 +508,17 @@ def build_mei(
                     XML_ID: f"neume-{glyph.id}",
                     "facs": f"#z-{glyph.id}",
                 })
+                stave = staves[stave_idx] if stave_idx < len(staves) else None
+                line_ys = stave.line_ys if stave else []
                 for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
+                    nc_cy = glyph.uly + spec.y_fraction * glyph.nrows
+                    pname, oct_str = _nc_pitch(nc_cy, line_ys)
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
                         "facs": f"#z-{glyph.id}",
-                        "pname": "a",
-                        "oct": "3",
+                        "pname": pname,
+                        "oct": oct_str,
                     }
                     if spec.tilt:
                         nc_attrs["tilt"] = spec.tilt
