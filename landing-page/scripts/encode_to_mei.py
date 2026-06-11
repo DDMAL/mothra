@@ -15,6 +15,7 @@ Usage:
 import argparse
 import base64
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -278,6 +279,58 @@ def _staves_from_staff_lines(
         ))
     return staves
 
+@dataclass
+class _NcSpec:
+    tilt: str = ""       # "" plain | "n" virga stem | "se" inclinatum diamond
+    quilisma: bool = False
+
+# Ordered nc specs per neume type (one entry = one note component).
+# Ichiro appends variant codes (e.g. "clivis2a") — _nc_specs_for strips them.
+_NEUME_NC_MAP: dict[str, list[_NcSpec]] = {
+    # ── single-note ────────────────────────────────────────────────────────
+    "punctum":              [_NcSpec()],
+    "virga":                [_NcSpec(tilt="n")],
+    "quilisma":             [_NcSpec(quilisma=True)],
+    "inclinatum":           [_NcSpec(tilt="se")],
+    "oriscus":              [_NcSpec()],
+    # ── two-note ───────────────────────────────────────────────────────────
+    "podatus":              [_NcSpec(), _NcSpec()],          # ascending (= pes)
+    "pes":                  [_NcSpec(), _NcSpec()],
+    "clivis":               [_NcSpec(), _NcSpec()],          # descending
+    "distropha":            [_NcSpec(), _NcSpec()],
+    "bivirga":              [_NcSpec(tilt="n"), _NcSpec(tilt="n")],
+    # ── three-note ─────────────────────────────────────────────────────────
+    "torculus":             [_NcSpec(), _NcSpec(), _NcSpec()],
+    "porrectus":            [_NcSpec(), _NcSpec(), _NcSpec()],
+    "scandicus":            [_NcSpec(), _NcSpec(), _NcSpec(tilt="n")],
+    "climacus":             [_NcSpec(), _NcSpec(tilt="se"), _NcSpec(tilt="se")],
+    "tristropha":           [_NcSpec(), _NcSpec(), _NcSpec()],
+    "trivirga":             [_NcSpec(tilt="n"), _NcSpec(tilt="n"), _NcSpec(tilt="n")],
+    # ── four-note ──────────────────────────────────────────────────────────
+    "torculusresupinus":    [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
+    "porrectusflexus":      [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
+    "scandicusflexus":      [_NcSpec(), _NcSpec(), _NcSpec(), _NcSpec()],
+    "climacusresupinus":    [_NcSpec(), _NcSpec(tilt="se"), _NcSpec(tilt="se"), _NcSpec()],
+}
+
+_NEUME_PREFIXES = ("neume--", "neume.", "neume_", "neume/")
+
+def _nc_specs_for(class_name: str) -> list[_NcSpec]:
+    """Map an Ichiro class name to an ordered list of nc specs.
+
+    Handles prefixes ("neume.", "neume--") and variant suffixes ("clivis2a" → "clivis").
+    Falls back to a single plain nc for unknown types.
+    """
+    name = class_name.lower().strip()
+    for prefix in _NEUME_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    # Strip trailing variant code: digits + optional letter ("2a", "3b", "1")
+    base = re.sub(r"\d+[a-z]?$", "", name).strip("_.-")
+    return _NEUME_NC_MAP.get(name) or _NEUME_NC_MAP.get(base) or [_NcSpec()]
+
+
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
 
@@ -319,8 +372,9 @@ def build_mei(
         "height": f"{image_h}px",
     })
 
-    # stave zones (used by <staff @facs>)
+    # stave zones (used by <sb @facs>) + clef zones (used by <clef @facs>)
     stave_zone_ids: dict[int, str] = {}
+    clef_zone_ids: dict[int, str] = {}
     for i, stave in enumerate(staves):
         zone_id = f"sz-{stave.id}"
         ET.SubElement(surface, _tag("zone"), {
@@ -332,6 +386,17 @@ def build_mei(
             "lry": str(stave.lry),
         })
         stave_zone_ids[i] = zone_id
+        # Clef zone: left edge of stave, roughly square (height ≈ staff height)
+        clef_zone_id = f"cz-{stave.id}"
+        stave_h = max(stave.lry - stave.uly, 1)
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: clef_zone_id,
+            "ulx": str(stave.ulx),
+            "uly": str(stave.uly),
+            "lrx": str(stave.ulx + stave_h),
+            "lry": str(stave.lry),
+        })
+        clef_zone_ids[i] = clef_zone_id
 
     all_glyphs = [g for idx in sorted(glyphs_by_stave) for g in glyphs_by_stave[idx]]
     for glyph in all_glyphs:
@@ -388,13 +453,16 @@ def build_mei(
         if stave_idx in stave_zone_ids:
             sb_attrs["facs"] = f"#{zone_id}"
         ET.SubElement(layer, _tag("sb"), sb_attrs)
-        # Clef must follow each <sb> so Verovio has a reference frame per stave
+        # Clef must follow each <sb>; @facs anchors it to the stave's left edge
         clef_id = str(uuid.uuid4()).replace("-", "")[:12]
-        ET.SubElement(layer, _tag("clef"), {
+        clef_attrs: dict[str, str] = {
             XML_ID: f"clef-{clef_id}",
             "shape": "C",
             "line": "3",
-        })
+        }
+        if stave_idx in clef_zone_ids:
+            clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
+        ET.SubElement(layer, _tag("clef"), clef_attrs)
         neume_glyphs = [g for g in staff_glyphs
                         if g.nrows > 0 and g.ncols / g.nrows < 8]
         for cluster in cluster_into_syllables(neume_glyphs):
@@ -410,12 +478,19 @@ def build_mei(
                     XML_ID: f"neume-{glyph.id}",
                     "facs": f"#z-{glyph.id}",
                 })
-                ET.SubElement(neume, _tag("nc"), {
-                    XML_ID: f"nc-{glyph.id}",
-                    "facs": f"#z-{glyph.id}",
-                    "pname": "a",
-                    "oct": "3",
-                })
+                for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
+                    nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
+                    nc_attrs: dict[str, str] = {
+                        XML_ID: f"nc-{nc_id}",
+                        "facs": f"#z-{glyph.id}",
+                        "pname": "a",
+                        "oct": "3",
+                    }
+                    if spec.tilt:
+                        nc_attrs["tilt"] = spec.tilt
+                    if spec.quilisma:
+                        nc_attrs["quilisma"] = "true"
+                    ET.SubElement(neume, _tag("nc"), nc_attrs)
     
     ET.indent(mei, space=" ")
     xml_model_pi = (
