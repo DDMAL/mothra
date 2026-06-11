@@ -159,35 +159,42 @@ def cluster_into_syllables(glyphs: list[Glyph]) -> list[list[Glyph]]:
 def estimate_staves_from_glyphs(
     glyphs: list[Glyph], page_w: int, page_h: int
 ) -> list[StaveBbox]:
-    """Cluster glyphs by Y-center into approximate stave bounding boxes.
+    """Estimate stave bounding boxes from GameraXML glyphs.
 
-    GameraXML typically includes detected staff lines (very wide, very short
-    glyphs with ncols/nrows >> 1) alongside actual neumes. Staff lines shift
-    avg_h down and appear as bridging glyphs between rows in the sorted-cy
-    sequence, collapsing all rows into one cluster.
+    Primary strategy: cluster the detected staff lines (wide, flat glyphs with
+    aspect ratio ≥ 8 spanning >20% of page width).  These are highly reliable
+    stave anchors and are unaffected by text characters that fill inter-stave
+    gaps and cause the neume-Y-clustering approach to collapse all staves into
+    one.
 
-    Fix: exclude staff-line-like glyphs (aspect ratio ≥ 8) from avg_h
-    calculation and from clustering. Use consecutive-gap comparison on the
-    sorted cy sequence: a gap > 1.5× avg neume height reliably falls between
-    rows while staying below the ~79 px neume-only inter-row gap.
+    Fallback: if too few staff lines are available, cluster neume-like glyphs
+    by Y-center gap (original approach with tighter outlier filtering).
     """
     if not glyphs:
         return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)]
 
-    # Staff lines have ncols >> nrows (ratio ≥ 8); neumes are roughly square.
-    # Exclude them so they don't distort avg_h or bridge inter-row gaps.
+    # ── Strategy 1: use staff line glyphs ──────────────────────────────────
+    # Staff lines span most of the page width and have ncols >> nrows.
+    min_line_width = page_w * 0.2
+    staff_lines = [
+        g for g in glyphs
+        if g.nrows > 0 and g.ncols / g.nrows >= 8 and g.ncols >= min_line_width
+    ]
+
+    if len(staff_lines) >= 4:
+        staves = _staves_from_staff_lines(staff_lines, page_w, page_h)
+        if staves:
+            return staves
+
+    # ── Strategy 2: neume Y-gap clustering (fallback) ──────────────────────
     neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
     if not neume_like:
         neume_like = glyphs
 
     avg_h = median(g.nrows for g in neume_like)
+    # Tighter outlier cutoff (×2 instead of ×3) reduces bridging by tall glyphs.
+    representative = [g for g in neume_like if g.nrows <= avg_h * 2] or neume_like
 
-    # Also drop very tall outliers (large initials, decorations).
-    representative = [g for g in neume_like if g.nrows <= avg_h * 3] or neume_like
-
-    # Sort and split on CONSECUTIVE cy gaps.
-    # Within a row these gaps are ≲ 44 px; between rows they are ≳ 79 px
-    # (neume-only), so 1.5 × avg_h ≈ 72 px cleanly separates them.
     sorted_glyphs = sorted(representative, key=lambda g: g.cy)
     gap_threshold = avg_h * 1.5
 
@@ -207,6 +214,67 @@ def estimate_staves_from_glyphs(
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
+        ))
+    return staves
+
+
+def _staves_from_staff_lines(
+    staff_lines: list[Glyph], page_w: int, page_h: int
+) -> list[StaveBbox]:
+    """Build stave bboxes from clustered staff line glyphs."""
+    sorted_lines = sorted(staff_lines, key=lambda g: g.cy)
+
+    # Estimate typical intra-stave line spacing from the smaller half of gaps.
+    gaps_in_order = [
+        sorted_lines[i].cy - sorted_lines[i - 1].cy
+        for i in range(1, len(sorted_lines))
+    ]
+    small_gaps = sorted(gaps_in_order)[: max(1, len(gaps_in_order) // 2)]
+    typical_spacing = median(small_gaps)
+    inter_stave_threshold = max(typical_spacing * 2.5, typical_spacing + 20)
+
+    # First-pass: split into clusters at inter-stave gaps.
+    clusters: list[list[Glyph]] = [[sorted_lines[0]]]
+    for i in range(1, len(sorted_lines)):
+        if gaps_in_order[i - 1] > inter_stave_threshold:
+            clusters.append([sorted_lines[i]])
+        else:
+            clusters[-1].append(sorted_lines[i])
+
+    # Second-pass: split any oversized cluster (likely two staves merged).
+    # A stave normally has ≤5 detected lines; more implies a merge.
+    split_clusters: list[list[Glyph]] = []
+    for cluster in clusters:
+        if len(cluster) <= 5:
+            split_clusters.append(cluster)
+            continue
+        c_sorted = sorted(cluster, key=lambda g: g.cy)
+        c_gaps = [(c_sorted[i].cy - c_sorted[i - 1].cy, i)
+                  for i in range(1, len(c_sorted))]
+        # Split at the largest intra-cluster gap if it's notably bigger than typical.
+        split_gap, split_idx = max(c_gaps, key=lambda x: x[0])
+        if split_gap > typical_spacing * 1.8:
+            split_clusters.append(c_sorted[:split_idx])
+            split_clusters.append(c_sorted[split_idx:])
+        else:
+            split_clusters.append(cluster)
+
+    # Build bboxes: pad above/below so neumes that sit on the staff are included.
+    staves = []
+    for i, cluster in enumerate(split_clusters):
+        if not cluster:
+            continue
+        top_y = min(g.uly for g in cluster)
+        bot_y = max(g.lry for g in cluster)
+        # Tight bounds: half a line-spacing above and below the outermost staff lines.
+        # Verovio derives glyph size from zone height; excess padding makes neumes too large.
+        pad = max(5, int(typical_spacing * 0.5))
+        staves.append(StaveBbox(
+            id=f"auto-{i}",
+            ulx=max(0, min(g.ulx for g in cluster)),
+            uly=max(0, top_y - pad),
+            lrx=min(page_w, max(g.lrx for g in cluster)),
+            lry=min(page_h, bot_y + pad),
         ))
     return staves
 
@@ -237,7 +305,7 @@ def build_mei(
     music = ET.SubElement(mei, _tag("music"))
 
     #fac simile
-    facsimile = ET.SubElement(music, _tag("facsimile"))
+    facsimile = ET.SubElement(music, _tag("facsimile"), {"type": "transcription"})
     surface = ET.SubElement(facsimile, _tag("surface"), {
         XML_ID: "surface-0001",
         "ulx": "0",
@@ -304,6 +372,11 @@ def build_mei(
         XML_ID: f"layer-{layer_id}",
         "n": "1",
     })
+    pb_id = str(uuid.uuid4()).replace("-", "")[:12]
+    ET.SubElement(layer, _tag("pb"), {
+        XML_ID: f"pb-{pb_id}",
+        "facs": "#surface-0001",
+    })
 
     for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
         staff_glyphs = glyphs_by_stave[stave_idx]
@@ -322,7 +395,9 @@ def build_mei(
             "shape": "C",
             "line": "3",
         })
-        for cluster in cluster_into_syllables(staff_glyphs):
+        neume_glyphs = [g for g in staff_glyphs
+                        if g.nrows > 0 and g.ncols / g.nrows < 8]
+        for cluster in cluster_into_syllables(neume_glyphs):
             syllable_id = cluster[0].id
             syllable = ET.SubElement(layer, _tag("syllable"), {
                 XML_ID: f"syllable-{syllable_id}",
@@ -337,12 +412,19 @@ def build_mei(
                 })
                 ET.SubElement(neume, _tag("nc"), {
                     XML_ID: f"nc-{glyph.id}",
+                    "facs": f"#z-{glyph.id}",
                     "pname": "a",
                     "oct": "3",
                 })
     
     ET.indent(mei, space=" ")
-    xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(mei, encoding="unicode")
+    xml_model_pi = (
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
+    )
+    xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_model_pi + ET.tostring(mei, encoding="unicode")
     return xml_str.encode("utf-8")
 
 REQUIRED_MEI_VERSION = "5.0.0-dev"
@@ -356,6 +438,25 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
         warnings.append(
             f"meiversion='{version}' — Neon requires '{REQUIRED_MEI_VERSION}' (schema will report INVALID)"
         )
+
+    facsimiles = list(root.iter(_tag("facsimile")))
+    for fac in facsimiles:
+        if fac.get("type") != "transcription":
+            warnings.append(
+                "facsimile missing @type='transcription' — Verovio won't apply pixel coordinate conversion"
+            )
+
+    layers = list(root.iter(_tag("layer")))
+    for layer in layers:
+        children = list(layer)
+        if not children or children[0].tag != _tag("pb"):
+            warnings.append(
+                "layer must start with <pb> before any <sb> — required by Neon's ConvertMei.ts"
+            )
+        pbs = [c for c in children if c.tag == _tag("pb")]
+        for pb in pbs:
+            if not pb.get("facs"):
+                warnings.append("pb missing @facs pointing to <surface>")
 
     zones: dict[str, str] = {}
     for zone in root.iter(_tag("zone")):
@@ -419,9 +520,10 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
             warnings.append("neume missing xml:id")
         check_facs(neume, f"neume {nid or '?'}")
 
-    #nc: xml:id + pname + oct
+    # nc: xml:id + facs + pname + oct
     for nc in root.iter(_tag("nc")):
         ncid = nc.get(XML_ID, "")
+        check_facs(nc, f"nc {ncid or '?'}")
         for attr in ("pname", "oct"):
             if not nc.get(attr):
                 warnings.append(f"nc {ncid or '?'}: missing @{attr}")
