@@ -33,3 +33,7 @@ mothra/.claude/
 
 #dependencies
 landing-page/node_modules
+landing-page/scripts/.venv
+
+#mock files
+landing-page/scripts/mock_data

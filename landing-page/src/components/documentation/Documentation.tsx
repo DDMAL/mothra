@@ -38,11 +38,14 @@ export default function Documentation({ onHome: _onHome }: DocumentationProps) {
     function navigate(sec: DocSection, target?: string) {
         setSection(sec);
         setScrollTarget(target ?? null);
+        if (!target) {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
     }
 
     return (
         <div className="flex-1 flex bg-[#4AADAA]">
-            <aside className="w-72 shrink-0 bg-[#c5dfe0] flex flex-col py-6 px-2">
+            <aside className="w-72 shrink-0 bg-[#c5dfe0] flex flex-col py-6 px-2 sticky top-14 self-start h-[calc(100vh-3.5rem)] overflow-y-auto">
                 <nav className="flex flex-col gap-0.5 text-sm text-[#1D3335]">
                     <button
                         onClick={() => navigate("home")}

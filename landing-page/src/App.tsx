@@ -11,6 +11,7 @@ import ProcessingPage from "./components/workflow/ProcessingPage";
 import CompletionPage from "./components/workflow/CompletionPage";
 import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
+import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
 
 type View =
   | "landing"
@@ -28,7 +29,8 @@ type View =
   | "encoding-processing"
   | "encoding-completion"
   | "sending"
-  | "send-completion";
+  | "send-completion"
+  | "neon-test";
 
 export interface ProjectImage {
   id: string;
@@ -97,7 +99,81 @@ export default function App() {
     models: string[];
   }>({ images: [], models: [] });
   const [stepsUnlocked, setStepsUnlocked] = useState(0);
+  const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
+  const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [neonManifest, setNeonManifest] = useState<File | null>(null);
+  const [meiContent, settleMeiContent] = useState<{ bytes: string; stem: string } | null>(null);
 
+  const handleDownloadMei = () => {
+      if (!meiContent?.bytes) return;
+      const bytes = Uint8Array.from(atob(meiContent.bytes), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${meiContent.stem}.mei`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+  useEffect(() => {
+    if (view !== "encoding-processing") return;
+    settleMeiContent(null); 
+
+    if (pendingXmlFile) {
+      const buildForm = async () => {
+        const form = new FormData();
+        form.append("xml_file", pendingXmlFile);
+        if (pendingImageFile) {
+          const img = new Image();
+          const url = URL.createObjectURL(pendingImageFile);
+          await new Promise<void>((res) => { img.onload = () => res(); img.src = url; });
+          form.append("image_width", String(img.naturalWidth));
+          form.append("image_height", String(img.naturalHeight));
+          URL.revokeObjectURL(url);
+        }
+        return form;
+      };
+      buildForm().then((form) =>
+      fetch("/api/encode-upload", { method: "POST", body: form }))
+        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then((data) => {
+          setNeonManifest(data.manifest ?? null);
+          setEncodingLogs(data.logs ?? []);
+          settleMeiContent({ bytes: data.mei_base64, stem: pendingXmlFile.name.replace(".xml", "")});
+
+          const xmlBytes = Uint8Array.from(atob(data.mei_base64), (c) => c.charCodeAt(0));
+          const xmlText = new TextDecoder().decode(xmlBytes);
+          const stem = pendingXmlFile.name.replace(".xml", "");
+          const newMeiFile: MeiFile = {
+            id: crypto.randomUUID(),
+            name: `${stem}.mei`,
+            xmlContent: xmlText,
+            corrected: false,
+          };
+          setProjects((prev) => 
+            prev.map((p) => 
+              p.name === selectedProject
+                ? { ...p, meiFiles: [...p.meiFiles, newMeiFile]} 
+                : p,
+            ),
+          );
+        })
+        .catch((err) => console.error("Encoding failed:", err));
+    } else {
+      // mock fallback
+      fetch("/api/encode", { method: "POST"})
+        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then((data) => {
+          setNeonManifest(data.manifest ?? null);
+          setEncodingLogs(data.logs ?? []);
+        })
+        .catch((err) => console.error("encoding failed:", err));
+    }
+  }, [view]);
+  
+  
   useEffect(() => {
     if (view !== "landing" && view !== "about") {
       document
@@ -125,6 +201,7 @@ export default function App() {
       },
       { threshold: 0.1 },
     );
+
 
     document
       .querySelectorAll(".scroll-fade")
@@ -227,12 +304,14 @@ export default function App() {
             intervalMs={60}
             completionDelayMs={4000}/>
       ) : view === "ic-completion" ? (
-          <CompletionPage
-            description="all images successfully classified!"
-            continueLabel="let's encode"
-            logsFileName="iclogs.txt"
+          <IcCompletionTestPage
             onContinue={() => setView("encoding-processing")}
-            onBackToProject={() => setView("project")} />
+            onBackToProject={() => setView("project")}
+            logsFileName="iclogs.txt"
+            xmlFile={pendingXmlFile}
+            onXmlFileChange={setPendingXmlFile}
+            imageFile={pendingImageFile}
+            onImageFileChange={setPendingImageFile} />
       ) : view === "encoding-processing" ? (
           <ProcessingPage
             onBack={() => setView("ic-completion")}
@@ -242,14 +321,16 @@ export default function App() {
             }}
             singleLabel="processing"
             intervalMs={60}
-            completionDelayMs={4000} />
+            completionDelayMs={4000}
+            logs={encodingLogs} />
       ) : view === "encoding-completion" ? (
         <CompletionPage
           description="encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."
           continueLabel="correction"
           continueHref="https://ddmal.ca/Neon/"
           logsFileName="encodinglogs.txt"
-          onBackToProject={() => setView("project")} />
+          onBackToProject={() => setView("project")}
+          onDownloadMei={meiContent ? handleDownloadMei : undefined} />
       ) : view === "sending" ? (
         <ProcessingPage 
           onBack={() => setView("project")}

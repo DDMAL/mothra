@@ -13,7 +13,11 @@
       "Read(//tmp/**)",
       "Bash(conda run *)",
       "Bash(find /Users/kyriebouressa/Documents/muscrat -name \"inference_simple.py\" 2>/dev/null)",
-      "Read(//Users/kyriebouressa/Documents/muscrat/**)"
+      "Read(//Users/kyriebouressa/Documents/muscrat/**)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Skill(deep-research)",
+      "Skill(deep-research:*)"
     ]
   }
 }
