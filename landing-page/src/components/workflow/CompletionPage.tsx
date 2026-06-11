@@ -5,8 +5,8 @@ interface CompletionPageProps {
   description?: string;
   continueLabel?: string;
   logsFileName?: string;
-  // testing
   onDownloadMei?: () => void;
+  onDownloadManifest?: () => void;
 }
 
 export default function CompletionPage({
@@ -16,7 +16,8 @@ export default function CompletionPage({
   description = "images have successfully been normalized and initially annotated. you can now view annotations on the project page!",
   continueLabel = "continue to IC",
   logsFileName,
-  onDownloadMei
+  onDownloadMei,
+  onDownloadManifest,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
     const blob = new Blob([""], { type: "text/plain" });
@@ -73,6 +74,13 @@ export default function CompletionPage({
           onClick={onDownloadMei}
           className="absolute bottom-8 right-8 text-white/60 text-sm hover:text-white cursor-pointer">
             &gt; download mei file
+        </button>
+      )}
+      {onDownloadManifest && (
+        <button
+          onClick={onDownloadManifest}
+          className="absolute bottom-16 right-8 text-white/60 text-sm hover:text-white cursor-pointer">
+            &gt; download neon manifest
         </button>
       )}
     </div>

@@ -102,8 +102,19 @@ export default function App() {
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
-  const [neonManifest, setNeonManifest] = useState<File | null>(null);
+  const [neonManifest, setNeonManifest] = useState<Record<string, unknown> | null>(null);
   const [meiContent, settleMeiContent] = useState<{ bytes: string; stem: string } | null>(null);
+
+  const handleDownloadManifest = () => {
+    if (!neonManifest || !meiContent) return;
+    const blob = new Blob([JSON.stringify(neonManifest, null, 2)], { type: "application/ld+json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${meiContent.stem}_manifest.jsonld`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleDownloadMei = () => {
       if (!meiContent?.bytes) return;
@@ -119,24 +130,16 @@ export default function App() {
 
   useEffect(() => {
     if (view !== "encoding-processing") return;
-    settleMeiContent(null); 
+    settleMeiContent(null);
+    setNeonManifest(null);
 
     if (pendingXmlFile) {
-      const buildForm = async () => {
-        const form = new FormData();
-        form.append("xml_file", pendingXmlFile);
-        if (pendingImageFile) {
-          const img = new Image();
-          const url = URL.createObjectURL(pendingImageFile);
-          await new Promise<void>((res) => { img.onload = () => res(); img.src = url; });
-          form.append("image_width", String(img.naturalWidth));
-          form.append("image_height", String(img.naturalHeight));
-          URL.revokeObjectURL(url);
-        }
-        return form;
-      };
-      buildForm().then((form) =>
-      fetch("/api/encode-upload", { method: "POST", body: form }))
+      const form = new FormData();
+      form.append("xml_file", pendingXmlFile);
+      if (pendingImageFile) {
+        form.append("image_file", pendingImageFile);
+      }
+      fetch("/api/encode-upload", { method: "POST", body: form })
         .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then((data) => {
           setNeonManifest(data.manifest ?? null);
@@ -166,7 +169,6 @@ export default function App() {
       fetch("/api/encode", { method: "POST"})
         .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then((data) => {
-          setNeonManifest(data.manifest ?? null);
           setEncodingLogs(data.logs ?? []);
         })
         .catch((err) => console.error("encoding failed:", err));
@@ -330,7 +332,8 @@ export default function App() {
           continueHref="https://ddmal.ca/Neon/"
           logsFileName="encodinglogs.txt"
           onBackToProject={() => setView("project")}
-          onDownloadMei={meiContent ? handleDownloadMei : undefined} />
+          onDownloadMei={meiContent ? handleDownloadMei : undefined}
+          onDownloadManifest={meiContent ? handleDownloadManifest : undefined} />
       ) : view === "sending" ? (
         <ProcessingPage 
           onBack={() => setView("project")}

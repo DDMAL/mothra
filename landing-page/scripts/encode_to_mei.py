@@ -156,6 +156,60 @@ def cluster_into_syllables(glyphs: list[Glyph]) -> list[list[Glyph]]:
             clusters[-1].append(glyph)
     return clusters
 
+def estimate_staves_from_glyphs(
+    glyphs: list[Glyph], page_w: int, page_h: int
+) -> list[StaveBbox]:
+    """Cluster glyphs by Y-center into approximate stave bounding boxes.
+
+    GameraXML typically includes detected staff lines (very wide, very short
+    glyphs with ncols/nrows >> 1) alongside actual neumes. Staff lines shift
+    avg_h down and appear as bridging glyphs between rows in the sorted-cy
+    sequence, collapsing all rows into one cluster.
+
+    Fix: exclude staff-line-like glyphs (aspect ratio ≥ 8) from avg_h
+    calculation and from clustering. Use consecutive-gap comparison on the
+    sorted cy sequence: a gap > 1.5× avg neume height reliably falls between
+    rows while staying below the ~79 px neume-only inter-row gap.
+    """
+    if not glyphs:
+        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)]
+
+    # Staff lines have ncols >> nrows (ratio ≥ 8); neumes are roughly square.
+    # Exclude them so they don't distort avg_h or bridge inter-row gaps.
+    neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
+    if not neume_like:
+        neume_like = glyphs
+
+    avg_h = median(g.nrows for g in neume_like)
+
+    # Also drop very tall outliers (large initials, decorations).
+    representative = [g for g in neume_like if g.nrows <= avg_h * 3] or neume_like
+
+    # Sort and split on CONSECUTIVE cy gaps.
+    # Within a row these gaps are ≲ 44 px; between rows they are ≳ 79 px
+    # (neume-only), so 1.5 × avg_h ≈ 72 px cleanly separates them.
+    sorted_glyphs = sorted(representative, key=lambda g: g.cy)
+    gap_threshold = avg_h * 1.5
+
+    rows: list[list[Glyph]] = [[sorted_glyphs[0]]]
+    for i in range(1, len(sorted_glyphs)):
+        if sorted_glyphs[i].cy - sorted_glyphs[i - 1].cy > gap_threshold:
+            rows.append([sorted_glyphs[i]])
+        else:
+            rows[-1].append(sorted_glyphs[i])
+
+    pad = max(5, int(avg_h * 0.3))
+    staves = []
+    for i, row in enumerate(rows):
+        staves.append(StaveBbox(
+            id=f"auto-{i}",
+            ulx=max(0, min(g.ulx for g in row) - pad),
+            uly=max(0, min(g.uly for g in row) - pad),
+            lrx=min(page_w, max(g.lrx for g in row) + pad),
+            lry=min(page_h, max(g.lry for g in row) + pad),
+        ))
+    return staves
+
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
 
@@ -168,7 +222,7 @@ def build_mei(
     manuscript_name: str,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
-    mei = ET.Element(_tag("mei"), {"meiversion": "4.0.1"})
+    mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
 
     # meiHead
 
@@ -226,53 +280,166 @@ def build_mei(
     mdiv = ET.SubElement(body, _tag("mdiv"))
     score = ET.SubElement(mdiv, _tag("score"))
 
-    n_staves = max(1, len([k for k in glyphs_by_stave if k >= 0]))
+    # sb-based format: one <staffDef>, one <staff>, <sb> milestones per stave
     score_def = ET.SubElement(score, _tag("scoreDef"))
     staff_grp = ET.SubElement(score_def, _tag("staffGrp"))
-    for i in range(n_staves):
-        ET.SubElement(staff_grp, _tag("staffDef"), {
-            "n": str(i + 1),
-            "lines": "4",
-            "notationtype": "neume",
-        })
+    staff_grp_id = str(uuid.uuid4()).replace("-", "")[:12]
+    ET.SubElement(staff_grp, _tag("staffDef"), {
+        XML_ID: f"staffdef-{staff_grp_id}",
+        "n": "1",
+        "lines": "4",
+        "notationtype": "neume",
+        "clef.shape": "C",
+        "clef.line": "3",
+    })
 
     section = ET.SubElement(score, _tag("section"))
+    staff_id = str(uuid.uuid4()).replace("-", "")[:12]
+    staff_el = ET.SubElement(section, _tag("staff"), {
+        XML_ID: f"staff-{staff_id}",
+        "n": "1",
+    })
+    layer_id = str(uuid.uuid4()).replace("-", "")[:12]
+    layer = ET.SubElement(staff_el, _tag("layer"), {
+        XML_ID: f"layer-{layer_id}",
+        "n": "1",
+    })
 
-    for n, stave_idx in enumerate(sorted(k for k in glyphs_by_stave if k >= 0), start=1):
+    for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
         staff_glyphs = glyphs_by_stave[stave_idx]
         if not staff_glyphs:
             continue
-        staff_attrs: dict[str, str] = {"n": str(n)}
+        # <sb> marks the start of each stave and links it to its zone
+        zone_id = stave_zone_ids.get(stave_idx, str(stave_idx))
+        sb_attrs: dict[str, str] = {XML_ID: f"sb-{zone_id}"}
         if stave_idx in stave_zone_ids:
-            staff_attrs["facs"] = f"#{stave_zone_ids[stave_idx]}"
-        staff_el = ET.SubElement(section, _tag("staff"), staff_attrs)
-        layer = ET.SubElement(staff_el, _tag("layer"), {"n": "1"})
+            sb_attrs["facs"] = f"#{zone_id}"
+        ET.SubElement(layer, _tag("sb"), sb_attrs)
+        # Clef must follow each <sb> so Verovio has a reference frame per stave
+        clef_id = str(uuid.uuid4()).replace("-", "")[:12]
+        ET.SubElement(layer, _tag("clef"), {
+            XML_ID: f"clef-{clef_id}",
+            "shape": "C",
+            "line": "3",
+        })
         for cluster in cluster_into_syllables(staff_glyphs):
-            syllable = ET.SubElement(layer, _tag("syllable"))
-            syl = ET.SubElement(syllable, _tag("syl"))
+            syllable_id = cluster[0].id
+            syllable = ET.SubElement(layer, _tag("syllable"), {
+                XML_ID: f"syllable-{syllable_id}",
+            })
+            syl_id = str(uuid.uuid4()).replace("-", "")[:12]
+            syl = ET.SubElement(syllable, _tag("syl"), {XML_ID: f"syl-{syl_id}"})
             syl.text = "-"
             for glyph in cluster:
-                neume = ET.SubElement(syllable, _tag("neume"))
+                neume = ET.SubElement(syllable, _tag("neume"), {
+                    XML_ID: f"neume-{glyph.id}",
+                    "facs": f"#z-{glyph.id}",
+                })
                 ET.SubElement(neume, _tag("nc"), {
                     XML_ID: f"nc-{glyph.id}",
-                    "facs": f"#z-{glyph.id}",
+                    "pname": "a",
+                    "oct": "3",
                 })
     
     ET.indent(mei, space=" ")
     xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(mei, encoding="unicode")
     return xml_str.encode("utf-8")
 
-def build_neon_manifest(mei_bytes: bytes, image_path: Path, stem: str) -> dict:
+REQUIRED_MEI_VERSION = "5.0.0-dev"
+
+def validate_mei(xml_bytes: bytes) -> list[str]:
+    warnings = []
+    root = ET.fromstring(xml_bytes)
+
+    version = root.get("meiversion", "")
+    if version != REQUIRED_MEI_VERSION:
+        warnings.append(
+            f"meiversion='{version}' — Neon requires '{REQUIRED_MEI_VERSION}' (schema will report INVALID)"
+        )
+
+    zones: dict[str, str] = {}
+    for zone in root.iter(_tag("zone")):
+        zid = zone.get(XML_ID, "")
+        if zid:
+            zones[zid] = zone.get("type", "")
+    
+    def check_facs(el, label):
+        facs = el.get("facs", "")
+        if not facs:
+            warnings.append(f"{label} missing @facs")
+            return
+        ref = facs.lstrip("#")
+        if ref not in zones:
+            warnings.append(f"{label} @facs '{facs}' does not resolve to any zone")
+    
+    #zone bounding boxes
+    for zone in root.iter(_tag("zone")):
+        zid = zone.get(XML_ID, "<no-id>")
+        try:
+            ulx, uly = int(zone.get("ulx", 0)), int(zone.get("uly", 0))
+            lrx, lry = int(zone.get("lrx", 0)), int(zone.get("lry", 0))
+        except ValueError:
+            warnings.append(f"zone {zid}: non-integer coordinate")
+            continue
+        if ulx < 0 or uly < 0 or lrx < 0 or lry < 0:
+            warnings.append(f"zone {zid}: negative coordinate ({ulx}, {uly}, {lrx}, {lry})")
+        if ulx >= lrx or uly >= lry:
+            warnings.append(f"zone {zid}: degenerate bbox ({ulx}, {uly})-({lrx}, {lry})")
+
+    # sb-based: exactly one <staff>, each <sb> must resolve to a type="staff" zone
+    staves = list(root.iter(_tag("staff")))
+    if not staves:
+        warnings.append("no <staff> elements found - output is empty")
+    sbs = list(root.iter(_tag("sb")))
+    if not sbs:
+        warnings.append("no <sb> elements found - stave zones not linked")
+    for sb in sbs:
+        sbid = sb.get(XML_ID, "?")
+        facs = sb.get("facs", "")
+        ref = facs.lstrip("#")
+        if not ref:
+            warnings.append(f"sb {sbid}: missing @facs")
+        elif ref not in zones:
+            warnings.append(f"sb {sbid}: @facs '{facs}' unresolved")
+        elif zones[ref] != "staff":
+            warnings.append(f"sb {sbid}: zone '{ref}' has type='{zones[ref]}', expected 'staff'")
+
+    # syllable: xml:id required (Neon references syllables by id)
+    for syllable in root.iter(_tag("syllable")):
+        if not syllable.get(XML_ID):
+            warnings.append("syllable missing xml:id")
+
+    # neume: xml:id + facs
+    neumes = list(root.iter(_tag("neume")))
+    if not neumes:
+        warnings.append("no <neume> elements found - no glyphs encoded")
+    for neume in neumes:
+        nid = neume.get(XML_ID, "")
+        if not nid:
+            warnings.append("neume missing xml:id")
+        check_facs(neume, f"neume {nid or '?'}")
+
+    #nc: xml:id + pname + oct
+    for nc in root.iter(_tag("nc")):
+        ncid = nc.get(XML_ID, "")
+        for attr in ("pname", "oct"):
+            if not nc.get(attr):
+                warnings.append(f"nc {ncid or '?'}: missing @{attr}")
+
+    return warnings
+
+def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
     mei_b64 = base64.b64encode(mei_bytes).decode()
-    image_ref = str(image_path)
     return {
-        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/2/manifest.jsonld",
-        "@id": f"{stem}-manifest",
+        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/1/manifest.jsonld",
+        "@id": f"urn:uuid:{uuid.uuid4()}",
         "title": stem,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "image": image_ref,
         "mei_annotations": [
             {
+                "id": f"urn:uuid:{uuid.uuid4()}",
+                "type": "Annotation",
                 "body": f"data:application/mei+xml;base64,{mei_b64}",
                 "target": image_ref,
             }
@@ -309,12 +476,14 @@ def main():
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
     mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name)
+    for w in validate_mei(mei_bytes):
+        print(f"[warn] {w}", file=sys.stderr)
 
     mei_path = out_dir / f"{stem}.mei"
     mei_path.write_bytes(mei_bytes)
     print(f"MEI written: {mei_path}")
 
-    manifest = build_neon_manifest(mei_bytes, args.image.resolve(), stem)
+    manifest = build_neon_manifest(mei_bytes, str(args.image.resolve()), stem)
     manifest_path = out_dir / f"{stem}_manifest.jsonld"
     manifest_path.write_text(json.dumps(manifest, indent=2))
     print(f"Manifest written: {manifest_path}")

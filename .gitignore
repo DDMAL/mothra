@@ -22,7 +22,7 @@ training_output.log
 # Symlinks
 data/labels
 
-mothra/.claude/
+
 
 #any kind of config file
 *.yaml
@@ -37,3 +37,6 @@ landing-page/scripts/.venv
 
 #mock files
 landing-page/scripts/mock_data
+
+# Claude Code local config
+.claude/
