@@ -33,3 +33,6 @@ mothra/.claude/
 
 #dependencies
 landing-page/node_modules
+landing-page/scripts/__pycache__
+landing-page/scripts/.venv
+landing-page/scripts/mock_data
