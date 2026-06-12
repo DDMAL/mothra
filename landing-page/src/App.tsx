@@ -12,6 +12,7 @@ import CompletionPage from "./components/workflow/CompletionPage";
 import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
 import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
+import MyAccount from "./components/MyAccount";
 
 import type { CurrentUser } from "./hooks/useAuth";
 import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
@@ -21,6 +22,7 @@ type View =
   | "about"
   | "login"
   | "register"
+  | "account"
   | "docs"
   | "projects"
   | "project"
@@ -314,6 +316,7 @@ export default function App() {
         onAbout={() => setView("about")}
         onDocs={() => setView("docs")}
         onHome={() => setView("landing")}
+        onAccount={() => setView("account")}
       />
       {view === "landing" ? (
         <main>
@@ -467,6 +470,8 @@ export default function App() {
         />
       ) : view === "docs" ? (
         <Documentation onHome={() => setView("landing")} />
+      ) : view === "account" && currentUser ? (
+        <MyAccount currentUser={currentUser} />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}

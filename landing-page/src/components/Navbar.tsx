@@ -10,6 +10,7 @@ interface NavbarProps {
   onLogout?: () => void;
   onHome?: () => void;
   onDocs?: () => void;
+  onAccount?: () => void;
 }
 
 export default function Navbar({
@@ -21,6 +22,7 @@ export default function Navbar({
   onLogout,
   onHome,
   onDocs,
+  onAccount,
 }: NavbarProps) {
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -86,7 +88,7 @@ export default function Navbar({
                 />
                 <div className="absolute right-0 top-full mt-2 z-50 bg-white border border-gray-200 rounded-2xl shadow-lg py-2 min-w-[160px]">
                   <button
-                    onClick={() => setShowDropdown(false)}
+                    onClick={() => { setShowDropdown(false); onAccount?.(); }}
                     className="w-full text-left px-5 py-2.5 text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
                   >
                     my account
