@@ -269,18 +269,23 @@ def _staves_from_staff_lines(
     for i, cluster in enumerate(split_clusters):
         if not cluster:
             continue
-        top_y = min(g.uly for g in cluster)
-        bot_y = max(g.lry for g in cluster)
-        # Tight bounds: half a line-spacing above and below the outermost staff lines.
-        # Verovio derives glyph size from zone height; excess padding makes neumes too large.
+        top_y = min(g.cy for g in cluster)
+        bot_y = max(g.cy for g in cluster)
+        # Tight bounds: half a line-spacing above/below the outermost line centers.
+        # Using cy (not uly/lry) prevents line thickness from inflating the zone.
         pad = max(5, int(typical_spacing * 0.5))
+        _raw_ys = sorted(g.cy for g in cluster)
+        _deduped: list[float] = []
+        for _y in _raw_ys:
+            if not _deduped or _y - _deduped[-1] > 5:
+                _deduped.append(_y)
         staves.append(StaveBbox(
             id=f"auto-{i}",
             ulx=max(0, min(g.ulx for g in cluster)),
-            uly=max(0, top_y - pad),
+            uly=max(0, int(top_y - pad)),
             lrx=min(page_w, max(g.lrx for g in cluster)),
-            lry=min(page_h, bot_y + pad),
-            line_ys=sorted(g.cy for g in cluster),
+            lry=min(page_h, int(bot_y + pad)),
+            line_ys=_deduped,
         ))
     return staves
 
