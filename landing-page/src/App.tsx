@@ -52,6 +52,7 @@ export interface Project {
   meiFiles: MeiFile[];
   stepsUnlocked: number;
   usedImageNames: string[];
+  usedModelNames: string[];
   deletedAt?: number;
 }
 export interface ProjectModel {
@@ -160,6 +161,15 @@ export default function App() {
       body: JSON.stringify({ usedImageNames: names }),
     });
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, usedImageNames: names} : p)));
+  };
+
+  const updateUsedModelNames = async (id: number, names: string[]) => {
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json"},
+      body: JSON.stringify({ usedModelNames: names }),
+    });
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, usedModelNames: names} : p)));
   };
 
 
@@ -356,8 +366,11 @@ export default function App() {
           }}
           onSendToCantus={() => setView("sending")}
           onRenameProject={(newName) => renameProject(selectedProject.id, newName)}
-          usedNames={{ images: selectedProject.usedImageNames, models: [] }}
-          onUsedNamesChange={(names) => updateUsedImageNames(selectedProject.id, names.images )}
+          usedNames={{ images: selectedProject.usedImageNames, models: selectedProject.usedModelNames ?? [] }}
+          onUsedNamesChange={(names) => {
+            updateUsedImageNames(selectedProject.id, names.images);
+            updateUsedModelNames(selectedProject.id, names.models);
+          }}
           stepsUnlocked={selectedProject.stepsUnlocked}
           onUploadImage={async (file) => {
             const form = new FormData();

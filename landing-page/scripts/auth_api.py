@@ -42,6 +42,7 @@ def init_db():
             name TEXT NOT NULL,
             steps_unlocked INTEGER DEFAULT 0,
             used_image_names TEXT DEFAULT '[]', -- JSON array
+            used_model_names TEXT DEFAULT '[]', -- JSON array
             deleted_at TEXT
         );
         CREATE TABLE IF NOT EXISTS project_images (
@@ -66,6 +67,18 @@ def init_db():
     con.close()
 
 init_db()
+
+# migrate existing DBs that predate used_model_names
+def _migrate_db():
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("ALTER TABLE projects ADD COLUMN used_model_names TEXT DEFAULT '[]'")
+        con.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    con.close()
+
+_migrate_db()
 
 def _pre_hash(pw: str) -> str:
     return base64.b64encode(hashlib.sha256(pw.encode("utf-8")).digest()).decode()
@@ -148,7 +161,7 @@ def me(user=Depends(get_current_user)):
     return user
 
 def _project_row_to_dict(con, row, username):
-    pid, name, steps, used_json, deleted_at = row
+    pid, name, steps, used_json, used_model_json, deleted_at = row
     images = [{"id": r[0], "name": r[1]} for r in
               con.execute("SELECT id, name FROM project_images WHERE project_id=?", (pid,))]
     models = [{"id": r[0], "name": r[1]} for r in
@@ -157,7 +170,9 @@ def _project_row_to_dict(con, row, username):
            con.execute("SELECT id, name, xml_content, corrected FROM mei_files WHERE project_id=?", (pid,))]
     return {
         "id": pid, "name": name, "user": username,
-        "stepsUnlocked": steps, "usedImageNames": json.loads(used_json),
+        "stepsUnlocked": steps,
+        "usedImageNames": json.loads(used_json),
+        "usedModelNames": json.loads(used_model_json or "[]"),
         "images": images, "models": models, "meiFiles": mei,
         "annotations": [], "deletedAt": deleted_at,
     }
@@ -166,7 +181,7 @@ def _project_row_to_dict(con, row, username):
 def list_projects(user=Depends(get_current_user)):
     con = sqlite3.connect(DB_PATH)
     rows = con.execute(
-        "SELECT id, name, steps_unlocked, used_image_names, deleted_at FROM projects WHERE user_id=?",
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at FROM projects WHERE user_id=?",
         (user["id"],)
     ).fetchall()
     result=[_project_row_to_dict(con, row, user["username"]) for row in rows]
@@ -185,12 +200,13 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     con.close()
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
-            "stepsUnlocked": 0, "usedImageNames": [], "deletedAt": None}
+            "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], "deletedAt": None}
 
 class UpdateProjectBody(BaseModel):
     name: Optional[str] = None
     stepsUnlocked: Optional[int] = None
-    usedImageNames: Optional[int] = None
+    usedImageNames: Optional[list] = None
+    usedModelNames: Optional[list] = None
     deletedAt: Optional[str] = None
 
 @router.put("/projects/{project_id}")
@@ -206,6 +222,9 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
     if body.usedImageNames is not None:
         con.execute("UPDATE projects SET used_image_names=? WHERE id=?",
                     (json.dumps(body.usedImageNames), project_id))
+    if body.usedModelNames is not None:
+        con.execute("UPDATE projects SET used_model_names=? WHERE id=?",
+                    (json.dumps(body.usedModelNames), project_id))
     if body.deletedAt is not None:
         con.execute("UPDATE projects SET deleted_at=? WHERE id=?", (body.deletedAt, project_id))
     con.commit()
