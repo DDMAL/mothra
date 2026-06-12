@@ -3,6 +3,7 @@ export interface CurrentUser {
     username: string;
     email: string;
     firstName: string;
+    createdAt: string;
 }
 
 const TOKEN_KEY = "mothra_token";

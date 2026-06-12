@@ -91,12 +91,12 @@ def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="invalid token")
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
-        "SELECT id, username, email, first_name, last_name from users where id=?", (user_id,)
+        "SELECT id, username, email, first_name, last_name, created_at from users where id=?", (user_id,)
     ).fetchone()
     con.close()
     if not row:
         raise HTTPException(status_code=401, detail="user not found")
-    return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4]}
+    return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4], "createdAt": row[5]}
 
 class RegisterBody(BaseModel):
     username: str
