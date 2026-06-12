@@ -11,6 +11,7 @@ interface ProcessingPageProps {
   singleLabel?: string;
   intervalMs?: number;
   completionDelayMs?: number;
+  logs?: string[];
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -21,6 +22,7 @@ export default function ProcessingPage({
   singleLabel,
   intervalMs = 100,
   completionDelayMs = 400,
+  logs = []
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -33,6 +35,24 @@ export default function ProcessingPage({
   const [cancelPrompt, setCancelPrompt] = useState(false);
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
+  const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!logs || logs.length === 0) return;
+    const totalMs = 100 * (intervalMs ?? 100);
+    const timers = logs.map((line, i) => {
+      const delay = Math.round((totalMs / (logs.length + 1)) * (i + 1));
+      return setTimeout(() => {
+        setRevealedLogs((prev) => [...prev, line]);
+      }, delay);
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [logs]);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [revealedLogs]);
 
   useEffect(() => {
     pausedRef.current = cancelPrompt;
@@ -149,7 +169,20 @@ export default function ProcessingPage({
             {logsOpen ? "v" : ">"} view logs
           </button>
           {logsOpen && (
-            <div className="mt-2  bg-[#1D3335] rounded-xl h-32 w-full" />
+            <div className="mt-2  bg-[#1D3335] rounded-xl h-32 w-full overflow-y-auto p-3">
+              {revealedLogs.length > 0 ? (
+                <>
+                  {revealedLogs.map((line, i) => (
+                    <div key={i} className="text-white/70 text-xs font-mono leading-5">
+                      {line}
+                    </div>
+                  ))}
+                  <div ref={logEndRef} />
+                </>
+              ) : (
+                <div className="text-white/30 text-xs font-mono">waiting for logs...</div>
+              )}
+            </div>
           )}
         </div>
       </div>

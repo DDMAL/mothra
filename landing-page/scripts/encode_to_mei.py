@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+"""
+encode_to_mei.py - Convert GameraXML (output from standalone IC) + Mothra inference JSON (stave detections) into
+a pitch-less MEI-Neume file and Neon manifest JSON-LD
+
+Usage:
+    python scrupts/encode_to_mei.py \
+        --gamera-xml path/to/classified.xml \
+        --mothra-json path/to/inference_output.json \
+        --image path/to/image.jpg \
+        [--output-dir encoding-outputs/] \
+        [--manuscript "CH-Fco Ms. 2_006r"]
+"""
+
+import argparse
+import base64
+import json
+import re
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import median
+import xml.etree.ElementTree as ET
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+try:
+    from extract_ms_id import extract_manuscript_id
+except ImportError:
+    def extract_manuscript_id(filename: str) -> str:
+        return Path(filename).stem
+    
+
+MEI_NS = "http://www.music-encoding.org/ns/mei"
+XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
+STAVE_BUFFER_PX = 20
+SYLLABLE_GAP_MULTIPLIER = 1.5
+
+@dataclass
+class Glyph:
+    id: str
+    ulx: int
+    uly: int
+    ncols: int
+    nrows: int
+    class_name: str
+    confidence: float
+    state: str # MANUAL | AUTOMATIC | UNCLASSIFIEd
+
+    @property
+    def lrx(self) -> int:
+        return self.ulx + self.ncols
+    
+    @property
+    def lry(self) -> int:
+        return self.uly + self.nrows
+    
+    @property
+    def cy(self) -> float:
+        return self.uly + self.nrows / 2
+    
+@dataclass
+class StaveBbox:
+    id: str
+    ulx: int
+    uly: int
+    lrx: int
+    lry: int
+    line_ys: list[float] = field(default_factory=list)
+
+    @property
+    def cy(self) -> float:
+        return (self.uly + self.lry) / 2
+    
+def parse_gamera_xml(path: Path) -> list[Glyph]:
+    tree = ET.parse(path)
+    root = tree.getroot()
+    glyphs = []
+    for glyph_el in root.iter("glyph"):
+        ulx = int(glyph_el.get("ulx", 0))
+        uly = int(glyph_el.get("uly", 0))
+        ncols= int(glyph_el.get("ncols", 1))
+        nrows = int(glyph_el.get("nrows", 1))
+        class_name = "UNCLASSIFIED"
+        confidence = 0.0
+        state = "UNCLASSIFIED"
+        ids_el = glyph_el.find("ids")
+        if ids_el is not None:
+            state = ids_el.get("state", "UNCLASSIFIED")
+            id_el = ids_el.find("id")
+            if id_el is not None:
+                class_name = id_el.get("name", "UNCLASSIFIED")
+                confidence = float(id_el.get("confidence", 0.0))
+        glyphs.append(Glyph(
+            id=str(uuid.uuid4()).replace("-", "")[:12],
+            ulx=ulx, uly=uly, ncols=ncols, nrows=nrows,
+            class_name=class_name, confidence=confidence, state=state,
+        ))
+    return glyphs
+    
+
+def parse_staves(path: Path) -> tuple[list[StaveBbox], int, int]:
+    with open(path) as f:
+        data = json.load(f)
+    image_w = data.get("imageWidth", 0)
+    image_h = data.get("imageHeight", 0)
+    staves = []
+    for ann in data.get("annotations", []):
+        class_id = ann.get("classId", ann.get("class_id", -1))
+        # clsasId 3 = staves in annotator format, classId 2 = staves in raw YOLO format
+        if class_id not in (2, 3):
+            continue
+        x, y, w, h = ann["bbox"]
+        staves.append(StaveBbox(
+            id=str(uuid.uuid4()).replace("-", "")[:12],
+            ulx=int(x), uly=int(y),
+            lrx=int(x+w), lry=int(y+h)
+        ))
+    staves.sort(key=lambda s: s.uly)
+    return staves, image_w, image_h
+
+def assign_glyphs_to_staves(
+        glyphs: list[Glyph], staves: list[StaveBbox]
+) -> dict[int, list[Glyph]]:
+    result: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+    if not staves:
+        result[-1] = list(glyphs)
+        return result
+    for glyph in glyphs:
+        cy = glyph.cy
+        best_idx = None
+        best_overlap = -1
+        for i, stave in enumerate(staves):
+            lo = stave.uly - STAVE_BUFFER_PX
+            hi = stave.lry + STAVE_BUFFER_PX
+            if lo <= cy <= hi:
+                overlap = min(cy, hi) - max(cy, lo)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_idx = i
+        if best_idx is None:
+            best_idx = min(range(len(staves)), key=lambda i: abs(staves[i].cy - cy))
+        result[best_idx].append(glyph)
+    for idx in result:
+        result[idx].sort(key=lambda g: g.ulx)
+    return result
+
+def cluster_into_syllables(glyphs: list[Glyph]) -> list[list[Glyph]]:
+    if not glyphs:
+        return []
+    threshold = SYLLABLE_GAP_MULTIPLIER * median(g.ncols for g in glyphs)
+    clusters: list[list[Glyph]] = [[glyphs[0]]]
+    for glyph in glyphs[1:]:
+        if glyph.ulx - clusters[-1][-1].lrx > threshold:
+            clusters.append([glyph])
+        else:
+            clusters[-1].append(glyph)
+    return clusters
+
+def estimate_staves_from_glyphs(
+    glyphs: list[Glyph], page_w: int, page_h: int
+) -> list[StaveBbox]:
+    """Estimate stave bounding boxes from GameraXML glyphs.
+
+    Primary strategy: cluster the detected staff lines (wide, flat glyphs with
+    aspect ratio ≥ 8 spanning >20% of page width).  These are highly reliable
+    stave anchors and are unaffected by text characters that fill inter-stave
+    gaps and cause the neume-Y-clustering approach to collapse all staves into
+    one.
+
+    Fallback: if too few staff lines are available, cluster neume-like glyphs
+    by Y-center gap (original approach with tighter outlier filtering).
+    """
+    if not glyphs:
+        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)]
+
+    # ── Strategy 1: use staff line glyphs ──────────────────────────────────
+    # Staff lines span most of the page width and have ncols >> nrows.
+    min_line_width = page_w * 0.2
+    staff_lines = [
+        g for g in glyphs
+        if g.nrows > 0 and g.ncols / g.nrows >= 8 and g.ncols >= min_line_width
+    ]
+
+    if len(staff_lines) >= 4:
+        staves = _staves_from_staff_lines(staff_lines, page_w, page_h)
+        if staves:
+            return staves
+
+    # ── Strategy 2: neume Y-gap clustering (fallback) ──────────────────────
+    neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
+    if not neume_like:
+        neume_like = glyphs
+
+    avg_h = median(g.nrows for g in neume_like)
+    # Tighter outlier cutoff (×2 instead of ×3) reduces bridging by tall glyphs.
+    representative = [g for g in neume_like if g.nrows <= avg_h * 2] or neume_like
+
+    sorted_glyphs = sorted(representative, key=lambda g: g.cy)
+    gap_threshold = avg_h * 1.5
+
+    rows: list[list[Glyph]] = [[sorted_glyphs[0]]]
+    for i in range(1, len(sorted_glyphs)):
+        if sorted_glyphs[i].cy - sorted_glyphs[i - 1].cy > gap_threshold:
+            rows.append([sorted_glyphs[i]])
+        else:
+            rows[-1].append(sorted_glyphs[i])
+
+    pad = max(5, int(avg_h * 0.3))
+    staves = []
+    for i, row in enumerate(rows):
+        h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
+        est_uly = max(0, min(g.uly for g in row) - pad)
+        staves.append(StaveBbox(
+            id=f"auto-{i}",
+            ulx=max(0, min(g.ulx for g in row) - pad),
+            uly=max(0, min(g.uly for g in row) - pad),
+            lrx=min(page_w, max(g.lrx for g in row) + pad),
+            lry=min(page_h, max(g.lry for g in row) + pad),
+            line_ys=[est_uly + h * i / 3 for i in range(4)],
+        ))
+    return staves
+
+
+def _staves_from_staff_lines(
+    staff_lines: list[Glyph], page_w: int, page_h: int
+) -> list[StaveBbox]:
+    """Build stave bboxes from clustered staff line glyphs."""
+    sorted_lines = sorted(staff_lines, key=lambda g: g.cy)
+
+    # Estimate typical intra-stave line spacing from the smaller half of gaps.
+    gaps_in_order = [
+        sorted_lines[i].cy - sorted_lines[i - 1].cy
+        for i in range(1, len(sorted_lines))
+    ]
+    small_gaps = sorted(gaps_in_order)[: max(1, len(gaps_in_order) // 2)]
+    typical_spacing = median(small_gaps)
+    inter_stave_threshold = max(typical_spacing * 2.5, typical_spacing + 20)
+
+    # First-pass: split into clusters at inter-stave gaps.
+    clusters: list[list[Glyph]] = [[sorted_lines[0]]]
+    for i in range(1, len(sorted_lines)):
+        if gaps_in_order[i - 1] > inter_stave_threshold:
+            clusters.append([sorted_lines[i]])
+        else:
+            clusters[-1].append(sorted_lines[i])
+
+    # Second-pass: split any oversized cluster (likely two staves merged).
+    # A stave normally has ≤5 detected lines; more implies a merge.
+    split_clusters: list[list[Glyph]] = []
+    for cluster in clusters:
+        if len(cluster) <= 5:
+            split_clusters.append(cluster)
+            continue
+        c_sorted = sorted(cluster, key=lambda g: g.cy)
+        c_gaps = [(c_sorted[i].cy - c_sorted[i - 1].cy, i)
+                  for i in range(1, len(c_sorted))]
+        # Split at the largest intra-cluster gap if it's notably bigger than typical.
+        split_gap, split_idx = max(c_gaps, key=lambda x: x[0])
+        if split_gap > typical_spacing * 1.8:
+            split_clusters.append(c_sorted[:split_idx])
+            split_clusters.append(c_sorted[split_idx:])
+        else:
+            split_clusters.append(cluster)
+
+    # Build bboxes: pad above/below so neumes that sit on the staff are included.
+    staves = []
+    for i, cluster in enumerate(split_clusters):
+        if not cluster:
+            continue
+        top_y = min(g.cy for g in cluster)
+        bot_y = max(g.cy for g in cluster)
+        # Tight bounds: half a line-spacing above/below the outermost line centers.
+        # Using cy (not uly/lry) prevents line thickness from inflating the zone.
+        pad = max(5, int(typical_spacing * 0.5))
+        _raw_ys = sorted(g.cy for g in cluster)
+        _deduped: list[float] = []
+        for _y in _raw_ys:
+            if not _deduped or _y - _deduped[-1] > 5:
+                _deduped.append(_y)
+        staves.append(StaveBbox(
+            id=f"auto-{i}",
+            ulx=max(0, min(g.ulx for g in cluster)),
+            uly=max(0, int(top_y - pad)),
+            lrx=min(page_w, max(g.lrx for g in cluster)),
+            lry=min(page_h, int(bot_y + pad)),
+            line_ys=_deduped,
+        ))
+    return staves
+
+@dataclass
+class _NcSpec:
+    tilt: str = ""       # "" plain | "n" virga stem | "se" inclinatum diamond
+    quilisma: bool = False
+    y_fraction: float = 0.5
+
+# Ordered nc specs per neume type (one entry = one note component).
+# Ichiro appends variant codes (e.g. "clivis2a") — _nc_specs_for strips them.
+_NEUME_NC_MAP: dict[str, list[_NcSpec]] = {
+    # ── single-note ────────────────────────────────────────────────────────
+    "punctum":              [_NcSpec(y_fraction=0.5)],
+    "virga":                [_NcSpec(tilt="n", y_fraction=0.5)],
+    "quilisma":             [_NcSpec(quilisma=True, y_fraction=0.5)],
+    "inclinatum":           [_NcSpec(tilt="se", y_fraction=0.5)],
+    "oriscus":              [_NcSpec(y_fraction=0.5)],
+    # ── two-note ───────────────────────────────────────────────────────────
+    "podatus":              [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],          # ascending (= pes)
+    "pes":                  [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "clivis":               [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],          # descending
+    "distropha":            [_NcSpec(y_fraction=0.4), _NcSpec(y_fraction=0.6)],
+    "bivirga":              [_NcSpec(tilt="n", y_fraction=0.4), _NcSpec(tilt="n", y_fraction=0.6)],
+    # ── three-note ─────────────────────────────────────────────────────────
+    "torculus":             [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
+    "porrectus":            [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "scandicus":            [_NcSpec(y_fraction=0.83), _NcSpec(y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.17)],
+    "climacus":             [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83)],
+    "tristropha":           [_NcSpec(y_fraction=0.33), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.67)],
+    "trivirga":             [_NcSpec(tilt="n", y_fraction=0.33), _NcSpec(tilt="n", y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.67)],
+    # ── four-note ──────────────────────────────────────────────────────────
+    "torculusresupinus":    [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
+    "porrectusflexus":      [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
+    "scandicusflexus":      [_NcSpec(y_fraction=0.8), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.2), _NcSpec(y_fraction=0.5)],
+    "climacusresupinus":    [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83), _NcSpec(y_fraction=0.5)],
+}
+
+_NEUME_PREFIXES = ("neume--", "neume.", "neume_", "neume/")
+
+def _nc_specs_for(class_name: str) -> list[_NcSpec]:
+    """Map an Ichiro class name to an ordered list of nc specs.
+
+    Handles prefixes ("neume.", "neume--") and variant suffixes ("clivis2a" → "clivis").
+    Falls back to a single plain nc for unknown types.
+    """
+    name = class_name.lower().strip()
+    for prefix in _NEUME_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    # Strip trailing variant code: digits + optional letter ("2a", "3b", "1")
+    base = re.sub(r"\d+[a-z]?$", "", name).strip("_.-")
+    return _NEUME_NC_MAP.get(name) or _NEUME_NC_MAP.get(base) or [_NcSpec()]
+
+_PITCH_NOTES = ["c", "d", "e", "f", "g", "a", "b"]
+
+def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tuple[str, str]:
+    """Diatonic step offset from clef note → (pname, oct).
+    Positive step = below clef (lower pitch); negative = above (higher pitch).
+    """
+    clef_abs = clef_oct * 7 + _PITCH_NOTES.index(clef_note)
+    note_abs = clef_abs - step
+    return _PITCH_NOTES[note_abs % 7], str(note_abs // 7)
+
+def _nc_pitch(nc_cy: float, line_ys: list[float], clef_line: int = 3) -> tuple[str, str]:
+    """Return (pname, oct) for a note at nc_cy given staff line Y positions.
+
+    line_ys must be sorted ascending (smallest Y = top of image = highest pitch).
+    Falls back to ("a", "3") when line data is unavailable.
+    """
+    if len(line_ys) < 2:
+        return "a", "3"
+    spacings = [line_ys[i+1] - line_ys[i] for i in range(len(line_ys) - 1)]
+    line_spacing = sum(spacings) / len(spacings)
+    clef_idx = len(line_ys) - clef_line
+    clef_y = line_ys[clef_idx]
+    step = round((nc_cy - clef_y) / (line_spacing / 2))
+    return _pitch_from_step(step)
+
+def _tag(local: str) -> str:
+    return f"{{{MEI_NS}}}{local}"
+
+def build_mei(
+    glyphs_by_stave: dict[int, list[Glyph]],
+    staves: list[StaveBbox],
+    image_path: Path,
+    image_w: int,
+    image_h: int,
+    manuscript_name: str,
+) -> bytes:
+    ET.register_namespace("", MEI_NS)
+    mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
+
+    # meiHead
+
+    head = ET.SubElement(mei, _tag("meiHead"))
+    file_desc = ET.SubElement(head, _tag("fileDesc"))
+    title_stmt = ET.SubElement(file_desc, _tag("titleStmt"))
+    title_el = ET.SubElement(title_stmt, _tag("title"))
+    title_el.text = manuscript_name
+    pub_stmt = ET.SubElement(file_desc, _tag("pubStmt"))
+    ET.SubElement(pub_stmt, _tag("unpub"))
+
+    music = ET.SubElement(mei, _tag("music"))
+
+    #fac simile
+    facsimile = ET.SubElement(music, _tag("facsimile"), {"type": "transcription"})
+    surface = ET.SubElement(facsimile, _tag("surface"), {
+        XML_ID: "surface-0001",
+        "ulx": "0",
+        "uly": "0",
+        "lrx": str(image_w),
+        "lry": str(image_h),
+    })
+    ET.SubElement(surface, _tag("graphic"), {
+        "target": str(image_path),
+        "width": f"{image_w}px",
+        "height": f"{image_h}px",
+    })
+
+    # stave zones (used by <sb @facs>) + clef zones (used by <clef @facs>)
+    stave_zone_ids: dict[int, str] = {}
+    clef_zone_ids: dict[int, str] = {}
+    for i, stave in enumerate(staves):
+        zone_id = f"sz-{stave.id}"
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: zone_id,
+            "type": "staff",
+            "ulx": str(stave.ulx),
+            "uly": str(stave.uly),
+            "lrx": str(stave.lrx),
+            "lry": str(stave.lry),
+        })
+        stave_zone_ids[i] = zone_id
+        # Clef zone: left edge of stave, roughly square (height ≈ staff height)
+        clef_zone_id = f"cz-{stave.id}"
+        stave_h = max(stave.lry - stave.uly, 1)
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: clef_zone_id,
+            "ulx": str(stave.ulx),
+            "uly": str(stave.uly),
+            "lrx": str(stave.ulx + stave_h),
+            "lry": str(stave.lry),
+        })
+        clef_zone_ids[i] = clef_zone_id
+
+    all_glyphs = [g for idx in sorted(glyphs_by_stave) for g in glyphs_by_stave[idx]]
+    for glyph in all_glyphs:
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: f"z-{glyph.id}",
+            "ulx": str(glyph.ulx),
+            "uly": str(glyph.uly),
+            "lrx": str(glyph.lrx),
+            "lry": str(glyph.lry),
+        })
+
+    # body
+    body = ET.SubElement(music, _tag("body"))
+    mdiv = ET.SubElement(body, _tag("mdiv"))
+    score = ET.SubElement(mdiv, _tag("score"))
+
+    # sb-based format: one <staffDef>, one <staff>, <sb> milestones per stave
+    score_def = ET.SubElement(score, _tag("scoreDef"))
+    staff_grp = ET.SubElement(score_def, _tag("staffGrp"))
+    staff_grp_id = str(uuid.uuid4()).replace("-", "")[:12]
+    ET.SubElement(staff_grp, _tag("staffDef"), {
+        XML_ID: f"staffdef-{staff_grp_id}",
+        "n": "1",
+        "lines": "4",
+        "notationtype": "neume",
+        "clef.shape": "C",
+        "clef.line": "3",
+    })
+
+    section = ET.SubElement(score, _tag("section"))
+    staff_id = str(uuid.uuid4()).replace("-", "")[:12]
+    staff_el = ET.SubElement(section, _tag("staff"), {
+        XML_ID: f"staff-{staff_id}",
+        "n": "1",
+    })
+    layer_id = str(uuid.uuid4()).replace("-", "")[:12]
+    layer = ET.SubElement(staff_el, _tag("layer"), {
+        XML_ID: f"layer-{layer_id}",
+        "n": "1",
+    })
+    pb_id = str(uuid.uuid4()).replace("-", "")[:12]
+    ET.SubElement(layer, _tag("pb"), {
+        XML_ID: f"pb-{pb_id}",
+        "facs": "#surface-0001",
+    })
+
+    for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
+        staff_glyphs = glyphs_by_stave[stave_idx]
+        if not staff_glyphs:
+            continue
+        # <sb> marks the start of each stave and links it to its zone
+        zone_id = stave_zone_ids.get(stave_idx, str(stave_idx))
+        sb_attrs: dict[str, str] = {XML_ID: f"sb-{zone_id}"}
+        if stave_idx in stave_zone_ids:
+            sb_attrs["facs"] = f"#{zone_id}"
+        ET.SubElement(layer, _tag("sb"), sb_attrs)
+        # Clef must follow each <sb>; @facs anchors it to the stave's left edge
+        clef_id = str(uuid.uuid4()).replace("-", "")[:12]
+        clef_attrs: dict[str, str] = {
+            XML_ID: f"clef-{clef_id}",
+            "shape": "C",
+            "line": "3",
+        }
+        if stave_idx in clef_zone_ids:
+            clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
+        ET.SubElement(layer, _tag("clef"), clef_attrs)
+        neume_glyphs = [g for g in staff_glyphs
+                        if g.nrows > 0 and g.ncols / g.nrows < 8]
+        for cluster in cluster_into_syllables(neume_glyphs):
+            syllable_id = cluster[0].id
+            syllable = ET.SubElement(layer, _tag("syllable"), {
+                XML_ID: f"syllable-{syllable_id}",
+            })
+            syl_id = str(uuid.uuid4()).replace("-", "")[:12]
+            syl = ET.SubElement(syllable, _tag("syl"), {XML_ID: f"syl-{syl_id}"})
+            syl.text = "-"
+            for glyph in cluster:
+                neume = ET.SubElement(syllable, _tag("neume"), {
+                    XML_ID: f"neume-{glyph.id}",
+                    "facs": f"#z-{glyph.id}",
+                })
+                stave = staves[stave_idx] if stave_idx < len(staves) else None
+                line_ys = stave.line_ys if stave else []
+                for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
+                    nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
+                    nc_cy = glyph.uly + spec.y_fraction * glyph.nrows
+                    pname, oct_str = _nc_pitch(nc_cy, line_ys)
+                    nc_attrs: dict[str, str] = {
+                        XML_ID: f"nc-{nc_id}",
+                        "facs": f"#z-{glyph.id}",
+                        "pname": pname,
+                        "oct": oct_str,
+                    }
+                    if spec.tilt:
+                        nc_attrs["tilt"] = spec.tilt
+                    if spec.quilisma:
+                        nc_attrs["quilisma"] = "true"
+                    ET.SubElement(neume, _tag("nc"), nc_attrs)
+    
+    ET.indent(mei, space=" ")
+    xml_model_pi = (
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
+    )
+    xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_model_pi + ET.tostring(mei, encoding="unicode")
+    return xml_str.encode("utf-8")
+
+REQUIRED_MEI_VERSION = "5.0.0-dev"
+
+def validate_mei(xml_bytes: bytes) -> list[str]:
+    warnings = []
+    root = ET.fromstring(xml_bytes)
+
+    version = root.get("meiversion", "")
+    if version != REQUIRED_MEI_VERSION:
+        warnings.append(
+            f"meiversion='{version}' — Neon requires '{REQUIRED_MEI_VERSION}' (schema will report INVALID)"
+        )
+
+    facsimiles = list(root.iter(_tag("facsimile")))
+    for fac in facsimiles:
+        if fac.get("type") != "transcription":
+            warnings.append(
+                "facsimile missing @type='transcription' — Verovio won't apply pixel coordinate conversion"
+            )
+
+    layers = list(root.iter(_tag("layer")))
+    for layer in layers:
+        children = list(layer)
+        if not children or children[0].tag != _tag("pb"):
+            warnings.append(
+                "layer must start with <pb> before any <sb> — required by Neon's ConvertMei.ts"
+            )
+        pbs = [c for c in children if c.tag == _tag("pb")]
+        for pb in pbs:
+            if not pb.get("facs"):
+                warnings.append("pb missing @facs pointing to <surface>")
+
+    zones: dict[str, str] = {}
+    for zone in root.iter(_tag("zone")):
+        zid = zone.get(XML_ID, "")
+        if zid:
+            zones[zid] = zone.get("type", "")
+    
+    def check_facs(el, label):
+        facs = el.get("facs", "")
+        if not facs:
+            warnings.append(f"{label} missing @facs")
+            return
+        ref = facs.lstrip("#")
+        if ref not in zones:
+            warnings.append(f"{label} @facs '{facs}' does not resolve to any zone")
+    
+    #zone bounding boxes
+    for zone in root.iter(_tag("zone")):
+        zid = zone.get(XML_ID, "<no-id>")
+        try:
+            ulx, uly = int(zone.get("ulx", 0)), int(zone.get("uly", 0))
+            lrx, lry = int(zone.get("lrx", 0)), int(zone.get("lry", 0))
+        except ValueError:
+            warnings.append(f"zone {zid}: non-integer coordinate")
+            continue
+        if ulx < 0 or uly < 0 or lrx < 0 or lry < 0:
+            warnings.append(f"zone {zid}: negative coordinate ({ulx}, {uly}, {lrx}, {lry})")
+        if ulx >= lrx or uly >= lry:
+            warnings.append(f"zone {zid}: degenerate bbox ({ulx}, {uly})-({lrx}, {lry})")
+
+    # sb-based: exactly one <staff>, each <sb> must resolve to a type="staff" zone
+    staves = list(root.iter(_tag("staff")))
+    if not staves:
+        warnings.append("no <staff> elements found - output is empty")
+    sbs = list(root.iter(_tag("sb")))
+    if not sbs:
+        warnings.append("no <sb> elements found - stave zones not linked")
+    for sb in sbs:
+        sbid = sb.get(XML_ID, "?")
+        facs = sb.get("facs", "")
+        ref = facs.lstrip("#")
+        if not ref:
+            warnings.append(f"sb {sbid}: missing @facs")
+        elif ref not in zones:
+            warnings.append(f"sb {sbid}: @facs '{facs}' unresolved")
+        elif zones[ref] != "staff":
+            warnings.append(f"sb {sbid}: zone '{ref}' has type='{zones[ref]}', expected 'staff'")
+
+    # syllable: xml:id required (Neon references syllables by id)
+    for syllable in root.iter(_tag("syllable")):
+        if not syllable.get(XML_ID):
+            warnings.append("syllable missing xml:id")
+
+    # neume: xml:id + facs
+    neumes = list(root.iter(_tag("neume")))
+    if not neumes:
+        warnings.append("no <neume> elements found - no glyphs encoded")
+    for neume in neumes:
+        nid = neume.get(XML_ID, "")
+        if not nid:
+            warnings.append("neume missing xml:id")
+        check_facs(neume, f"neume {nid or '?'}")
+
+    # nc: xml:id + facs + pname + oct
+    for nc in root.iter(_tag("nc")):
+        ncid = nc.get(XML_ID, "")
+        check_facs(nc, f"nc {ncid or '?'}")
+        for attr in ("pname", "oct"):
+            if not nc.get(attr):
+                warnings.append(f"nc {ncid or '?'}: missing @{attr}")
+
+    return warnings
+
+def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
+    mei_b64 = base64.b64encode(mei_bytes).decode()
+    return {
+        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/1/manifest.jsonld",
+        "@id": f"urn:uuid:{uuid.uuid4()}",
+        "title": stem,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "image": image_ref,
+        "mei_annotations": [
+            {
+                "id": f"urn:uuid:{uuid.uuid4()}",
+                "type": "Annotation",
+                "body": f"data:application/mei+xml;base64,{mei_b64}",
+                "target": image_ref,
+            }
+        ],
+    }
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="GameraXML + Mothra inference JSON -> pitch-less MEI + Neon manifest."
+    )
+    parser.add_argument("--gamera-xml", required=True, type=Path, metavar="PATH")
+    parser.add_argument("--mothra-json", required=True, type=Path, metavar="PATH")
+    parser.add_argument("--image", required=True, type=Path, metavar="PATH")
+    parser.add_argument("--output-dir", type=Path, default=Path("encoding-outputs"))
+    parser.add_argument("--manuscript", type=str, default=None)
+    args = parser.parse_args()
+
+    stem = args.image.stem
+    ms_name = args.manuscript or extract_manuscript_id(args.image.name)
+
+    out_dir = args.output_dir / stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Parsing GameraXML: {args.gamera_xml}")
+    glyphs = parse_gamera_xml(args.gamera_xml)
+    print(f" {len(glyphs)} glyphs loaded")
+
+    print(f"Parsing stave detections: {args.mothra_json}")
+    staves, image_w, image_h = parse_staves(args.mothra_json)
+    print(f"{len(staves)} staves found")
+
+    glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+    assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
+    print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
+
+    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name)
+    for w in validate_mei(mei_bytes):
+        print(f"[warn] {w}", file=sys.stderr)
+
+    mei_path = out_dir / f"{stem}.mei"
+    mei_path.write_bytes(mei_bytes)
+    print(f"MEI written: {mei_path}")
+
+    manifest = build_neon_manifest(mei_bytes, str(args.image.resolve()), stem)
+    manifest_path = out_dir / f"{stem}_manifest.jsonld"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"Manifest written: {manifest_path}")
+    print(f"\nLoad in Neon: editor.html?manifest={manifest_path.resolve()}")
+
+if __name__ == "__main__":
+    main()
