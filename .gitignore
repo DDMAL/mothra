@@ -33,3 +33,12 @@ data/labels
 
 #dependencies
 landing-page/node_modules
+landing-page/scripts/__pycache__
+landing-page/scripts/mock_data
+landing-page/scripts/.venv
+
+#mock files
+landing-page/scripts/mock_data
+
+# Claude Code local config
+.claude/

@@ -1,39 +1,44 @@
 import { useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { Project } from "../App";
 import DeleteProjectModal from "./DeleteProjectModal";
 
 interface MyProjectsProps {
   projects: Project[];
-  setProjects: Dispatch<SetStateAction<Project[]>>;
-  onSelectProject: (name: string) => void;
+  onSelectProject: (id: number) => void;
+  onCreateProject: (name: string) => void;
+  onRenameProject: (id: number, newName: string) => void;
+  onDeleteProject: (id: number) => void;
+  onRestoreProject: (id: number) => void;
 }
 
 export default function MyProjects({
   projects,
-  setProjects,
   onSelectProject,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
+  onRestoreProject,
 }: MyProjectsProps) {
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
-  const [deleteConfirmProject, setDeleteConfirmProject] = useState<string | null>(null);
-  const [renamingRow, setRenamingRow] = useState<string | null>(null);
+  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+  const [deleteConfirmProject, setDeleteConfirmProject] = useState<number | null>(null);
+  const [renamingRow, setRenamingRow] = useState<number | null>(null);
   const [renameName, setRenameName] = useState("");
 
   const activeProjects = projects.filter((p) => !p.deletedAt);
   const trashedProjects = projects.filter((p) => !!p.deletedAt);
 
-  const projectToDelete = deleteConfirmProject
-    ? projects.find((p) => p.name === deleteConfirmProject) ?? null
+  const projectToDelete = deleteConfirmProject !== null
+    ? projects.find((p) => p.id === deleteConfirmProject) ?? null
     : null;
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 py-10 relative">
       <div
         className={`absolute inset-0 z-30 bg-black/30 transition-opacity pointer-events-none
-                      ${showCreate || !!deleteConfirmProject ? "opacity-100" : "opacity-0"}`}
+                      ${showCreate || deleteConfirmProject !== null ? "opacity-100" : "opacity-0"}`}
       />
       <div className="max-w-4xl mx-auto flex items-center gap-6 mb-6">
         <h1 className="text-4xl font-bold italic text-white">My Projects</h1>
@@ -76,45 +81,33 @@ export default function MyProjects({
             </div>
             {activeProjects.map((p) => (
               <div
-                key={p.name}
-                onMouseEnter={() => setHoveredRow(p.name)}
+                key={p.id}
+                onMouseEnter={() => setHoveredRow(p.id)}
                 onMouseLeave={() => setHoveredRow(null)}
                 className="grid grid-cols-[2fr_2fr_1fr_5rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm transition-colors hover:bg-[#b0cdc9]"
               >
-                {renamingRow === p.name ? (
+                {renamingRow === p.id ? (
                   <input
                     autoFocus
                     value={renameName}
                     onChange={(e) => setRenameName(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
-                        setProjects((prev) =>
-                          prev.map((proj) =>
-                            proj.name === renamingRow
-                              ? { ...proj, name: renameName.trim() || renamingRow }
-                              : proj,
-                          ),
-                        );
+                        onRenameProject(p.id, renameName.trim() || p.name);
                         setRenamingRow(null);
                       } else if (e.key === "Escape") {
                         setRenamingRow(null);
                       }
                     }}
                     onBlur={() => {
-                      setProjects((prev) =>
-                        prev.map((proj) =>
-                          proj.name === renamingRow
-                            ? { ...proj, name: renameName.trim() || renamingRow }
-                            : proj,
-                        ),
-                      );
+                      onRenameProject(p.id, renameName.trim() || p.name);
                       setRenamingRow(null);
                     }}
                     className="bg-white rounded-lg px-3 py-1 text-[#1D3335] outline-none text-sm w-2/3"
                   />
                 ) : (
                   <span
-                    onClick={() => onSelectProject(p.name)}
+                    onClick={() => onSelectProject(p.id)}
                     className="cursor-pointer hover:underline"
                   >
                     {p.name}
@@ -123,11 +116,11 @@ export default function MyProjects({
                 <span>{p.user}</span>
                 <span>{p.images.length}</span>
                 <div
-                  className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.name ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+                  className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.id ? "opacity-100" : "opacity-0 pointer-events-none"}`}
                 >
                   <button
                     onClick={() => {
-                      setRenamingRow(p.name);
+                      setRenamingRow(p.id);
                       setRenameName(p.name);
                     }}
                     className="cursor-pointer text-base"
@@ -135,7 +128,7 @@ export default function MyProjects({
                     ✏️
                   </button>
                   <button
-                    onClick={() => setDeleteConfirmProject(p.name)}
+                    onClick={() => setDeleteConfirmProject(p.id)}
                     className="cursor-pointer text-base"
                   >
                     🗑
@@ -162,7 +155,7 @@ export default function MyProjects({
               );
               return (
                 <div
-                  key={p.name}
+                  key={p.id}
                   className="grid grid-cols-[2fr_2fr_1fr_6rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm"
                 >
                   <span className="opacity-60">{p.name}</span>
@@ -170,15 +163,7 @@ export default function MyProjects({
                   <span className="opacity-60">{daysLeft}d</span>
                   <div className="flex justify-end">
                     <button
-                      onClick={() =>
-                        setProjects((prev) =>
-                          prev.map((proj) =>
-                            proj.name === p.name
-                              ? { ...proj, deletedAt: undefined }
-                              : proj,
-                          ),
-                        )
-                      }
+                      onClick={() => onRestoreProject(p.id)}
                       className="text-xs text-[#1E6B70] font-semibold hover:opacity-70 cursor-pointer"
                     >
                       restore
@@ -225,17 +210,7 @@ export default function MyProjects({
             <button
               onClick={() => {
                 if (!newName.trim()) return;
-                setProjects((prev) => [
-                  ...prev,
-                  {
-                    name: newName.trim(),
-                    user: "username",
-                    images: [],
-                    models: [],
-                    annotations: [],
-                    meiFiles: [],
-                  },
-                ]);
+                onCreateProject(newName.trim());
                 setNewName("");
                 setShowCreate(false);
               }}
@@ -251,13 +226,7 @@ export default function MyProjects({
         <DeleteProjectModal
           project={projectToDelete}
           onConfirm={() => {
-            setProjects((prev) =>
-              prev.map((p) =>
-                p.name === projectToDelete.name
-                  ? { ...p, deletedAt: Date.now() }
-                  : p,
-              ),
-            );
+            onDeleteProject(projectToDelete.id);
             setDeleteConfirmProject(null);
           }}
           onCancel={() => setDeleteConfirmProject(null)}

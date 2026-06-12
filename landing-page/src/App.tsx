@@ -13,6 +13,9 @@ import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
 import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
 
+import type { CurrentUser } from "./hooks/useAuth";
+import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
+
 type View =
   | "landing"
   | "about"
@@ -38,12 +41,15 @@ export interface ProjectImage {
   src?: string;
 }
 export interface Project {
+  id: number;
   name: string;
   user: string;
   images: ProjectImage[];
   models: ProjectModel[];
   annotations: AnnotationSet[];
   meiFiles: MeiFile[];
+  stepsUnlocked: number;
+  usedImageNames: string[];
   deletedAt?: number;
 }
 export interface ProjectModel {
@@ -68,42 +74,94 @@ export interface MeiFile {
 
 export default function App() {
   const [view, setView] = useState<View>("landing");
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      name: "project alpha",
-      user: "username",
-      images: [
-        { id: "1", name: "image 1" },
-        { id: "2", name: "image 2" },
-        { id: "3", name: "image 3" },
-      ],
-      models: [],
-      annotations: [],
-      meiFiles: []
-    },
-    {
-      name: "project beta",
-      user: "username",
-      images: Array.from({ length: 7 }, (_, i) => ({
-        id: String(i + 1),
-        name: `image ${i + 1}`,
-      })),
-      models: [],
-      annotations: [],
-      meiFiles: []
-    },
-  ]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
-  const [usedNames, setUsedNames] = useState<{
-    images: string[];
-    models: string[];
-  }>({ images: [], models: [] });
-  const [stepsUnlocked, setStepsUnlocked] = useState(0);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [neonManifest, setNeonManifest] = useState<Record<string, unknown> | null>(null);
   const [meiContent, settleMeiContent] = useState<{ bytes: string; stem: string } | null>(null);
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  // auth
+
+  const handleLoginSuccess = (user: CurrentUser, token: string) => {
+    setToken(token);
+    setCurrentUser(user);
+    fetch("/api/projects", { headers: authHeaders() })
+      .then(r => r.json())
+      .then(setProjects);
+    setView("projects");
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    setCurrentUser(null);
+    setProjects([]);
+    setSelectedProjectId(null);
+    setView("landing");
+  };
+
+  // project mutations
+
+  const createProject = async (name: string) => { 
+    const r = await fetch("/api/projects", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json"},
+      body: JSON.stringify({ name }),
+    });
+    const project = await r.json();
+    setProjects(prev => [...prev, project]);
+  }
+
+  const renameProject = async (id: number, newName: string) => {
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName }),
+    });
+    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, name: newName }: p));
+  };
+
+  const deleteProject = async (id: number) => {
+    const deletedAt = new Date().toISOString();
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ deletedAt }),
+    });
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, deletedAt: Date.now() } : p)));
+  };
+
+  const restoreProject = async (id: number) => {
+    await fetch(`/api/projects/${id}/restore`, {
+      method: "POST", headers: authHeaders(),
+    });
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, deletedAt: undefined} : p));
+  };
+
+  const updateProjectSteps = async (id: number, steps: number) => {
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json"},
+      body: JSON.stringify({ stepsUnlocked: steps }),
+    });
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, stepsUnlocked: steps } : p)));
+  };
+
+  const updateUsedImageNames = async (id: number, names: string[]) => {
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json"},
+      body: JSON.stringify({ usedImageNames: names }),
+    });
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, usedImageNames: names} : p)));
+  };
+
+
+  // download helpers
 
   const handleDownloadManifest = () => {
     if (!neonManifest || !meiContent) return;
@@ -128,6 +186,26 @@ export default function App() {
       URL.revokeObjectURL(url);
     }
 
+  
+
+    // session restore
+
+    useEffect(() => {
+      const token = getToken();
+      if (!token) return;
+      fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok? r.json() : Promise.reject()))
+        .then((user) => {
+          setCurrentUser(user);
+          return fetch("/api/projects", { headers: { Authorization: `Bearer ${token}` } });
+        })
+        .then((r) => r.json())
+        .then(setProjects)
+        .catch(() => clearToken());
+    }, []);
+
+  // encoding effect
+
   useEffect(() => {
     if (view !== "encoding-processing") return;
     settleMeiContent(null);
@@ -141,7 +219,7 @@ export default function App() {
       }
       fetch("/api/encode-upload", { method: "POST", body: form })
         .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .then((data) => {
+        .then(async (data) => {
           setNeonManifest(data.manifest ?? null);
           setEncodingLogs(data.logs ?? []);
           settleMeiContent({ bytes: data.mei_base64, stem: pendingXmlFile.name.replace(".xml", "")});
@@ -155,11 +233,21 @@ export default function App() {
             xmlContent: xmlText,
             corrected: false,
           };
+          if (selectedProjectId) {
+            const r = await fetch(`/api/projects/${selectedProjectId}/mei`, {
+              method: "POST",
+              headers: { ...authHeaders(), "Content-Type": "application/json"},
+              body: JSON.stringify({ name: newMeiFile.name, xmlContent: xmlText }),
+            });
+            const saved = await r.json();
+            newMeiFile.id = saved.id;
+          }
+
           setProjects((prev) => 
             prev.map((p) => 
-              p.name === selectedProject
-                ? { ...p, meiFiles: [...p.meiFiles, newMeiFile]} 
-                : p,
+              p.id === selectedProjectId
+                ? { ...p, meiFiles: [...p.meiFiles, newMeiFile]}
+              : p,
             ),
           );
         })
@@ -218,14 +306,14 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar
+        currentUser={currentUser}
+        onLogout={handleLogout}
         onLogin={() => setView("login")}
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
         onAbout={() => setView("about")}
         onDocs={() => setView("docs")}
-        loggedIn={view === "projects" || view === "project"}
         onHome={() => setView("landing")}
-        onLogout={() => setView("landing")}
       />
       {view === "landing" ? (
         <main>
@@ -237,25 +325,25 @@ export default function App() {
       ) : view === "projects" ? (
         <MyProjects
           projects={projects}
-          setProjects={setProjects}
-          onSelectProject={(name) => {
-            setSelectedProject(name);
-            setView("project");
-          }}
+          onSelectProject={(id) => { setSelectedProjectId(id); setView("project"); }}
+          onCreateProject={createProject}
+          onRenameProject={renameProject}
+          onDeleteProject={deleteProject}
+          onRestoreProject={restoreProject}
         />
       ) : view === "project" && selectedProject ? (
         <ProjectDetail
-          project={projects.find((p) => p.name === selectedProject)!}
+          project={selectedProject}
           onBack={() => setView("projects")}
           onContinue={() => {
-            if (stepsUnlocked >= 3) window.open("https://ddmal.ca/Neon/", "_blank");
-            else if (stepsUnlocked >= 2) setView("ic-completion");
-            else if (stepsUnlocked >= 1) setView("ic");
+            if (selectedProject.stepsUnlocked >= 3) window.open("https://ddmal.ca/Neon", "_blank");
+            else if (selectedProject.stepsUnlocked >= 2) setView("ic-completion");
+            else if (selectedProject.stepsUnlocked >= 1) setView("ic");
             else setView("processing");
           }}
           onUpdateProject={(updated) =>
             setProjects((prev) =>
-              prev.map((p) => (p.name === updated.name ? updated : p)),
+              prev.map((p) => (p.id === updated.id ? updated : p)),
             )
           }
           onStepClick={(step) => {
@@ -264,21 +352,46 @@ export default function App() {
             else if (step === 3) window.open("https://ddmal.ca/Neon/");
           }}
           onSendToCantus={() => setView("sending")}
-          onRenameProject={(newName) => {
-            setProjects((prev) =>
-              prev.map((p) => (p.name === selectedProject ? { ...p, name: newName } : p)),
-            );
-            setSelectedProject(newName);
+          onRenameProject={(newName) => renameProject(selectedProject.id, newName)}
+          usedNames={{ images: selectedProject.usedImageNames, models: [] }}
+          onUsedNamesChange={(names) => updateUsedImageNames(selectedProject.id, names.images )}
+          stepsUnlocked={selectedProject.stepsUnlocked}
+          onUploadImage={async (file) => {
+            const form = new FormData();
+            form.append("file", file);
+            const r = await fetch(`/api/projects/${selectedProject.id}/images`, {
+              method: "POST",
+              headers: authHeaders(),
+              body: form,
+            });
+            return r.json();
           }}
-          usedNames={usedNames}
-          onUsedNamesChange={setUsedNames}
-          stepsUnlocked={stepsUnlocked}
+          onUploadModel={async (name) => {
+            const r = await fetch(`/api/projects/${selectedProject.id}/models`, {
+              method: "POST",
+              headers: { ...authHeaders(), "Content-Type": "application/json"},
+              body: JSON.stringify({ name }),
+            });
+            return r.json();
+          }}
+          onDeleteImage={async (imageId) => {
+            await fetch(`/api/projects/${selectedProject.id}/images/${imageId}`, {
+              method: "DELETE",
+              headers: authHeaders(),
+            });
+          }}
+          onDeleteProject={() => {
+            deleteProject(selectedProject.id);
+            setView("projects");
+          }}
         />
       ) : view === "processing" ? (
         <ProcessingPage 
           onBack={() => setView("project")}
           onComplete={() => {
-            setStepsUnlocked((s) => Math.max(s, 1));
+            if (selectedProjectId && selectedProject) {
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 1));
+            }
             setView("completion");
           }} />
       ) : view === "completion" ? (
@@ -288,18 +401,18 @@ export default function App() {
           logsFileName="annotatorlogs.txt" />
       ) : view === "ic" && selectedProject ? (
           <InteractiveClassifier
-            images={
-              projects
-                .find((p) => p.name === selectedProject)!
-                .images.filter((img) => usedNames.images.includes(img.name))
-            }
+            images={selectedProject.images.filter((img) => 
+              selectedProject.usedImageNames.includes(img.name)
+            )}
             onProcessAll={() => setView("ic-processing")}
           />
       ) : view === "ic-processing" ? (
           <ProcessingPage
             onBack={() => setView("ic")}
             onComplete={() => {
-              setStepsUnlocked((s) => Math.max(s, 2));
+              if (selectedProjectId && selectedProject) {
+                updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 2));
+              }
               setView("ic-completion");
             }}
             singleLabel="classifying all pages"
@@ -318,7 +431,9 @@ export default function App() {
           <ProcessingPage
             onBack={() => setView("ic-completion")}
             onComplete={() => {
-              setStepsUnlocked((s) => Math.max(s, 3));
+              if (selectedProjectId && selectedProject) {
+                updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
+              }
               setView("encoding-completion");
             }}
             singleLabel="processing"
@@ -356,6 +471,7 @@ export default function App() {
         <AuthPage
           mode={view as "login" | "register"}
           onSwitchMode={(m) => setView(m)}
+          onSuccess={handleLoginSuccess}
         />
       )}
       <Footer />

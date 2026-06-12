@@ -1,11 +1,12 @@
 import { useState } from "react";
+import type { CurrentUser } from "../hooks/useAuth";
 
 interface NavbarProps {
   onLogin?: () => void;
   onGetStarted?: () => void;
   onMyProjects?: () => void;
   onAbout?: () => void;
-  loggedIn?: boolean;
+  currentUser?: CurrentUser | null;
   onLogout?: () => void;
   onHome?: () => void;
   onDocs?: () => void;
@@ -16,7 +17,7 @@ export default function Navbar({
   onGetStarted,
   onMyProjects,
   onAbout,
-  loggedIn,
+  currentUser,
   onLogout,
   onHome,
   onDocs,
@@ -69,13 +70,13 @@ export default function Navbar({
           my projects
         </button>
 
-        {loggedIn ? (
+        {currentUser ? (
           <div className="relative">
             <button
               onClick={() => setShowDropdown((v) => !v)}
               className="px-5 py-2 bg-[#4AADAA] text-white text-sm rounded-full hover:opacity-90 transition-opacity cursor-pointer"
             >
-              hello, [name]!
+              hello, {currentUser.username}!
             </button>
             {showDropdown && (
               <>
