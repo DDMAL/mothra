@@ -85,8 +85,8 @@ def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="not authenticated")
     token = authorization.removeprefix("Bearer ")
     try:
-        payload = jwt.encode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_is = int(payload["sub"])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(payload["sub"])
     except (JWTError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="invalid token")
     con = sqlite3.connect(DB_PATH)
