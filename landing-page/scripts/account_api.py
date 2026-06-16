@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3
+import psycopg2, psycopg2.errors
 
-from auth_api import get_current_user, DB_PATH
+from auth_api import get_current_user, get_db_conn
 
 router = APIRouter()
 
@@ -15,19 +15,24 @@ class UpdateUserBody(BaseModel):
 def update_me(body: UpdateUserBody, user=Depends(get_current_user)):
     if not body.username and not body.email:
         return user
-    con = sqlite3.connect(DB_PATH)
+    con = get_db_conn()
+    cur = con.cursor()
     try:
         if body.username:
-            con.execute("UPDATE users SET username = ? WHERE id = ?", (body.username, user["id"]))
+            cur.execute("UPDATE users SET username = %s WHERE id = %s", (body.username, user["id"]))
         if body.email:
-            con.execute("UPDATE users SET email = ? WHERE id = ?", (body.email, user["id"]))
+            cur.execute("UPDATE users SET email = %s WHERE id = %s", (body.email, user["id"]))
         con.commit()
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
+        con.rollback()
+        cur.close()
         con.close()
         raise HTTPException(status_code=409, detail="username or email already taken")
-    row = con.execute(
-        "SELECT id, username, email, first_name, last_name, created_at FROM users WHERE id=?",
+    cur.execute(
+        "SELECT id, username, email, first_name, last_name, created_at FROM users WHERE id=%s",
         (user["id"],)
-    ).fetchone()
+    )
+    row = cur.fetchone()
+    cur.close()
     con.close()
-    return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4], "createdAt": row[5]}
+    return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4], "createdAt": str(row[5])}

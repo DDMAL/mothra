@@ -22,11 +22,16 @@ training_output.log
 # Symlinks
 data/labels
 
+#.venv
+landing-page/scripts/.venv
 
 
 #any kind of config file
-*.yaml
 .hfconfig
+
+# local environment variables (contain secrets — never commit)
+.env
+landing-page/scripts/.env
 
 # artifacts from component filtering
 *.pyc
