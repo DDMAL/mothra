@@ -6,17 +6,16 @@ services:
     buildCommand: > 
       npm install && npm run build && 
       pip install -r scripts/requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    workingDir: scripts
+    startCommand: cd scripts && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MOTHRA_SECRET
         generateValue: true
       - key: DATABASE_URL
         fromDatabase:
-          name: mothra-DATABASE_URL
+          name: mothra-db
           property: connectionString
 
 databases:
-  - name: mothra-databases
+  - name: mothra-db
     databaseName: mothra
     plan: free
