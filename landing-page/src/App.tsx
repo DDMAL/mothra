@@ -54,6 +54,8 @@ export interface Project {
   usedImageNames: string[];
   usedModelNames: string[];
   deletedAt?: number;
+  lastOpenedAt?: string;
+  isPinned?: boolean;
 }
 export interface ProjectModel {
   id: string;
@@ -79,6 +81,9 @@ export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+
+  const normalizeProjects = (raw: Project[]) =>
+    raw.map(p => ({ ...p, images: p.images.map(img => ({ ...img, src: img.src ?? `/api/images/${img.id}` })) }));
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
@@ -88,6 +93,18 @@ export default function App() {
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
 
+  const togglePin = (id: number) => {
+    const project = projects.find(p => p.id === id);
+    if (!project) return;
+    const isPinned = !project.isPinned;
+    fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ isPinned }),
+    });
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, isPinned } : p));
+  };
+
   // auth
 
   const handleLoginSuccess = (user: CurrentUser, token: string) => {
@@ -95,7 +112,7 @@ export default function App() {
     setCurrentUser(user);
     fetch("/api/projects", { headers: authHeaders() })
       .then(r => r.json())
-      .then(setProjects);
+      .then(data => setProjects(normalizeProjects(data)));
     setView("projects");
   };
 
@@ -144,6 +161,11 @@ export default function App() {
     });
     setProjects(prev => prev.map(p => p.id === id ? { ...p, deletedAt: undefined} : p));
   };
+
+  const permanentlyDeleteProject = async (id: number) => {
+    await fetch(`/api/projects/${id}`, { method: "DELETE", headers: authHeaders() })
+    setProjects(prev => prev.filter(p => p.id !== id));
+  }
 
   const updateProjectSteps = async (id: number, steps: number) => {
     await fetch(`/api/projects/${id}`, {
@@ -212,7 +234,7 @@ export default function App() {
           return fetch("/api/projects", { headers: { Authorization: `Bearer ${token}` } });
         })
         .then((r) => r.json())
-        .then(setProjects)
+        .then(data => setProjects(normalizeProjects(data)))
         .catch(() => clearToken());
     }, []);
 
@@ -338,11 +360,23 @@ export default function App() {
       ) : view === "projects" ? (
         <MyProjects
           projects={projects}
-          onSelectProject={(id) => { setSelectedProjectId(id); setView("project"); }}
+          onSelectProject={(id) => { 
+            setSelectedProjectId(id); 
+            setView("project"); 
+            const now = new Date().toISOString();
+            fetch(`/api/projects/${id}`, {
+              method: "PUT",
+              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              body: JSON.stringify({ lastOpenedAt: now }),
+            });
+            setProjects(prev => prev.map(p => p.id === id ? { ...p, lastOpenedAt: now } : p));
+          }}
           onCreateProject={createProject}
           onRenameProject={renameProject}
           onDeleteProject={deleteProject}
           onRestoreProject={restoreProject}
+          onPermanentlyDeleteProject={permanentlyDeleteProject}
+          onTogglePin={togglePin}
         />
       ) : view === "project" && selectedProject ? (
         <ProjectDetail
