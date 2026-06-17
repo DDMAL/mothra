@@ -43,7 +43,7 @@ landing-page/scripts/mock_data
 landing-page/scripts/.venv
 
 #mock files
-landing-page/scripts/mock_data
+landing-page/dist
 
 # Claude Code local config
 .claude/

@@ -13,9 +13,11 @@ import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
 import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
 import MyAccount from "./components/MyAccount";
+import type { Project, MeiFile } from "./types";
 
 import type { CurrentUser } from "./hooks/useAuth";
 import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
+import { downloadBlob } from "./utils/download";
 
 type View =
   | "landing"
@@ -37,45 +39,6 @@ type View =
   | "send-completion"
   | "neon-test";
 
-export interface ProjectImage {
-  id: string;
-  name: string;
-  src?: string;
-}
-export interface Project {
-  id: number;
-  name: string;
-  user: string;
-  images: ProjectImage[];
-  models: ProjectModel[];
-  annotations: AnnotationSet[];
-  meiFiles: MeiFile[];
-  stepsUnlocked: number;
-  usedImageNames: string[];
-  usedModelNames: string[];
-  deletedAt?: number;
-  lastOpenedAt?: string;
-  isPinned?: boolean;
-}
-export interface ProjectModel {
-  id: string;
-  name: string;
-}
-
-export interface AnnotationSet {
-  id: string;
-  imageName: string;
-  imageSrc?: string;
-  jsonName: string;
-  txtName: string;
-}
-
-export interface MeiFile {
-  id: string;
-  name: string;
-  xmlContent?: string;
-  corrected?: boolean;
-}
 
 export default function App() {
   const [view, setView] = useState<View>("landing");
@@ -199,26 +162,17 @@ export default function App() {
 
   const handleDownloadManifest = () => {
     if (!neonManifest || !meiContent) return;
-    const blob = new Blob([JSON.stringify(neonManifest, null, 2)], { type: "application/ld+json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${meiContent.stem}_manifest.jsonld`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(
+      new Blob([JSON.stringify(neonManifest, null, 2)], { type: "application/ld+json" }),
+      `${meiContent.stem}_manifest.jsonld`,
+    );
   };
 
   const handleDownloadMei = () => {
-      if (!meiContent?.bytes) return;
-      const bytes = Uint8Array.from(atob(meiContent.bytes), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: "application/xml" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${meiContent.stem}.mei`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
+    if (!meiContent?.bytes) return;
+    const bytes = Uint8Array.from(atob(meiContent.bytes), (c) => c.charCodeAt(0));
+    downloadBlob(new Blob([bytes], { type: "application/xml" }), `${meiContent.stem}.mei`);
+  }
 
   
 

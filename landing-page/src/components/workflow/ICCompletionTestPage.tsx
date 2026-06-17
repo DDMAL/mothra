@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { downloadBlob } from "../../utils/download";
 
 interface IcCompletionTestPageProps {
     onContinue: () => void;
@@ -25,13 +26,7 @@ export default function IcCompletionTestPage({
     const [imageDragging, setImageDragging] = useState(false);
 
     const handleDownloadLogs = () => {
-        const blob = new Blob([""], { type: "text/plain"});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = logsFileName!;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
     };
 
     return (

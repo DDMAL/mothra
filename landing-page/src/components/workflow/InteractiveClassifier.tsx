@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ProjectImage } from "../../App";
+import type { ProjectImage } from "../../types";
 
 interface InteractiveClassifierProps {
   images: ProjectImage[];

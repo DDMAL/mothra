@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
-import type { Project } from "../App";
+import type { Project } from "../types";
 
 type AccountTab = "info" | "files";
 

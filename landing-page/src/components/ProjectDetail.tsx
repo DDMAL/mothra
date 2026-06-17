@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import type { Project, ProjectModel, MeiFile } from "../App";
+import type { Project, MeiFile } from "../types";
 import { authHeaders } from "../hooks/useAuth";
 import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import * as pdfjsLib from "pdfjs-dist";
+import { AuthImage } from "./AuthImage";
+import { formatRelativeTime } from "../utils/time";
+import { downloadBlob } from "../utils/download";
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
@@ -49,15 +53,6 @@ function formatActivity(e: ActivityEntry): string {
     case "step_unlocked": return `step ${e.detail} unlocked`;
     default: return e.detail || e.actionType;
   }
-}
-
-function formatRelativeTime(ts: string): string {
-  const hours = (Date.now() - new Date(ts).getTime()) / 3600000;
-  if (hours < 1) return "< 1 hour ago";
-  if (hours < 24) {
-    const h = Math.floor(hours); return `${h}h ago`;
-  }
-  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 
@@ -291,13 +286,7 @@ export default function ProjectDetail({
   };
 
   const handleExportMei = (file: MeiFile) => {
-    const blob = new Blob([file.xmlContent ?? ""], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([file.xmlContent ?? ""], { type: "application/xml" }), file.name);
   };
 
   const totalImagePages = Math.ceil(project.images.length / ITEMS_PER_PAGE);
@@ -357,13 +346,7 @@ export default function ProjectDetail({
             <button
               onClick={async () => {
                 const res = await fetch(`/api/projects/${project.id}/export`, { headers: authHeaders() });
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `${project.name}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
+                downloadBlob(await res.blob(), `${project.name}.zip`);
               }}
               className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
             >
@@ -1408,29 +1391,6 @@ export default function ProjectDetail({
   );
 }
 
-
-// authenticated image (plain <img> can't send Authorization headers)
-
-function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const [blobSrc, setBlobSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let revoked = false;
-    let objectUrl: string | null = null;
-    fetch(src, { headers: authHeaders() })
-      .then(r => r.blob())
-      .then(blob => {
-        if (revoked) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobSrc(objectUrl);
-      });
-    return () => {
-      revoked = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src]);
-  if (!blobSrc) return null;
-  return <img src={blobSrc} alt={alt} className={className} />;
-}
 
 // activity log
 

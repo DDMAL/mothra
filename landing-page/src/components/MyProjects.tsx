@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
-import { authHeaders } from "../hooks/useAuth";
-import type { Project, MeiFile } from "../App";
+import { useState } from "react";
+import { AuthImage } from "./AuthImage";
+import type { Project, MeiFile } from "../types";
 import DeleteProjectModal from "./DeleteProjectModal";
+import { formatLastOpened } from "../utils/time";
 
 interface MyProjectsProps {
   projects: Project[];
@@ -14,16 +15,6 @@ interface MyProjectsProps {
   onTogglePin: (id: number) => void;
 }
 
-function formatLastOpened(ts: string | undefined): string {
-  if (!ts) return "never opened";
-  const hours = (Date.now() - new Date(ts).getTime()) / 3600000;
-  if (hours < 1) return "< 1 hour ago";
-  if (hours < 24) {
-    const h = Math.floor(hours);
-    return `${h} hour${h !== 1 ? "s" : ""} ago`;
-  }
-  return new Date(ts).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}
 
 function MeiProgress({ meiFiles }: { meiFiles: MeiFile[] }) {
   if (meiFiles.length === 0) return null;
@@ -39,19 +30,6 @@ function MeiProgress({ meiFiles }: { meiFiles: MeiFile[] }) {
       <span className="text-xs text-[#1D3335]/50">{corrected}/{meiFiles.length} corrected</span>
     </div>
   );
-}
-
-function AuthImage({ imageId, className }: { imageId: string; className?: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    let url = "";
-    fetch(`/api/images/${imageId}`, { headers: authHeaders() })
-      .then(r => r.blob())
-      .then(blob => { url = URL.createObjectURL(blob); setSrc(url); });
-    return () => { if (url) URL.revokeObjectURL(url); };
-  }, [imageId]);
-  if (!src) return <div className={`${className ?? ""} bg-[#1D3335]/10`} />;
-  return <img src={src} alt="" className={`${className ?? ""} object-cover`} />;
 }
 
 export default function MyProjects({
@@ -255,7 +233,7 @@ export default function MyProjects({
                     >
                       <div className="aspect-[4/3] bg-[#1D3335]/10">
                         {p.images.length > 0
-                          ? <AuthImage imageId={p.images[0].id} className="w-full h-full" />
+                          ? <AuthImage src={`/api/images/${p.images[0].id}`} className="w-full h-full" />
                           : <div className="w-full h-full flex items-center justify-center text-[#1D3335]/30 text-xs">no images</div>
                         }
                       </div>

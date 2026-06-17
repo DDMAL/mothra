@@ -1,3 +1,5 @@
+import { downloadBlob } from "../../utils/download";
+
 interface CompletionPageProps {
   onContinue?: () => void;
   continueHref?: string;
@@ -20,13 +22,7 @@ export default function CompletionPage({
   onDownloadManifest,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
-    const blob = new Blob([""], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = logsFileName!;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
   };
 
   return (
