@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, ProjectModel, MeiFile } from "../App";
+import { authHeaders } from "../hooks/useAuth";
 import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
@@ -325,6 +326,21 @@ export default function ProjectDetail({
               </button>
             );
           })}
+          <button
+            onClick={async () => {
+              const res = await fetch(`/api/projects/${project.id}/export`, { headers: authHeaders() });
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${project.name}.zip`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
+          >
+            export all files ↓
+          </button>
         </div>
 
         <div className="flex-1 min-w-0">

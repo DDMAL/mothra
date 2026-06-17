@@ -54,6 +54,7 @@ export interface Project {
   usedImageNames: string[];
   usedModelNames: string[];
   deletedAt?: number;
+  lastOpenedAt?: string;
 }
 export interface ProjectModel {
   id: string;
@@ -144,6 +145,11 @@ export default function App() {
     });
     setProjects(prev => prev.map(p => p.id === id ? { ...p, deletedAt: undefined} : p));
   };
+
+  const permanentlyDeleteProject = async (id: number) => {
+    await fetch(`/api/projects/${id}`, { method: "DELETE", headers: authHeaders() })
+    setProjects(prev => prev.filter(p => p.id !== id));
+  }
 
   const updateProjectSteps = async (id: number, steps: number) => {
     await fetch(`/api/projects/${id}`, {
@@ -338,11 +344,22 @@ export default function App() {
       ) : view === "projects" ? (
         <MyProjects
           projects={projects}
-          onSelectProject={(id) => { setSelectedProjectId(id); setView("project"); }}
+          onSelectProject={(id) => { 
+            setSelectedProjectId(id); 
+            setView("project"); 
+            const now = new Date().toISOString();
+            fetch(`/api/projects/${id}`, {
+              method: "PUT",
+              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              body: JSON.stringify({ lastOpenedAt: now }),
+            });
+            setProjects(prev => prev.map(p => p.id === id ? { ...p, lastOpenedAt: now } : p));
+          }}
           onCreateProject={createProject}
           onRenameProject={renameProject}
           onDeleteProject={deleteProject}
           onRestoreProject={restoreProject}
+          onPermanentlyDeleteProject={permanentlyDeleteProject}
         />
       ) : view === "project" && selectedProject ? (
         <ProjectDetail

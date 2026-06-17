@@ -8,6 +8,7 @@ import uuid as _uuid
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import bcrypt
+import io, zipfile
 
 router = APIRouter()
 
@@ -85,6 +86,17 @@ def _migrate_db():
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()  # column already exists
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE projects ADD COLUMN last_opened_at TIMESTAMPTZ")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
     finally:
         cur.close()
         con.close()
@@ -184,7 +196,7 @@ def me(user=Depends(get_current_user)):
     return user
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at = row
     cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
     cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
@@ -199,6 +211,7 @@ def _project_row_to_dict(cur, row, username):
         "usedModelNames": json.loads(used_model_json or "[]"),
         "images": images, "models": models, "meiFiles": mei,
         "annotations": [], "deletedAt": deleted_at,
+        "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
     }
 
 @router.get("/projects")
@@ -206,7 +219,7 @@ def list_projects(user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at"
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, last_opened_at"
         " FROM projects WHERE user_id=%s",
         (user["id"],)
     )
@@ -240,6 +253,7 @@ class UpdateProjectBody(BaseModel):
     usedImageNames: Optional[list] = None
     usedModelNames: Optional[list] = None
     deletedAt: Optional[str] = None
+    lastOpenedAt: Optional[str] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -264,6 +278,9 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
                     (json.dumps(body.usedModelNames), project_id))
     if body.deletedAt is not None:
         cur.execute("UPDATE projects SET deleted_at=%s WHERE id=%s", (body.deletedAt, project_id))
+    if body.lastOpenedAt is not None:
+        cur.execute("UPDATE projects SET last_opened_at=%s WHERE id=%s",
+                    (body.lastOpenedAt, project_id))
     con.commit()
     cur.close()
     con.close()
@@ -283,6 +300,22 @@ def restore_project(project_id: int, user=Depends(get_current_user)):
     con.commit()
     cur.close()
     con.close()
+    return {"ok": True}
+
+@router.delete("/projects/{project_id}")
+def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
+    cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
+    cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
+    cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
+    con.commit()
+    cur.close(); con.close()
     return {"ok": True}
 
 # image endpoints
@@ -384,3 +417,32 @@ def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user
     cur.close()
     con.close()
     return {"id": model_id, "name": body.name}
+
+@router.get("/projects/{project_id}/export")
+def export_project(project_id: int, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    project_name = row[1]
+    cur.execute("SELECT name, mime_type, data FROM project_images WHERE project_id=%s", (project_id, ))
+    images = cur.fetchall()
+    cur.execute("SELECT name, xml_content FROM mei_files WHERE project_id=%s", (project_id, ))
+    mei_files = cur.fetchall()
+    cur.close(); con.close()
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for img_name, _mime, data in images:
+            zf.writestr(f"images/{img_name}", bytes(data))
+        for mei_name, xml_content in mei_files:
+            zf.writestr(f"mei/{mei_name}", xml_content or "")
+    buf.seek(0)
+    safe_name = project_name.replace(" ", "_")
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'}
+    )

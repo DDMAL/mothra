@@ -1,5 +1,6 @@
-import { useState } from "react";
-import type { Project } from "../App";
+import { useState, useEffect } from "react";
+import { authHeaders } from "../hooks/useAuth";
+import type { Project, MeiFile } from "../App";
 import DeleteProjectModal from "./DeleteProjectModal";
 
 interface MyProjectsProps {
@@ -9,6 +10,47 @@ interface MyProjectsProps {
   onRenameProject: (id: number, newName: string) => void;
   onDeleteProject: (id: number) => void;
   onRestoreProject: (id: number) => void;
+  onPermanentlyDeleteProject: (id: number) => void;
+}
+
+function formatLastOpened(ts: string | undefined): string {
+  if (!ts) return "never opened";
+  const hours = (Date.now() - new Date(ts).getTime()) / 3600000;
+  if (hours < 1) return "< 1 hour ago";
+  if (hours < 24) {
+    const h = Math.floor(hours);
+    return `${h} hour${h !== 1 ? "s" : ""} ago`;
+  }
+  return new Date(ts).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+function MeiProgress({ meiFiles }: { meiFiles: MeiFile[] }) {
+  if (meiFiles.length === 0) return null;
+  const corrected = meiFiles.filter(f => f.corrected).length;
+  return (
+    <div className="flex items-center gap-2 mt-0.5">
+      <div className="h-1.5 w-20 bg-[#1D3335]/10 rounded-full overflow-hidden flex-shrink-0">
+        <div
+          className="h-full bg-[#1E6B70] rounded-full transition-all"
+          style={{ width: `${(corrected / meiFiles.length) * 100}%` }}
+        />
+      </div>
+      <span className="text-xs text-[#1D3335]/50">{corrected}/{meiFiles.length} corrected</span>
+    </div>
+  );
+}
+
+function AuthImage({ imageId, className }: { imageId: string; className?: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let url = "";
+    fetch(`/api/images/${imageId}`, { headers: authHeaders() })
+      .then(r => r.blob())
+      .then(blob => { url = URL.createObjectURL(blob); setSrc(url); });
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [imageId]);
+  if (!src) return <div className={`${className ?? ""} bg-[#1D3335]/10`} />;
+  return <img src={src} alt="" className={`${className ?? ""} object-cover`} />;
 }
 
 export default function MyProjects({
@@ -18,6 +60,7 @@ export default function MyProjects({
   onRenameProject,
   onDeleteProject,
   onRestoreProject,
+  onPermanentlyDeleteProject,
 }: MyProjectsProps) {
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
@@ -26,12 +69,22 @@ export default function MyProjects({
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<number | null>(null);
   const [renamingRow, setRenamingRow] = useState<number | null>(null);
   const [renameName, setRenameName] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "gallery">("list");
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
 
-  const activeProjects = projects.filter((p) => !p.deletedAt);
-  const trashedProjects = projects.filter((p) => !!p.deletedAt);
+  const activeProjects = projects
+    .filter(p => !p.deletedAt)
+    .sort((a, b) => {
+      if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
+      if (!a.lastOpenedAt) return 1;
+      if (!b.lastOpenedAt) return -1;
+      return new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime();
+    });
+
+  const trashedProjects = projects.filter(p => !!p.deletedAt);
 
   const projectToDelete = deleteConfirmProject !== null
-    ? projects.find((p) => p.id === deleteConfirmProject) ?? null
+    ? projects.find(p => p.id === deleteConfirmProject) ?? null
     : null;
 
   return (
@@ -50,6 +103,18 @@ export default function MyProjects({
             + new project
           </button>
         )}
+        <div className="ml-auto flex items-center gap-1 bg-[#C8E6E3]/30 rounded-lg p-1">
+          <button
+            onClick={() => setViewMode("list")}
+            title="list view"
+            className={`px-2 py-1 rounded text-sm transition-colors cursor-pointer ${viewMode === "list" ? "bg-white text-[#1D3335]" : "text-white/70 hover:text-white"}`}
+          >☰</button>
+          <button
+            onClick={() => setViewMode("gallery")}
+            title="gallery view"
+            className={`px-2 py-1 rounded text-sm transition-colors cursor-pointer ${viewMode === "gallery" ? "bg-white text-[#1D3335]" : "text-white/70 hover:text-white"}`}
+          >⊞</button>
+        </div>
       </div>
 
       {/* tab bar */}
@@ -72,83 +137,134 @@ export default function MyProjects({
 
       <div className="max-w-4xl mx-auto bg-[#C8E6E3] rounded-b-2xl rounded-tr-2xl overflow-hidden">
         {tab === "active" ? (
-          <>
-            <div className="grid grid-cols-[2fr_2fr_1fr_5rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
-              <span>project name</span>
-              <span>creator</span>
-              <span>number of images</span>
-              <span />
-            </div>
-            {activeProjects.map((p) => (
-              <div
-                key={p.id}
-                onMouseEnter={() => setHoveredRow(p.id)}
-                onMouseLeave={() => setHoveredRow(null)}
-                className="grid grid-cols-[2fr_2fr_1fr_5rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm transition-colors hover:bg-[#b0cdc9]"
-              >
-                {renamingRow === p.id ? (
-                  <input
-                    autoFocus
-                    value={renameName}
-                    onChange={(e) => setRenameName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+          viewMode === "list" ? (
+            <>
+              <div className="grid grid-cols-[2fr_1fr_1fr_5rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
+                <span>project name</span>
+                <span>creator</span>
+                <span>last opened</span>
+                <span />
+              </div>
+              {activeProjects.map(p => (
+                <div
+                  key={p.id}
+                  onMouseEnter={() => setHoveredRow(p.id)}
+                  onMouseLeave={() => setHoveredRow(null)}
+                  className="grid grid-cols-[2fr_1fr_1fr_5rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm transition-colors hover:bg-[#b0cdc9]"
+                >
+                  {renamingRow === p.id ? (
+                    <input
+                      autoFocus
+                      value={renameName}
+                      onChange={e => setRenameName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          onRenameProject(p.id, renameName.trim() || p.name);
+                          setRenamingRow(null);
+                        } else if (e.key === "Escape") {
+                          setRenamingRow(null);
+                        }
+                      }}
+                      onBlur={() => {
                         onRenameProject(p.id, renameName.trim() || p.name);
                         setRenamingRow(null);
-                      } else if (e.key === "Escape") {
-                        setRenamingRow(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      onRenameProject(p.id, renameName.trim() || p.name);
-                      setRenamingRow(null);
-                    }}
-                    className="bg-white rounded-lg px-3 py-1 text-[#1D3335] outline-none text-sm w-2/3"
-                  />
-                ) : (
-                  <span
-                    onClick={() => onSelectProject(p.id)}
-                    className="cursor-pointer hover:underline"
-                  >
-                    {p.name}
-                  </span>
-                )}
-                <span>{p.user}</span>
-                <span>{p.images.length}</span>
-                <div
-                  className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.id ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-                >
-                  <button
-                    onClick={() => {
-                      setRenamingRow(p.id);
-                      setRenameName(p.name);
-                    }}
-                    className="cursor-pointer text-base"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => setDeleteConfirmProject(p.id)}
-                    className="cursor-pointer text-base"
-                  >
-                    🗑
-                  </button>
+                      }}
+                      className="bg-white rounded-lg px-3 py-1 text-[#1D3335] outline-none text-sm w-2/3"
+                    />
+                  ) : (
+                    <div className="flex flex-col">
+                      <span onClick={() => onSelectProject(p.id)} className="cursor-pointer hover:underline">
+                        {p.name}
+                      </span>
+                      <MeiProgress meiFiles={p.meiFiles} />
+                    </div>
+                  )}
+                  <span>{p.user}</span>
+                  <span className="text-[#1D3335]/60">{formatLastOpened(p.lastOpenedAt)}</span>
+                  <div className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.id ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+                    <button
+                      onClick={() => { setRenamingRow(p.id); setRenameName(p.name); }}
+                      className="cursor-pointer text-base"
+                    >✏️</button>
+                    <button
+                      onClick={() => setDeleteConfirmProject(p.id)}
+                      className="cursor-pointer text-base"
+                    >🗑</button>
+                  </div>
                 </div>
-              </div>
-            ))}
-            {activeProjects.length === 0 && (
-              <p className="px-6 py-6 text-sm text-[#1D3335]/60">no projects yet</p>
-            )}
-          </>
+              ))}
+              {activeProjects.length === 0 && (
+                <p className="px-6 py-6 text-sm text-[#1D3335]/60">no projects yet</p>
+              )}
+            </>
+          ) : (
+            <>
+              {activeProjects.length === 0 ? (
+                <p className="px-6 py-6 text-sm text-[#1D3335]/60">no projects yet</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4">
+                  {activeProjects.map(p => (
+                    <div
+                      key={p.id}
+                      onClick={() => onSelectProject(p.id)}
+                      onMouseEnter={() => setHoveredRow(p.id)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                      className="bg-white rounded-2xl overflow-hidden cursor-pointer hover:opacity-90 transition-opacity relative"
+                    >
+                      <div className="aspect-[4/3] bg-[#1D3335]/10">
+                        {p.images.length > 0
+                          ? <AuthImage imageId={p.images[0].id} className="w-full h-full" />
+                          : <div className="w-full h-full flex items-center justify-center text-[#1D3335]/30 text-xs">no images</div>
+                        }
+                      </div>
+                      <div className="p-3 flex flex-col gap-1">
+                        <span className="font-semibold text-[#1D3335] text-sm truncate">{p.name}</span>
+                        <span className="text-[#1D3335]/50 text-xs">{formatLastOpened(p.lastOpenedAt)}</span>
+                        <MeiProgress meiFiles={p.meiFiles} />
+                      </div>
+                      {hoveredRow === p.id && (
+                        <div className="absolute top-2 right-2 flex gap-1" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => { setRenamingRow(p.id); setRenameName(p.name); setViewMode("list"); }}
+                            className="bg-white/80 rounded-lg px-2 py-1 text-xs cursor-pointer hover:opacity-70"
+                          >✏️</button>
+                          <button
+                            onClick={() => setDeleteConfirmProject(p.id)}
+                            className="bg-white/80 rounded-lg px-2 py-1 text-xs cursor-pointer hover:opacity-70"
+                          >🗑</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )
         ) : (
           <>
+            {trashedProjects.length > 0 && (
+              <div className="flex gap-3 px-6 pt-4 pb-2">
+                <button
+                  onClick={() => trashedProjects.forEach(p => onRestoreProject(p.id))}
+                  className="text-xs text-[#1E6B70] font-semibold hover:opacity-70 cursor-pointer"
+                >
+                  restore all
+                </button>
+                <button
+                  onClick={() => setShowDeleteAllConfirm(true)}
+                  className="text-xs text-red-600 font-semibold hover:opacity-70 cursor-pointer"
+                >
+                  delete all
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-[2fr_2fr_1fr_6rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
               <span>project name</span>
               <span>creator</span>
               <span>days remaining</span>
               <span />
             </div>
-            {trashedProjects.map((p) => {
+            {trashedProjects.map(p => {
               const daysLeft = Math.max(
                 0,
                 30 - Math.floor((Date.now() - (p.deletedAt ?? 0)) / 86400000),
@@ -156,7 +272,7 @@ export default function MyProjects({
               return (
                 <div
                   key={p.id}
-                  className="grid grid-cols-[2fr_2fr_1fr_6rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm"
+                  className="grid grid-cols-[2fr_2fr_1fr_8rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm"
                 >
                   <span className="opacity-60">{p.name}</span>
                   <span className="opacity-60">{p.user}</span>
@@ -167,6 +283,12 @@ export default function MyProjects({
                       className="text-xs text-[#1E6B70] font-semibold hover:opacity-70 cursor-pointer"
                     >
                       restore
+                    </button>
+                    <button
+                      onClick={() => onPermanentlyDeleteProject(p.id)}
+                      className="text-xs text-red-500 font-semibold hover:opacity-70 cursor-pointer"
+                    >
+                      delete
                     </button>
                   </div>
                 </div>
@@ -183,27 +305,17 @@ export default function MyProjects({
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={() => {
-              setShowCreate(false);
-              setNewName("");
-            }}
+            onClick={() => { setShowCreate(false); setNewName(""); }}
           />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-4 relative shadow-2xl">
+          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-4 shadow-2xl">
             <button
-              onClick={() => {
-                setShowCreate(false);
-                setNewName("");
-              }}
+              onClick={() => { setShowCreate(false); setNewName(""); }}
               className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-            >
-              ✕
-            </button>
-            <h2 className="text-xl text-[#1D3335] text-center">
-              create new project
-            </h2>
+            >✕</button>
+            <h2 className="text-xl text-[#1D3335] text-center">create new project</h2>
             <input
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              onChange={e => setNewName(e.target.value)}
               placeholder="project name"
               className="bg-white rounded-2xl px-6 py-3 text-center text-[#1D3335] outline-none text-sm placeholder:text-[#1D3335]/60"
             />
@@ -231,6 +343,35 @@ export default function MyProjects({
           }}
           onCancel={() => setDeleteConfirmProject(null)}
         />
+      )}
+
+      {showDeleteAllConfirm && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setShowDeleteAllConfirm(false)} />
+          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-5 shadow-2xl">
+            <button
+              onClick={() => setShowDeleteAllConfirm(false)}
+              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
+            >✕</button>
+            <h2 className="text-xl text-[#1D3335] text-center">delete all trashed projects?</h2>
+            <p className="text-sm text-[#1D3335]/70 text-center">
+              this will permanently delete {trashedProjects.length} project{trashedProjects.length !== 1 ? "s" : ""} and cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => {
+                  trashedProjects.forEach(p => onPermanentlyDeleteProject(p.id));
+                  setShowDeleteAllConfirm(false);
+                }}
+                className="px-6 py-2.5 bg-red-600 text-white font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
+              >yes, delete all</button>
+              <button
+                onClick={() => setShowDeleteAllConfirm(false)}
+                className="px-6 py-2.5 border-2 border-[#1D3335]/30 text-[#1D3335] font-semibold rounded-xl hover:opacity-70 cursor-pointer text-sm"
+              >cancel</button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
