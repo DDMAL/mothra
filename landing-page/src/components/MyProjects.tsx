@@ -3,6 +3,7 @@ import { AuthImage } from "./AuthImage";
 import type { Project, MeiFile } from "../types";
 import DeleteProjectModal from "./DeleteProjectModal";
 import { formatLastOpened } from "../utils/time";
+import Modal from "./Modal";
 
 interface MyProjectsProps {
   projects: Project[];
@@ -331,16 +332,7 @@ export default function MyProjects({
       </div>
 
       {showCreate && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => { setShowCreate(false); setNewName(""); }}
-          />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-4 shadow-2xl">
-            <button
-              onClick={() => { setShowCreate(false); setNewName(""); }}
-              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-            >✕</button>
+        <Modal onClose={() => { setShowCreate(false); setNewName(""); }} size="lg" backdrop="none">
             <h2 className="text-xl text-[#1D3335] text-center">create new project</h2>
             <input
               value={newName}
@@ -359,8 +351,8 @@ export default function MyProjects({
             >
               create project
             </button>
-          </div>
-        </>
+        </Modal>
+          
       )}
 
       {projectToDelete && (
@@ -375,13 +367,7 @@ export default function MyProjects({
       )}
 
       {showDeleteAllConfirm && (
-        <>
-          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setShowDeleteAllConfirm(false)} />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-5 shadow-2xl">
-            <button
-              onClick={() => setShowDeleteAllConfirm(false)}
-              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-            >✕</button>
+       <Modal size="sm" backdrop="dim" onClose={() => setShowDeleteAllConfirm(false)}>
             <h2 className="text-xl text-[#1D3335] text-center">delete all trashed projects?</h2>
             <p className="text-sm text-[#1D3335]/70 text-center">
               this will permanently delete {trashedProjects.length} project{trashedProjects.length !== 1 ? "s" : ""} and cannot be undone.
@@ -399,8 +385,7 @@ export default function MyProjects({
                 className="px-6 py-2.5 border-2 border-[#1D3335]/30 text-[#1D3335] font-semibold rounded-xl hover:opacity-70 cursor-pointer text-sm"
               >cancel</button>
             </div>
-          </div>
-        </>
+       </Modal>
       )}
     </div>
   );

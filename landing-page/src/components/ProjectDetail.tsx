@@ -9,6 +9,10 @@ import { AuthImage } from "./AuthImage";
 import { formatRelativeTime } from "../utils/time";
 import { downloadBlob } from "../utils/download";
 
+import Modal from "./Modal";
+import Paginator from "./Paginator";
+import ContextMenu from "./ContextMenu";
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
@@ -583,25 +587,7 @@ export default function ProjectDetail({
                       })}
                     </div>
                     {totalImagePages > 1 && (
-                      <div className="flex items-center justify-center gap-4 mt-6 text-white text-sm">
-                        <button
-                          onClick={() => imgSection.setPage((p) => p - 1)}
-                          disabled={imgSection.page === 0}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          ←
-                        </button>
-                        <span>
-                          page {imgSection.page + 1} of {totalImagePages}
-                        </span>
-                        <button
-                          onClick={() => imgSection.setPage((p) => p + 1)}
-                          disabled={imgSection.page === totalImagePages - 1}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          →
-                        </button>
-                      </div>
+                      <Paginator page={imgSection.page} totalPages={totalImagePages} onPageChange={imgSection.setPage} />
                     )}
                   </>
                 )}
@@ -692,25 +678,7 @@ export default function ProjectDetail({
                       })}
                     </div>
                     {totalModelPages > 1 && (
-                      <div className="flex items-center justify-center gap-4 mt-6 text-white text-sm">
-                        <button
-                          onClick={() => mdlSection.setPage((p) => p - 1)}
-                          disabled={mdlSection.page === 0}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          ←
-                        </button>
-                        <span>
-                          page {mdlSection.page + 1} of {totalModelPages}
-                        </span>
-                        <button
-                          onClick={() => mdlSection.setPage((p) => p + 1)}
-                          disabled={mdlSection.page === totalModelPages - 1}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          →
-                        </button>
-                      </div>
+                      <Paginator page={mdlSection.page} totalPages={totalModelPages} onPageChange={mdlSection.setPage} />
                     )}
                   </>
                 )}
@@ -814,23 +782,7 @@ export default function ProjectDetail({
                       })}
                     </div>
                     {totalMeiPages > 1 && (
-                      <div className="flex items-center justify-center gap-4 mt-6 text-white text-sm">
-                        <button
-                          onClick={() => meiSection.setPage((p) => p - 1)}
-                          disabled={meiSection.page === 0}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          ←
-                        </button>
-                        <span>page {meiSection.page + 1} of {totalMeiPages}</span>
-                        <button
-                          onClick={() => meiSection.setPage((p) => p + 1)}
-                          disabled={meiSection.page === totalMeiPages - 1}
-                          className="hover:opacity-70 disabled:opacity-30 cursor-pointer"
-                        >
-                          →
-                        </button>
-                      </div>
+                      <Paginator page={meiSection.page} totalPages={totalMeiPages} onPageChange={meiSection.setPage} />
                     )}
                   </>
                 )}
@@ -920,170 +872,120 @@ export default function ProjectDetail({
 
       {/* image context menu */}
       {imgSection.menu && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => imgSection.setMenu(null)}
-          />
-          <div
-            className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
-            style={{ top: imgSection.menu.y + 8, left: imgSection.menu.x - 80 }}
-          >
-            <button
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-              onClick={() => {
-                setQuickLookId(imgSection.menu!.id);
-                imgSection.setMenu(null);
-              }}
-            >
-              Quick Look
-            </button>
-            <button
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-              onClick={() => {
-                const img = project.images.find(
-                  (i) => i.id === imgSection.menu!.id,
-                );
+        <ContextMenu
+          x={imgSection.menu.x}
+          y={imgSection.menu.y}
+          onClose={() => imgSection.setMenu(null)}
+          items={[
+            {
+              label: "Quick Look",
+              onClick: () => { setQuickLookId(imgSection.menu!.id); imgSection.setMenu(null); },
+            },
+            {
+              label: "Use Image",
+              onClick: () => {
+                const img = project.images.find(i => i.id === imgSection.menu!.id);
                 if (img && !usedNames.images.includes(img.name)) {
-                  onUsedNamesChange({
-                    ...usedNames,
-                    images: [...usedNames.images, img.name],
-                  });
+                  onUsedNamesChange({ ...usedNames, images: [...usedNames.images, img.name] });
                 }
                 imgSection.setMenu(null);
                 setValidationError(null);
-              }}
-            >
-              Use Image
-            </button>
-            <button
-              onClick={() => deleteImage(imgSection.menu!.id)}
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-            >
-              Delete Image
-            </button>
-            <button
-              onClick={() => {
-                const img = project.images.find(
-                  (i) => i.id === imgSection.menu!.id,
-                )!;
+              },
+            },
+            {
+              label: "Delete Image",
+              onClick: () => deleteImage(imgSection.menu!.id),
+            },
+            {
+              label: "Rename Image",
+              onClick: () => {
+                const img = project.images.find(i => i.id === imgSection.menu!.id)!;
                 imgSection.setRenameModal({ id: imgSection.menu!.id });
                 imgSection.setRenameName(img.name);
                 imgSection.setMenu(null);
-              }}
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-            >
-              Rename Image
-            </button>
-          </div>
-        </>
+              },
+            },
+          ]}
+        />
       )}
 
       {/* model context menu */}
       {mdlSection.menu && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => mdlSection.setMenu(null)}
-          />
-          <div
-            className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
-            style={{ top: mdlSection.menu.y + 8, left: mdlSection.menu.x - 80 }}
-          >
-            <button
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-              onClick={() => {
-                const model = project.models.find(
-                  (m) => m.id === mdlSection.menu!.id,
-                );
+        <ContextMenu
+          x={mdlSection.menu.x}
+          y={mdlSection.menu.y}
+          onClose={() => mdlSection.setMenu(null)}
+          items={[
+            {
+              label: "Use Model",
+              onClick: () => {
+                const model = project.models.find(m => m.id === mdlSection.menu!.id);
                 if (model && !usedNames.models.includes(model.name)) {
-                  onUsedNamesChange({
-                    ...usedNames,
-                    models: [...usedNames.models, model.name],
-                  });
+                  onUsedNamesChange({ ...usedNames, models: [...usedNames.models, model.name] });
                 }
                 mdlSection.setMenu(null);
                 setValidationError(null);
-              }}
-            >
-              Use Model
-            </button>
-            <button
-              onClick={() => deleteModel(mdlSection.menu!.id)}
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-            >
-              Delete Model
-            </button>
-            <button
-              onClick={() => {
-                const m = project.models.find(
-                  (m) => m.id === mdlSection.menu!.id,
-                )!;
+              },
+            },
+            {
+              label: "Delete Model",
+              onClick: () => deleteModel(mdlSection.menu!.id),
+            },
+            { 
+              label: "Rename Model",
+              onClick: () => {
+                const m = project.models.find(m => m.id === mdlSection.menu!.id)!;
                 mdlSection.setRenameModal({ id: mdlSection.menu!.id });
                 mdlSection.setRenameName(m.name);
                 mdlSection.setMenu(null);
-              }}
-              className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-            >
-              Rename Model
-            </button>
-          </div>
-        </>
+              },
+            },
+          ]}
+        />
       )}
 
-      {meiSection.menu && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => meiSection.setMenu(null)}/>
-          <div
-            className="fixed z-50 bg-white rounded-2xl shadow-lg p-4 flex flex-col gap-1 min-w-[160px]"
-            style={{ top: meiSection.menu.y + 8, left: meiSection.menu.x - 80 }}>
-              <button
-                className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-                onClick={() => {
-                  setMeiLookId(meiSection.menu!.id);
+      {meiSection.menu && (() => {
+        const file = project.meiFiles.find(f => f.id === meiSection.menu!.id);
+        const newCorrected = file ? !file.corrected : false;
+        return (
+          <ContextMenu
+            x={meiSection.menu.x}
+            y={meiSection.menu.y}
+            onClose={() => meiSection.setMenu(null)}
+            items={[
+              {
+                label: "View",
+                onClick: () => { setMeiLookId(meiSection.menu!.id); meiSection.setMenu(null); },
+              },
+              {
+                label: "Export",
+                onClick: () => {
+                  const f = project.meiFiles.find(f => f.id === meiSection.menu!.id)!;
+                  handleExportMei(f);
                   meiSection.setMenu(null);
-                }}>
-                  View
-              </button>
-              <button
-                className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-                onClick={() => {
-                  const file = project.meiFiles.find((f) => f.id === meiSection.menu!.id)!;
-                  handleExportMei(file);
+                },
+              },
+              ...(file ? [{
+                label: newCorrected ? "Mark as Corrected" : "Mark as Uncorrected",
+                onClick: () => {
+                  fetch(`/api/projects/${project.id}/mei/${file.id}`, {
+                    method: "PATCH",
+                    headers: { ...authHeaders(), "Content-Type": "application/json" },
+                    body: JSON.stringify({ corrected: newCorrected }),
+                  });
+                  onUpdateProject({
+                    ...project,
+                    meiFiles: project.meiFiles.map(f => 
+                      f.id === file.id ? { ...f, corrected: newCorrected } : f
+                    ),
+                  });
                   meiSection.setMenu(null);
-                }}>
-                  Export
-              </button>
-              {(() => {
-                const file = project.meiFiles.find(f => f.id === meiSection.menu!.id);
-                if (!file) return null;
-                const newCorrected = !file.corrected;
-                return (
-                  <button
-                    className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
-                    onClick={() => {
-                      fetch(`/api/projects/${project.id}/mei/${file.id}`, {
-                        method: "PATCH",
-                        headers: { ...authHeaders(), "Content-Type": "application/json" },
-                        body: JSON.stringify({ corrected: newCorrected }),
-                      });
-                      onUpdateProject({
-                        ...project,
-                        meiFiles: project.meiFiles.map(f =>
-                          f.id === file.id ? { ...f, corrected: newCorrected } : f
-                        ),
-                      });
-                      meiSection.setMenu(null);
-                    }}>
-                    {newCorrected ? "Mark as Corrected" : "Mark as Uncorrected"}
-                  </button>
-                );
-              })()}
-          </div>
-        </>
-      )}
+                },
+              }] : []),
+            ]}
+            /> 
+        );
+      })()}
 
       {/* rename modals */}
       {imgSection.renameModal && (
@@ -1224,168 +1126,79 @@ export default function ProjectDetail({
       })()}
       {/* image upload modal */}
       {imgSection.uploadModal && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => {
-              imgSection.setUploadModal(false);
-              imgSection.setDragging(false);
-            }}
-          />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
-            <button
-              onClick={() => {
-                if (!converting) {
-                  imgSection.setUploadModal(false);
-                  imgSection.setDragging(false);
-                }
-              }}
-              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
+        <Modal onClose={() => { if (!converting) { imgSection.setUploadModal(false); imgSection.setDragging(false); } }}>
+          <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
+          {converting ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
+              <p className="text-sm text-[#1D3335] text-center">converting PDF pages...</p>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
+              onDragEnter={(e) => {e.preventDefault(); imgSection.setDragging(true); }}
+              onDragLeave={() => imgSection.setDragging(false)}
+              onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+              className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
+                ${imgSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
             >
-              x
-            </button>
-            <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
-            {converting ? (
-              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
-                <p className="text-sm text-[#1D3335] text-center">
-                  converting PDF pages...
-                </p>
+              <span className="text-3xl">↑</span>
+              <p className="text-sm text-[#1D3335] text-center">drag & drop images, folders, or PDFs here</p>
+              <div className="flex gap-4 text-sm text-[#1D3335]">
+                <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select files</button>
+                <span className="text-[#1D3335]/40">or</span>
+                <button onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select folder</button>
               </div>
-            ) : (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  imgSection.setDragging(true);
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault();
-                  imgSection.setDragging(true);
-                }}
-                onDragLeave={() => imgSection.setDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  handleFiles(e.dataTransfer.files);
-                }}
-                className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
-                  ${imgSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
-              >
-                <span className="text-3xl">↑</span>
-                <p className="text-sm text-[#1D3335] text-center">
-                  drag & drop images, folders, or PDFs here
-                </p>
-                <div className="flex gap-4 text-sm text-[#1D3335]">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fileInputRef.current?.click();
-                    }}
-                    className="underline hover:opacity-70 cursor-pointer"
-                  >
-                    select files
-                  </button>
-                  <span className="text-[#1D3335]/40">or</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      folderInputRef.current?.click();
-                    }}
-                    className="underline hover:opacity-70 cursor-pointer"
-                  >
-                    select folder
-                  </button>
-                </div>
-              </div>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) handleFiles(e.target.files);
-              }}
-            />
-            <input
-              ref={folderInputRef}
-              type="file"
-              // @ts-expect-error
-              webkitdirectory=""
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) handleFiles(e.target.files);
-              }}
-            />
-          </div>
-        </>
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
+            // @ts-expect-error
+            webkitdirectory=""
+            className="hidden"
+            onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}
+          />
+        </Modal>
       )}
 
       {/* model upload modal */}
       {mdlSection.uploadModal && (
-        <>
+        <Modal onClose={() => { mdlSection.setUploadModal(false); mdlSection.setDragging(false); }}>
+          <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
           <div
-            className="fixed inset-0 z-40"
-            onClick={() => {
-              mdlSection.setUploadModal(false);
-              mdlSection.setDragging(false);
-            }}
-          />
-          <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-6 relative shadow-2xl">
+            onClick={() => modelFileInputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
+            onDragEnter={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
+            onDragLeave={() => mdlSection.setDragging(false)}
+            onDrop={(e) => {e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
+            className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
+              ${mdlSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
+          >
+            <span className="text-3xl">↑</span>
+            <p className="text-sm text-[#1D3335] text-center">drag & drop .h5 or .hdf5 files here</p>
             <button
-              onClick={() => {
-                mdlSection.setUploadModal(false);
-                mdlSection.setDragging(false);
-              }}
-              className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-            >
-              x
-            </button>
-            <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
-            <div
-              onClick={() => modelFileInputRef.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault();
-                mdlSection.setDragging(true);
-              }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                mdlSection.setDragging(true);
-              }}
-              onDragLeave={() => mdlSection.setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleModelFiles(e.dataTransfer.files);
-              }}
-              className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
-                ${mdlSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
-            >
-              <span className="text-3xl">↑</span>
-              <p className="text-sm text-[#1D3335] text-center">
-                drag & drop .h5 or .hdf5 files here
-              </p>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  modelFileInputRef.current?.click();
-                }}
-                className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
-              >
-                select files
-              </button>
-            </div>
-            <input
-              ref={modelFileInputRef}
-              type="file"
-              accept=".h5,.hdf5"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) handleModelFiles(e.target.files);
-              }}
-            />
+              onClick={(e) => { e.stopPropagation(); modelFileInputRef.current?.click(); }}
+              className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
+            >select files</button>
           </div>
-        </>
+          <input
+            ref={modelFileInputRef}
+            type="file"
+            accept=".h5,.hdf5"
+            multiple
+            className="hidden"
+            onChange={(e) => { if (e.target.files) handleModelFiles(e.target.files); }}
+          />
+        </Modal>
       )}
     </div>
   );

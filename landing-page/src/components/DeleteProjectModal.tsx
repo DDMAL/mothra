@@ -1,4 +1,5 @@
 import type { Project } from "../types";
+import Modal from "./Modal";
 
 interface DeleteProjectModalProps {
   project: Project;
@@ -8,15 +9,7 @@ interface DeleteProjectModalProps {
 
 export default function DeleteProjectModal({ project, onConfirm, onCancel }: DeleteProjectModalProps) {
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onCancel} />
-      <div className="animate-fade-in fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-5 relative shadow-2xl">
-        <button
-          onClick={onCancel}
-          className="absolute top-4 right-5 text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer"
-        >
-          ✕
-        </button>
+    <Modal onClose={onCancel} backdrop="dim">
         <h2 className="text-xl text-[#1D3335] font-semibold text-center">delete project?</h2>
         <p className="text-sm text-[#1D3335] text-center leading-relaxed">
           deleting <span className="font-semibold">"{project.name}"</span> will result in{" "}
@@ -39,8 +32,7 @@ export default function DeleteProjectModal({ project, onConfirm, onCancel }: Del
           >
             cancel
           </button>
-        </div>
-      </div>
-    </>
+          </div>
+    </Modal> 
   );
 }
