@@ -27,6 +27,10 @@ interface ProjectDetailProps {
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
+  onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadModel: (name: string) => Promise<{ id: string; name: string }>;
+  onDeleteImage: (imageId: string) => Promise<void>;
+  onDeleteProject: () => void;
 }
 
 export default function ProjectDetail({
@@ -40,6 +44,10 @@ export default function ProjectDetail({
   onStepClick,
   onSendToCantus,
   onRenameProject,
+  onUploadImage,
+  onUploadModel,
+  onDeleteImage,
+  onDeleteProject
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files"
@@ -104,6 +112,7 @@ export default function ProjectDetail({
         activeTab === "images" &&
         imgSection.selectedIds.size > 0
       ) {
+        [...imgSection.selectedIds].forEach((id) => onDeleteImage(id));
         onUpdateProject({
           ...project,
           images: project.images.filter(
@@ -137,7 +146,8 @@ export default function ProjectDetail({
   ]);
 
   // image actions
-  const deleteImage = (id: string) => {
+  const deleteImage = async (id: string) => {
+    await onDeleteImage(id);
     onUpdateProject({
       ...project,
       images: project.images.filter((img) => img.id !== id),
@@ -195,18 +205,22 @@ export default function ProjectDetail({
     const pdfFiles = all.filter((f) => f.type === "application/pdf");
     if (imageFiles.length === 0 && pdfFiles.length === 0) return;
     setConverting(true);
-    const imageEntries = imageFiles.map((f) => ({
-      id: crypto.randomUUID(),
-      name: f.name,
-      src: URL.createObjectURL(f),
+
+    const imageEntries = await Promise.all(imageFiles.map(async (f) => {
+      const result = await onUploadImage(f);
+      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
     }));
-    const pdfEntries = (await Promise.all(pdfFiles.map(pdfToImages)))
-      .flat()
-      .map(({ name, src }) => ({ id: crypto.randomUUID(), name, src }));
-    onUpdateProject({
-      ...project,
-      images: [...project.images, ...imageEntries, ...pdfEntries],
-    });
+    
+    const pdfImages = (await Promise.all(pdfFiles.map(pdfToImages))).flat();
+    const pdfEntries = await Promise.all(pdfImages.map(async ({ name, src: blobUrl }) => {
+      const blob = await fetch(blobUrl).then((r) => r.blob());
+      URL.revokeObjectURL(blobUrl);
+      const file = new File([blob], name, { type: "image/png "});
+      const result = await onUploadImage(file);
+      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
+    }));
+
+    onUpdateProject({ ...project, images: [...project.images, ...imageEntries, ...pdfEntries] });
     setConverting(false);
     imgSection.setUploadModal(false);
     imgSection.setDragging(false);
@@ -236,12 +250,12 @@ export default function ProjectDetail({
     mdlSection.setRenameModal(null);
   };
 
-  const handleModelFiles = (files: FileList | File[]) => {
+  const handleModelFiles = async (files: FileList | File[]) => {
     const valid = Array.from(files).filter((f) => /\.(h5|hdf5)$/i.test(f.name));
     if (valid.length === 0) return;
-    const entries: ProjectModel[] = valid.map((f) => ({
-      id: crypto.randomUUID(),
-      name: f.name,
+    const entries = await Promise.all(valid.map(async (f) => {
+      const result = await onUploadModel(f.name);
+      return { id: result.id, name: result.name || f.name };
     }));
     onUpdateProject({ ...project, models: [...project.models, ...entries] });
     mdlSection.setUploadModal(false);
@@ -1053,7 +1067,7 @@ export default function ProjectDetail({
         <DeleteProjectModal
           project={project}
           onConfirm={() => {
-            onUpdateProject({ ...project, deletedAt: Date.now() });
+            onDeleteProject();
             onBack();
           }}
           onCancel={() => setShowDeleteModal(false)}

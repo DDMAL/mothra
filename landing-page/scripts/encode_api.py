@@ -1,9 +1,9 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-import sys
+from fastapi import APIRouter
 from fastapi.responses import Response, JSONResponse
 
+
+from pathlib import Path
+import sys
 import base64
 import json
 import mimetypes
@@ -63,15 +63,11 @@ from encode_to_mei import (
     estimate_staves_from_glyphs, build_mei, build_neon_manifest, validate_mei,
 )
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
+router = APIRouter()
 
 MOCK_DIR = Path(__file__).parent / "mock_data"
 
-@app.post("/encode")
+@router.post("/encode")
 def encode():
     glyphs = parse_gamera_xml(MOCK_DIR / "mock_page.xml")
     staves, image_w, image_h = parse_staves(MOCK_DIR / "mock_staves.json")
@@ -80,7 +76,7 @@ def encode():
     mei_bytes = build_mei(glyphs_by_stave, staves, image_path, image_w, image_h, "mock_page")
     return build_neon_manifest(mei_bytes, str(image_path), "mock_page")
 
-@app.post("/encode-upload")
+@router.post("/encode-upload")
 async def encode_upload(
     xml_file: UploadFile = FAPIFile(...),
     image_file: Optional[UploadFile] = FAPIFile(None)):
@@ -147,7 +143,7 @@ async def encode_upload(
     return {"session_id": session_id, "mei_base64": mei_b64, "logs": logs, "manifest": manifest}
 
 
-@app.get("/manifest/{session_id}")
+@router.get("/manifest/{session_id}")
 def get_manifest(session_id: str):
     manifest_file = MANIFEST_DIR / f"{session_id}.jsonld"
     if manifest_file.exists():
@@ -155,7 +151,7 @@ def get_manifest(session_id: str):
     return JSONResponse(status_code=404, content={"error": "manifest not found"})
 
 
-@app.get("/mei/{session_id}")
+@router.get("/mei/{session_id}")
 def get_mei(session_id: str):
     if session_id not in _sessions:
         return JSONResponse(status_code=404, content={"error": "not found"})
