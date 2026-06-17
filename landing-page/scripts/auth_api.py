@@ -71,6 +71,15 @@ def init_db():
             corrected INTEGER DEFAULT 0
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                action_type TEXT NOT NULL,
+                detail TEXT DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+        )    
+    """)
     con.commit()
     cur.close()
     con.close()
@@ -94,6 +103,17 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE projects ADD COLUMN last_opened_at TIMESTAMPTZ")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE projects ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
@@ -196,7 +216,7 @@ def me(user=Depends(get_current_user)):
     return user
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned = row
     cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
     cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
@@ -212,14 +232,21 @@ def _project_row_to_dict(cur, row, username):
         "images": images, "models": models, "meiFiles": mei,
         "annotations": [], "deletedAt": deleted_at,
         "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
+        "isPinned": bool(is_pinned),
     }
 
+def _log_activity(cur, project_id: int, action_type: str, detail: str = ""):
+    cur.execute(
+        "INSERT INTO activity_log (project_id, action_type, detail) VALUES (%s, %s, %s)",
+        (project_id, action_type, detail)
+    )
 @router.get("/projects")
 def list_projects(user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, last_opened_at"
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, " \
+        " last_opened_at, is_pinned"
         " FROM projects WHERE user_id=%s",
         (user["id"],)
     )
@@ -228,6 +255,23 @@ def list_projects(user=Depends(get_current_user)):
     cur.close()
     con.close()
     return result
+
+@router.get("/projects/{project_id}/activity")
+def get_activity(project_id: int, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute(
+        "SELECT action_type, detail, created_at FROM activity_log"
+        " WHERE project_id=%s ORDER BY created_at DESC LIMIT 100",
+        (project_id,)
+    )
+    entries = [{"actionType": r[0], "detail": r[1], "createdAt": str(r[2])} for r in cur.fetchall()]
+    cur.close(); con.close()
+    return entries
 
 class CreateProjectBody(BaseModel):
     name: str
@@ -254,6 +298,7 @@ class UpdateProjectBody(BaseModel):
     usedModelNames: Optional[list] = None
     deletedAt: Optional[str] = None
     lastOpenedAt: Optional[str] = None
+    isPinned: Optional[bool] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -270,6 +315,7 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
         cur.execute("UPDATE projects SET name=%s WHERE id=%s", (body.name, project_id))
     if body.stepsUnlocked is not None:
         cur.execute("UPDATE projects SET steps_unlocked=%s WHERE id=%s", (body.stepsUnlocked, project_id))
+        _log_activity(cur, project_id, "step_unlocked", str(body.stepsUnlocked))
     if body.usedImageNames is not None:
         cur.execute("UPDATE projects SET used_image_names=%s WHERE id=%s",
                     (json.dumps(body.usedImageNames), project_id))
@@ -281,6 +327,8 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
     if body.lastOpenedAt is not None:
         cur.execute("UPDATE projects SET last_opened_at=%s WHERE id=%s",
                     (body.lastOpenedAt, project_id))
+    if body.isPinned is not None:
+        cur.execute("UPDATE projects SET is_pinned=%s WHERE id=%s", (body.isPinned, project_id))
     con.commit()
     cur.close()
     con.close()
@@ -337,6 +385,7 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
         "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",
         (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes))
     )
+    _log_activity(cur, project_id, "image_imported", file.filename)
     con.commit()
     cur.close()
     con.close()
@@ -385,13 +434,37 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
         con.close()
         raise HTTPException(status_code=404)
     mei_id = _uuid.uuid4().hex
-    con.execute(
+    cur.execute(
         "INSERT INTO mei_files (id, project_id, name, xml_content) VALUES (%s,%s,%s,%s)",
         (mei_id, project_id, body.name, body.xmlContent))
+    _log_activity(cur, project_id, "mei_produced", body.name)
     con.commit()
     cur.close()
     con.close()
     return {"id": mei_id}
+
+class UpdateMeiBody(BaseModel):
+    corrected: Optional[bool] = None
+
+@router.patch("/projects/{project_id}/mei/{mei_id}")
+def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    if body.corrected is not None:
+        cur.execute("UPDATE mei_files SET corrected=%s WHERE id=%s AND project_id=%s",
+                    (1 if body.corrected else 0, mei_id, project_id))
+        if body.corrected:
+            cur.execute("SELECT name FROM mei_files WHERE id=%s", 
+                        (mei_id,))
+            name_row = cur.fetchone()
+            _log_activity(cur, project_id, "mei_corrected", name_row[0] if name_row else "")
+    con.commit()
+    cur.close(); con.close()
+    return {"ok": True}
 
 # models
 
@@ -413,6 +486,7 @@ def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user
         "INSERT INTO project_models (id, project_id, name) VALUES (%s,%s,%s)",
         (model_id, project_id, body.name)
     )
+    _log_activity(cur, project_id, "model_added", body.name)
     con.commit()
     cur.close()
     con.close()
