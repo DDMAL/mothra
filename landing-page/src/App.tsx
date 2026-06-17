@@ -484,7 +484,11 @@ export default function App() {
       ) : view === "docs" ? (
         <Documentation onHome={() => setView("landing")} />
       ) : view === "account" && currentUser ? (
-        <MyAccount currentUser={currentUser} onUserUpdate={(u) => setCurrentUser(u)} />
+        <MyAccount 
+          currentUser={currentUser} 
+          onUserUpdate={(u) => setCurrentUser(u)}
+          onLogout={handleLogout}
+         />
       ) : (
         <AuthPage
           mode={view as "login" | "register"}
