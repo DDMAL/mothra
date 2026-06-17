@@ -566,7 +566,7 @@ export default function ProjectDetail({
                               }}
                             >
                               {img.src && (
-                                <img
+                                <AuthImage
                                   src={img.src}
                                   alt={img.name}
                                   className="w-full h-full object-cover"
@@ -754,7 +754,7 @@ export default function ProjectDetail({
                           {/* top: image */}
                           <div className="absolute inset-0 bg-[#C8E6E3]/50 rounded-xl overflow-hidden flex items-end justify-start p-2">
                             {set.imageSrc && (
-                              <img
+                              <AuthImage
                                 src={set.imageSrc}
                                 alt={set.imageName}
                                 className="absolute inset-0 w-full h-full object-cover opacity-60"
@@ -1165,7 +1165,7 @@ export default function ProjectDetail({
                   </button>
                   <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
                     {img.src ? (
-                      <img
+                      <AuthImage
                         src={img.src}
                         alt={img.name}
                         className="object-contain max-h-[60vh] w-full"
@@ -1408,6 +1408,29 @@ export default function ProjectDetail({
   );
 }
 
+
+// authenticated image (plain <img> can't send Authorization headers)
+
+function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    fetch(src, { headers: authHeaders() })
+      .then(r => r.blob())
+      .then(blob => {
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobSrc(objectUrl);
+      });
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+  if (!blobSrc) return null;
+  return <img src={blobSrc} alt={alt} className={className} />;
+}
 
 // activity log
 

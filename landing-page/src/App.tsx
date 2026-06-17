@@ -81,6 +81,9 @@ export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+
+  const normalizeProjects = (raw: Project[]) =>
+    raw.map(p => ({ ...p, images: p.images.map(img => ({ ...img, src: img.src ?? `/api/images/${img.id}` })) }));
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
@@ -109,7 +112,7 @@ export default function App() {
     setCurrentUser(user);
     fetch("/api/projects", { headers: authHeaders() })
       .then(r => r.json())
-      .then(setProjects);
+      .then(data => setProjects(normalizeProjects(data)));
     setView("projects");
   };
 
@@ -231,7 +234,7 @@ export default function App() {
           return fetch("/api/projects", { headers: { Authorization: `Bearer ${token}` } });
         })
         .then((r) => r.json())
-        .then(setProjects)
+        .then(data => setProjects(normalizeProjects(data)))
         .catch(() => clearToken());
     }, []);
 
