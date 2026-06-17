@@ -142,7 +142,7 @@ def register(body: RegisterBody):
     con = get_db_conn()
     cur = con.cursor()
     try: 
-        con.execute(
+        cur.execute(
             "INSERT INTO users (username, email, first_name, last_name, password_hash)"
             " VALUES (%s,%s,%s,%s,%s) RETURNING id",
             (body.username, body.email, body.first_name, body.last_name, hash_password(body.password))

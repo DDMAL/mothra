@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from auth_api import router as auth_router
 from encode_api import router as encode_router
