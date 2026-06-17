@@ -12,6 +12,7 @@ import { downloadBlob } from "../utils/download";
 import Modal from "./Modal";
 import Paginator from "./Paginator";
 import ContextMenu from "./ContextMenu";
+import AssetGrid from "./AssetGrid";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -532,64 +533,16 @@ export default function ProjectDetail({
                 {project.images.length === 0 ? (
                   <p className="text-white/70 text-sm">no images yet</p>
                 ) : (
-                  <>
-                    <div
-                      className="grid grid-cols-5 gap-4"
-                      onMouseDown={(e) => {
-                        if (e.shiftKey) e.preventDefault();
-                      }}
-                    >
-                      {pagedImages.map((img, pageIdx) => {
-                        const idx = imgSection.page * ITEMS_PER_PAGE + pageIdx;
-                        return (
-                          <div key={img.id} className="flex flex-col gap-2">
-                            <div
-                              className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow
-                                ${imgSection.selectedIds.has(img.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                                ${usedNames.images.includes(img.name) ? "opacity-40 cursor-default" : ""}`}
-                              onClick={(e) => {
-                                if (!usedNames.images.includes(img.name))
-                                  imgSection.handleClick(e, img.id, idx);
-                              }}
-                            >
-                              {img.src && (
-                                <AuthImage
-                                  src={img.src}
-                                  alt={img.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              )}
-                            </div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span
-                                className={`text-sm text-white truncate ${usedNames.images.includes(img.name) ? "opacity-40" : ""}`}
-                              >
-                                {img.name}
-                              </span>
-                              {!usedNames.images.includes(img.name) && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    imgSection.setMenu({
-                                      id: img.id,
-                                      x: e.clientX,
-                                      y: e.clientY,
-                                    });
-                                  }}
-                                  className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                                >
-                                  ⋮
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {totalImagePages > 1 && (
-                      <Paginator page={imgSection.page} totalPages={totalImagePages} onPageChange={imgSection.setPage} />
-                    )}
-                  </>
+                  <AssetGrid
+                    pagedItems={pagedImages}
+                    pageOffset={imgSection.page * ITEMS_PER_PAGE}
+                    section={imgSection}
+                    usedNames={usedNames.images}
+                    totalPages={totalImagePages}
+                    renderThumbnail={img =>
+                      img.src ? <AuthImage src={img.src} alt={img.name} className="w-full h-full object-cover" /> : null
+                    }
+                  />
                 )}
               </div>
             )}
@@ -600,87 +553,20 @@ export default function ProjectDetail({
                 {project.models.length === 0 ? (
                   <p className="text-white/70 text-sm">no models yet</p>
                 ) : (
-                  <>
-                    <div
-                      className="grid grid-cols-5 gap-4"
-                      onMouseDown={(e) => {
-                        if (e.shiftKey) e.preventDefault();
-                      }}
-                    >
-                      {pagedModels.map((model, pageIdx) => {
-                        const idx = mdlSection.page * ITEMS_PER_PAGE + pageIdx;
-                        return (
-                          <div key={model.id} className="flex flex-col gap-2">
-                            <div
-                              className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer
-                                transition-shadow flex items-center justify-center
-                                ${mdlSection.selectedIds.has(model.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                                ${usedNames.models.includes(model.name) ? "opacity-40 cursor-default" : ""}`}
-                              onClick={(e) => {
-                                if (!usedNames.models.includes(model.name))
-                                  mdlSection.handleClick(e, model.id, idx);
-                              }}
-                            >
-                              <svg
-                                width="56"
-                                height="64"
-                                viewBox="0 0 56 64"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                              >
-                                <path
-                                  d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z"
-                                  fill="white"
-                                  fillOpacity="0.25"
-                                />
-                                <path
-                                  d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z"
-                                  fill="white"
-                                  fillOpacity="0.45"
-                                />
-                                <text
-                                  x="28"
-                                  y="46"
-                                  textAnchor="middle"
-                                  fill="white"
-                                  fontSize="16"
-                                  fontWeight="bold"
-                                  fontFamily="monospace"
-                                >
-                                  H5
-                                </text>
-                              </svg>
-                            </div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span
-                                className={`text-sm text-white truncate ${usedNames.models.includes(model.name) ? "opacity-40" : ""}`}
-                              >
-                                {model.name}
-                              </span>
-                              {!usedNames.models.includes(model.name) && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    mdlSection.setMenu({
-                                      id: model.id,
-                                      x: e.clientX,
-                                      y: e.clientY,
-                                    });
-                                  }}
-                                  className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                                >
-                                  ⋮
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {totalModelPages > 1 && (
-                      <Paginator page={mdlSection.page} totalPages={totalModelPages} onPageChange={mdlSection.setPage} />
+                  <AssetGrid
+                    pagedItems={pagedModels}
+                    pageOffset={mdlSection.page * ITEMS_PER_PAGE}
+                    section={mdlSection}
+                    usedNames={usedNames.models}
+                    totalPages={totalModelPages}
+                    renderThumbnail={() => (
+                      <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
+                      <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
+                      <text x="28" y="46" textAnchor="middle" fill="white" fontSize="16" fontWeight="bold" fontFamily="monospace">H5</text>
+                      </svg>
                     )}
-                  </>
+                  />
                 )}
               </div>
             )}
