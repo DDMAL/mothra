@@ -240,6 +240,7 @@ def _log_activity(cur, project_id: int, action_type: str, detail: str = ""):
         "INSERT INTO activity_log (project_id, action_type, detail) VALUES (%s, %s, %s)",
         (project_id, action_type, detail)
     )
+
 @router.get("/projects")
 def list_projects(user=Depends(get_current_user)):
     con = get_db_conn()
@@ -358,6 +359,7 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     if not row or row[0] != user["id"]:
         cur.close(); con.close()
         raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM activity_log WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))

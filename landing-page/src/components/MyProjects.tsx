@@ -11,6 +11,7 @@ interface MyProjectsProps {
   onDeleteProject: (id: number) => void;
   onRestoreProject: (id: number) => void;
   onPermanentlyDeleteProject: (id: number) => void;
+  onTogglePin: (id: number) => void;
 }
 
 function formatLastOpened(ts: string | undefined): string {
@@ -61,6 +62,7 @@ export default function MyProjects({
   onDeleteProject,
   onRestoreProject,
   onPermanentlyDeleteProject,
+  onTogglePin,
 }: MyProjectsProps) {
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
@@ -72,9 +74,22 @@ export default function MyProjects({
   const [viewMode, setViewMode] = useState<"list" | "gallery">("list");
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
 
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"lastOpened" | "dateCreated" | "nameAZ">("lastOpened");
+  
   const activeProjects = projects
     .filter(p => !p.deletedAt)
+    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
+      // pinned is always first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+
+      // then by selected sort
+      if (sortBy === "nameAZ") return a.name.localeCompare(b.name);
+      if (sortBy === "dateCreated") return b.id - a.id;
+
+      // default is by lastOpened
       if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
       if (!a.lastOpenedAt) return 1;
       if (!b.lastOpenedAt) return -1;
@@ -137,7 +152,25 @@ export default function MyProjects({
 
       <div className="max-w-4xl mx-auto bg-[#C8E6E3] rounded-b-2xl rounded-tr-2xl overflow-hidden">
         {tab === "active" ? (
-          viewMode === "list" ? (
+          <>
+            <div className="px-6 pt-4 pb-3 flex items-center gap-3 border-b border-[#1D3335]/10">
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="search projects..."
+                className="flex-1 bg-white/70 rounded-xl px-4 py-1.5 text-sm text-[#1D3335] outline-none placeholder:text-[#1D3335]/40"
+              />
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                className="bg-white/70 rounded-xl px-3 py-1.5 text-sm text-[#1D3335] outline-none cursor-pointer"
+              >
+                <option value="lastOpened">last opened</option>
+                <option value="dateCreated">date created</option>
+                <option value="nameAZ">name a–z</option>
+              </select>
+            </div>
+          {viewMode === "list" ? (
             <>
               <div className="grid grid-cols-[2fr_1fr_1fr_5rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
                 <span>project name</span>
@@ -173,9 +206,18 @@ export default function MyProjects({
                     />
                   ) : (
                     <div className="flex flex-col">
-                      <span onClick={() => onSelectProject(p.id)} className="cursor-pointer hover:underline">
-                        {p.name}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={e => { e.stopPropagation(); onTogglePin(p.id); }}
+                          className="text-sm leading-none cursor-pointer shrink-0"
+                          title={p.isPinned ? "unpin" : "pin to top"}
+                        >
+                          {p.isPinned ? "★" : "☆"}
+                        </button>
+                        <span onClick={() => onSelectProject(p.id)} className="cursor-pointer hover:underline">
+                          {p.name}
+                        </span>
+                      </div>
                       <MeiProgress meiFiles={p.meiFiles} />
                     </div>
                   )}
@@ -218,7 +260,15 @@ export default function MyProjects({
                         }
                       </div>
                       <div className="p-3 flex flex-col gap-1">
-                        <span className="font-semibold text-[#1D3335] text-sm truncate">{p.name}</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={e => { e.stopPropagation(); onTogglePin(p.id); }}
+                            className="text-sm leading-none cursor-pointer shrink-0"
+                            title={p.isPinned ? "unpin" : "pin to top"}>
+                            {p.isPinned ? "★" : "☆"}
+                          </button>
+                          <span className="font-semibold text-[#1D3335] text-sm truncate">{p.name}</span>
+                        </div>
                         <span className="text-[#1D3335]/50 text-xs">{formatLastOpened(p.lastOpenedAt)}</span>
                         <MeiProgress meiFiles={p.meiFiles} />
                       </div>
@@ -239,7 +289,8 @@ export default function MyProjects({
                 </div>
               )}
             </>
-          )
+          )}
+          </>
         ) : (
           <>
             {trashedProjects.length > 0 && (
@@ -258,7 +309,7 @@ export default function MyProjects({
                 </button>
               </div>
             )}
-            <div className="grid grid-cols-[2fr_2fr_1fr_6rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
+            <div className="grid grid-cols-[2fr_2fr_1fr_8rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
               <span>project name</span>
               <span>creator</span>
               <span>days remaining</span>
@@ -277,7 +328,7 @@ export default function MyProjects({
                   <span className="opacity-60">{p.name}</span>
                   <span className="opacity-60">{p.user}</span>
                   <span className="opacity-60">{daysLeft}d</span>
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-3">
                     <button
                       onClick={() => onRestoreProject(p.id)}
                       className="text-xs text-[#1E6B70] font-semibold hover:opacity-70 cursor-pointer"

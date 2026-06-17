@@ -34,6 +34,33 @@ interface ProjectDetailProps {
   onDeleteProject: () => void;
 }
 
+interface ActivityEntry {
+  actionType: string;
+  detail: string;
+  createdAt: string;
+}
+
+function formatActivity(e: ActivityEntry): string {
+  switch (e.actionType) {
+    case "image_imported": return `image: ${e.detail}`;
+    case "model_added": return `model: ${e.detail}`;
+    case "mei_produced": return `MEI produced: ${e.detail}`;
+    case "mei_corrected": return `MEI corrected: ${e.detail}`;
+    case "step_unlocked": return `step ${e.detail} unlocked`;
+    default: return e.detail || e.actionType;
+  }
+}
+
+function formatRelativeTime(ts: string): string {
+  const hours = (Date.now() - new Date(ts).getTime()) / 3600000;
+  if (hours < 1) return "< 1 hour ago";
+  if (hours < 24) {
+    const h = Math.floor(hours); return `${h}h ago`;
+  }
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+
 export default function ProjectDetail({
   project,
   onBack,
@@ -304,45 +331,47 @@ export default function ProjectDetail({
       {/* main layout */}
       <div className="flex gap-8 max-w-6xl mx-auto">
         {/* progress sidebar */}
-        <div className="w-48 shrink-0 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start mt-[4.5rem]">
-          <span className="text-white/60 text-sm font-medium mb-1">
-            progress:
-          </span>
-          {STEPS.map((label, i) => {
-            const stepNum = i + 1;
-            const unlocked = stepsUnlocked >= stepNum;
-            return (
-              <button
-                key={stepNum}
-                disabled={!unlocked}
-                onClick={() => onStepClick(stepNum)}
-                className={`text-left text-sm px-3 py-2 rounded-xl transition-opacity ${
-                  unlocked
-                    ? "text-white hover:bg-white/10 cursor-pointer"
-                    : "text-white/30 cursor-not-allowed"
-                }`}
-              >
-                {stepNum}) {label}
-              </button>
-            );
-          })}
-          <button
-            onClick={async () => {
-              const res = await fetch(`/api/projects/${project.id}/export`, { headers: authHeaders() });
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `${project.name}.zip`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
-          >
-            export all files ↓
-          </button>
+        <div className="flex flex-col gap-3 shrink-0 mt-[4.5rem]">
+          <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start">
+            <span className="text-white/60 text-sm font-medium mb-1">
+              progress:
+            </span>
+            {STEPS.map((label, i) => {
+              const stepNum = i + 1;
+              const unlocked = stepsUnlocked >= stepNum;
+              return (
+                <button
+                  key={stepNum}
+                  disabled={!unlocked}
+                  onClick={() => onStepClick(stepNum)}
+                  className={`text-left text-sm px-3 py-2 rounded-xl transition-opacity ${
+                    unlocked
+                      ? "text-white hover:bg-white/10 cursor-pointer"
+                      : "text-white/30 cursor-not-allowed"
+                  }`}
+                >
+                  {stepNum} {label}
+                </button>
+              );
+            })}
+            <button
+              onClick={async () => {
+                const res = await fetch(`/api/projects/${project.id}/export`, { headers: authHeaders() });
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${project.name}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
+            >
+              export all files ↓
+            </button>
+          </div>
+          <ActivityLog projectId={project.id} />
         </div>
-
         <div className="flex-1 min-w-0">
           {/* header */}
           <div className="flex items-center gap-4 mb-8">
@@ -1044,6 +1073,31 @@ export default function ProjectDetail({
                 }}>
                   Export
               </button>
+              {(() => {
+                const file = project.meiFiles.find(f => f.id === meiSection.menu!.id);
+                if (!file) return null;
+                const newCorrected = !file.corrected;
+                return (
+                  <button
+                    className="text-sm text-[#1D3335] text-left px-2 py-1.5 hover:opacity-70 cursor-pointer"
+                    onClick={() => {
+                      fetch(`/api/projects/${project.id}/mei/${file.id}`, {
+                        method: "PATCH",
+                        headers: { ...authHeaders(), "Content-Type": "application/json" },
+                        body: JSON.stringify({ corrected: newCorrected }),
+                      });
+                      onUpdateProject({
+                        ...project,
+                        meiFiles: project.meiFiles.map(f =>
+                          f.id === file.id ? { ...f, corrected: newCorrected } : f
+                        ),
+                      });
+                      meiSection.setMenu(null);
+                    }}>
+                    {newCorrected ? "Mark as Corrected" : "Mark as Uncorrected"}
+                  </button>
+                );
+              })()}
           </div>
         </>
       )}
@@ -1349,6 +1403,46 @@ export default function ProjectDetail({
             />
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+
+// activity log
+
+function ActivityLog({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch(`/api/projects/${projectId}/activity`, { headers: authHeaders() })
+      .then(r => r.json())
+      .then(setEntries);
+  }, [open, projectId]);
+
+  return (
+    <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-5 py-3 flex items-center justify-between text-white/60 hover:text-white text-xs cursor-pointer transition-colors"
+      >
+        <span>activity log</span>
+        <span className={`transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 flex flex-col gap-3 max-h-64 overflow-y-auto">
+          {entries.length === 0
+            ? <p className="text-xs text-white/40">no activity yet</p>
+            : entries.map((e, i) => (
+                <div key={i}>
+                  <p className="text-xs text-white/80 leading-snug">{formatActivity(e)}</p>
+                  <p className="text-[10px] text-white/40 mt-0.5">{formatRelativeTime(e.createdAt)}</p>
+                </div>
+              ))
+          }
+        </div>
       )}
     </div>
   );

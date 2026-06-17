@@ -55,6 +55,7 @@ export interface Project {
   usedModelNames: string[];
   deletedAt?: number;
   lastOpenedAt?: string;
+  isPinned?: boolean;
 }
 export interface ProjectModel {
   id: string;
@@ -88,6 +89,18 @@ export default function App() {
   const [meiContent, settleMeiContent] = useState<{ bytes: string; stem: string } | null>(null);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  const togglePin = (id: number) => {
+    const project = projects.find(p => p.id === id);
+    if (!project) return;
+    const isPinned = !project.isPinned;
+    fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ isPinned }),
+    });
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, isPinned } : p));
+  };
 
   // auth
 
@@ -360,6 +373,7 @@ export default function App() {
           onDeleteProject={deleteProject}
           onRestoreProject={restoreProject}
           onPermanentlyDeleteProject={permanentlyDeleteProject}
+          onTogglePin={togglePin}
         />
       ) : view === "project" && selectedProject ? (
         <ProjectDetail
