@@ -1,5 +1,5 @@
-import type { Project } from "../types";
-import Modal from "./Modal";
+import type { Project } from "../../types";
+import Modal from "../shared/Modal";
 
 interface DeleteProjectModalProps {
   project: Project;

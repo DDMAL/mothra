@@ -1,23 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
-import type { Project, MeiFile } from "../../types";
+import { useEffect, useState } from "react";
+import type { Project } from "../../types";
 import { authHeaders } from "../../hooks/useAuth";
-import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
+import { useAssetSection } from "../../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
-import * as pdfjsLib from "pdfjs-dist";
-import { AuthImage } from "../shared/AuthImage";
-import { formatRelativeTime, formatActivity } from "../../utils/time";
-import type { ActivityEntry } from "../../utils/time";
+import ActivityLog from "./ActivityLog";
+import ImageTab from "./ImageTab";
+import ModelTab from "./ModelTab";
+import MeiTab from "./MeiTab";
+import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
-
-import Modal from "../shared/Modal";
-import ContextMenu from "../shared/ContextMenu";
-import AssetGrid from "../shared/AssetGrid";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).href;
 
 const STEPS = [
   "interactive classifier",
@@ -57,44 +49,29 @@ export default function ProjectDetail({
   onUploadImage,
   onUploadModel,
   onDeleteImage,
-  onDeleteProject
+  onDeleteProject,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files"
   >("images");
-  const [quickLookId, setQuickLookId] = useState<string | null>(null);
-  const [converting, setConverting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  const modelFileInputRef = useRef<HTMLInputElement>(null);
-
-  const imgSection = useAssetSection(project.images);
-  const mdlSection = useAssetSection(project.models);
-  const meiSection = useAssetSection(project.meiFiles);
-  
-  const [meiLookId, setMeiLookId] = useState<string | null>(null);
-  const [meiSubTab, setMeiSubTab] = useState<"mei produced" | "mei corrected">("mei produced");
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
+  const imgSection = useAssetSection(project.images);
+  const mdlSection = useAssetSection(project.models);
+  const meiSection = useAssetSection(project.meiFiles);
+
   const switchTab = (tab: "images" | "models" | "annotations" | "mei files") => {
     setActiveTab(tab);
-    setMeiSubTab("mei produced");
     imgSection.clearSelection();
     mdlSection.clearSelection();
     meiSection.clearSelection();
     imgSection.setPage(0);
     mdlSection.setPage(0);
   };
-
-  const switchMeiSubTab = (tab: "mei produced" | "mei corrected") => {
-    setMeiSubTab(tab);
-    meiSection.clearSelection();
-    meiSection.setPage(0);
-  }
 
   const tabs = [
     "images",
@@ -114,188 +91,45 @@ export default function ProjectDetail({
         mdlSection.clearSelection();
         meiSection.setMenu(null);
         meiSection.clearSelection();
-        setMeiLookId(null);
-        setQuickLookId(null);
       }
-      if (
-        e.key === "Delete" &&
-        activeTab === "images" &&
-        imgSection.selectedIds.size > 0
-      ) {
-        [...imgSection.selectedIds].forEach((id) => onDeleteImage(id));
-        onUpdateProject({
-          ...project,
-          images: project.images.filter(
-            (img) => !imgSection.selectedIds.has(img.id),
-          ),
-        });
-        imgSection.clearSelection();
-      }
-      if (
-        e.key === "Delete" &&
-        activeTab === "models" &&
-        mdlSection.selectedIds.size > 0
-      ) {
-        onUpdateProject({
-          ...project,
-          models: project.models.filter(
-            (m) => !mdlSection.selectedIds.has(m.id),
-          ),
-        });
-        mdlSection.clearSelection();
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (
+          document.activeElement?.tagName === "INPUT" ||
+          document.activeElement?.tagName === "TEXTAREA"
+        )
+          return;
+        if (activeTab === "images" && imgSection.selectedIds.size > 0) {
+          imgSection.selectedIds.forEach((id) => onDeleteImage(id));
+          onUpdateProject({
+            ...project,
+            images: project.images.filter(
+              (img) => !imgSection.selectedIds.has(img.id),
+            ),
+          });
+          imgSection.clearSelection();
+        }
+        if (activeTab === "models" && mdlSection.selectedIds.size > 0) {
+          onUpdateProject({
+            ...project,
+            models: project.models.filter(
+              (m) => !mdlSection.selectedIds.has(m.id),
+            ),
+          });
+          mdlSection.clearSelection();
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [
-    imgSection.selectedIds,
-    mdlSection.selectedIds,
     activeTab,
+    imgSection,
+    mdlSection,
+    meiSection,
     project,
+    onDeleteImage,
     onUpdateProject,
   ]);
-
-  // image actions
-  const deleteImage = async (id: string) => {
-    await onDeleteImage(id);
-    onUpdateProject({
-      ...project,
-      images: project.images.filter((img) => img.id !== id),
-    });
-    imgSection.setMenu(null);
-  };
-
-  const renameImage = () => {
-    const current = project.images.find(
-      (img) => img.id === imgSection.renameModal?.id,
-    );
-    onUpdateProject({
-      ...project,
-      images: project.images.map((img) =>
-        img.id === imgSection.renameModal?.id
-          ? { ...img, name: imgSection.renameName.trim() || current!.name }
-          : img,
-      ),
-    });
-    imgSection.setRenameModal(null);
-  };
-
-  const pdfToImages = async (
-    file: File,
-  ): Promise<{ name: string; src: string }[]> => {
-    const baseName = file.name.replace(/\.pdf$/i, "");
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
-      .promise;
-    const results: { name: string; src: string }[] = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 300 / 72 });
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({
-        canvasContext: canvas.getContext("2d")!,
-        canvas,
-        viewport,
-      }).promise;
-      const blob = await new Promise<Blob>((res) =>
-        canvas.toBlob((b) => res(b!), "image/png"),
-      );
-      results.push({
-        name: `${baseName} (page${i}).png`,
-        src: URL.createObjectURL(blob),
-      });
-    }
-    return results;
-  };
-
-  const handleFiles = async (files: FileList | File[]) => {
-    const all = Array.from(files);
-    const imageFiles = all.filter((f) => f.type.startsWith("image/"));
-    const pdfFiles = all.filter((f) => f.type === "application/pdf");
-    if (imageFiles.length === 0 && pdfFiles.length === 0) return;
-    setConverting(true);
-
-    const imageEntries = await Promise.all(imageFiles.map(async (f) => {
-      const result = await onUploadImage(f);
-      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
-    }));
-    
-    const pdfImages = (await Promise.all(pdfFiles.map(pdfToImages))).flat();
-    const pdfEntries = await Promise.all(pdfImages.map(async ({ name, src: blobUrl }) => {
-      const blob = await fetch(blobUrl).then((r) => r.blob());
-      URL.revokeObjectURL(blobUrl);
-      const file = new File([blob], name, { type: "image/png "});
-      const result = await onUploadImage(file);
-      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
-    }));
-
-    onUpdateProject({ ...project, images: [...project.images, ...imageEntries, ...pdfEntries] });
-    setConverting(false);
-    imgSection.setUploadModal(false);
-    imgSection.setDragging(false);
-  };
-
-  // model actions
-  const deleteModel = (id: string) => {
-    onUpdateProject({
-      ...project,
-      models: project.models.filter((m) => m.id !== id),
-    });
-    mdlSection.setMenu(null);
-  };
-
-  const renameModel = () => {
-    const current = project.models.find(
-      (m) => m.id === mdlSection.renameModal?.id,
-    );
-    onUpdateProject({
-      ...project,
-      models: project.models.map((m) =>
-        m.id === mdlSection.renameModal?.id
-          ? { ...m, name: mdlSection.renameName.trim() || current!.name }
-          : m,
-      ),
-    });
-    mdlSection.setRenameModal(null);
-  };
-
-  const handleModelFiles = async (files: FileList | File[]) => {
-    const valid = Array.from(files).filter((f) => /\.(h5|hdf5)$/i.test(f.name));
-    if (valid.length === 0) return;
-    const entries = await Promise.all(valid.map(async (f) => {
-      const result = await onUploadModel(f.name);
-      return { id: result.id, name: result.name || f.name };
-    }));
-    onUpdateProject({ ...project, models: [...project.models, ...entries] });
-    mdlSection.setUploadModal(false);
-    mdlSection.setDragging(false);
-  };
-
-  const handleExportMei = (file: MeiFile) => {
-    downloadBlob(new Blob([file.xmlContent ?? ""], { type: "application/xml" }), file.name);
-  };
-
-  const totalImagePages = Math.ceil(project.images.length / ITEMS_PER_PAGE);
-  const pagedImages = project.images.slice(
-    imgSection.page * ITEMS_PER_PAGE,
-    (imgSection.page + 1) * ITEMS_PER_PAGE,
-  );
-
-  const totalModelPages = Math.ceil(project.models.length / ITEMS_PER_PAGE);
-  const pagedModels = project.models.slice(
-    mdlSection.page * ITEMS_PER_PAGE,
-    (mdlSection.page + 1) * ITEMS_PER_PAGE,
-  );
-
-  const meiProduced = project.meiFiles.filter(f => !f.corrected);
-  const meiCorrected = project.meiFiles.filter(f => !!f.corrected);
-  const activeMeiFiles = meiSubTab === "mei produced" ? meiProduced : meiCorrected;
-  const totalMeiPages = Math.ceil(activeMeiFiles.length / ITEMS_PER_PAGE);
-  const pagedMei = activeMeiFiles.slice(
-    meiSection.page * ITEMS_PER_PAGE,
-    (meiSection.page + 1) * ITEMS_PER_PAGE,
-  );
 
   const selectionButtons = (noun: "image" | "model", count: number, onUse: () => void, onDelete: () => void) => (
     <>
@@ -315,7 +149,6 @@ export default function ProjectDetail({
           ${imgSection.uploadModal || !!imgSection.renameModal || mdlSection.uploadModal || !!mdlSection.renameModal ? "opacity-100" : "opacity-0"}`}
       />
 
-      {/* main layout */}
       <div className="flex gap-8 max-w-6xl mx-auto">
         {/* progress sidebar */}
         <div className="flex flex-col gap-3 shrink-0 mt-[4.5rem]">
@@ -353,6 +186,7 @@ export default function ProjectDetail({
           </div>
           <ActivityLog projectId={project.id} />
         </div>
+
         <div className="flex-1 min-w-0">
           {/* header */}
           <div className="flex items-center gap-4 mb-8">
@@ -417,7 +251,8 @@ export default function ProjectDetail({
             ) : null}
 
             {activeTab === "images" && imgSection.selectedIds.size > 0 && selectionButtons(
-              "image", imgSection.selectedIds.size, () => {
+              "image", imgSection.selectedIds.size,
+              () => {
                 const names = project.images.filter(img => imgSection.selectedIds.has(img.id)).map(img => img.name);
                 onUsedNamesChange({ ...usedNames, images: [...usedNames.images, ...names.filter(n => !usedNames.images.includes(n))] });
                 imgSection.clearSelection();
@@ -429,12 +264,14 @@ export default function ProjectDetail({
               },
             )}
 
-            {activeTab === "models" && mdlSection.selectedIds.size > 0 && selectionButtons("model", mdlSection.selectedIds.size, () => {
-              const names = project.models.filter(m => mdlSection.selectedIds.has(m.id)).map(m => m.name); 
-              onUsedNamesChange({ ...usedNames, models: [...usedNames.models, ...names.filter(n => !usedNames.models.includes(n))] });
-              mdlSection.clearSelection();
-              setValidationError(null);
-            },
+            {activeTab === "models" && mdlSection.selectedIds.size > 0 && selectionButtons(
+              "model", mdlSection.selectedIds.size,
+              () => {
+                const names = project.models.filter(m => mdlSection.selectedIds.has(m.id)).map(m => m.name);
+                onUsedNamesChange({ ...usedNames, models: [...usedNames.models, ...names.filter(n => !usedNames.models.includes(n))] });
+                mdlSection.clearSelection();
+                setValidationError(null);
+              },
               () => {
                 onUpdateProject({ ...project, models: project.models.filter(m => !mdlSection.selectedIds.has(m.id)) });
                 mdlSection.clearSelection();
@@ -448,9 +285,7 @@ export default function ProjectDetail({
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() =>
-                    switchTab(tab as "images" | "models" | "annotations" | "mei files")
-                  }
+                  onClick={() => switchTab(tab as "images" | "models" | "annotations" | "mei files")}
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
                       activeTab === tab
@@ -465,133 +300,45 @@ export default function ProjectDetail({
               <div className="flex-1 border-b border-white/50" />
             </div>
 
-            {/* images tab */}
             {activeTab === "images" && (
-              <div className="mt-6" onClick={() => imgSection.clearSelection()}>
-                {project.images.length === 0 ? (
-                  <p className="text-white/70 text-sm">no images yet</p>
-                ) : (
-                  <AssetGrid
-                    pagedItems={pagedImages}
-                    pageOffset={imgSection.page * ITEMS_PER_PAGE}
-                    section={imgSection}
-                    usedNames={usedNames.images}
-                    totalPages={totalImagePages}
-                    renderThumbnail={img =>
-                      img.src ? <AuthImage src={img.src} alt={img.name} className="w-full h-full object-cover" /> : null
-                    }
-                  />
-                )}
-              </div>
+              <ImageTab
+                project={project}
+                section={imgSection}
+                usedNames={usedNames}
+                onUpdateProject={onUpdateProject}
+                onUsedNamesChange={onUsedNamesChange}
+                onUploadImage={onUploadImage}
+                onDeleteImage={onDeleteImage}
+                setValidationError={setValidationError}
+              />
             )}
-
-            {/* models tab */}
             {activeTab === "models" && (
-              <div className="mt-6" onClick={() => mdlSection.clearSelection()}>
-                {project.models.length === 0 ? (
-                  <p className="text-white/70 text-sm">no models yet</p>
-                ) : (
-                  <AssetGrid
-                    pagedItems={pagedModels}
-                    pageOffset={mdlSection.page * ITEMS_PER_PAGE}
-                    section={mdlSection}
-                    usedNames={usedNames.models}
-                    totalPages={totalModelPages}
-                    renderThumbnail={() => (
-                      <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
-                      <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
-                      <text x="28" y="46" textAnchor="middle" fill="white" fontSize="16" fontWeight="bold" fontFamily="monospace">H5</text>
-                      </svg>
-                    )}
-                  />
-                )}
-              </div>
+              <ModelTab
+                project={project}
+                section={mdlSection}
+                usedNames={usedNames}
+                onUpdateProject={onUpdateProject}
+                onUsedNamesChange={onUsedNamesChange}
+                onUploadModel={onUploadModel}
+                setValidationError={setValidationError}
+              />
             )}
-
             {activeTab === "annotations" && (
-              <div className="mt-6">
-                {project.annotations.length === 0 ? (
-                  <p className="text-white/70 text-sm">no annotations yet</p>
-                ) : (
-                  <div className="grid grid-cols-5 gap-4">
-                    {project.annotations.map((set) => (
-                      <div key={set.id} className="flex flex-col gap-2">
-                        <div className="relative aspect-square">
-                          {/* bottom: txt */}
-                          <div className="absolute inset-0 translate-x-2 translate-y-2 bg-[#C8E6E3]/25 rounded-xl flex items-end justify-start p-2">
-                            <span className="text-[10px] text-white/50 font-mono">.txt</span>
-                          </div>
-                          {/* middle: json */}
-                          <div className="absolute inset-0 translate-x-1 translate-y-1 bg-[#C8E6E3]/35 rounded-xl flex items-end justify-start p-2">
-                            <span className="text-[10px] text-white/60 font-mono">.json</span>
-                          </div>
-                          {/* top: image */}
-                          <div className="absolute inset-0 bg-[#C8E6E3]/50 rounded-xl overflow-hidden flex items-end justify-start p-2">
-                            {set.imageSrc && (
-                              <AuthImage
-                                src={set.imageSrc}
-                                alt={set.imageName}
-                                className="absolute inset-0 w-full h-full object-cover opacity-60"
-                              />
-                            )}
-                            <span className="relative text-[10px] text-white/80 font-mono z-10">.png</span>
-                          </div>
-                        </div>
-                        <span className="text-sm text-white truncate">
-                          {set.imageName.replace(/\.[^.]+$/, "")}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <AnnotationsTab annotations={project.annotations} />
             )}
-
-
             {activeTab === "mei files" && (
-              <div className="mt-6" onClick={() => meiSection.clearSelection()}>
-                <div className="flex gap-2 mb-4">
-                  {(["mei produced", "mei corrected"] as const).map((sub) => (
-                    <button
-                      key={sub}
-                      onClick={(e) => { e.stopPropagation(); switchMeiSubTab(sub); }}
-                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer
-                        ${meiSubTab === sub ? "bg-white text-[#4AADAA]" : "text-white/60 hover:text-white/90"}`}
-                    >
-                      {sub}
-                    </button>
-                  ))}
-                </div>
-                {activeMeiFiles.length === 0 ? (
-                  <p className="text-white/70 text-sm">
-                    {meiSubTab === "mei produced" ? "no mei files yet" : "no corrected mei files yet"}
-                  </p>
-                ) : (
-                  <AssetGrid
-                    pagedItems={pagedMei}
-                    pageOffset={meiSection.page * ITEMS_PER_PAGE}
-                    section={meiSection}
-                    usedNames={[]}
-                    totalPages={totalMeiPages}
-                    renderThumbnail={() => (
-                      <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
-                        <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
-                        <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
-                      </svg>
-                    )}
-                  />
-                )}
-              </div>
+              <MeiTab
+                project={project}
+                section={meiSection}
+                onUpdateProject={onUpdateProject}
+              />
             )}
           </div>
         </div>
-        {/* end left column */}
 
         {/* right sidebar */}
         <div className="flex flex-col gap-3 w-52 flex-shrink-0 pt-2">
-          {meiSection.selectedIds.size > 0 && meiSubTab === "mei corrected" ? (
+          {meiSection.selectedIds.size > 0 ? (
             <button
               onClick={() => {
                 imgSection.clearSelection();
@@ -630,12 +377,7 @@ export default function ProjectDetail({
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() =>
-                    onUsedNamesChange({
-                      ...usedNames,
-                      models: usedNames.models.filter((n) => n !== name),
-                    })
-                  }
+                  onClick={() => onUsedNamesChange({ ...usedNames, models: usedNames.models.filter((n) => n !== name) })}
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×
@@ -647,12 +389,7 @@ export default function ProjectDetail({
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() =>
-                    onUsedNamesChange({
-                      ...usedNames,
-                      images: usedNames.images.filter((n) => n !== name),
-                    })
-                  }
+                  onClick={() => onUsedNamesChange({ ...usedNames, images: usedNames.images.filter((n) => n !== name) })}
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×
@@ -665,144 +402,7 @@ export default function ProjectDetail({
           )}
         </div>
       </div>
-      {/* end flex layout */}
 
-      {/* image context menu */}
-      {imgSection.menu && (
-        <ContextMenu
-          x={imgSection.menu.x}
-          y={imgSection.menu.y}
-          onClose={() => imgSection.setMenu(null)}
-          items={[
-            {
-              label: "Quick Look",
-              onClick: () => { setQuickLookId(imgSection.menu!.id); imgSection.setMenu(null); },
-            },
-            {
-              label: "Use Image",
-              onClick: () => {
-                const img = project.images.find(i => i.id === imgSection.menu!.id);
-                if (img && !usedNames.images.includes(img.name)) {
-                  onUsedNamesChange({ ...usedNames, images: [...usedNames.images, img.name] });
-                }
-                imgSection.setMenu(null);
-                setValidationError(null);
-              },
-            },
-            {
-              label: "Delete Image",
-              onClick: () => deleteImage(imgSection.menu!.id),
-            },
-            {
-              label: "Rename Image",
-              onClick: () => {
-                const img = project.images.find(i => i.id === imgSection.menu!.id)!;
-                imgSection.setRenameModal({ id: imgSection.menu!.id });
-                imgSection.setRenameName(img.name);
-                imgSection.setMenu(null);
-              },
-            },
-          ]}
-        />
-      )}
-
-      {/* model context menu */}
-      {mdlSection.menu && (
-        <ContextMenu
-          x={mdlSection.menu.x}
-          y={mdlSection.menu.y}
-          onClose={() => mdlSection.setMenu(null)}
-          items={[
-            {
-              label: "Use Model",
-              onClick: () => {
-                const model = project.models.find(m => m.id === mdlSection.menu!.id);
-                if (model && !usedNames.models.includes(model.name)) {
-                  onUsedNamesChange({ ...usedNames, models: [...usedNames.models, model.name] });
-                }
-                mdlSection.setMenu(null);
-                setValidationError(null);
-              },
-            },
-            {
-              label: "Delete Model",
-              onClick: () => deleteModel(mdlSection.menu!.id),
-            },
-            { 
-              label: "Rename Model",
-              onClick: () => {
-                const m = project.models.find(m => m.id === mdlSection.menu!.id)!;
-                mdlSection.setRenameModal({ id: mdlSection.menu!.id });
-                mdlSection.setRenameName(m.name);
-                mdlSection.setMenu(null);
-              },
-            },
-          ]}
-        />
-      )}
-
-      {meiSection.menu && (() => {
-        const file = project.meiFiles.find(f => f.id === meiSection.menu!.id);
-        const newCorrected = file ? !file.corrected : false;
-        return (
-          <ContextMenu
-            x={meiSection.menu.x}
-            y={meiSection.menu.y}
-            onClose={() => meiSection.setMenu(null)}
-            items={[
-              {
-                label: "View",
-                onClick: () => { setMeiLookId(meiSection.menu!.id); meiSection.setMenu(null); },
-              },
-              {
-                label: "Export",
-                onClick: () => {
-                  const f = project.meiFiles.find(f => f.id === meiSection.menu!.id)!;
-                  handleExportMei(f);
-                  meiSection.setMenu(null);
-                },
-              },
-              ...(file ? [{
-                label: newCorrected ? "Mark as Corrected" : "Mark as Uncorrected",
-                onClick: () => {
-                  fetch(`/api/projects/${project.id}/mei/${file.id}`, {
-                    method: "PATCH",
-                    headers: { ...authHeaders(), "Content-Type": "application/json" },
-                    body: JSON.stringify({ corrected: newCorrected }),
-                  });
-                  onUpdateProject({
-                    ...project,
-                    meiFiles: project.meiFiles.map(f => 
-                      f.id === file.id ? { ...f, corrected: newCorrected } : f
-                    ),
-                  });
-                  meiSection.setMenu(null);
-                },
-              }] : []),
-            ]}
-            /> 
-        );
-      })()}
-
-      {/* rename modals */}
-      {imgSection.renameModal && (
-        <RenameModal
-          label="image"
-          value={imgSection.renameName}
-          onChange={imgSection.setRenameName}
-          onSubmit={renameImage}
-          onClose={() => imgSection.setRenameModal(null)}
-        />
-      )}
-      {mdlSection.renameModal && (
-        <RenameModal
-          label="model"
-          value={mdlSection.renameName}
-          onChange={mdlSection.setRenameName}
-          onSubmit={renameModel}
-          onClose={() => mdlSection.setRenameModal(null)}
-        />
-      )}
       {projectRenameModal && (
         <RenameModal
           label="project"
@@ -825,218 +425,6 @@ export default function ProjectDetail({
           onCancel={() => setShowDeleteModal(false)}
         />
       )}
-
-      {/* quick look modal */}
-      {quickLookId && (() => {
-        const img = project.images.find((i) => i.id === quickLookId)!;
-        const isUsed = usedNames.images.includes(img.name);
-        return (
-          <QuickLookShell onClose={() => setQuickLookId(null)}>
-            <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
-              {img.src ? (
-                <AuthImage src={img.src} alt={img.name} className="object-contain max-h-[60vh] w-full" />
-              ) : (
-                <span className="text-white/40 text-sm py-16">{img.name}</span>
-              )}
-            </div>
-            <div className="flex gap-3 justify-center">
-              {!isUsed && (
-                <button
-                  onClick={() => {
-                    onUsedNamesChange({ ...usedNames, images: [...usedNames.images, img.name] });
-                    setValidationError(null);
-                    setQuickLookId(null);
-                  }}
-                  className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
-                    Use Image
-                  </button>
-              )}
-              <button
-                onClick={() => { deleteImage(quickLookId); setQuickLookId(null); }}
-                className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
-              >
-                Delete Image
-              </button>
-            </div>
-          </QuickLookShell>
-        );
-      })()}
-
-
-      {meiLookId && (() => {
-        const file = project.meiFiles.find((f) => f.id === meiLookId)!;
-        return (
-          <QuickLookShell onClose={() => setMeiLookId(null)}>
-            <p className="text-white font-mono text-sm">{file.name}</p>
-            <pre className="text-white/80 text-xs font-mono overflow-auto max-h-[60vh] whitespace-pre-wrap bg-black/20 rounded-xl p-4">
-              {file.xmlContent ?? "(no content)"}
-            </pre>
-            <div className="flex justify-center">
-              <button
-                onClick={() => handleExportMei(file)}
-                className="px-5 py-2 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
-                  export file
-              </button>
-            </div>
-          </QuickLookShell>
-        );
-      })()}
-      {/* image upload modal */}
-      {imgSection.uploadModal && (
-        <Modal onClose={() => { if (!converting) { imgSection.setUploadModal(false); imgSection.setDragging(false); } }}>
-          <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
-          {converting ? (
-            <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
-              <p className="text-sm text-[#1D3335] text-center">converting PDF pages...</p>
-            </div>
-          ) : (
-            <DropZone
-              dragging={imgSection.dragging}
-              onDragOver={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
-              onDragEnter={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
-              onDragLeave={() => imgSection.setDragging(false)}
-              onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-              onClick={() => fileInputRef.current?.click()}
-              label="drag & drop images, folders, or PDFs here"
-            >
-              <div className="flex gap-4 text-sm text-[#1D3335]">
-                <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select files</button>
-                <span className="text-[#1D3335]/40">or</span>
-                <button onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select folder</button>
-              </div>
-            </DropZone>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}
-          />
-          <input
-            ref={folderInputRef}
-            type="file"
-            // @ts-expect-error
-            webkitdirectory=""
-            className="hidden"
-            onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}
-          />
-        </Modal>
-      )}
-
-      {/* model upload modal */}
-      {mdlSection.uploadModal && (
-        <Modal onClose={() => { mdlSection.setUploadModal(false); mdlSection.setDragging(false); }}>
-          <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
-          <DropZone
-            dragging={mdlSection.dragging}
-            onDragOver={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
-            onDragEnter={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
-            onDragLeave={() => mdlSection.setDragging(false)}
-            onDrop={(e) => { e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
-            onClick={() => modelFileInputRef.current?.click()}
-            label="drag & drop .h5 or .hdf5 files here"
-          >
-            <button
-              onClick={(e) => { e.stopPropagation(); modelFileInputRef.current?.click(); }}
-              className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
-            >select files</button>
-          </DropZone>
-          <input
-            ref={modelFileInputRef}
-            type="file"
-            accept=".h5,.hdf5"
-            multiple
-            className="hidden"
-            onChange={(e) => { if (e.target.files) handleModelFiles(e.target.files); }}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-
-// activity log
-
-function ActivityLog({ projectId }: { projectId: number }) {
-  const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<ActivityEntry[]>([]);
-
-  useEffect(() => {
-    if (!open) return;
-    fetch(`/api/projects/${projectId}/activity`, { headers: authHeaders() })
-      .then(r => r.json())
-      .then(setEntries);
-  }, [open, projectId]);
-
-  return (
-    <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full px-5 py-3 flex items-center justify-between text-white/60 hover:text-white text-xs cursor-pointer transition-colors"
-      >
-        <span>activity log</span>
-        <span className={`transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
-      </button>
-      {open && (
-        <div className="px-4 pb-4 flex flex-col gap-3 max-h-64 overflow-y-auto">
-          {entries.length === 0
-            ? <p className="text-xs text-white/40">no activity yet</p>
-            : entries.map((e, i) => (
-                <div key={i}>
-                  <p className="text-xs text-white/80 leading-snug">{formatActivity(e)}</p>
-                  <p className="text-[10px] text-white/40 mt-0.5">{formatRelativeTime(e.createdAt)}</p>
-                </div>
-              ))
-          }
-        </div>
-      )}
-    </div>
-  );
-}
-
-function QuickLookShell({ onClose, children }: {
-  onClose: () => void; children: React.ReactNode
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-        <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
-          <button onClick={onClose}
-            className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer">×</button>
-            {children}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function DropZone({ dragging, onDragOver, onDragEnter, onDragLeave, onDrop, onClick, label, children }: {
-  dragging: boolean;
-  onDragOver: React.DragEventHandler;
-  onDragEnter: React.DragEventHandler;
-  onDragLeave: React.DragEventHandler;
-  onDrop: React.DragEventHandler;
-  onClick: () => void;
-  label: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      onDragOver={onDragOver}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
-        ${dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
-    >
-      <span className="text-3xl">↑</span>
-      <p className="text-sm text-[#1D3335] text-center">{label}</p>
-      {children}
     </div>
   );
 }

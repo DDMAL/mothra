@@ -1,4 +1,4 @@
-import Modal from "./Modal";
+import Modal from "../shared/Modal";
 
 interface RenameModalProps {
     label: string;
