@@ -185,6 +185,17 @@ export default function ProjectDetail({
             </button>
           </div>
           <ActivityLog projectId={project.id} />
+          <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">
+            <button
+              onClick={async () => {
+                const res = await fetch(`/api/projects/${project.id}/logs/download`, { headers: authHeaders() });
+                downloadBlob(await res.blob(), `${project.name}_logs.zip`);
+              }}
+              className="w-full text-xs text-white/60 hover:text-white text-left cursor-pointer transition-colors"
+            >
+              download all logs ↓
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 min-w-0">

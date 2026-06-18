@@ -80,6 +80,15 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
         )    
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS project_logs (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                log_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+        )    
+    """)
     con.commit()
     cur.close()
     con.close()
@@ -424,6 +433,8 @@ def delete_image(project_id: int, image_id: str, user=Depends(get_current_user))
 class AddMeiBody(BaseModel):
     name: str
     xmlContent: str
+    logs: Optional[list[str]] = None
+    logs: Optional[list[str]] = None
 
 @router.post("/projects/{project_id}/mei")
 def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
@@ -439,6 +450,12 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
     cur.execute(
         "INSERT INTO mei_files (id, project_id, name, xml_content) VALUES (%s,%s,%s,%s)",
         (mei_id, project_id, body.name, body.xmlContent))
+    if body.logs:
+        content = "\n".join(body.logs)
+        cur.execute(
+            "INSERT INTO project_logs (project_id, log_type, content) VALUES (%s, %s, %s)",
+            (project_id, "encoding", content)
+        )
     _log_activity(cur, project_id, "mei_produced", body.name)
     con.commit()
     cur.close()
@@ -521,4 +538,49 @@ def export_project(project_id: int, user=Depends(get_current_user)):
         content=buf.read(),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'}
+    )
+
+@router.get("/projects/{project_id}/logs/download")
+def download_project_logs(project_id: int, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    project_name = row[1]
+
+    cur.execute(
+        "SELECT action_type, detail, created_at FROM activity_log WHERE project_id=%s ORDER BY created_at ASC",
+        (project_id,)
+    )
+    activity_rows = cur.fetchall()
+
+    cur.execute(
+        "SELECT content, created_at FROM project_logs WHERE project_id=%s AND log_type='encoding' ORDER BY created_at ASC",
+        (project_id,)
+    )
+    encoding_rows = cur.fetchall()
+    cur.close(); con.close()
+
+    activity_lines = [
+        f"[{r[2]}] {r[0]}: {r[1]}" for r in activity_rows
+    ] or ["no activity recorded"]
+    activity_text = "\n".join(activity_lines)
+
+    encoding_sections = []
+    for content, created_at in encoding_rows:
+        encoding_sections.append(f"--- Run: {created_at} --- \n{content}")
+    encoding_text = "\n\n".join(encoding_sections) if encoding_sections else "no encoding logs recorded"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("activity_log.txt", activity_text)
+        zf.writestr("encoding_logs.txt", encoding_text)
+    buf.seek(0)
+    safe_name = project_name.replace(" ", "_")
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Dispositon": f'attachment; filename="{safe_name}_logs.zip"'}
     )
