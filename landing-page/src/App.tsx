@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
-import Navbar from "./components/Navbar";
-import Hero from "./components/Hero";
-import Features from "./components/Features";
-import Footer from "./components/Footer";
-import AuthPage from "./components/AuthPage";
-import MyProjects from "./components/MyProjects";
-import ProjectDetail from "./components/ProjectDetail";
-import About from "./components/About";
+import Navbar from "./components/layout/Navbar";
+import Hero from "./components/landing/Hero";
+import Features from "./components/landing/Features";
+import Footer from "./components/layout/Footer";
+import AuthPage from "./components/auth/AuthPage";
+import MyProjects from "./components/project/MyProjects";
+import ProjectDetail from "./components/project/ProjectDetail";
+import About from "./components/landing/About";
 import ProcessingPage from "./components/workflow/ProcessingPage";
 import CompletionPage from "./components/workflow/CompletionPage";
 import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
 import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
-import MyAccount from "./components/MyAccount";
+import MyAccount from "./components/account/MyAccount";
 import type { Project, MeiFile } from "./types";
 
 import type { CurrentUser } from "./hooks/useAuth";

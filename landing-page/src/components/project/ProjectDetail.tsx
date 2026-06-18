@@ -1,18 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { Project, MeiFile } from "../types";
-import { authHeaders } from "../hooks/useAuth";
-import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
+import type { Project, MeiFile } from "../../types";
+import { authHeaders } from "../../hooks/useAuth";
+import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import * as pdfjsLib from "pdfjs-dist";
-import { AuthImage } from "./AuthImage";
-import { formatRelativeTime, formatActivity } from "../utils/time";
-import type { ActivityEntry } from "../utils/time";
-import { downloadBlob } from "../utils/download";
+import { AuthImage } from "../shared/AuthImage";
+import { formatRelativeTime, formatActivity } from "../../utils/time";
+import type { ActivityEntry } from "../../utils/time";
+import { downloadBlob } from "../../utils/download";
 
-import Modal from "./Modal";
-import ContextMenu from "./ContextMenu";
-import AssetGrid from "./AssetGrid";
+import Modal from "../shared/Modal";
+import ContextMenu from "../shared/ContextMenu";
+import AssetGrid from "../shared/AssetGrid";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",

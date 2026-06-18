@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CurrentUser } from "../hooks/useAuth";
+import type { CurrentUser } from "../../hooks/useAuth";
 
 interface NavbarProps {
   onLogin?: () => void;

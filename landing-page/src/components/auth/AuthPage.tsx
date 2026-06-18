@@ -1,6 +1,6 @@
 import LoginForm from "./LoginForm";
-import RegisterForm from "./RegisterForm";
-import type { CurrentUser } from "../hooks/useAuth";
+import RegisterForm from "../RegisterForm";
+import type { CurrentUser } from "../../hooks/useAuth";
 
 interface AuthPageProps {
   mode: "login" | "register";

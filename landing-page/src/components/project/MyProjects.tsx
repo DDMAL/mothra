@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { AuthImage } from "./AuthImage";
-import type { Project, MeiFile } from "../types";
+import { AuthImage } from "../shared/AuthImage";
+import type { Project, MeiFile } from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
-import { formatLastOpened } from "../utils/time";
-import Modal from "./Modal";
+import { formatLastOpened } from "../../utils/time";
+import Modal from "../shared/Modal";
 
 const LIST_COLS = "grid-cols-[2fr_1fr_1fr_5rem]";
 const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";

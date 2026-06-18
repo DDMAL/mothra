@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { authHeaders } from "../hooks/useAuth";
+import { authHeaders } from "../../hooks/useAuth";
 
 interface AuthImageProps {
     src: string;

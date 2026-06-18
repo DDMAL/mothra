@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
-import type { CurrentUser } from "../hooks/useAuth";
-import { authHeaders } from "../hooks/useAuth";
-import type { Project } from "../types";
-import Modal from "./Modal";
+import type { CurrentUser } from "../../hooks/useAuth";
+import { authHeaders } from "../../hooks/useAuth";
+import type { Project } from "../../types";
+import Modal from "../shared/Modal";
 
 type AccountTab = "info" | "files";
 
