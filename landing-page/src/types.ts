@@ -37,3 +37,23 @@ export interface MeiFile {
   xmlContent?: string;
   corrected?: boolean;
 }
+
+export type View =
+  | "landing"
+  | "about"
+  | "login"
+  | "register"
+  | "account"
+  | "docs"
+  | "projects"
+  | "project"
+  | "processing"
+  | "completion"
+  | "ic"
+  | "ic-processing"
+  | "ic-completion"
+  | "encoding-processing"
+  | "encoding-completion"
+  | "sending"
+  | "send-completion"
+  | "neon-test";

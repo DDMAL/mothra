@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { Project } from "../types";
 import { authHeaders } from "./useAuth";
 import { downloadBlob } from "../utils/download";
-import type { View } from "../App";
+import type { View } from "../types";
 import type { MeiFile } from "../types";
 
 type SetProjects = React.Dispatch<React.SetStateAction<Project[]>>;
