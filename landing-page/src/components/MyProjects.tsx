@@ -5,6 +5,9 @@ import DeleteProjectModal from "./DeleteProjectModal";
 import { formatLastOpened } from "../utils/time";
 import Modal from "./Modal";
 
+const LIST_COLS = "grid-cols-[2fr_1fr_1fr_5rem]";
+const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";
+
 interface MyProjectsProps {
   projects: Project[];
   onSelectProject: (id: number) => void;
@@ -33,6 +36,29 @@ function MeiProgress({ meiFiles }: { meiFiles: MeiFile[] }) {
   );
 }
 
+function sortProjects(a: Project, b: Project, sortBy: "lastOpened" | "dateCreated" | "nameAZ"): number {
+  if (a.isPinned && !b.isPinned) return -1;
+  if (!a.isPinned && b.isPinned) return 1;
+  if (sortBy === "nameAZ") return a.name.localeCompare(b.name);
+  if (sortBy === "dateCreated") return b.id - a.id;
+  if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
+  if (!a.lastOpenedAt) return 1;
+  if (!b.lastOpenedAt) return -1;
+  return new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime();
+}
+
+function PinButton({ isPinned, onToggle }: { isPinned: boolean; onToggle: () => void }) {
+  return (
+        <button
+            onClick={e => { e.stopPropagation(); onToggle(); }}
+            className="text-sm leading-none cursor-pointer shrink-0"
+            title={isPinned ? "unpin" : "pin to top"}
+        >
+            {isPinned ? "★" : "☆"}
+        </button>
+    );
+}
+
 export default function MyProjects({
   projects,
   onSelectProject,
@@ -59,21 +85,7 @@ export default function MyProjects({
   const activeProjects = projects
     .filter(p => !p.deletedAt)
     .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => {
-      // pinned is always first
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
-
-      // then by selected sort
-      if (sortBy === "nameAZ") return a.name.localeCompare(b.name);
-      if (sortBy === "dateCreated") return b.id - a.id;
-
-      // default is by lastOpened
-      if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
-      if (!a.lastOpenedAt) return 1;
-      if (!b.lastOpenedAt) return -1;
-      return new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime();
-    });
+    .sort((a, b) => sortProjects(a, b, sortBy))
 
   const trashedProjects = projects.filter(p => !!p.deletedAt);
 
@@ -151,7 +163,7 @@ export default function MyProjects({
             </div>
           {viewMode === "list" ? (
             <>
-              <div className="grid grid-cols-[2fr_1fr_1fr_5rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
+              <div className={`grid ${LIST_COLS} px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10`}>
                 <span>project name</span>
                 <span>creator</span>
                 <span>last opened</span>
@@ -162,7 +174,7 @@ export default function MyProjects({
                   key={p.id}
                   onMouseEnter={() => setHoveredRow(p.id)}
                   onMouseLeave={() => setHoveredRow(null)}
-                  className="grid grid-cols-[2fr_1fr_1fr_5rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm transition-colors hover:bg-[#b0cdc9]"
+                  className={`grid ${LIST_COLS} px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm transition-colors hover:bg-[#b0cdc9]`}
                 >
                   {renamingRow === p.id ? (
                     <input
@@ -186,13 +198,7 @@ export default function MyProjects({
                   ) : (
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={e => { e.stopPropagation(); onTogglePin(p.id); }}
-                          className="text-sm leading-none cursor-pointer shrink-0"
-                          title={p.isPinned ? "unpin" : "pin to top"}
-                        >
-                          {p.isPinned ? "★" : "☆"}
-                        </button>
+                        <PinButton isPinned={!!p.isPinned} onToggle={() => onTogglePin(p.id)} />
                         <span onClick={() => onSelectProject(p.id)} className="cursor-pointer hover:underline">
                           {p.name}
                         </span>
@@ -240,12 +246,7 @@ export default function MyProjects({
                       </div>
                       <div className="p-3 flex flex-col gap-1">
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={e => { e.stopPropagation(); onTogglePin(p.id); }}
-                            className="text-sm leading-none cursor-pointer shrink-0"
-                            title={p.isPinned ? "unpin" : "pin to top"}>
-                            {p.isPinned ? "★" : "☆"}
-                          </button>
+                          <PinButton isPinned={!!p.isPinned} onToggle={() => onTogglePin(p.id)} />
                           <span className="font-semibold text-[#1D3335] text-sm truncate">{p.name}</span>
                         </div>
                         <span className="text-[#1D3335]/50 text-xs">{formatLastOpened(p.lastOpenedAt)}</span>
@@ -288,7 +289,7 @@ export default function MyProjects({
                 </button>
               </div>
             )}
-            <div className="grid grid-cols-[2fr_2fr_1fr_8rem] px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10">
+            <div className={`grid ${TRASH_COLS} px-6 py-3 text-[#1D3335] text-sm font-medium border-b border-[#1D3335]/10`}>
               <span>project name</span>
               <span>creator</span>
               <span>days remaining</span>
@@ -302,7 +303,7 @@ export default function MyProjects({
               return (
                 <div
                   key={p.id}
-                  className="grid grid-cols-[2fr_2fr_1fr_8rem] px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm"
+                  className={`grid ${TRASH_COLS} px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm`}
                 >
                   <span className="opacity-60">{p.name}</span>
                   <span className="opacity-60">{p.user}</span>

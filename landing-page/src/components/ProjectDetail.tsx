@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Project, MeiFile } from "../types";
 import { authHeaders } from "../hooks/useAuth";
 import { useAssetSection, ITEMS_PER_PAGE } from "../hooks/useAssetSection";
@@ -6,11 +6,11 @@ import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import * as pdfjsLib from "pdfjs-dist";
 import { AuthImage } from "./AuthImage";
-import { formatRelativeTime } from "../utils/time";
+import { formatRelativeTime, formatActivity } from "../utils/time";
+import type { ActivityEntry } from "../utils/time";
 import { downloadBlob } from "../utils/download";
 
 import Modal from "./Modal";
-import Paginator from "./Paginator";
 import ContextMenu from "./ContextMenu";
 import AssetGrid from "./AssetGrid";
 
@@ -42,24 +42,6 @@ interface ProjectDetailProps {
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteProject: () => void;
 }
-
-interface ActivityEntry {
-  actionType: string;
-  detail: string;
-  createdAt: string;
-}
-
-function formatActivity(e: ActivityEntry): string {
-  switch (e.actionType) {
-    case "image_imported": return `image: ${e.detail}`;
-    case "model_added": return `model: ${e.detail}`;
-    case "mei_produced": return `MEI produced: ${e.detail}`;
-    case "mei_corrected": return `MEI corrected: ${e.detail}`;
-    case "step_unlocked": return `step ${e.detail} unlocked`;
-    default: return e.detail || e.actionType;
-  }
-}
-
 
 export default function ProjectDetail({
   project,
@@ -315,6 +297,17 @@ export default function ProjectDetail({
     (meiSection.page + 1) * ITEMS_PER_PAGE,
   );
 
+  const selectionButtons = (noun: "image" | "model", count: number, onUse: () => void, onDelete: () => void) => (
+    <>
+      <button onClick={onUse} className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+        use {count} {noun}{count > 1 ? "s" : ""}
+      </button>
+      <button onClick={onDelete} className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
+        delete {count} {noun}{count > 1 ? "s" : ""}
+      </button>
+    </>
+  );
+
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48 relative">
       <div
@@ -423,84 +416,29 @@ export default function ProjectDetail({
               </button>
             ) : null}
 
-            {activeTab === "images" && imgSection.selectedIds.size > 0 && (
-              <>
-                <button
-                  onClick={() => {
-                    const names = project.images
-                      .filter((img) => imgSection.selectedIds.has(img.id))
-                      .map((img) => img.name);
-                    onUsedNamesChange({
-                      ...usedNames,
-                      images: [
-                        ...usedNames.images,
-                        ...names.filter((n) => !usedNames.images.includes(n)),
-                      ],
-                    });
-                    imgSection.clearSelection();
-                    setValidationError(null);
-                  }}
-                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  use {imgSection.selectedIds.size} image
-                  {imgSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
-                <button
-                  onClick={() => {
-                    onUpdateProject({
-                      ...project,
-                      images: project.images.filter(
-                        (img) => !imgSection.selectedIds.has(img.id),
-                      ),
-                    });
-                    imgSection.clearSelection();
-                  }}
-                  className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  delete {imgSection.selectedIds.size} image
-                  {imgSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
-              </>
+            {activeTab === "images" && imgSection.selectedIds.size > 0 && selectionButtons(
+              "image", imgSection.selectedIds.size, () => {
+                const names = project.images.filter(img => imgSection.selectedIds.has(img.id)).map(img => img.name);
+                onUsedNamesChange({ ...usedNames, images: [...usedNames.images, ...names.filter(n => !usedNames.images.includes(n))] });
+                imgSection.clearSelection();
+                setValidationError(null);
+              },
+              () => {
+                onUpdateProject({ ...project, images: project.images.filter(img => !imgSection.selectedIds.has(img.id)) });
+                imgSection.clearSelection();
+              },
             )}
 
-            {activeTab === "models" && mdlSection.selectedIds.size > 0 && (
-              <>
-                <button
-                  onClick={() => {
-                    const names = project.models
-                      .filter((m) => mdlSection.selectedIds.has(m.id))
-                      .map((m) => m.name);
-                    onUsedNamesChange({
-                      ...usedNames,
-                      models: [
-                        ...usedNames.models,
-                        ...names.filter((n) => !usedNames.models.includes(n)),
-                      ],
-                    });
-                    mdlSection.clearSelection();
-                    setValidationError(null);
-                  }}
-                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  use {mdlSection.selectedIds.size} model
-                  {mdlSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
-                <button
-                  onClick={() => {
-                    onUpdateProject({
-                      ...project,
-                      models: project.models.filter(
-                        (m) => !mdlSection.selectedIds.has(m.id),
-                      ),
-                    });
-                    mdlSection.clearSelection();
-                  }}
-                  className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  delete {mdlSection.selectedIds.size} model
-                  {mdlSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
-              </>
+            {activeTab === "models" && mdlSection.selectedIds.size > 0 && selectionButtons("model", mdlSection.selectedIds.size, () => {
+              const names = project.models.filter(m => mdlSection.selectedIds.has(m.id)).map(m => m.name); 
+              onUsedNamesChange({ ...usedNames, models: [...usedNames.models, ...names.filter(n => !usedNames.models.includes(n))] });
+              mdlSection.clearSelection();
+              setValidationError(null);
+            },
+              () => {
+                onUpdateProject({ ...project, models: project.models.filter(m => !mdlSection.selectedIds.has(m.id)) });
+                mdlSection.clearSelection();
+              },
             )}
           </div>
 
@@ -630,47 +568,20 @@ export default function ProjectDetail({
                     {meiSubTab === "mei produced" ? "no mei files yet" : "no corrected mei files yet"}
                   </p>
                 ) : (
-                  <>
-                    <div
-                      className="grid grid-cols-5 gap-4"
-                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
-                    >
-                      {pagedMei.map((file, pageIdx) => {
-                        const idx = meiSection.page * ITEMS_PER_PAGE + pageIdx;
-                        const selected = meiSection.selectedIds.has(file.id);
-                        return (
-                          <div key={file.id} className="flex flex-col gap-2">
-                            <div
-                              className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer transition-shadow
-                                ${selected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
-                              onClick={(e) => meiSection.handleClick(e, file.id, idx)}
-                            >
-                              <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
-                                <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
-                                <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
-                              </svg>
-                            </div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-sm text-white truncate">{file.name}</span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  meiSection.setMenu({ id: file.id, x: e.clientX, y: e.clientY });
-                                }}
-                                className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                              >
-                                ⋮
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {totalMeiPages > 1 && (
-                      <Paginator page={meiSection.page} totalPages={totalMeiPages} onPageChange={meiSection.setPage} />
+                  <AssetGrid
+                    pagedItems={pagedMei}
+                    pageOffset={meiSection.page * ITEMS_PER_PAGE}
+                    section={meiSection}
+                    usedNames={[]}
+                    totalPages={totalMeiPages}
+                    renderThumbnail={() => (
+                      <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
+                        <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
+                        <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">MEI</text>
+                      </svg>
                     )}
-                  </>
+                  />
                 )}
               </div>
             )}
@@ -916,98 +827,58 @@ export default function ProjectDetail({
       )}
 
       {/* quick look modal */}
-      {quickLookId &&
-        (() => {
-          const img = project.images.find((i) => i.id === quickLookId)!;
-          const isUsed = usedNames.images.includes(img.name);
-          return (
-            <>
-              <div
-                className="fixed inset-0 z-40 bg-black/60"
-                onClick={() => setQuickLookId(null)}
-              />
-              <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-                <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
-                  <button
-                    onClick={() => setQuickLookId(null)}
-                    className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer"
-                  >
-                    ×
+      {quickLookId && (() => {
+        const img = project.images.find((i) => i.id === quickLookId)!;
+        const isUsed = usedNames.images.includes(img.name);
+        return (
+          <QuickLookShell onClose={() => setQuickLookId(null)}>
+            <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
+              {img.src ? (
+                <AuthImage src={img.src} alt={img.name} className="object-contain max-h-[60vh] w-full" />
+              ) : (
+                <span className="text-white/40 text-sm py-16">{img.name}</span>
+              )}
+            </div>
+            <div className="flex gap-3 justify-center">
+              {!isUsed && (
+                <button
+                  onClick={() => {
+                    onUsedNamesChange({ ...usedNames, images: [...usedNames.images, img.name] });
+                    setValidationError(null);
+                    setQuickLookId(null);
+                  }}
+                  className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
+                    Use Image
                   </button>
-                  <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
-                    {img.src ? (
-                      <AuthImage
-                        src={img.src}
-                        alt={img.name}
-                        className="object-contain max-h-[60vh] w-full"
-                      />
-                    ) : (
-                      <span className="text-white/40 text-sm py-16">
-                        {img.name}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex gap-3 justify-center">
-                    {!isUsed && (
-                      <button
-                        onClick={() => {
-                          onUsedNamesChange({
-                            ...usedNames,
-                            images: [...usedNames.images, img.name],
-                          });
-                          setValidationError(null);
-                          setQuickLookId(null);
-                        }}
-                        className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
-                      >
-                        Use Image
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        deleteImage(quickLookId);
-                        setQuickLookId(null);
-                      }}
-                      className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
-                    >
-                      Delete Image
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </>
-          );
-        })()}
+              )}
+              <button
+                onClick={() => { deleteImage(quickLookId); setQuickLookId(null); }}
+                className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
+              >
+                Delete Image
+              </button>
+            </div>
+          </QuickLookShell>
+        );
+      })()}
 
 
       {meiLookId && (() => {
         const file = project.meiFiles.find((f) => f.id === meiLookId)!;
         return (
-          <>
-            <div
-              className="fixed inset-0 z-40 bg-black/60"
-              onClick={() => setMeiLookId(null)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-              <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
-                <button
-                  onClick={() => setMeiLookId(null)}
-                  className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer">
-                    ×
-                </button>
-                <p className="text-white font-mono text-sm">{file.name}</p>
-                <pre className="text-white/80 text-xs font-mono overflow-auto max-h-[60vh] whitespace-pre-wrap bg-black/20 rounded-xl p-4">
-                  {file.xmlContent ?? "(no content)"}
-                </pre>
-                <div className="flex justify-center">
-                  <button
-                    onClick={() => handleExportMei(file)}
-                    className="px-5 py-2 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
-                      export
-                    </button>
-                </div>
-              </div>
+          <QuickLookShell onClose={() => setMeiLookId(null)}>
+            <p className="text-white font-mono text-sm">{file.name}</p>
+            <pre className="text-white/80 text-xs font-mono overflow-auto max-h-[60vh] whitespace-pre-wrap bg-black/20 rounded-xl p-4">
+              {file.xmlContent ?? "(no content)"}
+            </pre>
+            <div className="flex justify-center">
+              <button
+                onClick={() => handleExportMei(file)}
+                className="px-5 py-2 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm">
+                  export file
+              </button>
             </div>
-          </>
+          </QuickLookShell>
         );
       })()}
       {/* image upload modal */}
@@ -1019,23 +890,21 @@ export default function ProjectDetail({
               <p className="text-sm text-[#1D3335] text-center">converting PDF pages...</p>
             </div>
           ) : (
-            <div
-              onClick={() => fileInputRef.current?.click()}
+            <DropZone
+              dragging={imgSection.dragging}
               onDragOver={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
-              onDragEnter={(e) => {e.preventDefault(); imgSection.setDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); imgSection.setDragging(true); }}
               onDragLeave={() => imgSection.setDragging(false)}
               onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-              className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
-                ${imgSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
+              onClick={() => fileInputRef.current?.click()}
+              label="drag & drop images, folders, or PDFs here"
             >
-              <span className="text-3xl">↑</span>
-              <p className="text-sm text-[#1D3335] text-center">drag & drop images, folders, or PDFs here</p>
               <div className="flex gap-4 text-sm text-[#1D3335]">
                 <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select files</button>
                 <span className="text-[#1D3335]/40">or</span>
                 <button onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }} className="underline hover:opacity-70 cursor-pointer">select folder</button>
               </div>
-            </div>
+            </DropZone>
           )}
           <input
             ref={fileInputRef}
@@ -1060,22 +929,20 @@ export default function ProjectDetail({
       {mdlSection.uploadModal && (
         <Modal onClose={() => { mdlSection.setUploadModal(false); mdlSection.setDragging(false); }}>
           <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
-          <div
-            onClick={() => modelFileInputRef.current?.click()}
+          <DropZone
+            dragging={mdlSection.dragging}
             onDragOver={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
             onDragEnter={(e) => { e.preventDefault(); mdlSection.setDragging(true); }}
             onDragLeave={() => mdlSection.setDragging(false)}
-            onDrop={(e) => {e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
-            className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
-              ${mdlSection.dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
+            onDrop={(e) => { e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
+            onClick={() => modelFileInputRef.current?.click()}
+            label="drag & drop .h5 or .hdf5 files here"
           >
-            <span className="text-3xl">↑</span>
-            <p className="text-sm text-[#1D3335] text-center">drag & drop .h5 or .hdf5 files here</p>
             <button
               onClick={(e) => { e.stopPropagation(); modelFileInputRef.current?.click(); }}
               className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
             >select files</button>
-          </div>
+          </DropZone>
           <input
             ref={modelFileInputRef}
             type="file"
@@ -1126,6 +993,50 @@ function ActivityLog({ projectId }: { projectId: number }) {
           }
         </div>
       )}
+    </div>
+  );
+}
+
+function QuickLookShell({ onClose, children }: {
+  onClose: () => void; children: React.ReactNode
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+        <div className="relative bg-[#1D3335] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 max-w-2xl w-full mx-4 pointer-events-auto animate-fade-in">
+          <button onClick={onClose}
+            className="absolute top-3 right-4 text-white/60 hover:text-white text-2xl leading-none cursor-pointer">×</button>
+            {children}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DropZone({ dragging, onDragOver, onDragEnter, onDragLeave, onDrop, onClick, label, children }: {
+  dragging: boolean;
+  onDragOver: React.DragEventHandler;
+  onDragEnter: React.DragEventHandler;
+  onDragLeave: React.DragEventHandler;
+  onDrop: React.DragEventHandler;
+  onClick: () => void;
+  label: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 cursor-pointer transition-colors
+        ${dragging ? "border-[#1E6B70] bg-[#1E6B70]/10" : "border-[#1D3335]/30 bg-white/40 hover:bg-white/60"}`}
+    >
+      <span className="text-3xl">↑</span>
+      <p className="text-sm text-[#1D3335] text-center">{label}</p>
+      {children}
     </div>
   );
 }

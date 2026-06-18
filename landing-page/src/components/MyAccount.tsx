@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
 import type { Project } from "../types";
@@ -74,41 +74,30 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
             });
     }, [showDeleteAccount]);
 
-    function handleUsernameKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-        if (e.key === "Escape") {
-            setUsernameVal(currentUser.username);
-            setEditingUsername(false);
-            setUsernameError("");
-        }
-        if (e.key === "Enter") {
-            const v = usernameVal.trim();
-            if (!v || v === currentUser.username) {
-                setUsernameVal(currentUser.username);
-                setEditingUsername(false);
-                return;
-            }
-            setPendingField("username");
-            setPendingValue(v);
-        }
-    }
+    // changing username or email
 
-    function handleEmailKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const handleFieldKeyDown= (field: "username" | "email") => (e: React.KeyboardEvent<HTMLInputElement>) => {
+        const isUsername = field === "username";
+        const val = isUsername ? usernameVal : emailVal;
+        const stored = isUsername  ? currentUser.username : currentUser.email;
+        const setVal = isUsername ? setUsernameVal : setEmailVal; 
+        const setEditing = isUsername ? setEditingUsername : setEditingEmail;
+        const setError = isUsername ? setUsernameError : setEmailError;
+
         if (e.key === "Escape") {
-            setEmailVal(currentUser.email);
-            setEditingEmail(false);
-            setEmailError("");
+            setVal(stored);
+            setEditing(false);
+            setError("");
         }
         if (e.key === "Enter") {
-            const v = emailVal.trim();
-            if (!v || v === currentUser.email) {
-                setEmailVal(currentUser.email);
-                setEditingEmail(false);
-                return;
+            const v = val.trim();
+            if (!v || v === stored) {
+                setVal(stored); setEditing(false); setError(""); return;
             }
-            setPendingField("email");
+            setPendingField(field);
             setPendingValue(v);
         }
-    }
+    };
 
     async function handleConfirm() {
         const body = pendingField === "username" ? { username: pendingValue } : { email: pendingValue };
@@ -183,48 +172,26 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
                 <h1 className="text-3xl font-bold italic text-[#1D3335] mb-6">my account</h1>
                 {tab === "info" && (
                     <div className="bg-[#C8E6E3] rounded-3xl p-8 max-w-2xl flex flex-col gap-5">
-                        <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-4">
-                                <span className="text-[#1D3335] w-24">username:</span>
-                                <input
-                                    ref={usernameRef}
-                                    type="text"
-                                    readOnly={!editingUsername}
-                                    value={usernameVal}
-                                    onChange={(e) => setUsernameVal(e.target.value)}
-                                    onKeyDown={handleUsernameKeyDown}
-                                    className={`flex-1 bg-white rounded-2xl px-4 py-2 text-[#1D3335] outline-none transition-shadow ${editingUsername ? "ring-2 ring-[#1E6B70]" : ""}`}
-                                />
-                                <button
-                                    onClick={() => { setEditingUsername(true); setUsernameError(""); }}
-                                    className="px-5 py-2 bg-[#1E6B70] text-white text-sm rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
-                                >
-                                    change
-                                </button>
-                            </div>
-                            {usernameError && <p className="text-red-600 text-sm pl-28">{usernameError}</p>}
-                        </div>
-                        <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-4">
-                                <span className="text-[#1D3335] w-24">email:</span>
-                                <input
-                                    ref={emailRef}
-                                    type="text"
-                                    readOnly={!editingEmail}
-                                    value={emailVal}
-                                    onChange={(e) => setEmailVal(e.target.value)}
-                                    onKeyDown={handleEmailKeyDown}
-                                    className={`flex-1 bg-white rounded-2xl px-4 py-2 text-[#1D3335] outline-none transition-shadow ${editingEmail ? "ring-2 ring-[#1E6B70]" : ""}`}
-                                />
-                                <button
-                                    onClick={() => { setEditingEmail(true); setEmailError(""); }}
-                                    className="px-5 py-2 bg-[#1E6B70] text-white text-sm rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
-                                >
-                                    change
-                                </button>
-                            </div>
-                            {emailError && <p className="text-red-600 text-sm pl-28">{emailError}</p>}
-                        </div>
+                        <EditableField
+                            label="username"
+                            value={usernameVal}
+                            onChange={setUsernameVal}
+                            onKeyDown={handleFieldKeyDown("username")}
+                            isEditing={editingUsername}
+                            onEdit={() => { setEditingUsername(true); setUsernameError(""); }}
+                            error={usernameError}
+                            inputRef={usernameRef}
+                        />
+                        <EditableField
+                            label="email"
+                            value={emailVal}
+                            onChange={setEmailVal}
+                            onKeyDown={handleFieldKeyDown("email")}
+                            isEditing={editingEmail}
+                            onEdit={() => { setEditingEmail(true); setEmailError(""); }}
+                            error={emailError}
+                            inputRef={emailRef}
+                        />
                         <p className="text-[#1D3335]">account created: {currentUser.createdAt ? formatDate(currentUser.createdAt) : "—"}</p>
                         <div className="flex gap-3">
                             <button
@@ -328,5 +295,40 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
             </Modal>
         )}
         </>
+    );
+}
+
+function EditableField({ label, value, onChange, onKeyDown, isEditing, onEdit, error, inputRef } : {
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    onKeyDown: React.KeyboardEventHandler<HTMLInputElement>;
+    isEditing: boolean;
+    onEdit: () => void;
+    error: string;
+    inputRef: React.RefObject<HTMLInputElement | null>;
+}) {
+    return (
+        <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-4">
+                <span className="text-[#1D3335] w-24">{label}:</span>
+                <input
+                    ref={inputRef}
+                    type="text"
+                    readOnly={!isEditing}
+                    value={value}
+                    onChange={e => onChange(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    className={`flex-1 bg-white rounded-2xl px-4 py-2 text-[#1D3335] outline-none transition-shadow ${isEditing ? "ring-2 ring-[#1E6B70]" : ""}`}
+                />
+                <button
+                    onClick={onEdit}
+                    className="px-5 py-2 bg-[#1E6B70] text-white text-sm rounded-2xl hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                    change
+                </button>
+            </div>
+            {error && <p className="text-red-600 text-sm pl-28">{error}</p>}
+        </div>
     );
 }

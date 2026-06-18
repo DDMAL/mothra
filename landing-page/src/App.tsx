@@ -19,7 +19,6 @@ import type { CurrentUser } from "./hooks/useAuth";
 import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
 import { downloadBlob } from "./utils/download";
 import { useProjectMutations } from "./hooks/useProjectMutations";
-import type { SignatureEditor } from "pdfjs-dist/types/src/display/editor/signature";
 
 type View =
   | "landing"
