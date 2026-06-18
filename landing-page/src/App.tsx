@@ -13,14 +13,14 @@ import InteractiveClassifier from "./components/workflow/InteractiveClassifier";
 import Documentation from "./components/documentation/Documentation";
 import IcCompletionTestPage from "./components/workflow/ICCompletionTestPage";
 import MyAccount from "./components/account/MyAccount";
-import type { Project, MeiFile } from "./types";
+import type { Project } from "./types";
 
 import type { CurrentUser } from "./hooks/useAuth";
 import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
-import { downloadBlob } from "./utils/download";
 import { useProjectMutations } from "./hooks/useProjectMutations";
+import { useEncodingFlow } from "./hooks/useEncodingFlow";
 
-type View =
+export type View =
   | "landing"
   | "about"
   | "login"
@@ -50,11 +50,6 @@ export default function App() {
     raw.map(p => ({ ...p, images: p.images.map(img => ({ ...img, src: img.src ?? `/api/images/${img.id}` })) }));
 
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
-  const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
-  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
-  const [neonManifest, setNeonManifest] = useState<Record<string, unknown> | null>(null);
-  const [meiContent, settleMeiContent] = useState<{ bytes: string; stem: string } | null>(null);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
 
@@ -62,6 +57,15 @@ export default function App() {
     createProject, renameProject, deleteProject, restoreProject, permanentlyDeleteProject, 
     updateProjectSteps, updateUsedImageNames, updateUsedModelNames, togglePin,
   } = useProjectMutations(setProjects);
+
+  const {
+    encodingLogs,
+    pendingXmlFile, setPendingXmlFile,
+    pendingImageFile, setPendingImageFile,
+    meiContent,
+    handleDownloadManifest,
+    handleDownloadMei,
+  } = useEncodingFlow(view, selectedProjectId, setProjects);
 
   // auth
 
@@ -81,22 +85,6 @@ export default function App() {
     setSelectedProjectId(null);
     setView("landing");
   };
-  
-  // download helpers
-
-  const handleDownloadManifest = () => {
-    if (!neonManifest || !meiContent) return;
-    downloadBlob(
-      new Blob([JSON.stringify(neonManifest, null, 2)], { type: "application/ld+json" }),
-      `${meiContent.stem}_manifest.jsonld`,
-    );
-  };
-
-  const handleDownloadMei = () => {
-    if (!meiContent?.bytes) return;
-    const bytes = Uint8Array.from(atob(meiContent.bytes), (c) => c.charCodeAt(0));
-    downloadBlob(new Blob([bytes], { type: "application/xml" }), `${meiContent.stem}.mei`);
-  }
 
   
 
@@ -115,65 +103,6 @@ export default function App() {
         .then(data => setProjects(normalizeProjects(data)))
         .catch(() => clearToken());
     }, []);
-
-  // encoding effect
-
-  useEffect(() => {
-    if (view !== "encoding-processing") return;
-    settleMeiContent(null);
-    setNeonManifest(null);
-
-    if (pendingXmlFile) {
-      const form = new FormData();
-      form.append("xml_file", pendingXmlFile);
-      if (pendingImageFile) {
-        form.append("image_file", pendingImageFile);
-      }
-      fetch("/api/encode-upload", { method: "POST", body: form })
-        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .then(async (data) => {
-          setNeonManifest(data.manifest ?? null);
-          setEncodingLogs(data.logs ?? []);
-          settleMeiContent({ bytes: data.mei_base64, stem: pendingXmlFile.name.replace(".xml", "")});
-
-          const xmlBytes = Uint8Array.from(atob(data.mei_base64), (c) => c.charCodeAt(0));
-          const xmlText = new TextDecoder().decode(xmlBytes);
-          const stem = pendingXmlFile.name.replace(".xml", "");
-          const newMeiFile: MeiFile = {
-            id: crypto.randomUUID(),
-            name: `${stem}.mei`,
-            xmlContent: xmlText,
-            corrected: false,
-          };
-          if (selectedProjectId) {
-            const r = await fetch(`/api/projects/${selectedProjectId}/mei`, {
-              method: "POST",
-              headers: { ...authHeaders(), "Content-Type": "application/json"},
-              body: JSON.stringify({ name: newMeiFile.name, xmlContent: xmlText }),
-            });
-            const saved = await r.json();
-            newMeiFile.id = saved.id;
-          }
-
-          setProjects((prev) => 
-            prev.map((p) => 
-              p.id === selectedProjectId
-                ? { ...p, meiFiles: [...p.meiFiles, newMeiFile]}
-              : p,
-            ),
-          );
-        })
-        .catch((err) => console.error("Encoding failed:", err));
-    } else {
-      // mock fallback
-      fetch("/api/encode", { method: "POST"})
-        .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .then((data) => {
-          setEncodingLogs(data.logs ?? []);
-        })
-        .catch((err) => console.error("encoding failed:", err));
-    }
-  }, [view]);
   
   
   useEffect(() => {
