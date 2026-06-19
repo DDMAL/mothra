@@ -99,14 +99,16 @@ export default function ProjectDetail({
         )
           return;
         if (activeTab === "images" && imgSection.selectedIds.size > 0) {
-          imgSection.selectedIds.forEach((id) => onDeleteImage(id));
-          onUpdateProject({
-            ...project,
-            images: project.images.filter(
-              (img) => !imgSection.selectedIds.has(img.id),
-            ),
-          });
+          const ids = [...imgSection.selectedIds];
           imgSection.clearSelection();
+          Promise.all(ids.map(id => onDeleteImage(id))).then (() => {
+            onUpdateProject({
+              ...project,
+              images: project.images.filter(
+                (img) => !imgSection.selectedIds.has(img.id),
+              ),
+            });
+          });
         }
         if (activeTab === "models" && mdlSection.selectedIds.size > 0) {
           onUpdateProject({
@@ -269,7 +271,9 @@ export default function ProjectDetail({
                 imgSection.clearSelection();
                 setValidationError(null);
               },
-              () => {
+              async () => {
+                const ids = [...imgSection.selectedIds];
+                await Promise.all(ids.map(id => onDeleteImage(id)));
                 onUpdateProject({ ...project, images: project.images.filter(img => !imgSection.selectedIds.has(img.id)) });
                 imgSection.clearSelection();
               },
