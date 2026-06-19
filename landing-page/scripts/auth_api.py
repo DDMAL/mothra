@@ -16,6 +16,7 @@ router = APIRouter()
 SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
+STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
 
 
 def get_db_conn():
@@ -391,6 +392,21 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
         raise HTTPException(status_code=404)
     image_id = _uuid.uuid4().hex
     image_bytes = await file.read()
+
+    cur.execute("""
+        SELECT COALESCE(SUM(octet_length(data)), 0)
+        FROM project_images
+        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+    """, (user["id"], ))
+    current_bytes = cur.fetchone()[0]
+
+    if current_bytes + len(image_bytes) > STORAGE_QUOTA_BYTES:
+        cur.close(); con.close()
+        raise HTTPException(
+            status_code=413,
+            detail=f"Storage quota exceeded ({STORAGE_QUOTA_BYTES // (1024*1024)} MB limit)"
+        )
+    
     mime_type = file.content_type or "image/png"
     cur.execute(
         "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",

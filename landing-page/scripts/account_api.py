@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import psycopg2, psycopg2.errors
 
-from auth_api import get_current_user, get_db_conn, verify_password, hash_password
+from auth_api import get_current_user, get_db_conn, verify_password, hash_password, STORAGE_QUOTA_BYTES
 
 router = APIRouter()
 
@@ -99,6 +99,8 @@ def get_usage(user=Depends(get_current_user)):
         "images": {"count": imgs[0], "bytes": imgs[1]},
         "meiFiles": {"count": mei[0],  "bytes": mei[1],  "corrected": mei[2]},
         "logs": {"count": logs[0], "bytes": logs[1]},
+        "quotaBytes": STORAGE_QUOTA_BYTES,
+
     }
 
 @router.delete("/me")

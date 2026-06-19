@@ -137,6 +137,10 @@ export default function AppRouter({
               headers: authHeaders(),
               body: form,
             });
+            if (!r.ok) {
+              const d = await r.json().catch(() => ({}));
+              throw new Error ((d as { detail?: string }).detail || "upload failed");
+            }
             return r.json();
           }}
           onUploadModel={async (name) => {

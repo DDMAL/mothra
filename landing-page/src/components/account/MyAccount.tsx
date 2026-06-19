@@ -11,6 +11,7 @@ type UsageData = {
     images: { count: number; bytes: number; };
     meiFiles: { count: number; bytes: number; corrected: number; };
     logs: { count: number; bytes: number; };
+    quotaBytes: number;
 };
 
 interface MyAccountProps {
@@ -62,6 +63,8 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
     const confirmRef = useRef<HTMLButtonElement>(null);
 
     const [usage, setUsage] = useState<UsageData | null>(null);
+    const usedBytes = (usage?.images.bytes ?? 0) + (usage?.meiFiles.bytes ?? 0) + (usage?.logs.bytes ?? 0);
+    const pct = usage?.quotaBytes ? Math.min((usedBytes / usage.quotaBytes) * 100, 100) : 0;
 
     useEffect(() => {
         if (editingUsername) usernameRef.current?.focus();
@@ -243,6 +246,21 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
                                     <p className="text-4xl font-bold text-[#1D3335]">
                                         {formatBytes(usage.images.bytes + usage.meiFiles.bytes + usage.logs.bytes)}
                                     </p>
+                                    <div className="...">
+                                        <div className="flex justify-between text-xs text-[#1D3335]/70 mb-1">
+                                            <span>{formatBytes(usedBytes)} used</span>
+                                            <span>{formatBytes(usage.quotaBytes)} limit</span>
+                                        </div>
+                                        <div className="w-full bg-white/30 rounded-full h-2 overflow-hidden">
+                                            <div
+                                            className="h-full rounded-full transition-all"
+                                            style={{
+                                                width: `${pct}%`,
+                                                background: pct > 90 ? "#dc2626" : "#1E6B70",
+                                            }}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">

@@ -31,6 +31,7 @@ export default function ImageTab({
 } : ImageTabProps) {
     const [quickLookId, setQuickLookId] = useState<string | null>(null);
     const [converting, setConverting] = useState(false);
+    const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -88,30 +89,37 @@ export default function ImageTab({
   };
 
   const handleFiles = async (files: FileList | File[]) => {
-    const all = Array.from(files);
-    const imageFiles = all.filter((f) => f.type.startsWith("image/"));
-    const pdfFiles = all.filter((f) => f.type === "application/pdf");
-    if (imageFiles.length === 0 && pdfFiles.length === 0) return;
-    setConverting(true);
+    setUploadError(null);
+    try {
+      const all = Array.from(files);
+      const imageFiles = all.filter((f) => f.type.startsWith("image/"));
+      const pdfFiles = all.filter((f) => f.type === "application/pdf");
+      if (imageFiles.length === 0 && pdfFiles.length === 0) return;
+      setConverting(true);
 
-    const imageEntries = await Promise.all(imageFiles.map(async (f) => {
-      const result = await onUploadImage(f);
-      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
-    }));
-    
-    const pdfImages = (await Promise.all(pdfFiles.map(pdfToImages))).flat();
-    const pdfEntries = await Promise.all(pdfImages.map(async ({ name, src: blobUrl }) => {
-      const blob = await fetch(blobUrl).then((r) => r.blob());
-      URL.revokeObjectURL(blobUrl);
-      const file = new File([blob], name, { type: "image/png "});
-      const result = await onUploadImage(file);
-      return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
-    }));
+      const imageEntries = await Promise.all(imageFiles.map(async (f) => {
+        const result = await onUploadImage(f);
+        return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
+      }));
+      
+      const pdfImages = (await Promise.all(pdfFiles.map(pdfToImages))).flat();
+      const pdfEntries = await Promise.all(pdfImages.map(async ({ name, src: blobUrl }) => {
+        const blob = await fetch(blobUrl).then((r) => r.blob());
+        URL.revokeObjectURL(blobUrl);
+        const file = new File([blob], name, { type: "image/png "});
+        const result = await onUploadImage(file);
+        return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
+      }));
 
-    onUpdateProject({ ...project, images: [...project.images, ...imageEntries, ...pdfEntries] });
-    setConverting(false);
-    section.setUploadModal(false);
-    section.setDragging(false);
+      onUpdateProject({ ...project, images: [...project.images, ...imageEntries, ...pdfEntries] });
+      setConverting(false);
+      section.setUploadModal(false);
+      section.setDragging(false);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "upload failed" );
+    } finally {
+      setConverting(false);
+    }
   };
 
   const totalImagePages = Math.ceil(project.images.length / ITEMS_PER_PAGE);
@@ -264,6 +272,9 @@ export default function ImageTab({
                     className="hidden"
                     onChange={(e) => { if (e.target.files) handleFiles(e.target.files); }}
                 />
+                {uploadError && (
+                  <p className="text-red-600 text-sm text-center">{uploadError}</p>
+                )}
                 </Modal>
             )}
         </>
