@@ -31,17 +31,26 @@ export default function ImageTab({
 } : ImageTabProps) {
     const [quickLookId, setQuickLookId] = useState<string | null>(null);
     const [converting, setConverting] = useState(false);
+    const [pdfProgress, setPdfProgress] = useState<{
+      done: number;
+      total: number;
+    } | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
 
     const deleteImage = async (id: string) => {
-    await onDeleteImage(id);
-    onUpdateProject({
-      ...project,
-      images: project.images.filter((img) => img.id !== id),
-    });
-    section.setMenu(null);
+      try {
+        await onDeleteImage(id);
+        onUpdateProject({
+          ...project,
+          images: project.images.filter((img) => img.id !== id),
+        });
+      } catch (err) {
+        // delete failed - leave state unchanged / image remains visible
+        console.error("Failed to delete image:", err);
+      }
+      section.setMenu(null);
   };
 
   const renameImage = () => {
@@ -61,6 +70,7 @@ export default function ImageTab({
 
   const pdfToImages = async (
     file: File,
+    onPageDone: () => void,
   ): Promise<{ name: string; src: string }[]> => {
     const baseName = file.name.replace(/\.pdf$/i, "");
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() })
@@ -84,6 +94,7 @@ export default function ImageTab({
         name: `${baseName} (page${i}).png`,
         src: URL.createObjectURL(blob),
       });
+      onPageDone();
     }
     return results;
   };
@@ -102,7 +113,21 @@ export default function ImageTab({
         return { id: result.id, name: result.name, src: `/api/images/${result.id}` };
       }));
       
-      const pdfImages = (await Promise.all(pdfFiles.map(pdfToImages))).flat();
+      const pdfDocs = await Promise.all(
+        pdfFiles.map(async f => pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise)
+      );
+      const total = pdfDocs.reduce((s, d) => s + d.numPages, 0);
+      setPdfProgress({ done: 0, total });
+
+      let done = 0;
+      const pdfImages: { name: string; src: string }[] = [];
+      for (let i = 0; i < pdfFiles.length; i++) {
+        const pages = await pdfToImages(pdfFiles[i], () => {
+          done++;
+          setPdfProgress({ done, total });
+        });
+        pdfImages.push(...pages);
+      }
       const pdfEntries = await Promise.all(pdfImages.map(async ({ name, src: blobUrl }) => {
         const blob = await fetch(blobUrl).then((r) => r.blob());
         URL.revokeObjectURL(blobUrl);
@@ -119,6 +144,7 @@ export default function ImageTab({
       setUploadError(err instanceof Error ? err.message : "upload failed" );
     } finally {
       setConverting(false);
+      setPdfProgress(null);
     }
   };
 
@@ -237,7 +263,21 @@ export default function ImageTab({
                 <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
                 {converting ? (
                     <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
-                    <p className="text-sm text-[#1D3335] text-center">converting PDF pages...</p>
+                      {pdfProgress ? (
+                        <>
+                          <p className="text-sm text-[#1D3335] text-center">
+                            converting PDF pages... {pdfProgress.done} / {pdfProgress.total}
+                          </p>
+                          <div className="w-full bg-white/30 rounded-full h-3 overflow-hidden">
+                            <div
+                              className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
+                              style={{ width: `${(pdfProgress.done / pdfProgress.total) * 100}%` }}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-[#1D3335] text-center">uploading...</p>
+                      )}
                     </div>
                 ) : (
                     <FileDropZone

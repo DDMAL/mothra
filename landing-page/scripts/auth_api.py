@@ -434,12 +434,20 @@ def get_image(image_id: str, user=Depends(get_current_user)):
 def delete_image(project_id: int, image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
     cur.execute(
         "SELECT id FROM project_images WHERE id=%s AND project_id=%s", (image_id, project_id)
     )
-    if cur.fetchone():
-        cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
-        con.commit()
+    if not cur.fetchone():
+        cur.close(); con.close()
+        raise HTTPException(status_code=404, detail="Image not found")
+    cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
+    _log_activity(cur, project_id, "image_deleted", image_id)
+    con.commit()
     cur.close()
     con.close()
     return {"ok": True}

@@ -152,10 +152,14 @@ export default function AppRouter({
             return r.json();
           }}
           onDeleteImage={async (imageId) => {
-            await fetch(`/api/projects/${selectedProject.id}/images/${imageId}`, {
+            const r = await fetch(`/api/projects/${selectedProject.id}/images/${imageId}`, {
               method: "DELETE",
               headers: authHeaders(),
             });
+            if (!r.ok) {
+              const d = await r.json().catch(() => ({}));
+              throw new Error((d as { detail?: string }).detail || "delete failed");
+            }
           }}
           onDeleteProject={() => {
             deleteProject(selectedProject.id);

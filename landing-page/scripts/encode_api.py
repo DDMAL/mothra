@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile, File as FAPIFile
 from fastapi.responses import Response, JSONResponse
 
 
@@ -9,8 +9,8 @@ import json
 import mimetypes
 import struct
 import tempfile, shutil, uuid as _uuid
-from fastapi import UploadFile, File as FAPIFile
 from typing import Optional
+import xml.etree.ElementTree as ET
 
 
 def _image_dimensions(header: bytes) -> Optional[tuple]:
@@ -142,6 +142,15 @@ async def encode_upload(
     }
     return {"session_id": session_id, "mei_base64": mei_b64, "logs": logs, "manifest": manifest}
 
+@router.post("/validate-mei")
+async def validate_mei_endpoint(file: UploadFile = FAPIFile(...)):
+    xml_bytes = await file.read()
+    try:
+        ET.fromstring(xml_bytes)
+    except ET.ParseError as e: 
+        return {"valid": False, "warnings": [f"XML parse error: {e}"]}
+    warnings = validate_mei(xml_bytes)
+    return {"valid": len(warnings) == 0, "warnings": warnings}
 
 @router.get("/manifest/{session_id}")
 def get_manifest(session_id: str):

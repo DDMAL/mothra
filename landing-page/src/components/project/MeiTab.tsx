@@ -6,6 +6,7 @@ import { downloadBlob } from "../../utils/download";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
 import QuickLookModal from "../shared/QuickLookModal";
+import Modal from "../shared/Modal";
 
 interface MeiTabProps {
     project: Project;
@@ -27,6 +28,20 @@ export default function MeiTab({ project, section, onUpdateProject }: MeiTabProp
         downloadBlob(new Blob([file.xmlContent ?? ""], { type: "application/xml" }), file.name);
     };
 
+    const handleValidate = async (file: MeiFile) => {
+        setValidateModal({ file, result: null, loading: true });
+        const blob = new Blob([file.xmlContent ?? ""], { type: "application/mei"} );
+        const form = new FormData();
+        form.append("file", blob, file.name);
+        const r = await fetch("/api/validate-mei", {
+             method: "POST",
+            headers: authHeaders(),
+            body: form,
+        });
+        const result = await r.json();
+        setValidateModal(prev => prev ? {...prev, result, loading: false } : null);
+    };
+
     const meiProduced = project.meiFiles.filter(f => !f.corrected);
     const meiCorrected = project.meiFiles.filter(f => !!f.corrected);
     const activeMeiFiles = meiSubTab === "mei produced" ? meiProduced : meiCorrected;
@@ -35,6 +50,11 @@ export default function MeiTab({ project, section, onUpdateProject }: MeiTabProp
         section.page * ITEMS_PER_PAGE,
         (section.page + 1) * ITEMS_PER_PAGE,
     );
+    const [validateModal, setValidateModal] = useState<{
+        file: MeiFile;
+        result: {valid: boolean; warnings: string[] } | null;
+        loading: Boolean;
+    } | null>(null);
 
     return (
         <>
@@ -91,6 +111,14 @@ export default function MeiTab({ project, section, onUpdateProject }: MeiTabProp
                         section.setMenu(null);
                         },
                     },
+                    { 
+                        label: "Validate",
+                        onClick: () => {
+                            const f = project.meiFiles.find(f => f.id === section.menu!.id)!;
+                            handleValidate(f);
+                            section.setMenu(null);
+                        }
+                    },
                     ...(file ? [{
                         label: newCorrected ? "Mark as Corrected" : "Mark as Uncorrected",
                         onClick: () => {
@@ -132,6 +160,28 @@ export default function MeiTab({ project, section, onUpdateProject }: MeiTabProp
                 </QuickLookModal>
                 );
             })()}
+            {validateModal && (
+                <Modal onClose={() => setValidateModal(null)}>
+                    <h2 className="text-xl text-[#1D3335] text-center">
+                        {validateModal.loading
+                            ? "validating..."
+                            : validateModal.result?.valid
+                            ? "valid MEI"
+                            : "MEI has warnings"}
+                    </h2>
+                    {!validateModal.loading && validateModal.result && (
+                        validateModal.result.valid ? (
+                            <p className="text-[#1E6B70] text-sm text-center">no issues found</p>
+                        ) : (
+                            <ul className="text-sm text-[#1D3335] flex flex-col gap-1 max-h-64 overflow-y-auto">
+                                {validateModal.result.warnings.map((w, i) => (
+                                    <li key={i} className="bg-white/40 rounded-lg px-3 py-1.5 font-mono text-xs">{w}</li>
+                                ))}
+                            </ul>
+                        )
+                    )}
+                </Modal>
+            )}
         </>
     );
 
