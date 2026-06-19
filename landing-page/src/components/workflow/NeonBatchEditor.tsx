@@ -59,8 +59,18 @@ export default function NeonBatchEditor({ project, meiFiles, onFinish, onBack }:
     const currentSession = currentFile ? sessions.get(currentFile.id) : null;
     const allCorrected = meiFiles.length > 0 && meiFiles.every((f) => corrected.has(f.id));
 
+    function triggerNeonSave() {
+        const iframeBody = iframeRef.current?.contentDocument?.body;
+        if (iframeBody) {
+            iframeBody.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true }));
+        }
+    }
+
     async function markCurrentDone() {
         if (!currentFile || corrected.has(currentFile.id)) return;
+        triggerNeonSave();
+        // brief wait for the async PUT inside Neon's updateDatabase() to complete
+        await new Promise((r) => setTimeout(r, 800));
         await fetch(`/api/projects/${project.id}/mei/${currentFile.id}`, {
             method: "PATCH",
             headers: { ...authHeaders(), "Content-Type": "application/json" },
