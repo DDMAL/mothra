@@ -131,6 +131,28 @@ def _migrate_db():
         cur.close()
         con.close()
 
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE projects ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
@@ -429,6 +451,25 @@ def get_image(image_id: str, user=Depends(get_current_user)):
     if not row:
         raise HTTPException(status_code=404)
     return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
+
+@router.get("/images/{image_id}/meta")
+def get_image_meta(image_id: str, user=Depends(get_current_user)):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT name, mime_type, octet_length(data), created_at FROM project_images WHERE id=%s",
+        (image_id,)
+    )
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row:
+        raise HTTPException(status_code=404)
+    return {
+        "name": row[0],
+        "mimeType": row[1] or "image/png",
+        "sizeBytes": row[2],
+        "createdAt": row[3].isoformat() if row[3] else None,
+    }
 
 @router.delete("/projects/{project_id}/images/{image_id}")
 def delete_image(project_id: int, image_id: str, user=Depends(get_current_user)):

@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project, ProjectImage } from "../../types";
 import * as pdfjsLib from "pdfjs-dist";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { AuthImage } from "../shared/AuthImage";
+import { authHeaders } from "../../hooks/useAuth";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
@@ -30,6 +31,11 @@ export default function ImageTab({
     project, section, usedNames, onUpdateProject, onUsedNamesChange, onUploadImage, onDeleteImage, setValidationError,
 } : ImageTabProps) {
     const [quickLookId, setQuickLookId] = useState<string | null>(null);
+    const [quickLookTab, setQuickLookTab] = useState<"preview" | "info">("preview");
+    const [quickLookMeta, setQuickLookMeta] = useState<{
+      mimeType: string; sizeBytes: number; createdAt: string | null;
+    } | null>(null);
+    const [quickLookDims, setQuickLookDims] = useState<{ w: number; h: number } | null>(null);
     const [converting, setConverting] = useState(false);
     const [pdfProgress, setPdfProgress] = useState<{
       done: number;
@@ -38,6 +44,19 @@ export default function ImageTab({
     const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+      if (quickLookTab !== "info" || !quickLookId) return;
+      setQuickLookMeta(null);
+      fetch(`/api/images/${quickLookId}/meta`, { headers: authHeaders() })
+        .then(r => r.json())
+        .then(setQuickLookMeta);
+    }, [quickLookTab, quickLookId]);
+
+    const formatBytes = (b: number) =>
+      b < 1024 ? `${b} B`
+      : b < 1024 ** 2 ? `${(b / 1024).toFixed(1)} KB`
+      : `${(b / 1024 ** 2).toFixed(2)} MB`;
 
     const deleteImage = async (id: string) => {
       try {
@@ -153,7 +172,6 @@ export default function ImageTab({
       section.page * ITEMS_PER_PAGE,
       (section.page + 1) * ITEMS_PER_PAGE,
     );
-
     return (
         <>
             <div className="mt-6" onClick={() => section.clearSelection()}>
@@ -181,7 +199,7 @@ export default function ImageTab({
                      items={[
                        {
                          label: "Quick Look",
-                         onClick: () => { setQuickLookId(section.menu!.id); section.setMenu(null); },
+                         onClick: () => { setQuickLookId(section.menu!.id); setQuickLookTab("preview"); setQuickLookDims(null); section.setMenu(null); },
                        },
                        {
                          label: "Use Image",
@@ -227,13 +245,51 @@ export default function ImageTab({
                     const isUsed = usedNames.images.includes(img.name);
                     return (
                       <QuickLookModal onClose={() => setQuickLookId(null)}>
-                        <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
-                          {img.src ? (
-                            <AuthImage src={img.src} alt={img.name} className="object-contain max-h-[60vh] w-full" />
-                          ) : (
-                            <span className="text-white/40 text-sm py-16">{img.name}</span>
-                          )}
+                        <div className="flex gap-2">
+                          {(["preview", "info"] as const).map(tab => (
+                            <button
+                              key={tab}
+                              onClick={() => setQuickLookTab(tab)}
+                              className={`px-4 py-1 rounded-lg text-sm font-semibold transition-colors cursor-pointer
+                                ${quickLookTab === tab ? "bg-white text-[#1D3335]" : "text-white/60 hover:text-white/90"}`}
+                            >
+                              {tab}
+                            </button>
+                          ))}
                         </div>
+                        {quickLookTab === "preview" ? (
+                          <div className="flex items-center justify-center bg-[#C8E6E3]/20 rounded-xl overflow-hidden max-h-[60vh]">
+                            {img.src ? (
+                              <AuthImage
+                                src={img.src}
+                                alt={img.name}
+                                className="object-contain max-h-[60vh] w-full"
+                                onLoad={(e) => {
+                                  const el = e.currentTarget;
+                                  setQuickLookDims({ w: el.naturalWidth, h: el.naturalHeight });
+                                }}
+                              />
+                            ) : (
+                              <span className="text-white/40 text-sm py-16">{img.name}</span>
+                            )}
+                          </div>
+                        ) : (
+                          quickLookMeta ? (
+                            <div className="flex flex-col gap-2 text-sm text-white/70 font-mono">
+                              <div className="flex justify-between gap-4"><span>name</span><span className="text-white truncate">{img.name}</span></div>
+                              <div className="flex justify-between gap-4"><span>type</span><span className="text-white">{quickLookMeta.mimeType}</span></div>
+                              <div className="flex justify-between gap-4"><span>size</span><span className="text-white">{formatBytes(quickLookMeta.sizeBytes)}</span></div>
+                              {quickLookDims && (
+                                <div className="flex justify-between gap-4"><span>dimensions</span><span className="text-white">{quickLookDims.w} × {quickLookDims.h} px</span></div>
+                              )}
+                              {quickLookMeta.createdAt && (
+                                <div className="flex justify-between gap-4"><span>uploaded</span><span className="text-white">{new Date(quickLookMeta.createdAt).toLocaleDateString()}</span></div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-white/40 text-sm text-center py-8">loading...</p>
+                          )
+                        )}
                         <div className="flex gap-3 justify-center">
                           {!isUsed && (
                             <button
