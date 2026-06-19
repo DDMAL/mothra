@@ -6,15 +6,30 @@ import Modal from "../shared/Modal";
 
 type AccountTab = "info" | "files";
 
+type UsageData = {
+    projects: {total: number; active: number; deleted: number; };
+    images: { count: number; bytes: number; };
+    meiFiles: { count: number; bytes: number; corrected: number; };
+    logs: { count: number; bytes: number; };
+};
+
 interface MyAccountProps {
     currentUser: CurrentUser;
     onUserUpdate: (u: CurrentUser) => void;
     onLogout: () => void;
 }
 
+
 function formatDate(s: string) {
     const d = new Date(s.replace(" ", "T") + "Z");
     return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+function formatBytes(n: number): string {
+    if (n === 0) return "0 B";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAccountProps) {
@@ -46,6 +61,8 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
     const emailRef = useRef<HTMLInputElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
 
+    const [usage, setUsage] = useState<UsageData | null>(null);
+
     useEffect(() => {
         if (editingUsername) usernameRef.current?.focus();
     }, [editingUsername]);
@@ -59,6 +76,12 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
         if (editingEmail) emailRef.current?.focus();
     }, [editingEmail]);
 
+    useEffect(() => {
+    if (tab !== "files") return;
+    fetch("/api/me/usage", { headers: authHeaders() })
+        .then(r => r.json())
+        .then(setUsage);
+    }, [tab]);
 
     useEffect(() => {
         if (!showDeleteAccount) return;
@@ -207,6 +230,53 @@ export default function MyAccount({ currentUser, onUserUpdate, onLogout}: MyAcco
                                 delete my account
                             </button>
                         </div>
+                    </div>
+                )}
+                {tab === "files" && (
+                    <div className="flex flex-col gap-6 max-w-2xl">
+                        {!usage ? (
+                            <p className="tet-white/60 text-sm">loading...</p>
+                        ) : (
+                            <>
+                                <div className="bg-[#C8E6E3] rounded-3xl p-8 flex flex-col gap-2">
+                                    <p className="text-[#1D3335] font-semibold text-lg mb-1">total storage</p>
+                                    <p className="text-4xl font-bold text-[#1D3335]">
+                                        {formatBytes(usage.images.bytes + usage.meiFiles.bytes + usage.logs.bytes)}
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-[#C8E6E3] rounded-3xl p-6 flex flex-col gap-1">
+                                        <p className="text-[#1D3335]/60 text-xs uppercase tracking-wide">projects</p>
+                                        <p className="text-3xl font-bold text-[#1D3335]">{usage.projects.active}</p>
+                                        <p className="text-sm text-[#1D3335]/70">
+                                            {usage.projects.deleted > 0 ? `+ ${usage.projects.deleted} in trash` : "none in trash"}
+                                        </p>
+                                    </div>
+
+                                    <div className="bg-[#C8E6E3] rounded-3xl p-6 flex flex-col gap-1">
+                                        <p className="text-[#1D3335]/60 text-xs uppercase tracking-wide">images</p>
+                                        <p className="text-3xl font-bold text-[#1D3335]">{usage.images.count}</p>
+                                        <p className="text-sm text-[#1D3335]/70">{formatBytes(usage.images.bytes)}</p>
+                                    </div>
+
+                                    <div className="bg-[#C8E6E3] rounded-3xl p-6 flex flex-col gap-1">
+                                        <p className="text-[#1D3335]/60 text-xs uppercase tracking-wide">mei files</p>
+                                        <p className="text-3xl font-bold text-[#1D3335]">{usage.meiFiles.count}</p>
+                                        <p className="text-sm text-[#1D3335]/70">
+                                            {usage.meiFiles.corrected}/{usage.meiFiles.count} corrected
+                                            &nbsp;·&nbsp;{formatBytes(usage.meiFiles.bytes)}
+                                        </p>
+                                    </div>
+
+                                    <div className="bg-[#C8E6E3] rounded-3xl p-6 flex flex-col gap-1">
+                                        <p className="text-[#1D3335]/60 text-xs uppercase tracking-wide">encoding logs</p>
+                                        <p className="text-3xl font-bold text-[#1D3335]">{usage.logs.count}</p>
+                                        <p className="text-sm text-[#1D3335]/70">{formatBytes(usage.logs.bytes)}</p>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
             </main>

@@ -56,6 +56,51 @@ def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
     con.commit(); cur.close(); con.close()
     return {"ok": True}
 
+@router.get("/me/usage")
+def get_usage(user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    uid = user["id"]
+
+    cur.execute("""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL) AS active
+        FROM projects WHERE user_id = %s
+    """, (uid,))
+    proj = cur.fetchone()
+
+    cur.execute("""
+        SELECT COUNT(*), COALESCE(SUM(octet_length(data)), 0)
+        FROM project_images
+        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+    """, (uid,))
+    imgs = cur.fetchone()
+
+    cur.execute("""
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(octet_length(xml_content)), 0),
+            COUNT(*) FILTER (WHERE corrected = 1)
+        FROM mei_files
+        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+    """, (uid,))
+    mei = cur.fetchone()
+
+    cur.execute("""
+        SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
+        FROM project_logs
+        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+    """, (uid,))
+    logs = cur.fetchone()
+
+    cur.close(); con.close()
+    return {
+        "projects": {"total": proj[0], "active": proj[1], "deleted": proj[0] - proj[1]},
+        "images": {"count": imgs[0], "bytes": imgs[1]},
+        "meiFiles": {"count": mei[0],  "bytes": mei[1],  "corrected": mei[2]},
+        "logs": {"count": logs[0], "bytes": logs[1]},
+    }
+
 @router.delete("/me")
 def delete_me(user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
