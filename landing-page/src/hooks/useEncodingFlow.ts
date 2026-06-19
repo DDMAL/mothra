@@ -52,7 +52,11 @@ export function useEncodingFlow(
                 const r = await fetch(`/api/projects/${selectedProjectId}/mei`, {
                   method: "POST",
                   headers: { ...authHeaders(), "Content-Type": "application/json"},
-                  body: JSON.stringify({ name: newMeiFile.name, xmlContent: xmlText, logs: encodingLogs }),
+                  body: JSON.stringify({ 
+                    name: newMeiFile.name, 
+                    xmlContent: xmlText, 
+                    imageName: pendingImageFile?.name ?? null,
+                    logs: encodingLogs, }),
                 });
                 const saved = await r.json();
                 newMeiFile.id = saved.id;

@@ -56,4 +56,5 @@ export type View =
   | "encoding-completion"
   | "sending"
   | "send-completion"
+  | "neon-editor"
   | "neon-test";

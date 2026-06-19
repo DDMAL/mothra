@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File as FAPIFile
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File as FAPIFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from pathlib import Path
@@ -17,6 +17,8 @@ SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
+NEON_MANIFESTS_DIR = Path(__file__).parent.parent / "public" / "neon" / "samples" / "manifests"
+NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_db_conn():
@@ -69,7 +71,8 @@ def init_db():
             project_id INTEGER REFERENCES projects(id),
             name TEXT NOT NULL,
             xml_content TEXT,
-            corrected INTEGER DEFAULT 0
+            corrected INTEGER DEFAULT 0,
+            image_name TEXT
         )
     """)
     cur.execute("""
@@ -153,6 +156,17 @@ def _migrate_db():
         cur.close()
         con.close()
 
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
@@ -167,6 +181,21 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_token(user_id: int) -> str:
     exp = datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
+
+def _make_edit_token(project_id: int, mei_id: str) -> str:
+    payload = {
+        "project_id": project_id, 
+        "mei_id": mei_id,
+        "exp": datetime.utcnow() + timedelta(hours=24)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def _verify_edit_token(token: str, project_id: int, mei_id: str) -> bool:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("project_id") == project_id and payload.get("mei_id") == mei_id
+    except Exception:
+        return False
 
 def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -498,7 +527,7 @@ def delete_image(project_id: int, image_id: str, user=Depends(get_current_user))
 class AddMeiBody(BaseModel):
     name: str
     xmlContent: str
-    logs: Optional[list[str]] = None
+    imageName: Optional[str] = None
     logs: Optional[list[str]] = None
 
 @router.post("/projects/{project_id}/mei")
@@ -513,8 +542,8 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
         raise HTTPException(status_code=404)
     mei_id = _uuid.uuid4().hex
     cur.execute(
-        "INSERT INTO mei_files (id, project_id, name, xml_content) VALUES (%s,%s,%s,%s)",
-        (mei_id, project_id, body.name, body.xmlContent))
+        "INSERT INTO mei_files (id, project_id, name, xml_content, image_name) VALUES (%s,%s,%s,%s,%s)",
+        (mei_id, project_id, body.name, body.xmlContent, body.imageName))
     if body.logs:
         content = "\n".join(body.logs)
         cur.execute(
@@ -529,6 +558,7 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
 
 class UpdateMeiBody(BaseModel):
     corrected: Optional[bool] = None
+    xmlContent: Optional[str] = None
 
 @router.patch("/projects/{project_id}/mei/{mei_id}")
 def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(get_current_user)):
@@ -538,6 +568,9 @@ def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(g
     if not row or row[0] != user["id"]:
         cur.close(); con.close()
         raise HTTPException(status_code=404)
+    if body.xmlContent is not None:
+        cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
+                    (body.xmlContent, mei_id, project_id))
     if body.corrected is not None:
         cur.execute("UPDATE mei_files SET corrected=%s WHERE id=%s AND project_id=%s",
                     (1 if body.corrected else 0, mei_id, project_id))
@@ -549,6 +582,79 @@ def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(g
     con.commit()
     cur.close(); con.close()
     return {"ok": True}
+
+@router.get("/projects/{project_id}/mei/{mei_id}/content")
+def get_mei_content(project_id: int, mei_id: str, token: str):
+    if not _verify_edit_token(token, project_id, mei_id):
+        raise HTTPException(status_code=403, detail="invalid or expired edit token")
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT xml_content FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="MEI not found")
+    return Response(content=row[0], media_type="application/xml")
+
+@router.put("/projects/{project_id}/mei/{mei_id}/content")
+async def put_mei_content(project_id: int, mei_id: str, token: str, request: Request):
+    if not _verify_edit_token(token, project_id, mei_id):
+        raise HTTPException(status_code=403, detail="invalid or expired exit token")
+    xml_content = (await request.body()).decode("utf-8")
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
+                (xml_content, mei_id, project_id))
+    con.commit(); cur.close(); con.close()
+    return {"ok": True}
+
+@router.post("/projects/{project_id}/mei/{mei_id}/edit-session")
+def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("SELECT name, image_name FROM mei_files WHERE id=%s AND project_id=%s",
+                (mei_id, project_id))
+    mei_row = cur.fetchone()
+    if not mei_row: 
+        cur.close(); con.close()
+        raise HTTPException(status_code=404, detail="MEI not found")
+    mei_name, image_name = mei_row
+
+    image_data_uri = None
+    if image_name:
+        cur.execute("SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
+                    (project_id, image_name))
+        img_row = cur.fetchone()
+        if img_row:
+            img_data, mime_type = img_row
+            mime = mime_type or "image/jpeg"
+            image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(img_data)).decode()}"
+    cur.close(); con.close()
+
+    edit_token = _make_edit_token(project_id, mei_id)
+    session_id = _uuid.uuid4().hex[:8]
+    manifest_id = str(_uuid.uuid4())
+    annotation_id = str(_uuid.uuid4())
+
+    content_url = f"/api/projects/{project_id}/mei/{mei_id}/content?token={edit_token}"
+    image_ref = image_data_uri or ""
+    manifest = {
+        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/1/manifest.jsonld",
+        "@id": f"urn:uuid:{manifest_id}",
+        "title": mei_name,
+        "image": image_ref,
+        "mei_annotations": [{
+            "id": f"urn:uuid:{annotation_id}",
+            "type": "Annotation",
+            "body": content_url,
+            "target": image_ref,
+        }]
+    }
+
+    (NEON_MANIFESTS_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
+    return {"session_id": session_id, "manifest_id": manifest_id}
 
 # models
 
