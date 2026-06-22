@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project } from "../types";
+import type { View, Project, AnnotationSet } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
@@ -190,15 +190,6 @@ export default function AppRouter({
               });
             return r.json();
           }}
-          onRunDetection={async (modelId, imageIds) => {
-            const r = await fetch(`/api/projects/${selectedProject.id}/predict`, {
-              method: "POST",
-              headers: { ...authHeaders(), "Content-Type": "application/json" },
-              body: JSON.stringify({ model_id: modelId, image_ids: imageIds }),
-            });
-            if (!r.ok) throw new Error("inference failed");
-            return r.json();
-          }}
           onDeleteImage={async (imageId) => {
             const r = await fetch(
               `/api/projects/${selectedProject.id}/images/${imageId}`,
@@ -221,7 +212,7 @@ export default function AppRouter({
         />
       ) : null;
     case "processing":
-      return (
+      return selectedProject ? (
         <ProcessingPage
           onBack={() => setView("project")}
           onComplete={() => {
@@ -233,8 +224,32 @@ export default function AppRouter({
             }
             setView("completion");
           }}
+          streamRequest={() => {
+            const usedModelId =
+              selectedProject.models.find((m) =>
+                (selectedProject.usedModelNames ?? []).includes(m.name),
+              )?.id ?? "";
+            const usedImageIds = selectedProject.images
+              .filter((i) => selectedProject.usedImageNames.includes(i.name))
+              .map((i) => i.id);
+            return fetch(`/api/projects/${selectedProject.id}/predict`, {
+              method: "POST",
+              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model_id: usedModelId,
+                image_ids: usedImageIds,
+              }),
+            });
+          }}
+          onResult={(annotations: AnnotationSet[]) => {
+            setProjects((prev) =>
+              prev.map((p) =>
+                p.id === selectedProject.id ? { ...p, annotations } : p,
+              ),
+            );
+          }}
         />
-      );
+      ) : null;
     case "completion":
       return (
         <CompletionPage

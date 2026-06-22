@@ -41,6 +41,7 @@ landing-page/node_modules
 landing-page/scripts/__pycache__
 landing-page/scripts/mock_data
 landing-page/scripts/.venv
+landing-page/scripts/stored_models
 
 #mock files
 landing-page/dist
