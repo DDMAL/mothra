@@ -641,7 +641,16 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
     content_url = f"/api/projects/{project_id}/mei/{mei_id}/content?token={edit_token}"
     image_ref = image_data_uri or ""
     manifest = {
-        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/1/manifest.jsonld",
+        "@context": [
+            "http://www.w3.org/ns/anno.jsonld",
+            {
+                "schema": "http://schema.org/",
+                "title": "schema:name",
+                "timestamp": "schema:dateModified",
+                "image": {"@id": "schema:image", "@type": "@id"},
+                "mei_annotations": {"@id": "Annotation", "@type": "@id", "@container": "@list"},
+            },
+        ],
         "@id": f"urn:uuid:{manifest_id}",
         "title": mei_name,
         "image": image_ref,
@@ -653,6 +662,7 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
         }]
     }
 
+    NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
     (NEON_MANIFESTS_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
     return {"session_id": session_id, "manifest_id": manifest_id}
 

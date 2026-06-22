@@ -647,7 +647,16 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
 def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
     mei_b64 = base64.b64encode(mei_bytes).decode()
     return {
-        "@context": "https://ddmal.music.mcgill.ca/Neon/contexts/1/manifest.jsonld",
+        "@context": [
+            "http://www.w3.org/ns/anno.jsonld",
+            {
+                "schema": "http://schema.org/",
+                "title": "schema:name",
+                "timestamp": "schema:dateModified",
+                "image": {"@id": "schema:image", "@type": "@id"},
+                "mei_annotations": {"@id": "Annotation", "@type": "@id", "@container": "@list"},
+            },
+        ],
         "@id": f"urn:uuid:{uuid.uuid4()}",
         "title": stem,
         "timestamp": datetime.now(timezone.utc).isoformat(),

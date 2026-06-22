@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "format": "prettier --write src/",
     "preview": "vite preview",
-    "build:neon": "cd neon && npx yarn install --frozen-lockfile --silent && export NODE_OPTIONS=--openssl-legacy-provider && npm run build && cp -r deployment/server/Neon-gh ../public/neon && cp deployment/server/editor.html ../public/neon/editor.html",
+    "build:neon": "cd neon && npx yarn install --frozen-lockfile --silent && export NODE_OPTIONS=--openssl-legacy-provider && npm run build && mkdir -p ../public/neon && cp -r deployment/server/Neon-gh ../public/neon/ && cp deployment/server/editor.html ../public/neon/editor.html",
     "build": "npm run build:neon && tsc -b && vite build"
   },
   "dependencies": {
