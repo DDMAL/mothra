@@ -1,0 +1,3 @@
+[submodule "landing-page/neon"]
+	path = landing-page/neon
+	url = https://github.com/DDMAL/Neon.git

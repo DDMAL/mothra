@@ -22,6 +22,13 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(encode_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
 
+_neon_dir = Path(__file__).parent.parent / "public" / "neon"
+if _neon_dir.exists():
+    app.mount("/neon", StaticFiles(directory=str(_neon_dir), html=True), name="neon")
+_neon_gh_dir = _neon_dir / "Neon-gh"
+if _neon_gh_dir.exists():
+    app.mount("/Neon-gh", StaticFiles(directory=str(_neon_gh_dir)), name="neon-gh")
+
 DIST_DIR = Path(__file__).parent.parent / "dist"
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")

@@ -15,6 +15,7 @@ import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
+import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
 
@@ -108,7 +109,7 @@ export default function AppRouter({
           project={selectedProject}
           onBack={() => setView("projects")}
           onContinue={() => {
-            if (selectedProject.stepsUnlocked >= 3) window.open("https://ddmal.ca/Neon", "_blank");
+            if (selectedProject.stepsUnlocked >= 3) setView("neon-editor");
             else if (selectedProject.stepsUnlocked >= 2) setView("ic-completion");
             else if (selectedProject.stepsUnlocked >= 1) setView("ic");
             else setView("processing");
@@ -119,7 +120,7 @@ export default function AppRouter({
           onStepClick={(step) => {
             if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
-            else if (step === 3) window.open("https://ddmal.ca/Neon/");
+            else if (step === 3) setView("neon-editor");
           }}
           onSendToCantus={() => setView("sending")}
           onRenameProject={(newName) => renameProject(selectedProject.id, newName)}
@@ -242,13 +243,26 @@ export default function AppRouter({
         <CompletionPage
           description="encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."
           continueLabel="correction"
-          continueHref="https://ddmal.ca/Neon/"
-          logsFileName="encodinglogs.txt"
+          onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
         />
       );
+    case "neon-editor":
+      return selectedProject && selectedProject.meiFiles.length > 0 ? (
+        <NeonBatchEditor
+          project={selectedProject}
+          meiFiles={selectedProject.meiFiles}
+          onFinish={() => {
+            if (selectedProjectId && selectedProject) {
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 4));
+            }
+            setView("project");
+          }}
+          onBack={() => setView("encoding-completion")}
+          />
+      ) : null;
     case "sending":
       return (
         <ProcessingPage

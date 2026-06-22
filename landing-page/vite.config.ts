@@ -6,9 +6,9 @@ export default defineConfig({
     plugins: [react(), tailwindcss()],
     server: {
         proxy: {
-            '/api': {
-                target: 'http://localhost:8001',
-            },
+            '/api': 'http://localhost:8001',
+            '/neon': 'http://localhost:8001',
+            '/Neon-gh': 'http://localhost:8001',
         },
     },
 });

@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write src/",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:neon": "cd neon && npx yarn install --frozen-lockfile --silent && export NODE_OPTIONS=--openssl-legacy-provider && npm run build && mkdir -p ../public/neon && cp -r deployment/server/Neon-gh ../public/neon/ && cp deployment/server/editor.html ../public/neon/editor.html",
+    "build": "npm run build:neon && tsc -b && vite build"
   },
   "dependencies": {
     "pdfjs-dist": "^6.0.227",
