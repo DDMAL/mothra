@@ -12,6 +12,7 @@ staff-finding/grouping_tests
 staff-finding/scripts/__pycache__/
 staff-finding/models/
 staff-finding/e2e_tests
+.claude/
 
 # Downloaded pretrained weights
 yolov8*.pt
