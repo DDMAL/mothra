@@ -5,7 +5,7 @@ import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { downloadBlob } from "../../utils/download";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
-import QuickLookModal from "../shared/QuickLookModal";
+import MeiViewerModal from "./MeiViewerModal";
 import Modal from "../shared/Modal";
 
 interface MeiTabProps {
@@ -19,7 +19,7 @@ export default function MeiTab({
   section,
   onUpdateProject,
 }: MeiTabProps) {
-  const [meiLookId, setMeiLookId] = useState<string | null>(null);
+  const [meiViewFile, setMeiViewFile] = useState<MeiFile | null>(null);
   const [meiSubTab, setMeiSubTab] = useState<"mei produced" | "mei corrected">(
     "mei produced",
   );
@@ -147,7 +147,7 @@ export default function MeiTab({
                 {
                   label: "View",
                   onClick: () => {
-                    setMeiLookId(section.menu!.id);
+                    setMeiViewFile(file ?? null);
                     section.setMenu(null);
                   },
                 },
@@ -204,26 +204,13 @@ export default function MeiTab({
           );
         })()}
 
-      {meiLookId &&
-        (() => {
-          const file = project.meiFiles.find((f) => f.id === meiLookId)!;
-          return (
-            <QuickLookModal onClose={() => setMeiLookId(null)}>
-              <p className="text-white font-mono text-sm">{file.name}</p>
-              <pre className="text-white/80 text-xs font-mono overflow-auto max-h-[60vh] whitespace-pre-wrap bg-black/20 rounded-xl p-4">
-                {file.xmlContent ?? "(no content)"}
-              </pre>
-              <div className="flex justify-center">
-                <button
-                  onClick={() => handleExportMei(file)}
-                  className="px-5 py-2 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
-                >
-                  export file
-                </button>
-              </div>
-            </QuickLookModal>
-          );
-        })()}
+      {meiViewFile && (
+        <MeiViewerModal
+          file={meiViewFile}
+          project={project}
+          onClose={() => setMeiViewFile(null)}
+        />
+      )}
       {validateModal && (
         <Modal onClose={() => setValidateModal(null)}>
           <h2 className="text-xl text-[#1D3335] text-center">

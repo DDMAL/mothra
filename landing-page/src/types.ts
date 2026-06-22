@@ -36,6 +36,7 @@ export interface MeiFile {
   name: string;
   xmlContent?: string;
   corrected?: boolean;
+  imageName?: string;
 }
 
 export type View =

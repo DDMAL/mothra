@@ -282,8 +282,8 @@ def _project_row_to_dict(cur, row, username):
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
     cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
-    cur.execute("SELECT id, name, xml_content, corrected FROM mei_files WHERE project_id=%s", (pid,))
-    mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3])}
+    cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
+    mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4]}
            for r in cur.fetchall()]
     return {
         "id": pid, "name": name, "user": username,
