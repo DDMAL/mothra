@@ -17,7 +17,7 @@ import base64
 import json
 import re
 import uuid
-from PIL import Image as _PIL_IMAGE
+from PIL import Image as _PIL_Image
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
