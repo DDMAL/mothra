@@ -17,6 +17,7 @@ import base64
 import json
 import re
 import uuid
+from PIL import Image as _PIL_IMAGE
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -736,6 +737,21 @@ def main():
 
     print(f"Parsing stave detections: {args.mothra_json}")
     staves, image_w, image_h = parse_staves(args.mothra_json)
+    
+    # Auto-detect scale: if --image is a different resolution than that of Mothra JSON, all coordinates need scaling
+    auto_scale = 1.0
+    try:
+        with _PIL_Image.open(args.image) as _img:
+            actual_w, _ = _img.size
+        if image_w and image_w != actual_w:
+            auto_scale = actual_w / image_w
+    except Exception as e:
+        print(f"[warn] could not read image dimensions for auto-scale: {e}", file=sys.stderr)
+    
+    scale = args.scale if args.scale is not None else auto_scale
+    if scale != 1.0:
+        source = "--scale override" if args.scale is not None else "auto-detected"
+        print (f"Scaling facsimile coordinates by {scale:.4g} times ({source})")
     print(f"{len(staves)} staves found")
 
     glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
@@ -743,9 +759,8 @@ def main():
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
     mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, syllable_gap_mult=args.syllable_gap_mult,)
-    if args.scale != 1.0:
-        print(f"Scaling facsimile coordinates by {args.scale} times")
-        mei_bytes = scale_facsimile(mei_bytes, args.scale)
+    if scale != 1.0:
+        mei_bytes = scale_facsimile(mei_bytes, scale)
     for w in validate_mei(mei_bytes):
         print(f"[warn] {w}", file=sys.stderr)
 
