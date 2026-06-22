@@ -398,7 +398,7 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab annotations={project.annotations} />
+              <AnnotationsTab annotations={project.annotations} projectId={project.id}/>
             )}
             {activeTab === "mei files" && (
               <MeiTab

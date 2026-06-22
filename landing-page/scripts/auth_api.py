@@ -735,6 +735,28 @@ async def add_model(
     con.close()
     return {"id": model_id, "name": file.filename}
 
+@router.get("/projects/{project_id}/annotations/{annotation_id}")
+async def get_annotation_txt(
+    project_id: int,
+    annotation_id: str,
+    user=Depends(get_current_user),
+):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT a.yolo_txt, a.image_name"
+        " FROM annotations a"
+        " JOIN projects p ON p.id = a.project_id"
+        " WHERE a.id = %s AND a.project_id = %s AND p.user_id = %s",
+        (annotation_id, project_id, user["id"]),
+    )
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row:
+        raise HTTPException(status_code=404)
+    return {"yoloTxt": row[0], "imageName": row[1]}
+
+
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
