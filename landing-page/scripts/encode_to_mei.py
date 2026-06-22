@@ -36,6 +36,7 @@ MEI_NS = "http://www.music-encoding.org/ns/mei"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 STAVE_BUFFER_PX = 20
 SYLLABLE_GAP_MULTIPLIER = 1.5
+_SKIP_CLASS_FRAGMENTS = frozenset({"custos", "divline", "division"})
 
 @dataclass
 class Glyph:
@@ -146,10 +147,10 @@ def assign_glyphs_to_staves(
         result[idx].sort(key=lambda g: g.ulx)
     return result
 
-def cluster_into_syllables(glyphs: list[Glyph]) -> list[list[Glyph]]:
+def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_MULTIPLIER, ) -> list[list[Glyph]]:
     if not glyphs:
         return []
-    threshold = SYLLABLE_GAP_MULTIPLIER * median(g.ncols for g in glyphs)
+    threshold = gap_mult * median(g.ncols for g in glyphs)
     clusters: list[list[Glyph]] = [[glyphs[0]]]
     for glyph in glyphs[1:]:
         if glyph.ulx - clusters[-1][-1].lrx > threshold:
@@ -376,6 +377,7 @@ def build_mei(
     image_w: int,
     image_h: int,
     manuscript_name: str,
+    syllable_gap_mult: float = SYLLABLE_GAP_MULTIPLIER,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
@@ -498,9 +500,18 @@ def build_mei(
         if stave_idx in clef_zone_ids:
             clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
         ET.SubElement(layer, _tag("clef"), clef_attrs)
-        neume_glyphs = [g for g in staff_glyphs
-                        if g.nrows > 0 and g.ncols / g.nrows < 8]
-        for cluster in cluster_into_syllables(neume_glyphs):
+        
+        skip_ids = {
+            g.id for g in staff_glyphs
+            if (g.nrows > 0 and g.ncols / g.nrows >= 8)
+            or any(frag in g.class_name.lower() for frag in _SKIP_CLASS_FRAGMENTS)
+        }
+        if skip_ids:
+            skipped = [g for g in staff_glyphs if g.id in skip_ids]
+            skip_types = ", ".join(sorted({g.class_name for g in skipped}))
+            print(f" [stave {stave_idx}] skipping {len(skip_ids)} glyph(s): {skip_types}")
+        neume_glyphs = [g for g in staff_glyphs if g.id not in skip_ids]
+        for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult):
             syllable_id = cluster[0].id
             syllable = ET.SubElement(layer, _tag("syllable"), {
                 XML_ID: f"syllable-{syllable_id}",
@@ -531,15 +542,42 @@ def build_mei(
                         nc_attrs["quilisma"] = "true"
                     ET.SubElement(neume, _tag("nc"), nc_attrs)
     
+    _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    _XML_MODEL_PI = (
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
+        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
+    )
     ET.indent(mei, space=" ")
+    xml_str = _XML_DECLARATION + _XML_MODEL_PI + ET.tostring(mei, encoding="unicode")
+    return xml_str.encode("utf-8")
+
+def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
+    """Scale every facsimile zone coordinate by factor (port of Rodan mei_resize.py)."""
+    if factor == 1.0:
+        return mei_bytes    
+    root = ET.fromstring(mei_bytes)
+    for el in root.iter():
+        for attr in ("ulx", "uly", "lrx", "lry"):
+            val = el.get(attr)
+            if val is not None:
+                try:
+                    el.set(attr, str(round(int(val) * factor)))
+                except (ValueError, TypeError):
+                    pass
+    ET.register_namespace("", MEI_NS)
+    ET.indent(root, space=" ")
+    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
     xml_model_pi = (
         '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
         ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
         '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
         ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
     )
-    xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_model_pi + ET.tostring(mei, encoding="unicode")
+    xml_str = xml_declaration + xml_model_pi + ET.tostring(root, encoding="unicode")
     return xml_str.encode("utf-8")
+
 
 REQUIRED_MEI_VERSION = "5.0.0-dev"
 
@@ -680,6 +718,10 @@ def main():
     parser.add_argument("--image", required=True, type=Path, metavar="PATH")
     parser.add_argument("--output-dir", type=Path, default=Path("encoding-outputs"))
     parser.add_argument("--manuscript", type=str, default=None)
+    parser.add_argument("--scale", type=float, default=1.0, metavar="FACTOR",
+                        help="multiply all facsimile zone coordinates by this factor ")
+    parser.add_argument("--syllable-gap-mult", type=float, default=SYLLABLE_GAP_MULTIPLIER,
+                        metavar="FLOAT", help="gap-to-median-glyph-width ratio for syllable clustering (default: 1.5)",)
     args = parser.parse_args()
 
     stem = args.image.stem
@@ -700,7 +742,10 @@ def main():
     assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
-    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name)
+    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, syllable_gap_mult=args.syllable_gap_mult,)
+    if args.scale != 1.0:
+        print(f"Scaling facsimile coordinates by {args.scale} times")
+        mei_bytes = scale_facsimile(mei_bytes, args.scale)
     for w in validate_mei(mei_bytes):
         print(f"[warn] {w}", file=sys.stderr)
 
