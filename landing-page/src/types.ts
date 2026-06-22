@@ -29,6 +29,7 @@ export interface AnnotationSet {
   imageSrc?: string;
   jsonName: string;
   txtName: string;
+  detectionCount?: number;
 }
 
 export interface MeiFile {

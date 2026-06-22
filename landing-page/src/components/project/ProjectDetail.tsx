@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Project } from "../../types";
+import type { Project, AnnotationSet } from "../../types";
 import { authHeaders } from "../../hooks/useAuth";
 import { useAssetSection } from "../../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
@@ -30,9 +30,10 @@ interface ProjectDetailProps {
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
-  onUploadModel: (name: string) => Promise<{ id: string; name: string }>;
+  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteProject: () => void;
+  onRunDetection: (modelId: string, imageIds: string[]) => Promise<AnnotationSet[]>;
 }
 
 export default function ProjectDetail({
@@ -50,6 +51,7 @@ export default function ProjectDetail({
   onUploadModel,
   onDeleteImage,
   onDeleteProject,
+  onRunDetection,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files"
@@ -133,6 +135,7 @@ export default function ProjectDetail({
     project,
     onDeleteImage,
     onUpdateProject,
+    onRunDetection,
   ]);
 
   const selectionButtons = (
@@ -398,7 +401,14 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab annotations={project.annotations} />
+              <AnnotationsTab 
+                annotations={project.annotations}
+                project={project}
+                onRunDetection={async (modelId, imageIds) => {
+                  const results = await onRunDetection(modelId, imageIds);
+                  onUpdateProject({ ...project, annotations: results });
+                }} 
+              />
             )}
             {activeTab === "mei files" && (
               <MeiTab

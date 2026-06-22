@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from inference_api import router as inference_router
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -21,6 +22,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api")
 app.include_router(encode_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
+app.include_router(inference_router, prefix="/api")
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():

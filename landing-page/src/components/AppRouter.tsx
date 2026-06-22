@@ -178,18 +178,25 @@ export default function AppRouter({
             }
             return r.json();
           }}
-          onUploadModel={async (name) => {
+          onUploadModel={async (file: File) => {
+            const form = new FormData();
+            form.append("file", file);
             const r = await fetch(
               `/api/projects/${selectedProject.id}/models`,
               {
                 method: "POST",
-                headers: {
-                  ...authHeaders(),
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ name }),
-              },
-            );
+                headers: authHeaders(),
+                body: form,
+              });
+            return r.json();
+          }}
+          onRunDetection={async (modelId, imageIds) => {
+            const r = await fetch(`/api/projects/${selectedProject.id}/predict`, {
+              method: "POST",
+              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              body: JSON.stringify({ model_id: modelId, image_ids: imageIds }),
+            });
+            if (!r.ok) throw new Error("inference failed");
             return r.json();
           }}
           onDeleteImage={async (imageId) => {

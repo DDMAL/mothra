@@ -12,11 +12,13 @@ import io, zipfile
 
 router = APIRouter()
 
-
 SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
+
+MODELS_DIR = Path(__file__).parent / "stored_models"
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR = Path(__file__).parent.parent / "public" / "neon" / "samples" / "manifests"
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +95,17 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
         )    
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS annotations (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id),
+            image_id TEXT,
+            image_name TEXT NOT NULL,
+            yolo_txt TEXT NOT NULL,
+            model_id TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
     con.commit()
     cur.close()
     con.close()
@@ -160,6 +173,17 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_models ADD COLUMN file_path TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
@@ -285,13 +309,26 @@ def _project_row_to_dict(cur, row, username):
     cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
     mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4]}
            for r in cur.fetchall()]
+    cur.execute(
+        "SELECT id, image_id, image_name FROM annotations WHERE project_id=%s", (pid,)
+    )
+    annotations = [
+        {
+            "id": r[0],
+            "imageName": r[2],
+            "imageSrc": f"/api/images/{r[1]}" if r[1] else None,
+            "txtName": f"annotation-{r[0]}.txt",
+            "jsonName": "",
+        }
+        for r in cur.fetchall()
+    ]
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
         "usedImageNames": json.loads(used_json),
         "usedModelNames": json.loads(used_model_json or "[]"),
         "images": images, "models": models, "meiFiles": mei,
-        "annotations": [], "deletedAt": deleted_at,
+        "annotations": annotations, "deletedAt": deleted_at,
         "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
         "isPinned": bool(is_pinned),
     }
@@ -668,11 +705,12 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
 
 # models
 
-class AddModelBody(BaseModel):
-    name: str
-
 @router.post("/projects/{project_id}/models")
-def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user)):
+async def add_model(
+    project_id: int, 
+    file: UploadFile = FAPIFile(...), 
+    user=Depends(get_current_user)
+):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
@@ -682,15 +720,20 @@ def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user
         con.close()
         raise HTTPException(status_code=404)
     model_id = _uuid.uuid4().hex
+    dest_dir = MODELS_DIR / str(project_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    file_path = dest_dir / f"{model_id}.pt"
+    model_bytes = await file.read()
+    file_path.write_bytes(model_bytes)
     cur.execute(
-        "INSERT INTO project_models (id, project_id, name) VALUES (%s,%s,%s)",
-        (model_id, project_id, body.name)
+        "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s,%s,%s, %s)",
+        (model_id, project_id, file.filename, str(file_path))
     )
-    _log_activity(cur, project_id, "model_added", body.name)
+    _log_activity(cur, project_id, "model_added", file.filename)
     con.commit()
     cur.close()
     con.close()
-    return {"id": model_id, "name": body.name}
+    return {"id": model_id, "name": file.filename}
 
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):
