@@ -64,7 +64,9 @@ export default function ProjectDetail({
   const mdlSection = useAssetSection(project.models);
   const meiSection = useAssetSection(project.meiFiles);
 
-  const switchTab = (tab: "images" | "models" | "annotations" | "mei files") => {
+  const switchTab = (
+    tab: "images" | "models" | "annotations" | "mei files",
+  ) => {
     setActiveTab(tab);
     imgSection.clearSelection();
     mdlSection.clearSelection();
@@ -101,7 +103,7 @@ export default function ProjectDetail({
         if (activeTab === "images" && imgSection.selectedIds.size > 0) {
           const ids = [...imgSection.selectedIds];
           imgSection.clearSelection();
-          Promise.all(ids.map(id => onDeleteImage(id))).then (() => {
+          Promise.all(ids.map((id) => onDeleteImage(id))).then(() => {
             onUpdateProject({
               ...project,
               images: project.images.filter(
@@ -133,13 +135,26 @@ export default function ProjectDetail({
     onUpdateProject,
   ]);
 
-  const selectionButtons = (noun: "image" | "model", count: number, onUse: () => void, onDelete: () => void) => (
+  const selectionButtons = (
+    noun: "image" | "model",
+    count: number,
+    onUse: () => void,
+    onDelete: () => void,
+  ) => (
     <>
-      <button onClick={onUse} className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
-        use {count} {noun}{count > 1 ? "s" : ""}
+      <button
+        onClick={onUse}
+        className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+      >
+        use {count} {noun}
+        {count > 1 ? "s" : ""}
       </button>
-      <button onClick={onDelete} className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20">
-        delete {count} {noun}{count > 1 ? "s" : ""}
+      <button
+        onClick={onDelete}
+        className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+      >
+        delete {count} {noun}
+        {count > 1 ? "s" : ""}
       </button>
     </>
   );
@@ -178,7 +193,9 @@ export default function ProjectDetail({
             })}
             <button
               onClick={async () => {
-                const res = await fetch(`/api/projects/${project.id}/export`, { headers: authHeaders() });
+                const res = await fetch(`/api/projects/${project.id}/export`, {
+                  headers: authHeaders(),
+                });
                 downloadBlob(await res.blob(), `${project.name}.zip`);
               }}
               className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
@@ -190,7 +207,10 @@ export default function ProjectDetail({
           <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">
             <button
               onClick={async () => {
-                const res = await fetch(`/api/projects/${project.id}/logs/download`, { headers: authHeaders() });
+                const res = await fetch(
+                  `/api/projects/${project.id}/logs/download`,
+                  { headers: authHeaders() },
+                );
                 downloadBlob(await res.blob(), `${project.name}_logs.zip`);
               }}
               className="w-full text-xs text-white/60 hover:text-white text-left cursor-pointer transition-colors"
@@ -221,7 +241,10 @@ export default function ProjectDetail({
               </button>
               {projectMenu && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setProjectMenu(false)} />
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setProjectMenu(false)}
+                  />
                   <div className="absolute z-50 top-full left-0 mt-1 bg-white rounded-2xl shadow-lg p-3 flex flex-col gap-1 min-w-[160px]">
                     <button
                       onClick={() => {
@@ -263,35 +286,67 @@ export default function ProjectDetail({
               </button>
             ) : null}
 
-            {activeTab === "images" && imgSection.selectedIds.size > 0 && selectionButtons(
-              "image", imgSection.selectedIds.size,
-              () => {
-                const names = project.images.filter(img => imgSection.selectedIds.has(img.id)).map(img => img.name);
-                onUsedNamesChange({ ...usedNames, images: [...usedNames.images, ...names.filter(n => !usedNames.images.includes(n))] });
-                imgSection.clearSelection();
-                setValidationError(null);
-              },
-              async () => {
-                const ids = [...imgSection.selectedIds];
-                await Promise.all(ids.map(id => onDeleteImage(id)));
-                onUpdateProject({ ...project, images: project.images.filter(img => !imgSection.selectedIds.has(img.id)) });
-                imgSection.clearSelection();
-              },
-            )}
+            {activeTab === "images" &&
+              imgSection.selectedIds.size > 0 &&
+              selectionButtons(
+                "image",
+                imgSection.selectedIds.size,
+                () => {
+                  const names = project.images
+                    .filter((img) => imgSection.selectedIds.has(img.id))
+                    .map((img) => img.name);
+                  onUsedNamesChange({
+                    ...usedNames,
+                    images: [
+                      ...usedNames.images,
+                      ...names.filter((n) => !usedNames.images.includes(n)),
+                    ],
+                  });
+                  imgSection.clearSelection();
+                  setValidationError(null);
+                },
+                async () => {
+                  const ids = [...imgSection.selectedIds];
+                  await Promise.all(ids.map((id) => onDeleteImage(id)));
+                  onUpdateProject({
+                    ...project,
+                    images: project.images.filter(
+                      (img) => !imgSection.selectedIds.has(img.id),
+                    ),
+                  });
+                  imgSection.clearSelection();
+                },
+              )}
 
-            {activeTab === "models" && mdlSection.selectedIds.size > 0 && selectionButtons(
-              "model", mdlSection.selectedIds.size,
-              () => {
-                const names = project.models.filter(m => mdlSection.selectedIds.has(m.id)).map(m => m.name);
-                onUsedNamesChange({ ...usedNames, models: [...usedNames.models, ...names.filter(n => !usedNames.models.includes(n))] });
-                mdlSection.clearSelection();
-                setValidationError(null);
-              },
-              () => {
-                onUpdateProject({ ...project, models: project.models.filter(m => !mdlSection.selectedIds.has(m.id)) });
-                mdlSection.clearSelection();
-              },
-            )}
+            {activeTab === "models" &&
+              mdlSection.selectedIds.size > 0 &&
+              selectionButtons(
+                "model",
+                mdlSection.selectedIds.size,
+                () => {
+                  const names = project.models
+                    .filter((m) => mdlSection.selectedIds.has(m.id))
+                    .map((m) => m.name);
+                  onUsedNamesChange({
+                    ...usedNames,
+                    models: [
+                      ...usedNames.models,
+                      ...names.filter((n) => !usedNames.models.includes(n)),
+                    ],
+                  });
+                  mdlSection.clearSelection();
+                  setValidationError(null);
+                },
+                () => {
+                  onUpdateProject({
+                    ...project,
+                    models: project.models.filter(
+                      (m) => !mdlSection.selectedIds.has(m.id),
+                    ),
+                  });
+                  mdlSection.clearSelection();
+                },
+              )}
           </div>
 
           {/* tab bar + content */}
@@ -300,7 +355,11 @@ export default function ProjectDetail({
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() => switchTab(tab as "images" | "models" | "annotations" | "mei files")}
+                  onClick={() =>
+                    switchTab(
+                      tab as "images" | "models" | "annotations" | "mei files",
+                    )
+                  }
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
                       activeTab === tab
@@ -392,7 +451,12 @@ export default function ProjectDetail({
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() => onUsedNamesChange({ ...usedNames, models: usedNames.models.filter((n) => n !== name) })}
+                  onClick={() =>
+                    onUsedNamesChange({
+                      ...usedNames,
+                      models: usedNames.models.filter((n) => n !== name),
+                    })
+                  }
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×
@@ -404,7 +468,12 @@ export default function ProjectDetail({
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
                 <button
-                  onClick={() => onUsedNamesChange({ ...usedNames, images: usedNames.images.filter((n) => n !== name) })}
+                  onClick={() =>
+                    onUsedNamesChange({
+                      ...usedNames,
+                      images: usedNames.images.filter((n) => n !== name),
+                    })
+                  }
                   className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
                 >
                   ×

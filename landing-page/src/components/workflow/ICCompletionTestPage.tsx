@@ -2,34 +2,34 @@ import { useRef, useState } from "react";
 import { downloadBlob } from "../../utils/download";
 
 interface IcCompletionTestPageProps {
-    onContinue: () => void;
-    onBackToProject: () => void;
-    logsFileName?: string;
-    xmlFile: File | null;
-    onXmlFileChange: (f: File | null) => void;
-    imageFile: File | null;
-    onImageFileChange: (f: File | null) => void;
+  onContinue: () => void;
+  onBackToProject: () => void;
+  logsFileName?: string;
+  xmlFile: File | null;
+  onXmlFileChange: (f: File | null) => void;
+  imageFile: File | null;
+  onImageFileChange: (f: File | null) => void;
 }
 
 export default function IcCompletionTestPage({
-    onContinue,
-    onBackToProject,
-    logsFileName,
-    xmlFile,
-    onXmlFileChange,
-    imageFile,
-    onImageFileChange,
+  onContinue,
+  onBackToProject,
+  logsFileName,
+  xmlFile,
+  onXmlFileChange,
+  imageFile,
+  onImageFileChange,
 }: IcCompletionTestPageProps) {
-    const inputRef = useRef<HTMLInputElement>(null);
-    const imageInputRef = useRef<HTMLInputElement>(null);
-    const [dragging, setDragging] = useState(false);
-    const [imageDragging, setImageDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [imageDragging, setImageDragging] = useState(false);
 
-    const handleDownloadLogs = () => {
-        downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
-    };
+  const handleDownloadLogs = () => {
+    downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
+  };
 
-    return (
+  return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48 relative">
       <div className="flex flex-col items-center gap-6">
         <h1 className="text-5xl font-bold italic text-white">ta-da!</h1>
@@ -41,7 +41,10 @@ export default function IcCompletionTestPage({
         {/* xml upload drop zone */}
         <div
           onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => {
             e.preventDefault();
@@ -57,7 +60,10 @@ export default function IcCompletionTestPage({
           </span>
           {xmlFile && (
             <button
-              onClick={(e) => { e.stopPropagation(); onXmlFileChange(null); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onXmlFileChange(null);
+              }}
               className="text-white/40 text-xs hover:text-white/70 cursor-pointer"
             >
               × clear
@@ -75,7 +81,10 @@ export default function IcCompletionTestPage({
         {/* image upload drop zone (used to set correct surface bounds in MEI) */}
         <div
           onClick={() => imageInputRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setImageDragging(true); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setImageDragging(true);
+          }}
           onDragLeave={() => setImageDragging(false)}
           onDrop={(e) => {
             e.preventDefault();
@@ -87,11 +96,16 @@ export default function IcCompletionTestPage({
             ${imageDragging ? "border-white bg-white/10" : "border-white/40 hover:border-white/70"}`}
         >
           <span className="text-white/80 text-sm font-mono">
-            {imageFile ? imageFile.name : "drop source image here (required for correct bounds)"}
+            {imageFile
+              ? imageFile.name
+              : "drop source image here (required for correct bounds)"}
           </span>
           {imageFile && (
             <button
-              onClick={(e) => { e.stopPropagation(); onImageFileChange(null); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onImageFileChange(null);
+              }}
               className="text-white/40 text-xs hover:text-white/70 cursor-pointer"
             >
               × clear
@@ -144,5 +158,4 @@ export default function IcCompletionTestPage({
       )}
     </div>
   );
-        
 }

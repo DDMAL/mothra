@@ -19,10 +19,16 @@ export default function InteractiveClassifier({
     next.add(images[currentIdx].id);
     setProcessedIds(next);
     for (let i = currentIdx + 1; i < images.length; i++) {
-      if (!next.has(images[i].id)) { setCurrentIdx(i); return; }
+      if (!next.has(images[i].id)) {
+        setCurrentIdx(i);
+        return;
+      }
     }
     for (let i = 0; i < currentIdx; i++) {
-      if (!next.has(images[i].id)) { setCurrentIdx(i); return; }
+      if (!next.has(images[i].id)) {
+        setCurrentIdx(i);
+        return;
+      }
     }
   };
 
@@ -122,7 +128,9 @@ export default function InteractiveClassifier({
               disabled={processedIds.has(images[currentIdx].id)}
               className="px-4 py-2 border-2 border-white text-white text-sm rounded-xl hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap flex-shrink-0"
             >
-              {processedIds.has(images[currentIdx].id) ? "processed [√]" : "mark image as processed"}
+              {processedIds.has(images[currentIdx].id)
+                ? "processed [√]"
+                : "mark image as processed"}
             </button>
             <div className="flex-1 flex items-center justify-center gap-3">
               <button
@@ -154,7 +162,9 @@ export default function InteractiveClassifier({
                     )}
                     {processed && (
                       <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                        <span className="text-white text-lg font-bold">[√]</span>
+                        <span className="text-white text-lg font-bold">
+                          [√]
+                        </span>
                       </div>
                     )}
                   </button>

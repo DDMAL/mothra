@@ -1,19 +1,23 @@
 export interface CurrentUser {
-    id: number;
-    username: string;
-    email: string;
-    firstName: string;
-    createdAt: string;
+  id: number;
+  username: string;
+  email: string;
+  firstName: string;
+  createdAt: string;
 }
 
 const TOKEN_KEY = "mothra_token";
 
-export function getToken() { return localStorage.getItem(TOKEN_KEY); }
-export function setToken(t: string) {
-    localStorage.setItem(TOKEN_KEY, t);
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
 }
-export function clearToken(): void { localStorage.removeItem(TOKEN_KEY); }
+export function setToken(t: string) {
+  localStorage.setItem(TOKEN_KEY, t);
+}
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
 export function authHeaders(): Record<string, string> {
-    const t = getToken();
-    return t ? { Authorization: `Bearer ${t}` } : {};
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
 }

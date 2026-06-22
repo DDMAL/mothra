@@ -6,23 +6,34 @@ interface RegisterFormProps {
   onSuccess: (user: CurrentUser, token: string) => void;
 }
 
+export default function RegisterForm({
+  onSwitchToLogin,
+  onSuccess,
+}: RegisterFormProps) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
 
-export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFormProps) {
-    const [firstName, setFirstName] = useState("");
-    const [lastName, setLastName] = useState("");
-    const [username, setUsername] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [error, setError] = useState("");
-
-    const handleSubmit = async() => {
-      setError("");
-    if (password !== confirmPassword)  { setError("passwords do not match"); return; }
+  const handleSubmit = async () => {
+    setError("");
+    if (password !== confirmPassword) {
+      setError("passwords do not match");
+      return;
+    }
     const r = await fetch("/api/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, first_name: firstName, last_name: lastName, password, }),
+      body: JSON.stringify({
+        username,
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        password,
+      }),
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));

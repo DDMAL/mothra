@@ -6,7 +6,10 @@ interface LoginFormProps {
   onSuccess: (user: CurrentUser, token: string) => void;
 }
 
-export default function LoginForm({ onSwitchToRegister, onSuccess }: LoginFormProps) {
+export default function LoginForm({
+  onSwitchToRegister,
+  onSuccess,
+}: LoginFormProps) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,7 +21,10 @@ export default function LoginForm({ onSwitchToRegister, onSuccess }: LoginFormPr
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: identifier, password }),
     });
-    if (!r.ok) { setError("invalid username or password"); return; }
+    if (!r.ok) {
+      setError("invalid username or password");
+      return;
+    }
     const { token, user } = await r.json();
     onSuccess(user, token);
   };

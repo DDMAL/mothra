@@ -1,6 +1,15 @@
 import React from "react";
 
-export default function FileDropZone({ dragging, onDragOver, onDragEnter, onDragLeave, onDrop, onClick, label, children }: {
+export default function FileDropZone({
+  dragging,
+  onDragOver,
+  onDragEnter,
+  onDragLeave,
+  onDrop,
+  onClick,
+  label,
+  children,
+}: {
   dragging: boolean;
   onDragOver: React.DragEventHandler;
   onDragEnter: React.DragEventHandler;

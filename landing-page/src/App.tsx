@@ -14,16 +14,21 @@ export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
+    null,
+  );
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const selectedProject =
+    projects.find((p) => p.id === selectedProjectId) ?? null;
 
   const mutations = useProjectMutations(setProjects);
 
   const {
     encodingLogs,
-    pendingXmlFile, setPendingXmlFile,
-    pendingImageFile, setPendingImageFile,
+    pendingXmlFile,
+    setPendingXmlFile,
+    pendingImageFile,
+    setPendingImageFile,
     meiContent,
     handleDownloadManifest,
     handleDownloadMei,
@@ -35,8 +40,8 @@ export default function App() {
     setToken(token);
     setCurrentUser(user);
     fetch("/api/projects", { headers: authHeaders() })
-      .then(r => r.json())
-      .then(data => setProjects(normalizeProjects(data)));
+      .then((r) => r.json())
+      .then((data) => setProjects(normalizeProjects(data)));
     setView("projects");
   };
 
@@ -55,10 +60,12 @@ export default function App() {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((user) => {
         setCurrentUser(user);
-        return fetch("/api/projects", { headers: { Authorization: `Bearer ${token}` } });
+        return fetch("/api/projects", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
       })
       .then((r) => r.json())
-      .then(data => setProjects(normalizeProjects(data)))
+      .then((data) => setProjects(normalizeProjects(data)))
       .catch(() => clearToken());
   }, []);
 

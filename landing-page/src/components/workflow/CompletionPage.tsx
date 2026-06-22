@@ -68,15 +68,17 @@ export default function CompletionPage({
       {onDownloadMei && (
         <button
           onClick={onDownloadMei}
-          className="absolute bottom-8 right-8 text-white/60 text-sm hover:text-white cursor-pointer">
-            &gt; download mei file
+          className="absolute bottom-8 right-8 text-white/60 text-sm hover:text-white cursor-pointer"
+        >
+          &gt; download mei file
         </button>
       )}
       {onDownloadManifest && (
         <button
           onClick={onDownloadManifest}
-          className="absolute bottom-16 right-8 text-white/60 text-sm hover:text-white cursor-pointer">
-            &gt; download neon manifest
+          className="absolute bottom-16 right-8 text-white/60 text-sm hover:text-white cursor-pointer"
+        >
+          &gt; download neon manifest
         </button>
       )}
     </div>
