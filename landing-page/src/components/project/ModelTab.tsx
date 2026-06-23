@@ -10,9 +10,9 @@ import FileDropZone from "../shared/FileDropZone";
 interface ModelTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectModel>>;
-  usedNames: { images: string[]; models: string[] };
+  usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
-  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   setValidationError: (e: string | null) => void;
 }

@@ -191,6 +191,17 @@ def _migrate_db():
         cur.close()
         con.close()
 
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE projects ADD COLUMN used_annotation_names TEXT DEFAULT '[]'")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
@@ -301,7 +312,7 @@ def me(user=Depends(get_current_user)):
     return user
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json = row
     cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
     cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
@@ -331,6 +342,7 @@ def _project_row_to_dict(cur, row, username):
         "annotations": annotations, "deletedAt": deleted_at,
         "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
         "isPinned": bool(is_pinned),
+        "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
     }
 
 def _log_activity(cur, project_id: int, action_type: str, detail: str = ""):
@@ -345,7 +357,7 @@ def list_projects(user=Depends(get_current_user)):
     cur = con.cursor()
     cur.execute(
         "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, " \
-        " last_opened_at, is_pinned"
+        " last_opened_at, is_pinned, used_annotation_names"
         " FROM projects WHERE user_id=%s",
         (user["id"],)
     )
@@ -388,7 +400,8 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     con.close()
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
-            "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], "deletedAt": None}
+            "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], 
+            "deletedAt": None, "usedAnnotationNames": []}
 
 class UpdateProjectBody(BaseModel):
     name: Optional[str] = None
@@ -398,6 +411,7 @@ class UpdateProjectBody(BaseModel):
     deletedAt: Optional[str] = None
     lastOpenedAt: Optional[str] = None
     isPinned: Optional[bool] = None
+    usedAnnotationNames: Optional[list] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -428,6 +442,9 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
                     (body.lastOpenedAt, project_id))
     if body.isPinned is not None:
         cur.execute("UPDATE projects SET is_pinned=%s WHERE id=%s", (body.isPinned, project_id))
+    if body.usedAnnotationNames is not None:
+        cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
+                    (json.dumps(body.usedAnnotationNames), project_id))
     con.commit()
     cur.close()
     con.close()

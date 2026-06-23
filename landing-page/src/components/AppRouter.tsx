@@ -73,6 +73,7 @@ export default function AppRouter({
     updateProjectSteps,
     updateUsedImageNames,
     updateUsedModelNames,
+    updateUsedAnnotationNames,
     togglePin,
   } = mutations;
 
@@ -153,10 +154,12 @@ export default function AppRouter({
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],
+            annotations: selectedProject.usedAnnotationNames ?? [],
           }}
           onUsedNamesChange={(names) => {
             updateUsedImageNames(selectedProject.id, names.images);
             updateUsedModelNames(selectedProject.id, names.models);
+            updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
           onUploadImage={async (file) => {

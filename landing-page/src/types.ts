@@ -14,6 +14,7 @@ export interface Project {
   stepsUnlocked: number;
   usedImageNames: string[];
   usedModelNames: string[];
+  usedAnnotationNames: string[];
   deletedAt?: number;
   lastOpenedAt?: string;
   isPinned?: boolean;

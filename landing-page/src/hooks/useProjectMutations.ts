@@ -89,6 +89,17 @@ export function useProjectMutations(setProjects: SetProjects) {
     );
   };
 
+  const updateUsedAnnotationNames = async (id: number, names: string[]) => {
+    await fetch(`/api/projects/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ usedAnnotationNames: names }),
+    });
+    setProjects((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, usedAnnotationNames: names } : p)),
+    );
+  };
+
   const togglePin = (id: number) => {
     setProjects((prev) => {
       const project = prev.find((p) => p.id === id);
@@ -112,6 +123,7 @@ export function useProjectMutations(setProjects: SetProjects) {
     updateProjectSteps,
     updateUsedImageNames,
     updateUsedModelNames,
+    updateUsedAnnotationNames,
     togglePin,
   };
 }

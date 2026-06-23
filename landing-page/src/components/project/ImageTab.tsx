@@ -19,9 +19,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 interface ImageTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectImage>>;
-  usedNames: { images: string[]; models: string[] };
+  usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
-  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;

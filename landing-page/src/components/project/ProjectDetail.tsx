@@ -23,8 +23,8 @@ interface ProjectDetailProps {
   onBack: () => void;
   onContinue: () => void;
   onUpdateProject: (updated: Project) => void;
-  usedNames: { images: string[]; models: string[] };
-  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  usedNames: { images: string[]; models: string[]; annotations: string[] };
+  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
@@ -63,6 +63,7 @@ export default function ProjectDetail({
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
   const meiSection = useAssetSection(project.meiFiles);
+  const annSection = useAssetSection(project.annotations);
 
   const switchTab = (
     tab: "images" | "models" | "annotations" | "mei files",
@@ -71,8 +72,10 @@ export default function ProjectDetail({
     imgSection.clearSelection();
     mdlSection.clearSelection();
     meiSection.clearSelection();
+    annSection.clearSelection();
     imgSection.setPage(0);
     mdlSection.setPage(0);
+    annSection.setPage(0);
   };
 
   const tabs = [
@@ -93,6 +96,8 @@ export default function ProjectDetail({
         mdlSection.clearSelection();
         meiSection.setMenu(null);
         meiSection.clearSelection();
+        annSection.clearSelection();
+        annSection.setMenu(null);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         if (
@@ -130,13 +135,14 @@ export default function ProjectDetail({
     imgSection,
     mdlSection,
     meiSection,
+    annSection,
     project,
     onDeleteImage,
     onUpdateProject,
   ]);
 
   const selectionButtons = (
-    noun: "image" | "model",
+    noun: "image" | "model" | "annotation",
     count: number,
     onUse: () => void,
     onDelete: () => void,
@@ -347,6 +353,27 @@ export default function ProjectDetail({
                   mdlSection.clearSelection();
                 },
               )}
+              {activeTab === "annotations" && annSection.selectedIds.size > 0 && (
+                <button
+                  onClick={() => {
+                    const names = project.annotations
+                      .filter((a) => annSection.selectedIds.has(a.id))
+                      .map((a) => a.imageName);
+                    onUsedNamesChange({
+                      ...usedNames,
+                      annotations: [
+                        ...usedNames.annotations,
+                        ...names.filter((n) => !usedNames.annotations.includes(n)),
+                      ],
+                    });
+                    annSection.clearSelection();
+                    setValidationError(null);
+                  }}
+                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    use {annSection.selectedIds.size} annotation{annSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
+              )}
           </div>
 
           {/* tab bar + content */}
@@ -398,7 +425,13 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab annotations={project.annotations} projectId={project.id}/>
+              <AnnotationsTab 
+                annotations={project.annotations} 
+                projectId={project.id}
+                section={annSection}
+                usedNames={usedNames}
+                onUsedNamesChange={onUsedNamesChange}
+              />
             )}
             {activeTab === "mei files" && (
               <MeiTab
@@ -437,6 +470,16 @@ export default function ProjectDetail({
                     return;
                   }
                   setValidationError(null);
+                } else if (stepsUnlocked === 1) {
+                  if (usedNames.annotations.length === 0) {
+                    setValidationError("must select at least one annotation!");
+                    return;
+                  }
+                  if (usedNames.annotations.length !== usedNames.images.length) {
+                    setValidationError("number of annotations must match number of images!");
+                    return;
+                  }
+                  setValidationError(null);
                 }
                 onContinue();
               }}
@@ -463,6 +506,20 @@ export default function ProjectDetail({
                 </button>
               </div>
             ))}
+            {stepsUnlocked >= 1 && (
+              <>
+                <hr className="border-white/40 my-1" />
+                {usedNames.annotations.map((name) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="truncate flex-1 mr-2">{name}</span>
+                    <button
+                      onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
+                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                    >×</button>
+                  </div>
+                ))}
+              </>
+            )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => (
               <div key={name} className="flex items-center justify-between">
