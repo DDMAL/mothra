@@ -29,7 +29,6 @@ interface AppRouterProps {
   selectedProject: Project | null;
   selectedProjectId: number | null;
   setSelectedProjectId: (id: number | null) => void;
-  encodingLogs: string[];
   pendingXmlFile: File | null;
   setPendingXmlFile: (f: File | null) => void;
   pendingImageFile: File | null;
@@ -40,6 +39,7 @@ interface AppRouterProps {
   handleLoginSuccess: (user: CurrentUser, token: string) => void;
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
+  handleEncodeResult: (ev: { session_id: string; mei_base64: string; manifest: Record<string, unknown> | null }) => void;
 }
 
 export default function AppRouter({
@@ -52,7 +52,6 @@ export default function AppRouter({
   selectedProject,
   selectedProjectId,
   setSelectedProjectId,
-  encodingLogs,
   pendingXmlFile,
   setPendingXmlFile,
   pendingImageFile,
@@ -63,6 +62,7 @@ export default function AppRouter({
   handleLoginSuccess,
   handleLogout,
   mutations,
+  handleEncodeResult,
 }: AppRouterProps) {
   const {
     createProject,
@@ -244,10 +244,10 @@ export default function AppRouter({
               }),
             });
           }}
-          onResult={(annotations: AnnotationSet[]) => {
+          onResult={( ev: { annotations: AnnotationSet[] }) => {
             setProjects((prev) =>
               prev.map((p) =>
-                p.id === selectedProject.id ? { ...p, annotations } : p,
+                p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
               ),
             );
           }}
@@ -300,23 +300,24 @@ export default function AppRouter({
         />
       );
     case "encoding-processing":
-      return (
+      return pendingXmlFile ? (
         <ProcessingPage
-          {...STEP_TIMING}
-          singleLabel="processing"
-          logs={encodingLogs}
           onBack={() => setView("ic-completion")}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 3),
-              );
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
             }
             setView("encoding-completion");
           }}
+          streamRequest={() => {
+            const form = new FormData();
+            form.append("xml_file", pendingXmlFile!);
+            if (pendingImageFile) form.append("image_file", pendingImageFile);
+            return fetch("/api/encode-upload", { method: "POST", body: form });
+          }}
+          onResult={handleEncodeResult}
         />
-      );
+  ) : null;
     case "encoding-completion":
       return (
         <CompletionPage

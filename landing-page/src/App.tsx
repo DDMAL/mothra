@@ -24,7 +24,6 @@ export default function App() {
   const mutations = useProjectMutations(setProjects);
 
   const {
-    encodingLogs,
     pendingXmlFile,
     setPendingXmlFile,
     pendingImageFile,
@@ -32,7 +31,8 @@ export default function App() {
     meiContent,
     handleDownloadManifest,
     handleDownloadMei,
-  } = useEncodingFlow(view, selectedProjectId, setProjects);
+    handleEncodeResult,
+  } = useEncodingFlow(selectedProjectId, setProjects);
 
   useScrollFade(view);
 
@@ -92,7 +92,6 @@ export default function App() {
         selectedProject={selectedProject}
         selectedProjectId={selectedProjectId}
         setSelectedProjectId={setSelectedProjectId}
-        encodingLogs={encodingLogs}
         pendingXmlFile={pendingXmlFile}
         setPendingXmlFile={setPendingXmlFile}
         pendingImageFile={pendingImageFile}
@@ -103,6 +102,7 @@ export default function App() {
         handleLoginSuccess={handleLoginSuccess}
         handleLogout={handleLogout}
         mutations={mutations}
+        handleEncodeResult={handleEncodeResult}
       />
       <Footer />
     </div>

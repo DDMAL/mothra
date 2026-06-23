@@ -42,7 +42,10 @@ export default function ProcessingPage({
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
   const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
+  const [timeDisplay, setTimeDisplay] = useState<string>("estimating...")
   const logEndRef = useRef<HTMLDivElement>(null);
+  const startTimeRef = useRef(Date.now());
+  const progressRef = useRef(0);
 
   useEffect(() => {
     if (!logs || logs.length === 0) return;
@@ -63,6 +66,39 @@ export default function ProcessingPage({
   useEffect(() => {
     pausedRef.current = cancelPrompt;
   }, [cancelPrompt]);
+
+    useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const p = progressRef.current;
+      if (p >= 100) {
+        setTimeDisplay("");
+        clearInterval(timer);
+        return;
+      }
+      const elapsedMs = Date.now() - startTimeRef.current;
+      if (p <= 0) {
+        setTimeDisplay("estimating...");
+        return;
+      }
+      const totalMs = elapsedMs / (p / 100);
+      const remainingMs = Math.max(0, totalMs - elapsedMs);
+      const s = Math.round(remainingMs / 1000);
+      if (s <= 0) {
+        setTimeDisplay("almost done...");
+        return;
+      }
+      if (s >= 60) {
+        setTimeDisplay(`~${Math.floor(s / 60)}m ${s % 60}s remaining`);
+      } else {
+        setTimeDisplay(`~${s}s remaining`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  })
 
   useEffect(() => {
     if (streamRequest) return;
@@ -200,8 +236,8 @@ export default function ProcessingPage({
           />
         </div>
 
-        {/* cancel */}
-        <div className="mt-4">
+        {/* cancel + time estimate */}
+        <div className="mt-4 flex items-center">
           {!cancelPrompt ? (
             <button
               onClick={() => setCancelPrompt(true)}
@@ -225,6 +261,11 @@ export default function ProcessingPage({
                 no
               </button>
             </div>
+          )}
+          {!cancelPrompt && timeDisplay && (
+            <span className="flex-1 text-center text-white/60 text-sm font-mono">
+              {timeDisplay}
+            </span>
           )}
         </div>
 
