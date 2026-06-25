@@ -576,6 +576,36 @@ def delete_image(project_id: int, image_id: str, user=Depends(get_current_user))
     con.close()
     return {"ok": True}
 
+@router.delete("/projects/{project_id}/annotations/{annotation_id}")
+def delete_annotation(project_id: int, annotation_id: str, user=Depends(get_current_user)):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM annotations WHERE id=%s AND project_id=%s", (annotation_id, project_id))
+    con.commit()
+    cur.close()
+    con.close()
+    return {"ok": True}
+
+@router.delete("/projects/{project_id}/mei/{mei_id}")
+def delete_mei_file(project_id: int, mei_id: str, user=Depends(get_current_user)):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
+    con.commit()
+    cur.close()
+    con.close()
+    return {"ok": True}
+
 # mei + model endpoints
 
 class AddMeiBody(BaseModel):
@@ -652,7 +682,7 @@ def get_mei_content(project_id: int, mei_id: str, token: str):
 @router.put("/projects/{project_id}/mei/{mei_id}/content")
 async def put_mei_content(project_id: int, mei_id: str, token: str, request: Request):
     if not _verify_edit_token(token, project_id, mei_id):
-        raise HTTPException(status_code=403, detail="invalid or expired exit token")
+        raise HTTPException(status_code=403, detail="invalid or expired edit token")
     xml_content = (await request.body()).decode("utf-8")
     con = get_db_conn(); cur = con.cursor()
     cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",

@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
+import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import Hero from "./landing/Hero";
 import Features from "./landing/Features";
@@ -18,6 +19,17 @@ import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
+
+function yoloTxtToJson(yoloTxt: string, imageName: string): string {
+  const annotations = yoloTxt
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [cls, x, y, w, h] = line.trim().split(" ").map(Number);
+      return { class: cls, x_center: x, y_center: y, width: w, height: h };
+    });
+  return JSON.stringify({ imageName, annotations }, null, 2);
+}
 
 interface AppRouterProps {
   view: View;
@@ -143,7 +155,8 @@ export default function AppRouter({
             )
           }
           onStepClick={(step) => {
-            if (step === 1) setView("ic");
+            if (step === 0) setView("processing");
+            else if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
           }}
@@ -192,6 +205,34 @@ export default function AppRouter({
                 body: form,
               });
             return r.json();
+          }}
+          onDeleteAnnotation={async (annotationId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
+          }}
+          onDownloadAnnotation={async (annotationId, format) => {
+            const r = await fetch(
+              `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
+              { headers: authHeaders() },
+            );
+            const data = await r.json();
+            const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+            if (format === "json") {
+              downloadBlob(
+                new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                `${stem}.json`,
+              );
+            } else {
+              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+            }
+          }}
+          onDeleteMei={async (meiId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/mei/${meiId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
           }}
           onDeleteImage={async (imageId) => {
             const r = await fetch(
@@ -244,10 +285,10 @@ export default function AppRouter({
               }),
             });
           }}
-          onResult={( ev: { annotations: AnnotationSet[] }) => {
+          onResult={(annotations: AnnotationSet[]) => {
             setProjects((prev) =>
               prev.map((p) =>
-                p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
+                p.id === selectedProject.id ? { ...p, annotations } : p,
               ),
             );
           }}
@@ -259,6 +300,39 @@ export default function AppRouter({
           onContinue={() => setView("ic")}
           onBackToProject={() => setView("project")}
           logsFileName="annotatorlogs.txt"
+          onDownloadAnnotations={
+            selectedProject?.annotations?.length
+              ? async () => {
+                  for (const ann of selectedProject.annotations) {
+                    const r = await fetch(
+                      `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
+                      { headers: authHeaders() },
+                    );
+                    const data = await r.json();
+                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+                  }
+                }
+              : undefined
+          }
+          onDownloadAnnotationsJson={
+            selectedProject?.annotations?.length
+              ? async () => {
+                  for (const ann of selectedProject.annotations) {
+                    const r = await fetch(
+                      `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
+                      { headers: authHeaders() },
+                    );
+                    const data = await r.json();
+                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+                    downloadBlob(
+                      new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                      `${stem}.json`,
+                    );
+                  }
+                }
+              : undefined
+          }
         />
       );
     case "ic":

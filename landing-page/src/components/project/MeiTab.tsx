@@ -12,12 +12,14 @@ interface MeiTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<MeiFile>>;
   onUpdateProject: (p: Project) => void;
+  onDeleteMei: (meiId: string) => Promise<void>;
 }
 
 export default function MeiTab({
   project,
   section,
   onUpdateProject,
+  onDeleteMei,
 }: MeiTabProps) {
   const [meiViewFile, setMeiViewFile] = useState<MeiFile | null>(null);
   const [meiSubTab, setMeiSubTab] = useState<"mei produced" | "mei corrected">(
@@ -65,7 +67,7 @@ export default function MeiTab({
   const [validateModal, setValidateModal] = useState<{
     file: MeiFile;
     result: { valid: boolean; warnings: string[] } | null;
-    loading: Boolean;
+    loading: boolean;
   } | null>(null);
 
   return (
@@ -169,6 +171,18 @@ export default function MeiTab({
                     )!;
                     handleValidate(f);
                     section.setMenu(null);
+                  },
+                },
+                {
+                  label: "Delete",
+                  onClick: async () => {
+                    const id = section.menu!.id;
+                    section.setMenu(null);
+                    await onDeleteMei(id);
+                    onUpdateProject({
+                      ...project,
+                      meiFiles: project.meiFiles.filter((f) => f.id !== id),
+                    });
                   },
                 },
                 ...(file

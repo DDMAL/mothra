@@ -9,6 +9,8 @@ interface CompletionPageProps {
   logsFileName?: string;
   onDownloadMei?: () => void;
   onDownloadManifest?: () => void;
+  onDownloadAnnotations?: () => void;
+  onDownloadAnnotationsJson?: () => void;
 }
 
 export default function CompletionPage({
@@ -20,6 +22,8 @@ export default function CompletionPage({
   logsFileName,
   onDownloadMei,
   onDownloadManifest,
+  onDownloadAnnotations,
+  onDownloadAnnotationsJson,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
     downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
@@ -64,6 +68,26 @@ export default function CompletionPage({
         >
           &gt; download {logsFileName}
         </button>
+      )}
+      {(onDownloadAnnotations || onDownloadAnnotationsJson) && (
+        <div className="absolute bottom-8 right-8 flex flex-col items-end gap-2">
+          {onDownloadAnnotations && (
+            <button
+              onClick={onDownloadAnnotations}
+              className="text-white/60 text-sm hover:text-white cursor-pointer"
+            >
+              &gt; download annotations (.txt)
+            </button>
+          )}
+          {onDownloadAnnotationsJson && (
+            <button
+              onClick={onDownloadAnnotationsJson}
+              className="text-white/60 text-sm hover:text-white cursor-pointer"
+            >
+              &gt; download annotations (.json)
+            </button>
+          )}
+        </div>
       )}
       {onDownloadMei && (
         <button

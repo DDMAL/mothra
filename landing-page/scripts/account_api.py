@@ -45,7 +45,7 @@ class ChangePasswordBody(BaseModel):
 def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELEct password_hash FROM users WHERE id=%s", (user["id"],))
+    cur.execute("SELECT password_hash FROM users WHERE id=%s", (user["id"],))
     row = cur.fetchone()
     cur.close(); con.close()
     if not row or not verify_password(body.old_password, row[0]):
@@ -111,7 +111,7 @@ def delete_me(user=Depends(get_current_user)):
     for pid in pids:
         cur.execute("DELETE FROM mei_files WHERE project_id=%s", (pid, ))
         cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
-        cur.execute("DELETE FOM project_models WHERE project_id=%s", (pid, ))
+        cur.execute("DELETE FROM project_models WHERE project_id=%s", (pid, ))
     cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
     cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
     con.commit(); cur.close(); con.close()

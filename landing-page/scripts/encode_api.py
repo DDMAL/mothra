@@ -180,6 +180,6 @@ def get_mei(session_id: str):
     return Response(
         content=s["mei_bytes"],
         media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename={s["stem"]}.mei"'},
+        headers={"Content-Disposition": f'attachment; filename="{s["stem"]}.mei"'},
     )
 
