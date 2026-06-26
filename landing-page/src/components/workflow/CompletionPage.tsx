@@ -7,6 +7,7 @@ interface CompletionPageProps {
   description?: string;
   continueLabel?: string;
   logsFileName?: string;
+  logContent?: string;
   onDownloadMei?: () => void;
   onDownloadManifest?: () => void;
   onDownloadAnnotations?: () => void;
@@ -20,13 +21,14 @@ export default function CompletionPage({
   description = "images have successfully been normalized and initially annotated. you can now view annotations on the project page!",
   continueLabel = "continue to IC",
   logsFileName,
+  logContent,
   onDownloadMei,
   onDownloadManifest,
   onDownloadAnnotations,
   onDownloadAnnotationsJson,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
-    downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
+    downloadBlob(new Blob([logContent ?? ""], { type: "text/plain" }), logsFileName!);
   };
 
   return (

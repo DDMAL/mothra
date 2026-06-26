@@ -33,6 +33,7 @@ interface ProjectDetailProps {
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
   onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
+  onDeleteModel: (modelId: string) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
@@ -53,6 +54,7 @@ export default function ProjectDetail({
   onUploadImage,
   onUploadModel,
   onDeleteImage,
+  onDeleteModel,
   onDeleteAnnotation,
   onDownloadAnnotation,
   onDeleteMei,
@@ -125,13 +127,15 @@ export default function ProjectDetail({
           });
         }
         if (activeTab === "models" && mdlSection.selectedIds.size > 0) {
-          onUpdateProject({
-            ...project,
-            models: project.models.filter(
-              (m) => !mdlSection.selectedIds.has(m.id),
-            ),
-          });
+          const ids = [...mdlSection.selectedIds];
+          const deleted = new Set(ids);
           mdlSection.clearSelection();
+          Promise.all(ids.map((id) => onDeleteModel(id))).then(() => {
+            onUpdateProject({
+              ...project,
+              models: project.models.filter((m) => !deleted.has(m.id)),
+            });
+          });
         }
         if (activeTab === "annotations" && annSection.selectedIds.size > 0) {
           const ids = [...annSection.selectedIds];

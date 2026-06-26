@@ -15,6 +15,7 @@ interface ProcessingPageProps {
   streamRequest?: () => Promise<Response>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onResult?: (data: any) => void;
+  onLogsReady?: (logs: string[]) => void
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -28,6 +29,7 @@ export default function ProcessingPage({
   logs = [],
   streamRequest,
   onResult,
+  onLogsReady,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -153,6 +155,7 @@ export default function ProcessingPage({
     const STAGE_PROGRESS: Record<string, number> = { checking: 33, validating: 66, processing: 100 };
 
     async function run() {
+      const collectedLogs: string[] = [];
       try {
         const resp = await streamRequest!();
         if (!resp.ok || !resp.body) return;
@@ -180,11 +183,15 @@ export default function ProcessingPage({
                 setProgress(STAGE_PROGRESS[ev.name] ?? 0);
               }
             }
-            if (ev.type === "log") setRevealedLogs((prev) => [...prev, ev.message]);
+            if (ev.type === "log") {
+              collectedLogs.push(ev.message);
+              setRevealedLogs((prev) => [...prev, ev.message]);
+            }
             if (ev.type === "result" && onResult) onResult(ev.annotations);
             if (ev.type === "error") setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
             if (ev.type === "done" && !completedRef.current) {
               completedRef.current = true;
+              onLogsReady?.(collectedLogs);
               setTimeout(onComplete, completionDelayMs);
             }
           }

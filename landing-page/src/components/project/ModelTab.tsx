@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { Project, ProjectModel } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
+import { authHeaders } from "../../hooks/useAuth";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
@@ -29,12 +30,17 @@ export default function ModelTab({
   const modelFileInputRef = useRef<HTMLInputElement>(null);
 
   // model actions
-  const deleteModel = (id: string) => {
+  const deleteModel = async (id: string) => {
+    section.setMenu(null);
+    const r = await fetch(`/api/projects/${project.id}/models/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!r.ok) return;
     onUpdateProject({
       ...project,
       models: project.models.filter((m) => m.id !== id),
     });
-    section.setMenu(null);
   };
 
   const renameModel = () => {

@@ -474,6 +474,8 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     if not row or row[0] != user["id"]:
         cur.close(); con.close()
         raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM annotations WHERE project_id=%s", (project_id,))
+    cur.execute("DELETE FROM project_logs WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM activity_log WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
@@ -527,7 +529,9 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
 def get_image(image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT data, mime_type FROM project_images WHERE id=%s", (image_id, ))
+    cur.execute("SELECT data, mime_type FROM project_images WHERE id=%s "
+                " AND project_id IN (SELECT id FROM projects WHERE user_id=%s)", 
+                (image_id, user["id"] ))
     row = cur.fetchone()
     cur.close()
     con.close()
@@ -540,8 +544,9 @@ def get_image_meta(image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT name, mime_type, octet_length(data), created_at FROM project_images WHERE id=%s",
-        (image_id,)
+        "SELECT name, mime_type, octet_length(data), created_at FROM project_images "
+        " WHERE id=%s AND project_id IN (SELECT id FROM projects WHERE user_id=%s)",
+        (image_id, user["id"])
     )
     row = cur.fetchone()
     cur.close(); con.close()
@@ -781,6 +786,31 @@ async def add_model(
     cur.close()
     con.close()
     return {"id": model_id, "name": file.filename}
+
+@router.delete("/projects/{project_id}/models/{model_id}")
+def delete_model(project_id: int, model_id: str, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute(
+        "SELECT file_path FROM project_models WHERE id=%s AND project_id=%s",
+        (model_id, project_id)
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404, detail="model not found")
+    file_path = row[0]
+    if file_path:
+        Path(file_path).unlink(missing_ok=True)
+    cur.execute("DELETE FROM project_models WHERE id=%s", (model_id,))
+    _log_activity(cur, project_id, "model_deleted", model_id)
+    con.commit()
+    cur.close(); con.close()
+    return {"ok": True}
 
 @router.get("/projects/{project_id}/annotations/{annotation_id}")
 async def get_annotation_txt(

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
@@ -88,6 +89,7 @@ export default function AppRouter({
     updateUsedAnnotationNames,
     togglePin,
   } = mutations;
+  const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
 
   switch (view) {
     case "landing":
@@ -205,6 +207,12 @@ export default function AppRouter({
                 body: form,
               });
             return r.json();
+          }}
+          onDeleteModel={async (modelId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/models/${modelId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
           }}
           onDeleteAnnotation={async (annotationId) => {
             await fetch(
@@ -390,6 +398,7 @@ export default function AppRouter({
             return fetch("/api/encode-upload", { method: "POST", body: form });
           }}
           onResult={handleEncodeResult}
+          onLogsReady={setEncodingLogs}
         />
   ) : null;
     case "encoding-completion":
@@ -399,6 +408,8 @@ export default function AppRouter({
           continueLabel="correction"
           onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}
+          logsFileName="encoding-logs.txt"
+          logContent={encodingLogs.join("\n")}
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
         />
