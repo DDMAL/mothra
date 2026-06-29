@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Project } from "../../types";
 import { authHeaders } from "../../hooks/useAuth";
+import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
@@ -539,53 +540,65 @@ export default function ProjectDetail({
             >
               send to cantus ultimus &rarr;
             </button>
-          ) : (
-            <button
-              onClick={() => {
-                if (stepsUnlocked === 0) {
-                  if (usedNames.models.length === 0) {
-                    setValidationError("must select at least one model!");
-                    return;
+          ) : (() => {
+            const annotations = project.annotations ?? [];
+            const meiFiles = project.meiFiles ?? [];
+            const nextStep = minNextStep(usedNames.images, annotations, meiFiles);
+            const continueLabel =
+              usedNames.images.length === 0 || nextStep === 0 ? "begin" :
+              nextStep === 1 ? "continue: ic" :
+              nextStep === 3 ? "continue: neon" :
+              "continue: send";
+            return (
+              <button
+                onClick={() => {
+                  if (nextStep === 0) {
+                    if (usedNames.models.length === 0) {
+                      setValidationError("must select at least one model!");
+                      return;
+                    }
+                    if (usedNames.images.length === 0) {
+                      setValidationError("must select at least one image!");
+                      return;
+                    }
+                    setValidationError(null);
+                  } else if (nextStep === 1 && stepsUnlocked <= 1) {
+                    if (usedNames.annotations.length === 0) {
+                      setValidationError("must select at least one annotation!");
+                      return;
+                    }
+                    if (usedNames.annotations.length !== usedNames.images.length) {
+                      setValidationError("number of annotations must match number of images!");
+                      return;
+                    }
+                    setValidationError(null);
                   }
-                  if (usedNames.images.length === 0) {
-                    setValidationError("must select at least one image!");
-                    return;
-                  }
-                  setValidationError(null);
-                } else if (stepsUnlocked === 1) {
-                  if (usedNames.annotations.length === 0) {
-                    setValidationError("must select at least one annotation!");
-                    return;
-                  }
-                  if (usedNames.annotations.length !== usedNames.images.length) {
-                    setValidationError("number of annotations must match number of images!");
-                    return;
-                  }
-                  setValidationError(null);
-                }
-                onContinue();
-              }}
-              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
-            >
-              {stepsUnlocked === 0 ? "begin" : "continue"} &rarr;
-            </button>
-          )}
+                  onContinue();
+                }}
+                className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+              >
+                {continueLabel} &rarr;
+              </button>
+            );
+          })()}
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
             <span className="text-white/80">selected:</span>
             {usedNames.models.map((name) => (
               <div key={name} className="flex items-center justify-between">
                 <span className="truncate flex-1 mr-2">{name}</span>
-                <button
-                  onClick={() =>
-                    onUsedNamesChange({
-                      ...usedNames,
-                      models: usedNames.models.filter((n) => n !== name),
-                    })
-                  }
-                  className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                >
-                  ×
-                </button>
+                {stepsUnlocked === 0 && (
+                  <button
+                    onClick={() =>
+                      onUsedNamesChange({
+                        ...usedNames,
+                        models: usedNames.models.filter((n) => n !== name),
+                      })
+                    }
+                    className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
             {stepsUnlocked >= 1 && (
@@ -594,31 +607,38 @@ export default function ProjectDetail({
                 {usedNames.annotations.map((name) => (
                   <div key={name} className="flex items-center justify-between">
                     <span className="truncate flex-1 mr-2">{name}</span>
-                    <button
-                      onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
-                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                    >×</button>
+                    {stepsUnlocked < 2 && (
+                      <button
+                        onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
+                        className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                      >×</button>
+                    )}
                   </div>
                 ))}
               </>
             )}
             <hr className="border-white/40 my-1" />
-            {usedNames.images.map((name) => (
-              <div key={name} className="flex items-center justify-between">
-                <span className="truncate flex-1 mr-2">{name}</span>
-                <button
-                  onClick={() =>
-                    onUsedNamesChange({
-                      ...usedNames,
-                      images: usedNames.images.filter((n) => n !== name),
-                    })
-                  }
-                  className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {usedNames.images.map((name) => {
+              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? []) !== null;
+              return (
+                <div key={name} className="flex items-center justify-between">
+                  <span className="truncate flex-1 mr-2">{name}</span>
+                  {!hasProgress && (
+                    <button
+                      onClick={() =>
+                        onUsedNamesChange({
+                          ...usedNames,
+                          images: usedNames.images.filter((n) => n !== name),
+                        })
+                      }
+                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {validationError && (
             <p className="text-white text-xs text-center">{validationError}</p>

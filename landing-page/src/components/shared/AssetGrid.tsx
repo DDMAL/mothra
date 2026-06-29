@@ -22,6 +22,7 @@ interface AssetGridProps<T extends AssetItem> {
   usedNames: string[];
   totalPages: number;
   renderThumbnail: (item: T) => ReactNode;
+  getItemBadge?: (name: string) => string | null;
 }
 
 export default function AssetGrid<T extends AssetItem>({
@@ -31,6 +32,7 @@ export default function AssetGrid<T extends AssetItem>({
   usedNames,
   totalPages,
   renderThumbnail,
+  getItemBadge,
 }: AssetGridProps<T>) {
   return (
     <>
@@ -43,10 +45,11 @@ export default function AssetGrid<T extends AssetItem>({
         {pagedItems.map((item, pageIdx) => {
           const idx = pageOffset + pageIdx;
           const used = usedNames.includes(item.name);
+          const badge = used ? (getItemBadge?.(item.name) ?? null) : null;
           return (
             <div key={item.id} className="flex flex-col gap-2">
               <div
-                className={`aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
+                className={`relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
                         ${section.selectedIds.has(item.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
                         ${used ? "opacity-40 cursor-default" : ""}`}
                 onClick={(e) => {
@@ -54,6 +57,13 @@ export default function AssetGrid<T extends AssetItem>({
                 }}
               >
                 {renderThumbnail(item)}
+                {badge && (
+                  <div className="absolute bottom-0 inset-x-0 flex justify-center pb-1.5 pointer-events-none">
+                    <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">
+                      {badge}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center justify-between gap-1">
                 <span

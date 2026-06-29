@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project, ProjectImage } from "../../types";
+import { getImageProgress } from "../../utils/imageStep";
 import * as pdfjsLib from "pdfjs-dist";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { AuthImage } from "../shared/AuthImage";
@@ -226,6 +227,9 @@ export default function ImageTab({
                   className="w-full h-full object-cover"
                 />
               ) : null
+            }
+            getItemBadge={(name) =>
+              getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [])?.badge ?? null
             }
           />
         )}

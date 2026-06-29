@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet, MeiFile } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
+import { getImageProgress, minNextStep } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import Hero from "./landing/Hero";
@@ -147,10 +148,14 @@ export default function AppRouter({
           project={selectedProject}
           onBack={() => setView("projects")}
           onContinue={() => {
-            if (selectedProject.stepsUnlocked >= 3) setView("neon-editor");
-            else if (selectedProject.stepsUnlocked >= 2)
-              setView("ic-completion");
-            else if (selectedProject.stepsUnlocked >= 1) setView("ic");
+            const step = minNextStep(
+              selectedProject.usedImageNames,
+              selectedProject.annotations ?? [],
+              selectedProject.meiFiles ?? [],
+            );
+            if (step >= 4) setView("sending");
+            else if (step >= 3) setView("neon-editor");
+            else if (step >= 1) setView("ic");
             else setView("processing");
           }}
           onUpdateProject={(updated) =>
@@ -349,9 +354,11 @@ export default function AppRouter({
     case "ic":
       return selectedProject ? (
         <InteractiveClassifier
-          images={selectedProject.images.filter((img) =>
-            selectedProject.usedImageNames.includes(img.name),
-          )}
+          images={selectedProject.images.filter((img) => {
+            if (!selectedProject.usedImageNames.includes(img.name)) return false;
+            const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+            return p === null || p.nextStep <= 1;
+          })}
           projectId={selectedProjectId}
           setPendingXmlFile={setPendingXmlFile}
           setPendingImageFile={setPendingImageFile}
