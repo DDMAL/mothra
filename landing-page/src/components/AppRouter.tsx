@@ -351,7 +351,18 @@ export default function AppRouter({
           images={selectedProject.images.filter((img) =>
             selectedProject.usedImageNames.includes(img.name),
           )}
-          onProcessAll={() => setView("ic-processing")}
+          projectId={selectedProjectId}
+          setPendingXmlFile={setPendingXmlFile}
+          setPendingImageFile={setPendingImageFile}
+          onEncode={() => {
+            if (selectedProjectId && selectedProject) {
+              updateProjectSteps(
+                selectedProjectId,
+                Math.max(selectedProject.stepsUnlocked, 2),
+              );
+            }
+            setView("encoding-processing");
+          }}
         />
       ) : null;
     case "ic-processing":
@@ -386,7 +397,10 @@ export default function AppRouter({
     case "encoding-processing":
       return pendingXmlFile ? (
         <ProcessingPage
-          onBack={() => setView("ic-completion")}
+          {...STEP_TIMING}
+          singleLabel="processing"
+          logs={encodingLogs}
+          onBack={() => setView("ic")}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
