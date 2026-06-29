@@ -12,6 +12,7 @@ interface CompletionPageProps {
   onDownloadManifest?: () => void;
   onDownloadAnnotations?: () => void;
   onDownloadAnnotationsJson?: () => void;
+  onCompare?: () => void;
 }
 
 export default function CompletionPage({
@@ -26,6 +27,7 @@ export default function CompletionPage({
   onDownloadManifest,
   onDownloadAnnotations,
   onDownloadAnnotationsJson,
+  onCompare,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
     downloadBlob(new Blob([logContent ?? ""], { type: "text/plain" }), logsFileName!);
@@ -62,6 +64,14 @@ export default function CompletionPage({
             back to project
           </button>
         </div>
+        {onCompare && (
+          <button
+            onClick={onCompare}
+            className="text-white/70 text-sm hover:text-white cursor-pointer underline"
+          >
+            compare before &amp; after →
+          </button>
+        )}
       </div>
       {logsFileName && (
         <button

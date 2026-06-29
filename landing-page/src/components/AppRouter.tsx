@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project, AnnotationSet } from "../types";
+import type { View, Project, AnnotationSet, MeiFile } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
 import { downloadBlob } from "../utils/download";
@@ -17,6 +17,7 @@ import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
+import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
@@ -90,6 +91,7 @@ export default function AppRouter({
     togglePin,
   } = mutations;
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
+  const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
   switch (view) {
     case "landing":
@@ -420,15 +422,25 @@ export default function AppRouter({
           project={selectedProject}
           meiFiles={selectedProject.meiFiles}
           onFinish={() => {
+            setOriginalMeiFiles([...(selectedProject?.meiFiles ?? [])]);
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
                 selectedProjectId,
                 Math.max(selectedProject.stepsUnlocked, 4),
               );
             }
-            setView("project");
+            setView("neon-completion");
           }}
           onBack={() => setView("encoding-completion")}
+        />
+      ) : null;
+    case "neon-completion":
+      return selectedProject ? (
+        <NeonCompletionPage
+          project={selectedProject}
+          originalMeiFiles={originalMeiFiles}
+          onSendToCantus={() => setView("sending")}
+          onBackToProject={() => setView("project")}
         />
       ) : null;
     case "sending":

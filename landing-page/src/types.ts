@@ -60,4 +60,5 @@ export type View =
   | "sending"
   | "send-completion"
   | "neon-editor"
+  | "neon-completion"
   | "neon-test";
