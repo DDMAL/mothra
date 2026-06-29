@@ -187,7 +187,7 @@ export default function ProcessingPage({
               collectedLogs.push(ev.message);
               setRevealedLogs((prev) => [...prev, ev.message]);
             }
-            if (ev.type === "result" && onResult) onResult(ev.annotations);
+            if (ev.type === "result" && onResult) onResult(ev);
             if (ev.type === "error") setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
             if (ev.type === "done" && !completedRef.current) {
               completedRef.current = true;

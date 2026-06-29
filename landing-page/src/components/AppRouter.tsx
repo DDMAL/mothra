@@ -293,10 +293,10 @@ export default function AppRouter({
               }),
             });
           }}
-          onResult={(annotations: AnnotationSet[]) => {
+          onResult={(ev: { annotations: AnnotationSet[] }) => {
             setProjects((prev) =>
               prev.map((p) =>
-                p.id === selectedProject.id ? { ...p, annotations } : p,
+                p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
               ),
             );
           }}

@@ -54,8 +54,8 @@ export function useEncodingFlow(
   }
   setProjects((prev) => 
     prev.map((p) => 
-    p.id === selectedProjectId ? {...p, meiFiles: [...p.meiFiles, newMeiFile] } : p, 
-  ),
+      p.id === selectedProjectId ? {...p, meiFiles: [...p.meiFiles, newMeiFile] } : p, 
+    )
   );
 };
   // download helpers
