@@ -85,6 +85,7 @@ export default function AppRouter({
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,
+    duplicateProject,
     updateProjectSteps,
     updateUsedImageNames,
     updateUsedModelNames,
@@ -140,6 +141,7 @@ export default function AppRouter({
           onRestoreProject={restoreProject}
           onPermanentlyDeleteProject={permanentlyDeleteProject}
           onTogglePin={togglePin}
+          onDuplicateProject={duplicateProject}
         />
       );
     case "project":
@@ -406,7 +408,7 @@ export default function AppRouter({
       return pendingXmlFile ? (
         <ProcessingPage
           {...STEP_TIMING}
-          singleLabel="processing"
+          singleLabel={pendingImageFile ? `encoding ${pendingImageFile.name}` : "encoding"}
           logs={encodingLogs}
           onBack={() => setView("ic")}
           onComplete={() => {
@@ -418,7 +420,12 @@ export default function AppRouter({
           streamRequest={(signal) => {
             const form = new FormData();
             form.append("xml_file", pendingXmlFile!);
-            if (pendingImageFile) form.append("image_file", pendingImageFile);
+            if (pendingImageFile) {
+              form.append("image_file", pendingImageFile);
+              form.append("image_name", pendingImageFile.name);
+              if (selectedProjectId)
+                form.append("project_id", String(selectedProjectId));
+            }
             return fetch("/api/encode-upload", { method: "POST", body: form, signal });
           }}
           onResult={handleEncodeResult}

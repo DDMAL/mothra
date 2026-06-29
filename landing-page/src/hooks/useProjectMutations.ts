@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { authHeaders } from "./useAuth";
 import type { Project } from "../types";
+import { normalizeProjects } from "../utils/projects";
 
 type SetProjects = Dispatch<SetStateAction<Project[]>>;
 
@@ -84,6 +85,17 @@ export function useProjectMutations(
     }
   };
 
+  const duplicateProject = async (id: number) => {
+    const r = await fetch(`/api/projects/${id}/duplicate`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!r.ok) throw new Error("duplicate failed");
+    const newProject: Project = normalizeProjects([await r.json()])[0];
+    setProjects(prev => [newProject, ...prev]);
+    return newProject;
+  }
+  
   const updateProjectSteps = async (id: number, steps: number) => {
     try {
       const r = await fetch(`/api/projects/${id}`, {
@@ -180,6 +192,7 @@ export function useProjectMutations(
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,
+    duplicateProject,
     updateProjectSteps,
     updateUsedImageNames,
     updateUsedModelNames,

@@ -64,6 +64,7 @@ export default function NeonCompletionPage({
             originalFiles={originalMeiFiles}
             correctedFiles={correctedFiles}
             onClose={() => setShowCompare(false)}
+            projectImages={project.images}
             />
         )}
         </>

@@ -17,6 +17,7 @@ interface MyProjectsProps {
   onRestoreProject: (id: number) => void;
   onPermanentlyDeleteProject: (id: number) => void;
   onTogglePin: (id: number) => void;
+  onDuplicateProject: (id: number) => void;
 }
 
 function MeiProgress({ meiFiles }: { meiFiles: MeiFile[] }) {
@@ -84,6 +85,7 @@ export default function MyProjects({
   onRestoreProject,
   onPermanentlyDeleteProject,
   onTogglePin,
+  onDuplicateProject,
 }: MyProjectsProps) {
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
@@ -241,6 +243,8 @@ export default function MyProjects({
                           </span>
                         </div>
                         <MeiProgress meiFiles={p.meiFiles} />
+                        <span className="text-xs text-[#1D3335]/50">{p.images.length} img</span>
+                        <span className="text-xs text-[#1D3335]/50">{p.annotations?.length ?? 0} ann</span>
                       </div>
                     )}
                     <span>{p.user}</span>
@@ -250,6 +254,13 @@ export default function MyProjects({
                     <div
                       className={`flex gap-3 justify-end transition-opacity ${hoveredRow === p.id ? "opacity-100" : "opacity-0 pointer-events-none"}`}
                     >
+                      <button
+                        onClick={() => onDuplicateProject(p.id)}
+                        title="duplicate project"
+                        className="cursor-pointer text-base"
+                      >
+                        ⧉
+                      </button>
                       <button
                         onClick={() => {
                           setRenamingRow(p.id);
@@ -316,6 +327,8 @@ export default function MyProjects({
                             {formatLastOpened(p.lastOpenedAt)}
                           </span>
                           <MeiProgress meiFiles={p.meiFiles} />
+                          <span className="text-xs text-[#1D3335]/50">{p.images.length} img</span>
+<span className="text-xs text-[#1D3335]/50">{p.annotations?.length ?? 0} ann</span>
                         </div>
                         {hoveredRow === p.id && (
                           <div

@@ -1,24 +1,40 @@
-import { useState } from "react";
-import type { MeiFile } from "../../types";
+import { useState, useMemo } from "react";
+import type { MeiFile, ProjectImage } from "../../types";
+import { diffZones } from "../../utils/meiZoneDiff";
+import MeiImageDiffView from "./MeiImageDiffView";
 
 interface Props {
     originalFiles: MeiFile[];
     correctedFiles: MeiFile[];
     onClose: () => void;
+    projectImages?: ProjectImage[];
 }
 
-export default function MeiCompareModal({ originalFiles, correctedFiles, onClose }: Props) {
+export default function MeiCompareModal({ originalFiles, correctedFiles, onClose, projectImages }: Props) {
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [viewMode, setViewMode] = useState<"xml" | "image-overlay">("xml");
 
-    // pair by id
     const pairs = correctedFiles.map((cf) => ({
         name: cf.name,
         original: originalFiles.find((f) => f.id === cf.id),
         corrected: cf,
     }));
 
-    // fallback: no pairs matched by id, show originals only
     const activePair = pairs[selectedIndex] ?? null;
+
+    const diff = useMemo(() => {
+        if (viewMode !== "image-overlay") return null;
+        const orig = activePair?.original?.xmlContent;
+        const corr = activePair?.corrected?.xmlContent;
+        if (!orig || !corr) return null;
+        return diffZones(orig, corr);
+    }, [viewMode, activePair]);
+
+    const imageId = useMemo(() => {
+        const name = activePair?.corrected?.imageName;
+        if (!name || !projectImages?.length) return null;
+        return projectImages.find((img) => img.name === name)?.id ?? null;
+    }, [projectImages, activePair]);
 
     return (
         <>
@@ -40,7 +56,7 @@ export default function MeiCompareModal({ originalFiles, correctedFiles, onClose
                 {pairs.map((p, i) => (
                     <button
                     key={p.corrected.id}
-                    onClick={() => setSelectedIndex(i)}
+                    onClick={() => { setSelectedIndex(i); setViewMode("xml"); }}
                     className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer truncate max-w-[140px] ${
                         i === selectedIndex
                         ? "bg-white text-[#4AADAA]"
@@ -48,6 +64,25 @@ export default function MeiCompareModal({ originalFiles, correctedFiles, onClose
                     }`}
                     >
                     {p.name}
+                    </button>
+                ))}
+                </div>
+            )}
+
+            {/* view mode toggle (only when images available) */}
+            {projectImages && (
+                <div className="flex gap-1 rounded-xl bg-white/30 p-1">
+                {(["xml", "image-overlay"] as const).map((mode) => (
+                    <button
+                    key={mode}
+                    onClick={() => setViewMode(mode)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        mode === viewMode
+                        ? "bg-white text-[#4AADAA]"
+                        : "text-[#1D3335]/60 hover:text-[#1D3335]"
+                    }`}
+                    >
+                    {mode === "xml" ? "XML" : "Image Overlay"}
                     </button>
                 ))}
                 </div>
@@ -61,8 +96,21 @@ export default function MeiCompareModal({ originalFiles, correctedFiles, onClose
             </button>
             </div>
 
-            {/* two-pane body */}
+            {/* body */}
             {activePair ? (
+            viewMode === "image-overlay" ? (
+                diff ? (
+                <MeiImageDiffView
+                    imageId={imageId}
+                    diff={diff}
+                    imageName={activePair.corrected.imageName ?? activePair.name}
+                />
+                ) : (
+                <div className="flex-1 flex items-center justify-center text-[#1D3335]/50 text-sm italic">
+                    no XML content available for overlay
+                </div>
+                )
+            ) : (
             <div className="flex flex-1 min-h-0 divide-x divide-[#1D3335]/20">
                 {/* left: before */}
                 <div className="flex-1 min-w-0 flex flex-col">
@@ -84,6 +132,7 @@ export default function MeiCompareModal({ originalFiles, correctedFiles, onClose
                 </pre>
                 </div>
             </div>
+            )
             ) : (
             <div className="flex-1 flex items-center justify-center text-[#1D3335]/50 text-sm">
                 No corrected files to compare.

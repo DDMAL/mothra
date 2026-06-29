@@ -880,6 +880,55 @@ def export_project(project_id: int, user=Depends(get_current_user)):
         headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'}
     )
 
+@router.post("/projects/{project_id}/duplicate")
+def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute(
+        "SELECT name FROM projects WHERE id = %s AND user_id = %s AND deleted_at IS NULL",
+        (project_id, current_user["id"])
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404, detail="project not found")
+
+    new_name = f"{row[0]} (copy)"
+    now = datetime.utcnow()
+    cur.execute(
+        "INSERT INTO projects (user_id, name, steps_unlocked, last_opened_at, created_at)"
+        " VALUES (%s, %s, 0, %s, %s) RETURNING id",
+        (current_user["id"], new_name, now, now)
+    )
+    new_id = cur.fetchone()[0]
+
+    cur.execute("SELECT name, mime_type, data FROM project_images WHERE project_id=%s", (project_id,))
+    for img_name, mime, data in cur.fetchall():
+        cur.execute(
+            "INSERT INTO project_images (id, project_id, name, mime_type, data, created_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (str(_uuid.uuid4()), new_id, img_name, mime, data, now)
+        )
+
+    cur.execute("SELECT name, file_path FROM project_models WHERE project_id=%s", (project_id,))
+    for model_name, file_path in cur.fetchall():
+        cur.execute(
+            "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s, %s, %s, %s)",
+            (str(_uuid.uuid4()), new_id, model_name, file_path)
+        )
+
+    con.commit()
+
+    cur.execute(
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at,"
+        " last_opened_at, is_pinned, used_annotation_names"
+        " FROM projects WHERE id=%s",
+        (new_id,)
+    )
+    result = _project_row_to_dict(cur, cur.fetchone(), current_user["username"])
+    cur.close(); con.close()
+    return result
+
+
 @router.get("/projects/{project_id}/logs/download")
 def download_project_logs(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()

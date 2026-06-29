@@ -67,10 +67,31 @@ export default function NeonBatchEditor({
     initSessions();
   }, [project.id, meiFiles]);
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleDoneAndNext();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, corrected]);
+
   const currentFile = meiFiles[currentIndex];
   const currentSession = currentFile ? sessions.get(currentFile.id) : null;
   const allCorrected =
     meiFiles.length > 0 && meiFiles.every((f) => corrected.has(f.id));
+
+  function nearestUncorrected(from: number, dir: 1 | -1): number {
+    let i = from + dir;
+    while (i >= 0 && i < meiFiles.length) {
+      if (!corrected.has(meiFiles[i].id)) return i;
+      i += dir;
+    }
+    return -1;
+  }
 
   function triggerNeonSave() {
     const iframeBody = iframeRef.current?.contentDocument?.body;
@@ -97,9 +118,8 @@ export default function NeonBatchEditor({
 
   async function handleDoneAndNext() {
     await markCurrentDone();
-    if (currentIndex < meiFiles.length - 1) {
-      setCurrentIndex((i) => i + 1);
-    }
+    const next = nearestUncorrected(currentIndex, 1);
+    if (next !== -1) setCurrentIndex(next);
   }
 
   return (
@@ -112,23 +132,40 @@ export default function NeonBatchEditor({
       }}
     >
       <div
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight") {
+            const n = nearestUncorrected(currentIndex, 1);
+            if (n !== -1) setCurrentIndex(n);
+          }
+          if (e.key === "ArrowLeft") {
+            const n = nearestUncorrected(currentIndex, -1);
+            if (n !== -1) setCurrentIndex(n);
+          }
+        }}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "8px, 16px",
+          padding: "8px 16px",
           background: "#1a1a2e",
           borderBottom: "2px solid #4AADAA",
           flexShrink: 0,
         }}
       >
+        <span style={{ color: "#4AADAA55", fontSize: 11 }}>
+          ← → navigate · Ctrl+Enter mark done
+        </span>
         <button onClick={onBack} style={btn}>
           ← Back
         </button>
         <button
-          onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-          disabled={currentIndex === 0}
-          style={{ ...btn, opacity: currentIndex === 0 ? 0.4 : 1 }}
+          onClick={() => {
+            const prev = nearestUncorrected(currentIndex, -1);
+            if (prev !== -1) setCurrentIndex(prev);
+          }}
+          disabled={nearestUncorrected(currentIndex, -1) === -1}
+          style={{ ...btn, opacity: nearestUncorrected(currentIndex, -1) === -1 ? 0.4 : 1 }}
         >
           ← Prev
         </button>
@@ -142,36 +179,42 @@ export default function NeonBatchEditor({
             padding: "2px 0",
           }}
         >
-          {meiFiles.map((f, i) => (
-            <button
-              key={f.id}
-              onClick={() => setCurrentIndex(i)}
-              style={{
-                ...btn,
-                background:
-                  i === currentIndex
-                    ? "#4AADAA"
-                    : corrected.has(f.id)
-                      ? "#1e4d4b"
-                      : "#2d2d4e",
-                border: i === currentIndex ? "none" : "1px solid #4AADAA44",
-                flexShrink: 0,
-              }}
-            >
-              {corrected.has(f.id) ? "✓" : ""}
-              {f.name}
-            </button>
-          ))}
+          {meiFiles.map((f, i) => {
+            const done = corrected.has(f.id);
+            return (
+              <button
+                key={f.id}
+                onClick={() => { if (!done) setCurrentIndex(i); }}
+                disabled={done}
+                style={{
+                  ...btn,
+                  background:
+                    i === currentIndex
+                      ? "#4AADAA"
+                      : done
+                        ? "#1e4d4b"
+                        : "#2d2d4e",
+                  border: i === currentIndex ? "none" : "1px solid #4AADAA44",
+                  flexShrink: 0,
+                  opacity: done ? 0.4 : 1,
+                  cursor: done ? "not-allowed" : "pointer",
+                }}
+              >
+                {done ? "✓ " : ""}{f.name}
+              </button>
+            );
+          })}
         </div>
 
         <button
-          onClick={() =>
-            setCurrentIndex((i) => Math.min(meiFiles.length - 1, i + 1))
-          }
-          disabled={currentIndex === meiFiles.length - 1}
+          onClick={() => {
+            const next = nearestUncorrected(currentIndex, 1);
+            if (next !== -1) setCurrentIndex(next);
+          }}
+          disabled={nearestUncorrected(currentIndex, 1) === -1}
           style={{
             ...btn,
-            opacity: currentIndex === meiFiles.length - 1 ? 0.4 : 1,
+            opacity: nearestUncorrected(currentIndex, 1) === -1 ? 0.4 : 1,
           }}
         >
           Next →

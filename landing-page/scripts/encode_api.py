@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File as FAPIFile
+from fastapi import APIRouter, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response, JSONResponse, StreamingResponse
 
 
@@ -60,8 +60,9 @@ MANIFEST_DIR.mkdir(exist_ok=True)
 sys.path.insert(0, str(Path(__file__).parent))
 from encode_to_mei import (
     parse_gamera_xml, parse_staves, assign_glyphs_to_staves,
-    estimate_staves_from_glyphs, build_mei, build_neon_manifest, validate_mei,
+    estimate_staves_from_glyphs, parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
 )
+from auth_api import get_db_conn
 
 router = APIRouter()
 
@@ -79,7 +80,10 @@ def encode():
 @router.post("/encode-upload")
 async def encode_upload(
     xml_file: UploadFile = FAPIFile(...),
-    image_file: Optional[UploadFile] = FAPIFile(None)):
+    image_file: Optional[UploadFile] = FAPIFile(None),
+    project_id: Optional[int] = Form(None),
+    image_name: Optional[str] = Form(None),
+):
     # read file bytes before entering the sync generator
     xml_bytes = await xml_file.read()
     xml_filename = xml_file.filename or "uploaded.xml"
@@ -118,8 +122,29 @@ async def encode_upload(
 
             # stage: validating
             yield event({"type": "stage", "name": "validating"})
-            staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
-            yield event({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
+            yolo_stave_hints = []
+            if project_id and image_name:
+                try:
+                    con = get_db_conn()
+                    cur = con.cursor()
+                    cur.execute(
+                        "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (image_name, project_id),
+                    )
+                    row = cur.fetchone()
+                    cur.close()
+                    con.close()
+                    if row and row[0]:
+                        yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                except Exception:
+                    pass  # fall back to heuristic silently
+            if yolo_stave_hints:
+                staves = yolo_stave_hints
+                yield event({"type": "log", "message": f" {len(staves)} stave(s) from YOLO annotations"})
+            else:
+                staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
+                yield event({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
             glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
             assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
             yield event({"type": "log", "message": f" {assigned} glyphs assigned to stave"})

@@ -160,6 +160,38 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
             clusters[-1].append(glyph)
     return clusters
 
+def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
+    """Parse YOLO annotation text into StaveBbox hints for staff lines.
+
+    Filters to boxes with width/height > 6 (wide flat shapes typical of staff lines)
+    and converts normalized coords to pixel space.
+    """
+    staves = []
+    for i, line in enumerate(yolo_txt.strip().splitlines()):
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            _, cx, cy, bw, bh = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+        except ValueError:
+            continue
+        if bh == 0 or bw / bh <= 6:
+            continue
+        # Convert normalized to pixel coords
+        px_cx = cx * img_w
+        px_cy = cy * img_h
+        px_bw = bw * img_w
+        px_bh = bh * img_h
+        staves.append(StaveBbox(
+            id=f"yolo-{i}",
+            ulx=int(px_cx - px_bw / 2),
+            uly=int(px_cy - px_bh / 2),
+            lrx=int(px_cx + px_bw / 2),
+            lry=int(px_cy + px_bh / 2),
+        ))
+    return sorted(staves, key=lambda s: s.uly)
+
+
 def estimate_staves_from_glyphs(
     glyphs: list[Glyph], page_w: int, page_h: int
 ) -> list[StaveBbox]:
