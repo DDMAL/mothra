@@ -12,7 +12,7 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
-  streamRequest?: () => Promise<Response>;
+  streamRequest?: (signal: AbortSignal) => Promise<Response>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onResult?: (data: any) => void;
   onLogsReady?: (logs: string[]) => void
@@ -157,7 +157,7 @@ export default function ProcessingPage({
     async function run() {
       const collectedLogs: string[] = [];
       try {
-        const resp = await streamRequest!();
+        const resp = await streamRequest!(abort.signal);
         if (!resp.ok || !resp.body) return;
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();

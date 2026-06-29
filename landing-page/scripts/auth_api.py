@@ -367,6 +367,23 @@ def list_projects(user=Depends(get_current_user)):
     con.close()
     return result
 
+@router.get("/projects/{project_id}")
+def get_project(project_id: int, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute(
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at,"
+        " last_opened_at, is_pinned, used_annotation_names"
+        " FROM projects WHERE id=%s AND user_id=%s",
+        (project_id, user["id"])
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    result = _project_row_to_dict(cur, row, user["username"])
+    cur.close(); con.close()
+    return result
+
 @router.get("/projects/{project_id}/activity")
 def get_activity(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()

@@ -278,7 +278,7 @@ export default function AppRouter({
             }
             setView("completion");
           }}
-          streamRequest={() => {
+          streamRequest={(signal) => {
             const usedModelId =
               selectedProject.models.find((m) =>
                 (selectedProject.usedModelNames ?? []).includes(m.name),
@@ -293,6 +293,7 @@ export default function AppRouter({
                 model_id: usedModelId,
                 image_ids: usedImageIds,
               }),
+              signal,
             });
           }}
           onResult={(ev: { annotations: AnnotationSet[] }) => {
@@ -407,11 +408,11 @@ export default function AppRouter({
             }
             setView("encoding-completion");
           }}
-          streamRequest={() => {
+          streamRequest={(signal) => {
             const form = new FormData();
             form.append("xml_file", pendingXmlFile!);
             if (pendingImageFile) form.append("image_file", pendingImageFile);
-            return fetch("/api/encode-upload", { method: "POST", body: form });
+            return fetch("/api/encode-upload", { method: "POST", body: form, signal });
           }}
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}
@@ -435,6 +436,15 @@ export default function AppRouter({
         <NeonBatchEditor
           project={selectedProject}
           meiFiles={selectedProject.meiFiles}
+          onFileCorrected={(id) =>
+            setProjects((prev) =>
+              prev.map((p) =>
+                p.id === selectedProjectId
+                  ? { ...p, meiFiles: p.meiFiles.map((f) => f.id === id ? { ...f, corrected: true } : f) }
+                  : p,
+              ),
+            )
+          }
           onFinish={() => {
             setOriginalMeiFiles([...(selectedProject?.meiFiles ?? [])]);
             if (selectedProjectId && selectedProject) {

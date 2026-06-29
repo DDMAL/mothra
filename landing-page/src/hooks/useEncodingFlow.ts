@@ -37,6 +37,7 @@ export function useEncodingFlow(
       name: `${stem}.mei`,
       xmlContent: xmlText,
       corrected: false,
+      imageName: pendingImageFile?.name ?? undefined,
     };
     if (selectedProjectId) {
       const r = await fetch(`/api/projects/${selectedProjectId}/mei`, {

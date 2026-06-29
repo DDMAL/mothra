@@ -33,13 +33,13 @@ export default function NeonCompletionPage({
             });
             if (r.ok) {
                 const data = await r.json();
-                const files: MeiFile[] = (data.mei_files ?? data.meiFiles ?? []).map(
-                    (f: { id: string; name: string; xml_content?: string; corrected?: boolean; image_name?: string }) => ({
+                const files: MeiFile[] = (data.meiFiles ?? []).map(
+                    (f: { id: string; name: string; xmlContent?: string; corrected?: boolean; imageName?: string }) => ({
                         id: String(f.id),
                         name: f.name,
-                        xmlContent: f.xml_content ?? "",
+                        xmlContent: f.xmlContent ?? "",
                         corrected: !!f.corrected,
-                        imageName: f.image_name,
+                        imageName: f.imageName,
                     }),
                 );
                 setCorrectedFiles(files.filter((f) => f.corrected));

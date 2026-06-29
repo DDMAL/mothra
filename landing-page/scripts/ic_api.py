@@ -48,12 +48,11 @@ IC_PUBLIC_URL = os.environ.get("IC_PUBLIC_URL", "http://localhost:8000").rstrip(
 # ---------------------------------------------------------------------------
 
 def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tuple[bytes, str]:
-    """Return a MOTHRA-JSON bbox document (bytes) for ``image_bytes``.
+    """Return ``(annotation_bytes, format)`` for ``ic_start()``.
 
-    Returns stored YOLO detections if available, otherwise emits a coarse placeholder grid.
-      ``classId`` 2 == Neumes (see IC's
-    ``ingest._MOTHRA_CLASS_TO_CATEGORY``). The schema is
-    ``{"annotations": [{"id", "classId", "bbox": [ulx, uly, w, h]}, ...]}``.
+    Uses stored YOLO detections when available; falls back to a coarse
+    placeholder grid so the IC step is always exercisable without a prior
+    predict run.
     """
     con = get_db_conn()
     cur = con.cursor()

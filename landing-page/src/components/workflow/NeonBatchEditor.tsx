@@ -12,6 +12,7 @@ interface NeonBatchEditorProps {
   meiFiles: MeiFile[];
   onFinish: () => void;
   onBack: () => void;
+  onFileCorrected?: (id: string) => void;
 }
 
 const btn: React.CSSProperties = {
@@ -30,6 +31,7 @@ export default function NeonBatchEditor({
   meiFiles,
   onFinish,
   onBack,
+  onFileCorrected,
 }: NeonBatchEditorProps) {
   const [sessions, setSessions] = useState<Map<string, BatchSession>>(
     new Map(),
@@ -90,6 +92,7 @@ export default function NeonBatchEditor({
       body: JSON.stringify({ corrected: true }),
     });
     setCorrected((prev) => new Set([...prev, currentFile.id]));
+    onFileCorrected?.(currentFile.id);
   }
 
   async function handleDoneAndNext() {
