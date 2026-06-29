@@ -1,7 +1,9 @@
+import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project } from "../types";
+import type { View, Project, AnnotationSet, MeiFile } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { authHeaders } from "../hooks/useAuth";
+import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import Hero from "./landing/Hero";
 import Features from "./landing/Features";
@@ -15,9 +17,21 @@ import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
+import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
+
+function yoloTxtToJson(yoloTxt: string, imageName: string): string {
+  const annotations = yoloTxt
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [cls, x, y, w, h] = line.trim().split(" ").map(Number);
+      return { class: cls, x_center: x, y_center: y, width: w, height: h };
+    });
+  return JSON.stringify({ imageName, annotations }, null, 2);
+}
 
 interface AppRouterProps {
   view: View;
@@ -29,7 +43,6 @@ interface AppRouterProps {
   selectedProject: Project | null;
   selectedProjectId: number | null;
   setSelectedProjectId: (id: number | null) => void;
-  encodingLogs: string[];
   pendingXmlFile: File | null;
   setPendingXmlFile: (f: File | null) => void;
   pendingImageFile: File | null;
@@ -40,6 +53,7 @@ interface AppRouterProps {
   handleLoginSuccess: (user: CurrentUser, token: string) => void;
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
+  handleEncodeResult: (ev: { session_id: string; mei_base64: string; manifest: Record<string, unknown> | null }) => void;
 }
 
 export default function AppRouter({
@@ -52,7 +66,6 @@ export default function AppRouter({
   selectedProject,
   selectedProjectId,
   setSelectedProjectId,
-  encodingLogs,
   pendingXmlFile,
   setPendingXmlFile,
   pendingImageFile,
@@ -63,6 +76,7 @@ export default function AppRouter({
   handleLoginSuccess,
   handleLogout,
   mutations,
+  handleEncodeResult,
 }: AppRouterProps) {
   const {
     createProject,
@@ -73,8 +87,11 @@ export default function AppRouter({
     updateProjectSteps,
     updateUsedImageNames,
     updateUsedModelNames,
+    updateUsedAnnotationNames,
     togglePin,
   } = mutations;
+  const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
+  const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
   switch (view) {
     case "landing":
@@ -142,7 +159,8 @@ export default function AppRouter({
             )
           }
           onStepClick={(step) => {
-            if (step === 1) setView("ic");
+            if (step === 0) setView("processing");
+            else if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
           }}
@@ -153,10 +171,12 @@ export default function AppRouter({
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],
+            annotations: selectedProject.usedAnnotationNames ?? [],
           }}
           onUsedNamesChange={(names) => {
             updateUsedImageNames(selectedProject.id, names.images);
             updateUsedModelNames(selectedProject.id, names.models);
+            updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
           onUploadImage={async (file) => {
@@ -178,19 +198,51 @@ export default function AppRouter({
             }
             return r.json();
           }}
-          onUploadModel={async (name) => {
+          onUploadModel={async (file: File) => {
+            const form = new FormData();
+            form.append("file", file);
             const r = await fetch(
               `/api/projects/${selectedProject.id}/models`,
               {
                 method: "POST",
-                headers: {
-                  ...authHeaders(),
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ name }),
-              },
-            );
+                headers: authHeaders(),
+                body: form,
+              });
             return r.json();
+          }}
+          onDeleteModel={async (modelId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/models/${modelId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
+          }}
+          onDeleteAnnotation={async (annotationId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
+          }}
+          onDownloadAnnotation={async (annotationId, format) => {
+            const r = await fetch(
+              `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
+              { headers: authHeaders() },
+            );
+            const data = await r.json();
+            const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+            if (format === "json") {
+              downloadBlob(
+                new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                `${stem}.json`,
+              );
+            } else {
+              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+            }
+          }}
+          onDeleteMei={async (meiId) => {
+            await fetch(
+              `/api/projects/${selectedProject.id}/mei/${meiId}`,
+              { method: "DELETE", headers: authHeaders() },
+            );
           }}
           onDeleteImage={async (imageId) => {
             const r = await fetch(
@@ -214,7 +266,7 @@ export default function AppRouter({
         />
       ) : null;
     case "processing":
-      return (
+      return selectedProject ? (
         <ProcessingPage
           onBack={() => setView("project")}
           onComplete={() => {
@@ -226,14 +278,71 @@ export default function AppRouter({
             }
             setView("completion");
           }}
+          streamRequest={() => {
+            const usedModelId =
+              selectedProject.models.find((m) =>
+                (selectedProject.usedModelNames ?? []).includes(m.name),
+              )?.id ?? "";
+            const usedImageIds = selectedProject.images
+              .filter((i) => selectedProject.usedImageNames.includes(i.name))
+              .map((i) => i.id);
+            return fetch(`/api/projects/${selectedProject.id}/predict`, {
+              method: "POST",
+              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model_id: usedModelId,
+                image_ids: usedImageIds,
+              }),
+            });
+          }}
+          onResult={(ev: { annotations: AnnotationSet[] }) => {
+            setProjects((prev) =>
+              prev.map((p) =>
+                p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
+              ),
+            );
+          }}
         />
-      );
+      ) : null;
     case "completion":
       return (
         <CompletionPage
           onContinue={() => setView("ic")}
           onBackToProject={() => setView("project")}
           logsFileName="annotatorlogs.txt"
+          onDownloadAnnotations={
+            selectedProject?.annotations?.length
+              ? async () => {
+                  for (const ann of selectedProject.annotations) {
+                    const r = await fetch(
+                      `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
+                      { headers: authHeaders() },
+                    );
+                    const data = await r.json();
+                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+                  }
+                }
+              : undefined
+          }
+          onDownloadAnnotationsJson={
+            selectedProject?.annotations?.length
+              ? async () => {
+                  for (const ann of selectedProject.annotations) {
+                    const r = await fetch(
+                      `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
+                      { headers: authHeaders() },
+                    );
+                    const data = await r.json();
+                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+                    downloadBlob(
+                      new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                      `${stem}.json`,
+                    );
+                  }
+                }
+              : undefined
+          }
         />
       );
     case "ic":
@@ -286,7 +395,7 @@ export default function AppRouter({
         />
       );
     case "encoding-processing":
-      return (
+      return pendingXmlFile ? (
         <ProcessingPage
           {...STEP_TIMING}
           singleLabel="processing"
@@ -294,15 +403,20 @@ export default function AppRouter({
           onBack={() => setView("ic")}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 3),
-              );
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
             }
             setView("encoding-completion");
           }}
+          streamRequest={() => {
+            const form = new FormData();
+            form.append("xml_file", pendingXmlFile!);
+            if (pendingImageFile) form.append("image_file", pendingImageFile);
+            return fetch("/api/encode-upload", { method: "POST", body: form });
+          }}
+          onResult={handleEncodeResult}
+          onLogsReady={setEncodingLogs}
         />
-      );
+  ) : null;
     case "encoding-completion":
       return (
         <CompletionPage
@@ -310,6 +424,8 @@ export default function AppRouter({
           continueLabel="correction"
           onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}
+          logsFileName="encoding-logs.txt"
+          logContent={encodingLogs.join("\n")}
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
         />
@@ -320,15 +436,25 @@ export default function AppRouter({
           project={selectedProject}
           meiFiles={selectedProject.meiFiles}
           onFinish={() => {
+            setOriginalMeiFiles([...(selectedProject?.meiFiles ?? [])]);
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
                 selectedProjectId,
                 Math.max(selectedProject.stepsUnlocked, 4),
               );
             }
-            setView("project");
+            setView("neon-completion");
           }}
           onBack={() => setView("encoding-completion")}
+        />
+      ) : null;
+    case "neon-completion":
+      return selectedProject ? (
+        <NeonCompletionPage
+          project={selectedProject}
+          originalMeiFiles={originalMeiFiles}
+          onSendToCantus={() => setView("sending")}
+          onBackToProject={() => setView("project")}
         />
       ) : null;
     case "sending":

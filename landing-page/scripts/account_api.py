@@ -45,7 +45,7 @@ class ChangePasswordBody(BaseModel):
 def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELEct password_hash FROM users WHERE id=%s", (user["id"],))
+    cur.execute("SELECT password_hash FROM users WHERE id=%s", (user["id"],))
     row = cur.fetchone()
     cur.close(); con.close()
     if not row or not verify_password(body.old_password, row[0]):
@@ -106,13 +106,22 @@ def get_usage(user=Depends(get_current_user)):
 @router.delete("/me")
 def delete_me(user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT id FROM projects WHERE user_id=%s", (user["id"], ))
-    pids = [r[0] for r in cur.fetchall()]
-    for pid in pids:
-        cur.execute("DELETE FROM mei_files WHERE project_id=%s", (pid, ))
-        cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
-        cur.execute("DELETE FOM project_models WHERE project_id=%s", (pid, ))
-    cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
-    cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
-    con.commit(); cur.close(); con.close()
+    try:
+        cur.execute("SELECT id FROM projects WHERE user_id=%s", (user["id"], ))
+        pids = [r[0] for r in cur.fetchall()]
+        for pid in pids:
+            cur.execute("DELETE FROM annotations WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM activity_log WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM project_logs WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM mei_files WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM project_models WHERE project_id=%s", (pid, ))
+        cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
+        cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise HTTPException(status_code=500, detail="account deletion failed")
+    finally:
+        cur.close(); con.close()
     return {"ok": True}

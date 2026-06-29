@@ -12,6 +12,10 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
+  streamRequest?: () => Promise<Response>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onResult?: (data: any) => void;
+  onLogsReady?: (logs: string[]) => void
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -23,6 +27,9 @@ export default function ProcessingPage({
   intervalMs = 100,
   completionDelayMs = 400,
   logs = [],
+  streamRequest,
+  onResult,
+  onLogsReady,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -35,8 +42,12 @@ export default function ProcessingPage({
   const [cancelPrompt, setCancelPrompt] = useState(false);
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
+  const streamAbortRef = useRef<AbortController | null>(null);
   const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
+  const [timeDisplay, setTimeDisplay] = useState<string>("estimating...")
   const logEndRef = useRef<HTMLDivElement>(null);
+  const startTimeRef = useRef(Date.now());
+  const progressRef = useRef(0);
 
   useEffect(() => {
     if (!logs || logs.length === 0) return;
@@ -58,7 +69,42 @@ export default function ProcessingPage({
     pausedRef.current = cancelPrompt;
   }, [cancelPrompt]);
 
+    useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+
   useEffect(() => {
+    const timer = setInterval(() => {
+      const p = progressRef.current;
+      if (p >= 100) {
+        setTimeDisplay("");
+        clearInterval(timer);
+        return;
+      }
+      const elapsedMs = Date.now() - startTimeRef.current;
+      if (p <= 0) {
+        setTimeDisplay("estimating...");
+        return;
+      }
+      const totalMs = elapsedMs / (p / 100);
+      const remainingMs = Math.max(0, totalMs - elapsedMs);
+      const s = Math.round(remainingMs / 1000);
+      if (s <= 0) {
+        setTimeDisplay("almost done...");
+        return;
+      }
+      if (s >= 60) {
+        setTimeDisplay(`~${Math.floor(s / 60)}m ${s % 60}s remaining`);
+      } else {
+        setTimeDisplay(`~${s}s remaining`);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  })
+
+  useEffect(() => {
+    if (streamRequest) return;
+
     const reveal = (stageIdx: number, key: keyof Stage, ms: number) =>
       setTimeout(
         () =>
@@ -71,7 +117,6 @@ export default function ProcessingPage({
     const timers = singleLabel
       ? []
       : [
-          // hardcoded rnw for testing
           reveal(0, "text", 2000),
           reveal(0, "check", 3000),
           reveal(1, "text", 5000),
@@ -99,6 +144,66 @@ export default function ProcessingPage({
       timers.forEach(clearTimeout);
       clearInterval(interval);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!streamRequest) return;
+    const abort = new AbortController();
+    streamAbortRef.current = abort;
+
+    const STAGE_IDX: Record<string, number> = { checking: 0, validating: 1, processing: 2 };
+    const STAGE_PROGRESS: Record<string, number> = { checking: 33, validating: 66, processing: 100 };
+
+    async function run() {
+      const collectedLogs: string[] = [];
+      try {
+        const resp = await streamRequest!();
+        if (!resp.ok || !resp.body) return;
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === "stage") {
+              const idx = STAGE_IDX[ev.name];
+              if (idx !== undefined)
+                setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, text: true } : s)));
+            }
+            if (ev.type === "stage_done") {
+              const idx = STAGE_IDX[ev.name];
+              if (idx !== undefined) {
+                setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, check: true } : s)));
+                setProgress(STAGE_PROGRESS[ev.name] ?? 0);
+              }
+            }
+            if (ev.type === "log") {
+              collectedLogs.push(ev.message);
+              setRevealedLogs((prev) => [...prev, ev.message]);
+            }
+            if (ev.type === "result" && onResult) onResult(ev);
+            if (ev.type === "error") setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
+            if (ev.type === "done" && !completedRef.current) {
+              completedRef.current = true;
+              onLogsReady?.(collectedLogs);
+              setTimeout(onComplete, completionDelayMs);
+            }
+          }
+        }
+      } catch (e) {
+        if ((e as Error).name !== "AbortError")
+          setRevealedLogs((prev) => [...prev, `error: ${(e as Error).message}`]);
+      }
+    }
+
+    run();
+    return () => abort.abort();
   }, []);
 
   return (
@@ -138,8 +243,8 @@ export default function ProcessingPage({
           />
         </div>
 
-        {/* cancel */}
-        <div className="mt-4">
+        {/* cancel + time estimate */}
+        <div className="mt-4 flex items-center">
           {!cancelPrompt ? (
             <button
               onClick={() => setCancelPrompt(true)}
@@ -151,7 +256,7 @@ export default function ProcessingPage({
             <div className="flex items-center gap-3 text-sm text-white">
               <span> are you sure? </span>
               <button
-                onClick={onBack}
+                onClick={() => { streamAbortRef.current?.abort(); onBack(); }}
                 className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
               >
                 yes
@@ -163,6 +268,11 @@ export default function ProcessingPage({
                 no
               </button>
             </div>
+          )}
+          {!cancelPrompt && timeDisplay && (
+            <span className="flex-1 text-center text-white/60 text-sm font-mono">
+              {timeDisplay}
+            </span>
           )}
         </div>
 

@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { Project, ProjectModel } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
+import { authHeaders } from "../../hooks/useAuth";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
@@ -10,10 +11,10 @@ import FileDropZone from "../shared/FileDropZone";
 interface ModelTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectModel>>;
-  usedNames: { images: string[]; models: string[] };
+  usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
-  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
-  onUploadModel: (name: string) => Promise<{ id: string; name: string }>;
+  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
+  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   setValidationError: (e: string | null) => void;
 }
 
@@ -29,12 +30,17 @@ export default function ModelTab({
   const modelFileInputRef = useRef<HTMLInputElement>(null);
 
   // model actions
-  const deleteModel = (id: string) => {
+  const deleteModel = async (id: string) => {
+    section.setMenu(null);
+    const r = await fetch(`/api/projects/${project.id}/models/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!r.ok) return;
     onUpdateProject({
       ...project,
       models: project.models.filter((m) => m.id !== id),
     });
-    section.setMenu(null);
   };
 
   const renameModel = () => {
@@ -53,11 +59,11 @@ export default function ModelTab({
   };
 
   const handleModelFiles = async (files: FileList | File[]) => {
-    const valid = Array.from(files).filter((f) => /\.(h5|hdf5)$/i.test(f.name));
+    const valid = Array.from(files).filter((f) => /\.pt$/i.test(f.name));
     if (valid.length === 0) return;
     const entries = await Promise.all(
       valid.map(async (f) => {
-        const result = await onUploadModel(f.name);
+        const result = await onUploadModel(f);
         return { id: result.id, name: result.name || f.name };
       }),
     );
@@ -111,7 +117,7 @@ export default function ModelTab({
                   fontWeight="bold"
                   fontFamily="monospace"
                 >
-                  H5
+                  PT
                 </text>
               </svg>
             )}
@@ -193,7 +199,7 @@ export default function ModelTab({
               handleModelFiles(e.dataTransfer.files);
             }}
             onClick={() => modelFileInputRef.current?.click()}
-            label="drag & drop .h5 or .hdf5 files here"
+            label="drag & drop .pt files here"
           >
             <button
               onClick={(e) => {
@@ -208,7 +214,7 @@ export default function ModelTab({
           <input
             ref={modelFileInputRef}
             type="file"
-            accept=".h5,.hdf5"
+            accept=".pt"
             multiple
             className="hidden"
             onChange={(e) => {

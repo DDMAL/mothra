@@ -17,14 +17,14 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
     null,
   );
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const selectedProject =
     projects.find((p) => p.id === selectedProjectId) ?? null;
 
-  const mutations = useProjectMutations(setProjects);
+  const mutations = useProjectMutations(setProjects, setMutationError);
 
   const {
-    encodingLogs,
     pendingXmlFile,
     setPendingXmlFile,
     pendingImageFile,
@@ -32,7 +32,8 @@ export default function App() {
     meiContent,
     handleDownloadManifest,
     handleDownloadMei,
-  } = useEncodingFlow(view, selectedProjectId, setProjects);
+    handleEncodeResult,
+  } = useEncodingFlow(selectedProjectId, setProjects);
 
   useScrollFade(view);
 
@@ -71,6 +72,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {mutationError && (
+        <div className="fixed top-14 inset-x-0 z-50 flex justify-center pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-3 bg-[#1D3335] text-white text-sm px-5 py-2.5 rounded-xl shadow-lg mt-2">
+            <span>{mutationError}</span>
+            <button
+              onClick={() => setMutationError(null)}
+              className="text-white/60 hover:text-white cursor-pointer text-base leading-none"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       <Navbar
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -92,7 +106,6 @@ export default function App() {
         selectedProject={selectedProject}
         selectedProjectId={selectedProjectId}
         setSelectedProjectId={setSelectedProjectId}
-        encodingLogs={encodingLogs}
         pendingXmlFile={pendingXmlFile}
         setPendingXmlFile={setPendingXmlFile}
         pendingImageFile={pendingImageFile}
@@ -103,6 +116,7 @@ export default function App() {
         handleLoginSuccess={handleLoginSuccess}
         handleLogout={handleLogout}
         mutations={mutations}
+        handleEncodeResult={handleEncodeResult}
       />
       <Footer />
     </div>

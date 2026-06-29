@@ -12,9 +12,10 @@ import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
 
 const STEPS = [
+  "annotate",
   "interactive classifier",
   "encoding",
-  "neon.js",
+  "neon",
   "send to cantus ultimus",
 ];
 
@@ -23,15 +24,19 @@ interface ProjectDetailProps {
   onBack: () => void;
   onContinue: () => void;
   onUpdateProject: (updated: Project) => void;
-  usedNames: { images: string[]; models: string[] };
-  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  usedNames: { images: string[]; models: string[]; annotations: string[] };
+  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
-  onUploadModel: (name: string) => Promise<{ id: string; name: string }>;
+  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
+  onDeleteModel: (modelId: string) => Promise<void>;
+  onDeleteAnnotation: (annotationId: string) => Promise<void>;
+  onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
+  onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
 }
 
@@ -49,6 +54,10 @@ export default function ProjectDetail({
   onUploadImage,
   onUploadModel,
   onDeleteImage,
+  onDeleteModel,
+  onDeleteAnnotation,
+  onDownloadAnnotation,
+  onDeleteMei,
   onDeleteProject,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
@@ -63,6 +72,7 @@ export default function ProjectDetail({
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
   const meiSection = useAssetSection(project.meiFiles);
+  const annSection = useAssetSection(project.annotations ?? []);
 
   const switchTab = (
     tab: "images" | "models" | "annotations" | "mei files",
@@ -71,8 +81,10 @@ export default function ProjectDetail({
     imgSection.clearSelection();
     mdlSection.clearSelection();
     meiSection.clearSelection();
+    annSection.clearSelection();
     imgSection.setPage(0);
     mdlSection.setPage(0);
+    annSection.setPage(0);
   };
 
   const tabs = [
@@ -93,6 +105,8 @@ export default function ProjectDetail({
         mdlSection.clearSelection();
         meiSection.setMenu(null);
         meiSection.clearSelection();
+        annSection.clearSelection();
+        annSection.setMenu(null);
       }
       if (e.key === "Delete" || e.key === "Backspace") {
         if (
@@ -113,13 +127,37 @@ export default function ProjectDetail({
           });
         }
         if (activeTab === "models" && mdlSection.selectedIds.size > 0) {
-          onUpdateProject({
-            ...project,
-            models: project.models.filter(
-              (m) => !mdlSection.selectedIds.has(m.id),
-            ),
-          });
+          const ids = [...mdlSection.selectedIds];
+          const deleted = new Set(ids);
           mdlSection.clearSelection();
+          Promise.all(ids.map((id) => onDeleteModel(id))).then(() => {
+            onUpdateProject({
+              ...project,
+              models: project.models.filter((m) => !deleted.has(m.id)),
+            });
+          });
+        }
+        if (activeTab === "annotations" && annSection.selectedIds.size > 0) {
+          const ids = [...annSection.selectedIds];
+          const deleted = new Set(ids);
+          annSection.clearSelection();
+          Promise.all(ids.map((id) => onDeleteAnnotation(id))).then(() => {
+            onUpdateProject({
+              ...project,
+              annotations: project.annotations.filter((a) => !deleted.has(a.id)),
+            });
+          });
+        }
+        if (activeTab === "mei files" && meiSection.selectedIds.size > 0) {
+          const ids = [...meiSection.selectedIds];
+          const deleted = new Set(ids);
+          meiSection.clearSelection();
+          Promise.all(ids.map((id) => onDeleteMei(id))).then(() => {
+            onUpdateProject({
+              ...project,
+              meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
+            });
+          });
         }
       }
     };
@@ -130,13 +168,14 @@ export default function ProjectDetail({
     imgSection,
     mdlSection,
     meiSection,
+    annSection,
     project,
     onDeleteImage,
     onUpdateProject,
   ]);
 
   const selectionButtons = (
-    noun: "image" | "model",
+    noun: "image" | "model" | "annotation",
     count: number,
     onUse: () => void,
     onDelete: () => void,
@@ -174,7 +213,7 @@ export default function ProjectDetail({
               progress:
             </span>
             {STEPS.map((label, i) => {
-              const stepNum = i + 1;
+              const stepNum = i;
               const unlocked = stepsUnlocked >= stepNum;
               return (
                 <button
@@ -347,6 +386,75 @@ export default function ProjectDetail({
                   mdlSection.clearSelection();
                 },
               )}
+              {activeTab === "annotations" && annSection.selectedIds.size > 0 && (
+                <>
+                  {selectionButtons(
+                    "annotation",
+                    annSection.selectedIds.size,
+                    () => {
+                      const names = project.annotations
+                        .filter((a) => annSection.selectedIds.has(a.id))
+                        .map((a) => a.imageName);
+                      onUsedNamesChange({
+                        ...usedNames,
+                        annotations: [
+                          ...usedNames.annotations,
+                          ...names.filter((n) => !usedNames.annotations.includes(n)),
+                        ],
+                      });
+                      annSection.clearSelection();
+                      setValidationError(null);
+                    },
+                    async () => {
+                      const ids = [...annSection.selectedIds];
+                      const deleted = new Set(ids);
+                      annSection.clearSelection();
+                      await Promise.all(ids.map((id) => onDeleteAnnotation(id)));
+                      onUpdateProject({
+                        ...project,
+                        annotations: project.annotations.filter((a) => !deleted.has(a.id)),
+                      });
+                    },
+                  )}
+                  <button
+                    onClick={() =>
+                      project.annotations
+                        .filter((a) => annSection.selectedIds.has(a.id))
+                        .forEach((a) => onDownloadAnnotation(a.id, "txt"))
+                    }
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.txt)
+                  </button>
+                  <button
+                    onClick={() =>
+                      project.annotations
+                        .filter((a) => annSection.selectedIds.has(a.id))
+                        .forEach((a) => onDownloadAnnotation(a.id, "json"))
+                    }
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.json)
+                  </button>
+                </>
+              )}
+              {activeTab === "mei files" && meiSection.selectedIds.size > 0 && (
+                <button
+                  onClick={async () => {
+                    const ids = [...meiSection.selectedIds];
+                    const deleted = new Set(ids);
+                    meiSection.clearSelection();
+                    await Promise.all(ids.map((id) => onDeleteMei(id)));
+                    onUpdateProject({
+                      ...project,
+                      meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
+                    });
+                  }}
+                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                >
+                  delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                </button>
+              )}
           </div>
 
           {/* tab bar + content */}
@@ -398,13 +506,20 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab annotations={project.annotations} />
+              <AnnotationsTab 
+                annotations={project.annotations} 
+                projectId={project.id}
+                section={annSection}
+                usedNames={usedNames}
+                onUsedNamesChange={onUsedNamesChange}
+              />
             )}
             {activeTab === "mei files" && (
               <MeiTab
                 project={project}
                 section={meiSection}
                 onUpdateProject={onUpdateProject}
+                onDeleteMei={onDeleteMei}
               />
             )}
           </div>
@@ -437,6 +552,16 @@ export default function ProjectDetail({
                     return;
                   }
                   setValidationError(null);
+                } else if (stepsUnlocked === 1) {
+                  if (usedNames.annotations.length === 0) {
+                    setValidationError("must select at least one annotation!");
+                    return;
+                  }
+                  if (usedNames.annotations.length !== usedNames.images.length) {
+                    setValidationError("number of annotations must match number of images!");
+                    return;
+                  }
+                  setValidationError(null);
                 }
                 onContinue();
               }}
@@ -463,6 +588,20 @@ export default function ProjectDetail({
                 </button>
               </div>
             ))}
+            {stepsUnlocked >= 1 && (
+              <>
+                <hr className="border-white/40 my-1" />
+                {usedNames.annotations.map((name) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="truncate flex-1 mr-2">{name}</span>
+                    <button
+                      onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
+                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                    >×</button>
+                  </div>
+                ))}
+              </>
+            )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => (
               <div key={name} className="flex items-center justify-between">

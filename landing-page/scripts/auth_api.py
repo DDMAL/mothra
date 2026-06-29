@@ -12,11 +12,13 @@ import io, zipfile
 
 router = APIRouter()
 
-
 SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
+
+MODELS_DIR = Path(__file__).parent / "stored_models"
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR = Path(__file__).parent.parent / "public" / "neon" / "samples" / "manifests"
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +95,17 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
         )    
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS annotations (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id),
+            image_id TEXT,
+            image_name TEXT NOT NULL,
+            yolo_txt TEXT NOT NULL,
+            model_id TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
     con.commit()
     cur.close()
     con.close()
@@ -160,6 +173,28 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_models ADD COLUMN file_path TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        con.close()
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE projects ADD COLUMN used_annotation_names TEXT DEFAULT '[]'")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
@@ -277,7 +312,7 @@ def me(user=Depends(get_current_user)):
     return user
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json = row
     cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
     cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
@@ -285,15 +320,29 @@ def _project_row_to_dict(cur, row, username):
     cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
     mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4]}
            for r in cur.fetchall()]
+    cur.execute(
+        "SELECT id, image_id, image_name FROM annotations WHERE project_id=%s", (pid,)
+    )
+    annotations = [
+        {
+            "id": r[0],
+            "imageName": r[2],
+            "imageSrc": f"/api/images/{r[1]}" if r[1] else None,
+            "txtName": f"annotation-{r[0]}.txt",
+            "jsonName": "",
+        }
+        for r in cur.fetchall()
+    ]
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
         "usedImageNames": json.loads(used_json),
         "usedModelNames": json.loads(used_model_json or "[]"),
         "images": images, "models": models, "meiFiles": mei,
-        "annotations": [], "deletedAt": deleted_at,
+        "annotations": annotations, "deletedAt": deleted_at,
         "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
         "isPinned": bool(is_pinned),
+        "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
     }
 
 def _log_activity(cur, project_id: int, action_type: str, detail: str = ""):
@@ -308,7 +357,7 @@ def list_projects(user=Depends(get_current_user)):
     cur = con.cursor()
     cur.execute(
         "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, " \
-        " last_opened_at, is_pinned"
+        " last_opened_at, is_pinned, used_annotation_names"
         " FROM projects WHERE user_id=%s",
         (user["id"],)
     )
@@ -351,7 +400,8 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     con.close()
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
-            "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], "deletedAt": None}
+            "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], 
+            "deletedAt": None, "usedAnnotationNames": []}
 
 class UpdateProjectBody(BaseModel):
     name: Optional[str] = None
@@ -361,6 +411,7 @@ class UpdateProjectBody(BaseModel):
     deletedAt: Optional[str] = None
     lastOpenedAt: Optional[str] = None
     isPinned: Optional[bool] = None
+    usedAnnotationNames: Optional[list] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -391,6 +442,9 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
                     (body.lastOpenedAt, project_id))
     if body.isPinned is not None:
         cur.execute("UPDATE projects SET is_pinned=%s WHERE id=%s", (body.isPinned, project_id))
+    if body.usedAnnotationNames is not None:
+        cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
+                    (json.dumps(body.usedAnnotationNames), project_id))
     con.commit()
     cur.close()
     con.close()
@@ -420,6 +474,8 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     if not row or row[0] != user["id"]:
         cur.close(); con.close()
         raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM annotations WHERE project_id=%s", (project_id,))
+    cur.execute("DELETE FROM project_logs WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM activity_log WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
@@ -473,7 +529,9 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
 def get_image(image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT data, mime_type FROM project_images WHERE id=%s", (image_id, ))
+    cur.execute("SELECT data, mime_type FROM project_images WHERE id=%s "
+                " AND project_id IN (SELECT id FROM projects WHERE user_id=%s)", 
+                (image_id, user["id"] ))
     row = cur.fetchone()
     cur.close()
     con.close()
@@ -486,8 +544,9 @@ def get_image_meta(image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT name, mime_type, octet_length(data), created_at FROM project_images WHERE id=%s",
-        (image_id,)
+        "SELECT name, mime_type, octet_length(data), created_at FROM project_images "
+        " WHERE id=%s AND project_id IN (SELECT id FROM projects WHERE user_id=%s)",
+        (image_id, user["id"])
     )
     row = cur.fetchone()
     cur.close(); con.close()
@@ -517,6 +576,36 @@ def delete_image(project_id: int, image_id: str, user=Depends(get_current_user))
         raise HTTPException(status_code=404, detail="Image not found")
     cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
     _log_activity(cur, project_id, "image_deleted", image_id)
+    con.commit()
+    cur.close()
+    con.close()
+    return {"ok": True}
+
+@router.delete("/projects/{project_id}/annotations/{annotation_id}")
+def delete_annotation(project_id: int, annotation_id: str, user=Depends(get_current_user)):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM annotations WHERE id=%s AND project_id=%s", (annotation_id, project_id))
+    con.commit()
+    cur.close()
+    con.close()
+    return {"ok": True}
+
+@router.delete("/projects/{project_id}/mei/{mei_id}")
+def delete_mei_file(project_id: int, mei_id: str, user=Depends(get_current_user)):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute("DELETE FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
     con.commit()
     cur.close()
     con.close()
@@ -598,7 +687,7 @@ def get_mei_content(project_id: int, mei_id: str, token: str):
 @router.put("/projects/{project_id}/mei/{mei_id}/content")
 async def put_mei_content(project_id: int, mei_id: str, token: str, request: Request):
     if not _verify_edit_token(token, project_id, mei_id):
-        raise HTTPException(status_code=403, detail="invalid or expired exit token")
+        raise HTTPException(status_code=403, detail="invalid or expired edit token")
     xml_content = (await request.body()).decode("utf-8")
     con = get_db_conn(); cur = con.cursor()
     cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
@@ -668,11 +757,12 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
 
 # models
 
-class AddModelBody(BaseModel):
-    name: str
-
 @router.post("/projects/{project_id}/models")
-def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user)):
+async def add_model(
+    project_id: int, 
+    file: UploadFile = FAPIFile(...), 
+    user=Depends(get_current_user)
+):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
@@ -682,15 +772,67 @@ def add_model(project_id: int, body: AddModelBody, user=Depends(get_current_user
         con.close()
         raise HTTPException(status_code=404)
     model_id = _uuid.uuid4().hex
+    dest_dir = MODELS_DIR / str(project_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    file_path = dest_dir / f"{model_id}.pt"
+    model_bytes = await file.read()
+    file_path.write_bytes(model_bytes)
     cur.execute(
-        "INSERT INTO project_models (id, project_id, name) VALUES (%s,%s,%s)",
-        (model_id, project_id, body.name)
+        "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s,%s,%s, %s)",
+        (model_id, project_id, file.filename, str(file_path))
     )
-    _log_activity(cur, project_id, "model_added", body.name)
+    _log_activity(cur, project_id, "model_added", file.filename)
     con.commit()
     cur.close()
     con.close()
-    return {"id": model_id, "name": body.name}
+    return {"id": model_id, "name": file.filename}
+
+@router.delete("/projects/{project_id}/models/{model_id}")
+def delete_model(project_id: int, model_id: str, user=Depends(get_current_user)):
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
+    row = cur.fetchone()
+    if not row or row[0] != user["id"]:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404)
+    cur.execute(
+        "SELECT file_path FROM project_models WHERE id=%s AND project_id=%s",
+        (model_id, project_id)
+    )
+    row = cur.fetchone()
+    if not row:
+        cur.close(); con.close()
+        raise HTTPException(status_code=404, detail="model not found")
+    file_path = row[0]
+    if file_path:
+        Path(file_path).unlink(missing_ok=True)
+    cur.execute("DELETE FROM project_models WHERE id=%s", (model_id,))
+    _log_activity(cur, project_id, "model_deleted", model_id)
+    con.commit()
+    cur.close(); con.close()
+    return {"ok": True}
+
+@router.get("/projects/{project_id}/annotations/{annotation_id}")
+async def get_annotation_txt(
+    project_id: int,
+    annotation_id: str,
+    user=Depends(get_current_user),
+):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT a.yolo_txt, a.image_name"
+        " FROM annotations a"
+        " JOIN projects p ON p.id = a.project_id"
+        " WHERE a.id = %s AND a.project_id = %s AND p.user_id = %s",
+        (annotation_id, project_id, user["id"]),
+    )
+    row = cur.fetchone()
+    cur.close(); con.close()
+    if not row:
+        raise HTTPException(status_code=404)
+    return {"yoloTxt": row[0], "imageName": row[1]}
+
 
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):

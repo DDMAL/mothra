@@ -10,6 +10,7 @@ load_dotenv()
 from auth_api import router as auth_router
 from encode_api import router as encode_router
 from account_api import router as account_router
+from inference_api import router as inference_router
 from ic_api import router as ic_router
 
 app = FastAPI()
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api")
 app.include_router(encode_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
+app.include_router(inference_router, prefix="/api")
 app.include_router(ic_router, prefix="/api")
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"

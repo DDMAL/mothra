@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File as FAPIFile
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import Response, JSONResponse, StreamingResponse
 
 
 from pathlib import Path
@@ -80,67 +80,79 @@ def encode():
 async def encode_upload(
     xml_file: UploadFile = FAPIFile(...),
     image_file: Optional[UploadFile] = FAPIFile(None)):
-    session_id = _uuid.uuid4().hex[:8]
-    tmp_dir = Path(tempfile.mkdtemp())
-    logs: list[str] = []
+    # read file bytes before entering the sync generator
+    xml_bytes = await xml_file.read()
+    xml_filename = xml_file.filename or "uploaded.xml"
+    image_bytes = await image_file.read() if image_file else None
+    image_filename = image_file.filename if image_file else None
 
-    xml_path = tmp_dir / "uploaded.xml"
-    with open(xml_path, "wb") as f:
-        shutil.copyfileobj(xml_file.file, f)
+    def generate():
+        def event(obj): return f"data: {json.dumps(obj)}\n\n"
+        tmp_dir = Path(tempfile.mkdtemp())
+        session_id = _uuid.uuid4().hex[:8]
+        try:
+            # stage: checking
+            yield event({"type": "stage", "name": "checking"})
+            xml_path = tmp_dir / "uploaded.xml"
+            xml_path.write_bytes(xml_bytes)
+            yield event({"type": "log", "message": f"parsing GameraXML: {xml_filename}"})
+            glyphs = parse_gamera_xml(xml_path)
+            yield event({"type": "log", "message": f" {len(glyphs)} glyphs loaded"})
 
-    logs.append(f"parsing GameraXML: {xml_file.filename}")
-    glyphs = parse_gamera_xml(xml_path)
-    logs.append(f" {len(glyphs)} glyphs loaded")
+            page_w = page_h = 0
+            image_data_uri = None
+            if image_bytes:
+                dims = _image_dimensions(image_bytes[:65536])
+                if dims:
+                    page_w, page_h = dims
+                    yield event({"type": "log", "message": f"page size: {page_w}×{page_h}px (from {image_filename})"})
+                else:
+                    yield event({"type": "log", "message": f"warning: could not read dimensions from {image_filename}"})
+                mime = mimetypes.guess_type(image_filename or "")[0] or "image/jpeg"
+                image_data_uri = f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+            if not (page_w and page_h):
+                page_w = max((g.lrx for g in glyphs), default=800) + 10
+                page_h = max((g.lry for g in glyphs), default=1200) + 10
+                yield event({"type": "log", "message": f"page size: {page_w}×{page_h}px (estimated)"})
+            yield event({"type": "stage_done", "name": "checking"})
 
-    page_w = page_h = 0
-    image_bytes: bytes = b""
-    image_data_uri: Optional[str] = None
-    if image_file:
-        header = await image_file.read(65536)
-        rest = await image_file.read()
-        image_bytes = header + rest
-        dims = _image_dimensions(header)
-        if dims:
-            page_w, page_h = dims
-            logs.append(f"page size: {page_w}×{page_h}px (from {image_file.filename})")
-        else:
-            logs.append(f"warning: could not read dimensions from {image_file.filename}")
-        mime = mimetypes.guess_type(image_file.filename)[0] or "image/jpeg"
-        image_data_uri = f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+            # stage: validating
+            yield event({"type": "stage", "name": "validating"})
+            staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
+            yield event({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
+            glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+            assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
+            yield event({"type": "log", "message": f" {assigned} glyphs assigned to stave"})
+            yield event({"type": "stage_done", "name": "validating"})
 
-    if not (page_w and page_h):
-        page_w = max((g.lrx for g in glyphs), default=800) + 10
-        page_h = max((g.lry for g in glyphs), default=1200) + 10
-        logs.append(f"page size: {page_w}×{page_h}px (estimated — upload image for exact bounds)")
+            #stage: processing
+            yield event({"type": "stage", "name": "processing"})
+            stem = Path(xml_filename).stem
+            image_ref = Path(image_filename) if image_filename else Path("")
+            mei_bytes_out = build_mei(glyphs_by_stave, staves, image_ref, page_w, page_h, stem)
+            validation_warnings = validate_mei(mei_bytes_out)
+            for w in validation_warnings:
+                yield event({"type": "log", "message": f"[warn] {w}"})
+            yield event({"type": "log", "message": "MEI built successfully" if not validation_warnings else "MEI built with warnings"})
+            mei_b64 = base64.b64encode(mei_bytes_out).decode()
+            manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
+            if manifest:
+                (MANIFEST_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
+            _sessions[session_id] = {"mei_bytes": mei_bytes_out, "stem": stem}
+            yield event({"type": "result", "session_id": session_id, "mei_base64": mei_b64, "manifest": manifest})
+            yield event({"type": "stage_done", "name": "processing"})
+            yield event({"type": "done"})
+        except Exception as e:
+            yield event({"type": "error", "message": str(e)})
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
-    staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
-    logs.append(f" estimated {len(staves)} stave(s) from glyph positions (no stave detection provided)")
-
-    glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
-    assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
-    logs.append(f" {assigned} glyphs assigned to stave")
-
-    stem = Path(xml_file.filename).stem
-    image_ref = Path(image_file.filename) if image_file else Path("")
-    mei_bytes = build_mei(glyphs_by_stave, staves, image_ref, page_w, page_h, stem)
-    validation_warnings = validate_mei(mei_bytes)
-    for w in validation_warnings:
-        logs.append(f"[warn] {w}")
-    logs.append("MEI built successfully" if not validation_warnings else "MEI built with warnings (see above)")
-    logs.append("encoding complete!")
-
-    mei_b64 = base64.b64encode(mei_bytes).decode()
-
-    manifest = build_neon_manifest(mei_bytes, image_data_uri or str(image_ref), stem) if image_data_uri else None
-
-    if manifest:
-        (MANIFEST_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
-
-    _sessions[session_id] = {
-        "mei_bytes": mei_bytes,
-        "stem": stem,
-    }
-    return {"session_id": session_id, "mei_base64": mei_b64, "logs": logs, "manifest": manifest}
 
 @router.post("/validate-mei")
 async def validate_mei_endpoint(file: UploadFile = FAPIFile(...)):
@@ -168,6 +180,6 @@ def get_mei(session_id: str):
     return Response(
         content=s["mei_bytes"],
         media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename={s["stem"]}.mei"'},
+        headers={"Content-Disposition": f'attachment; filename="{s["stem"]}.mei"'},
     )
 

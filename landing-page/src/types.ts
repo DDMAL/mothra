@@ -14,6 +14,7 @@ export interface Project {
   stepsUnlocked: number;
   usedImageNames: string[];
   usedModelNames: string[];
+  usedAnnotationNames: string[];
   deletedAt?: number;
   lastOpenedAt?: string;
   isPinned?: boolean;
@@ -29,6 +30,7 @@ export interface AnnotationSet {
   imageSrc?: string;
   jsonName: string;
   txtName: string;
+  detectionCount?: number;
 }
 
 export interface MeiFile {
@@ -58,4 +60,5 @@ export type View =
   | "sending"
   | "send-completion"
   | "neon-editor"
+  | "neon-completion"
   | "neon-test";
