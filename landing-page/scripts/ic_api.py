@@ -46,22 +46,31 @@ IC_PUBLIC_URL = os.environ.get("IC_PUBLIC_URL", "http://localhost:8000").rstrip(
 # ---------------------------------------------------------------------------
 # Bounding boxes
 # ---------------------------------------------------------------------------
-#
-# IC cannot create a session without a bbox annotation document. Real YOLO
-# inference (POST /api/predict) does not exist in mothra yet, so this is a
-# PLACEHOLDER that lays a coarse grid of boxes over the page just so the
-# embed → classify → encode loop is exercisable end to end. Swap the body
-# of generate_bboxes() for the real detector output (MOTHRA JSON / YOLO TXT)
-# when it lands — nothing else in this module changes.
 
-def generate_bboxes(image_bytes: bytes) -> bytes:
+def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tuple[bytes, str]:
     """Return a MOTHRA-JSON bbox document (bytes) for ``image_bytes``.
 
-    STUB. Emits a coarse grid of boxes covering the page so a created IC
-    session has glyphs to display. ``classId`` 2 == Neumes (see IC's
+    Returns stored YOLO detections if available, otherwise emits a coarse placeholder grid.
+      ``classId`` 2 == Neumes (see IC's
     ``ingest._MOTHRA_CLASS_TO_CATEGORY``). The schema is
     ``{"annotations": [{"id", "classId", "bbox": [ulx, uly, w, h]}, ...]}``.
     """
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute(
+            "SELECT yolo_txt FROM annotations"
+            " WHERE project_id=%s AND image_name=%s"
+            " ORDER BY created_at DESC LIMIT 1",
+            (project_id, image_name),
+        )
+        row = cur.fetchone()
+        if row and row[0].strip():
+            return row[0].encode(), "yolo"
+    finally:
+        cur.close()
+        con.close()
+
     try:
         from PIL import Image  # available in the mothra venv
 
@@ -95,7 +104,7 @@ def generate_bboxes(image_bytes: bytes) -> bytes:
                     ],
                 }
             )
-    return json.dumps({"annotations": annotations}).encode()
+    return json.dumps({"annotations": annotations}).encode(), "json"
 
 
 # ---------------------------------------------------------------------------
@@ -188,12 +197,12 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
     frontend embeds; the created session id comes back via postMessage.
     """
     image_bytes, mime_type = _project_image(project_id, body.imageName, user["id"])
-    annotations = generate_bboxes(image_bytes)
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, body.imageName)
 
     try:
         status, raw = _post_multipart(
             f"{IC_API_URL}/staging",
-            fields={"annotations_format": "json"},
+            fields={"annotations_format": ann_format},
             files=[
                 ("page_image", body.imageName, mime_type, image_bytes),
                 ("annotations", "annotations.json", "application/json", annotations),
