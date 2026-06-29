@@ -42,17 +42,41 @@ Schema is migrated forward via `_migrate_db()` in `auth_api.py` — new columns 
 
 ## Running locally
 
-**Both servers must be running simultaneously.**
+**Three servers must be running simultaneously** — the frontend, its backend, and the Interactive Classifier service (the IC step iframes it):
+
+| Port | Process | Role |
+|---|---|---|
+| `5173` | Vite dev server (landing-page) | Open this in the browser; proxies `/api`, `/neon`, `/Neon-gh` → `:8001` |
+| `8001` | landing-page FastAPI (`uvicorn`) | `/api/*`; also reaches IC server-to-server |
+| `8000` | IC service (`ic/` submodule) | IC REST API **and** the built IC SPA (served single-origin) |
+
+### One command (recommended)
 
 ```bash
-# Backend (terminal 1)
-cd landing-page/scripts
-source .venv/bin/activate
+./dev.sh          # starts all three; Ctrl-C tears all three down cleanly
+./dev.sh -b       # rebuild the IC frontend bundle first (do this after the
+                  #   ic/ submodule's frontend changes — else the iframe
+                  #   serves a stale build)
+./dev.sh -f       # free the ports first if something is stuck on them
+./dev.sh -h       # help
+```
+
+Ports are overridable (`WEB_PORT=3000 ./dev.sh`). The script assumes the venvs
+already exist (`ic/api/.venv`, `landing-page/scripts/.venv`) and
+`landing-page/node_modules` is installed — it runs them, it doesn't create them.
+
+### Manual (one terminal each)
+
+```bash
+# Terminal 1 — IC service (:8000)
+cd ic/api && HOST=127.0.0.1 PORT=8000 .venv/bin/ic-api
+
+# Terminal 2 — landing-page backend (:8001)
+cd landing-page/scripts && source .venv/bin/activate
 uvicorn main:app --reload --port 8001
 
-# Frontend (terminal 2)
-cd landing-page
-npm run dev
+# Terminal 3 — landing-page frontend (:5173)
+cd landing-page && npm run dev
 ```
 
 Open `http://localhost:5173`. All `/api/*` calls proxy to the backend automatically.
@@ -61,6 +85,8 @@ Open `http://localhost:5173`. All `/api/*` calls proxy to the backend automatica
 ```
 DATABASE_URL=postgresql://...   # Neon connection string
 MOTHRA_SECRET=...               # JWT signing key
+IC_API_URL=http://localhost:8000    # how :8001 reaches IC (server-to-server)
+IC_PUBLIC_URL=http://localhost:8000 # how the browser/iframe reaches IC's SPA
 ```
 
 ---
