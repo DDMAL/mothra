@@ -32,7 +32,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth_api import get_current_user, get_db_conn
+from auth_api import get_current_user, get_db_conn, release_db_conn
 
 router = APIRouter()
 
@@ -68,7 +68,7 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
             return row[0].encode(), "yolo"
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     try:
         from PIL import Image  # available in the mothra venv
@@ -182,7 +182,7 @@ def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[byte
         return bytes(img[0]), (img[1] or "image/png")
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
 
 @router.post("/projects/{project_id}/ic/start")

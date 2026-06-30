@@ -3,12 +3,34 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
+from slowapi import Limiter
+from slowwapi.util import get_remote_address
 import psycopg2, psycopg2.extras, psycopg2.errors, os, secrets, json, mimetypes, hashlib, base64
 import uuid as _uuid
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import bcrypt
 import io, zipfile
+
+limiter = Limiter(key_func=get_remote_address)
+# connection pooling
+from psycopg2 import pool as _pg_pool
+
+_db_pool: "_pg_pool.ThreadedConnectionPool | None" = None
+
+def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
+    global _db_pool
+    if _db_pool is None:
+        _db_pool = _pg_pool.ThreadedConnectionPool(
+            minconn=2, maxconn=15, dsn=os.environ["DATABASE_URL"]
+        )
+    return _db_pool
+
+def get_db_conn():
+    return _get_pool().getconn()
+
+def release_db_conn(con) -> None:
+    _get_pool().putconn(con)
 
 router = APIRouter()
 
@@ -106,9 +128,20 @@ def init_db():
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
+
+    # performance: db indexes
+    for _idx in [
+        "CREATE INDEX IF NOT EXISTS idx_project_images_pid ON project_images(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_project_models_pid ON project_models(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_mei_files_pid      ON mei_files(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_annotations_pid    ON annotations(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
+    ]:
+        cur.execute(_idx)
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
 
 init_db()
 
@@ -123,7 +156,7 @@ def _migrate_db():
         con.rollback()  # column already exists
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -134,7 +167,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -145,7 +178,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -156,7 +189,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -167,7 +200,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -178,7 +211,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -189,7 +222,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -200,7 +233,7 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close()
-        con.close()
+        release_db_conn(con)
 
     # startup cleanup of neon manifests to prevent excess accumulation
     import time as _time
@@ -254,7 +287,7 @@ def get_current_user(authorization: str = Header(None)):
     )
     row = cur.fetchone()
     cur.close()
-    con.close()
+    release_db_conn(con)
     if not row:
         raise HTTPException(status_code=401, detail="user not found")
     return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], 
@@ -272,6 +305,7 @@ class LoginBody(BaseModel):
     password: str
 
 @router.post("/register")
+@limiter.limit("5/minute")
 def register(body: RegisterBody):
     con = get_db_conn()
     cur = con.cursor()
@@ -286,16 +320,17 @@ def register(body: RegisterBody):
     except psycopg2.errors.UniqueViolation:
         con.rollback()
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=409, detail="username or email already taken")
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {
         "token": create_token(user_id),
         "user": {"id": user_id, "username": body.username, "email": body.email, "firstName": body.first_name}
     }
 
 @router.post("/login")
+@limiter.limit("10/minute")
 def login(body: LoginBody):
     con = get_db_conn()
     cur = con.cursor()
@@ -305,13 +340,17 @@ def login(body: LoginBody):
     )
     row = cur.fetchone()
     cur.close()
-    con.close()
+    release_db_conn(con)
     if not row or not verify_password(body.password, row[4]):
         raise HTTPException(status_code=401, detail="invalid credentials")
     return {
         "token": create_token(row[0]),
         "user": {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3]}
     }
+
+@router.post("/auth/refresh")
+def refresh_token(user=Depends(get_current_user)):
+    return {"access_token": create_token(user["id"]), "token_type": "bearer"}
 
 @router.get("/me")
 def me(user=Depends(get_current_user)):
@@ -362,15 +401,68 @@ def list_projects(user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, " \
+        "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, "
         " last_opened_at, is_pinned, used_annotation_names"
         " FROM projects WHERE user_id=%s",
         (user["id"],)
     )
     rows = cur.fetchall()
-    result=[_project_row_to_dict(cur, row, user["username"]) for row in rows]
+    if not rows:
+        cur.close(); release_db_conn(con); return []
+    
+    pids = tuple(r[0] for r in rows)
+
+    cur.execute("SELECT project_id, id, name FROM  project_images WHERE project_id IN %s", (pids,))
+    images_by_pid: dict = {}
+    for pid, iid, iname in cur.fetchall():
+        images_by_pid.setdefault(pid, []).append({"id": iid, "name": iname})
+
+    cur.execute("SELECT project_id, id, name FROM project_models WHERE project_id IN %s", (pids,))
+    models_by_pid: dict = {}
+    for pid, mid, mname in cur.fetchall():
+        models_by_pid.setdefault(pid, []).append({"id": mid, "name": mname})
+
+    cur.execute(
+        "SELECT project_id, id, name, xml_content, corrected, image_name"
+        " FROM mei_files WHERE project_id IN %s", (pids,)
+    )
+    mei_by_pid: dict = {}
+    for pid, fid, fname, xml, corr, iname in cur.fetchall():
+        mei_by_pid.setdefault(pid, []).append(
+            {"id": fid, "name": fname, "xmlContent": xml, "corrected": bool(corr), "imageName": iname}
+        )
+
+    cur.execute(
+        "SELECT project_id, id, image_id, image_name FROM annotations WHERE project_id IN %s",
+        (pids,)
+    )
+    ann_by_pid: dict = {}
+    for pid, aid, img_id, img_name in cur.fetchall():
+        ann_by_pid.setdefault(pid, []).append({
+            "id": aid, "imageName": img_name,
+            "imageSrc": f"/api/images/{img_id}" if img_id else None,
+            "txtName": f"annotation-{aid}.txt", "jsonName": "",
+        })
+
+    result = []
+    for row in rows:
+        pid = row[0]
+        result.append({
+            "id": pid, "name": row[1], "user": user["username"],
+            "stepsUnlocked": row[2],
+            "usedImageNames": json.loads(row[3]),
+            "usedModelNames": json.loads(row[4] or "[]"),
+            "images": images_by_pid.get(pid, []),
+            "models": models_by_pid.get(pid, []),
+            "meiFiles": mei_by_pid.get(pid, []),
+            "annotations": ann_by_pid.get(pid, []),
+            "deletedAt": row[5],
+            "lastOpenedAt": str(row[6]) if row[6] else None,
+            "isPinned": bool(row[7]),
+            "usedAnnotationNames": json.loads(row[8] or "[]"),
+        })
     cur.close()
-    con.close()
+    release_db_conn(con)
     return result
 
 @router.get("/projects/{project_id}")
@@ -384,10 +476,10 @@ def get_project(project_id: int, user=Depends(get_current_user)):
     )
     row = cur.fetchone()
     if not row:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     result = _project_row_to_dict(cur, row, user["username"])
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return result
 
 @router.get("/projects/{project_id}/activity")
@@ -396,7 +488,7 @@ def get_activity(project_id: int, user=Depends(get_current_user)):
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute(
         "SELECT action_type, detail, created_at FROM activity_log"
@@ -404,7 +496,7 @@ def get_activity(project_id: int, user=Depends(get_current_user)):
         (project_id,)
     )
     entries = [{"actionType": r[0], "detail": r[1], "createdAt": str(r[2])} for r in cur.fetchall()]
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return entries
 
 class CreateProjectBody(BaseModel):
@@ -420,7 +512,7 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     pid = cur.fetchone()[0]
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
             "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [], 
@@ -445,7 +537,7 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
 
     if not row or row[0] != user["id"]:
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=404)
     if body.name is not None:
         cur.execute("UPDATE projects SET name=%s WHERE id=%s", (body.name, project_id))
@@ -470,7 +562,7 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
                     (json.dumps(body.usedAnnotationNames), project_id))
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"ok": True}
 
 @router.post("/projects/{project_id}/restore")
@@ -481,12 +573,12 @@ def restore_project(project_id: int, user=Depends(get_current_user)):
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute("UPDATE projects SET deleted_at=NULL WHERE id=%s", (project_id, ))
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"ok": True}
 
 @router.delete("/projects/{project_id}")
@@ -495,7 +587,7 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute("DELETE FROM annotations WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM project_logs WHERE project_id=%s", (project_id,))
@@ -505,7 +597,7 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
     cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
     con.commit()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return {"ok": True}
 
 # image endpoints
@@ -518,7 +610,7 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=404)
     image_id = _uuid.uuid4().hex
     image_bytes = await file.read()
@@ -531,7 +623,7 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
     current_bytes = cur.fetchone()[0]
 
     if current_bytes + len(image_bytes) > STORAGE_QUOTA_BYTES:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(
             status_code=413,
             detail=f"Storage quota exceeded ({STORAGE_QUOTA_BYTES // (1024*1024)} MB limit)"
@@ -545,7 +637,7 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
     _log_activity(cur, project_id, "image_imported", file.filename)
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"id": image_id, "name": file.filename}
 
 @router.get("/images/{image_id}")
@@ -557,7 +649,7 @@ def get_image(image_id: str, user=Depends(get_current_user)):
                 (image_id, user["id"] ))
     row = cur.fetchone()
     cur.close()
-    con.close()
+    release_db_conn(con)
     if not row:
         raise HTTPException(status_code=404)
     return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
@@ -572,7 +664,7 @@ def get_image_meta(image_id: str, user=Depends(get_current_user)):
         (image_id, user["id"])
     )
     row = cur.fetchone()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     if not row:
         raise HTTPException(status_code=404)
     return {
@@ -589,19 +681,19 @@ def delete_image(project_id: int, image_id: str, user=Depends(get_current_user))
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute(
         "SELECT id FROM project_images WHERE id=%s AND project_id=%s", (image_id, project_id)
     )
     if not cur.fetchone():
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404, detail="Image not found")
     cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
     _log_activity(cur, project_id, "image_deleted", image_id)
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"ok": True}
 
 @router.delete("/projects/{project_id}/annotations/{annotation_id}")
@@ -611,12 +703,12 @@ def delete_annotation(project_id: int, annotation_id: str, user=Depends(get_curr
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute("DELETE FROM annotations WHERE id=%s AND project_id=%s", (annotation_id, project_id))
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"ok": True}
 
 @router.delete("/projects/{project_id}/mei/{mei_id}")
@@ -626,12 +718,12 @@ def delete_mei_file(project_id: int, mei_id: str, user=Depends(get_current_user)
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute("DELETE FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"ok": True}
 
 # mei + model endpoints
@@ -650,7 +742,7 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=404)
     mei_id = _uuid.uuid4().hex
     cur.execute(
@@ -665,7 +757,7 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
     _log_activity(cur, project_id, "mei_produced", body.name)
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"id": mei_id}
 
 class UpdateMeiBody(BaseModel):
@@ -678,7 +770,7 @@ def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(g
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     if body.xmlContent is not None:
         cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
@@ -692,7 +784,7 @@ def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(g
             name_row = cur.fetchone()
             _log_activity(cur, project_id, "mei_corrected", name_row[0] if name_row else "")
     con.commit()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return {"ok": True}
 
 @router.get("/projects/{project_id}/mei/{mei_id}/content")
@@ -702,7 +794,7 @@ def get_mei_content(project_id: int, mei_id: str, token: str):
     con = get_db_conn(); cur = con.cursor()
     cur.execute("SELECT xml_content FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
     row = cur.fetchone()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="MEI not found")
     return Response(content=row[0], media_type="application/xml")
@@ -715,7 +807,7 @@ async def put_mei_content(project_id: int, mei_id: str, token: str, request: Req
     con = get_db_conn(); cur = con.cursor()
     cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
                 (xml_content, mei_id, project_id))
-    con.commit(); cur.close(); con.close()
+    con.commit(); cur.close(); release_db_conn(con)
     return {"ok": True}
 
 @router.post("/projects/{project_id}/mei/{mei_id}/edit-session")
@@ -732,13 +824,13 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute("SELECT name, image_name FROM mei_files WHERE id=%s AND project_id=%s",
                 (mei_id, project_id))
     mei_row = cur.fetchone()
     if not mei_row: 
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404, detail="MEI not found")
     mei_name, image_name = mei_row
 
@@ -751,7 +843,7 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
             img_data, mime_type = img_row
             mime = mime_type or "image/jpeg"
             image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(img_data)).decode()}"
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
 
     edit_token = _make_edit_token(project_id, mei_id)
     session_id = _uuid.uuid4().hex[:8]
@@ -800,7 +892,7 @@ async def add_model(
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=404)
     model_id = _uuid.uuid4().hex
     dest_dir = MODELS_DIR / str(project_id)
@@ -815,7 +907,7 @@ async def add_model(
     _log_activity(cur, project_id, "model_added", file.filename)
     con.commit()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"id": model_id, "name": file.filename}
 
 @router.delete("/projects/{project_id}/models/{model_id}")
@@ -824,7 +916,7 @@ def delete_model(project_id: int, model_id: str, user=Depends(get_current_user))
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     cur.execute(
         "SELECT file_path FROM project_models WHERE id=%s AND project_id=%s",
@@ -832,7 +924,7 @@ def delete_model(project_id: int, model_id: str, user=Depends(get_current_user))
     )
     row = cur.fetchone()
     if not row:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404, detail="model not found")
     file_path = row[0]
     if file_path:
@@ -840,7 +932,7 @@ def delete_model(project_id: int, model_id: str, user=Depends(get_current_user))
     cur.execute("DELETE FROM project_models WHERE id=%s", (model_id,))
     _log_activity(cur, project_id, "model_deleted", model_id)
     con.commit()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return {"ok": True}
 
 @router.get("/projects/{project_id}/annotations/{annotation_id}")
@@ -859,7 +951,7 @@ async def get_annotation_txt(
         (annotation_id, project_id, user["id"]),
     )
     row = cur.fetchone()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     if not row:
         raise HTTPException(status_code=404)
     return {"yoloTxt": row[0], "imageName": row[1]}
@@ -871,14 +963,14 @@ def export_project(project_id: int, user=Depends(get_current_user)):
     cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     project_name = row[1]
     cur.execute("SELECT name, mime_type, data FROM project_images WHERE project_id=%s", (project_id, ))
     images = cur.fetchall()
     cur.execute("SELECT name, xml_content FROM mei_files WHERE project_id=%s", (project_id, ))
     mei_files = cur.fetchall()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -903,7 +995,7 @@ def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
     )
     row = cur.fetchone()
     if not row:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404, detail="project not found")
 
     new_name = f"{row[0]} (copy)"
@@ -948,7 +1040,7 @@ def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
         (new_id,)
     )
     result = _project_row_to_dict(cur, cur.fetchone(), current_user["username"])
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return result
 
 
@@ -958,7 +1050,7 @@ def download_project_logs(project_id: int, user=Depends(get_current_user)):
     cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     project_name = row[1]
 
@@ -973,7 +1065,7 @@ def download_project_logs(project_id: int, user=Depends(get_current_user)):
         (project_id,)
     )
     encoding_rows = cur.fetchall()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
 
     activity_lines = [
         f"[{r[2]}] {r[0]}: {r[1]}" for r in activity_rows

@@ -6,13 +6,15 @@ import json
 import uuid as _uuid
 import io
 
-from auth_api import get_db_conn, get_current_user
+from auth_api import get_db_conn, get_current_user, release_db_conn
 
 router = APIRouter()
 
 class PredictBody(BaseModel):
     model_id: str
     image_ids: list[str]
+    confidence_threshold: float = 0.5
+    device: str = "cpu"
 
 @router.post("/projects/{project_id}/predict")
 async def run_predict(
@@ -25,7 +27,7 @@ async def run_predict(
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
     if not row or row[0] != user["id"]:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
         raise HTTPException(status_code=404)
     
     model_id = body.model_id
@@ -51,6 +53,15 @@ async def run_predict(
             model = YOLO(model_row[0])
             yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
             yield event({"type": "stage_done", "name": "checking"})
+            inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
+            lines = []
+            if inference.boxes is not None and len(inference.boxes):
+                for box in inference.boxes:
+                    if float(box.conf[0]) < body.confidence_threshold:
+                        continue
+                    cls = int(box.cls[0])
+                    x, y, w, h = box.xywhn[0].tolist()
+                    lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
 
             # stage 2 - validatin
             yield event({"type": "stage", "name": "validating"})
@@ -85,6 +96,7 @@ async def run_predict(
                     " VALUES (%s,%s,%s,%s,%s,%s)",
                     (ann_id, project_id, image_id, image_name, yolo_txt, model_id)
                 )
+                con.commit()
                 yield event({"type": "log", "message": f"{image_name}: {len(lines)} detection(s)"})
                 results.append({
                     "id": ann_id, "imageName": image_name,
@@ -92,7 +104,6 @@ async def run_predict(
                     "txtName": f"annotation-{ann_id}.txt",
                     "jsonName": "", "detectionCount": len(lines),
                 })
-            con.commit()
             yield event({"type": "stage_done", "name": "processing"})
             yield event({"type": "result", "annotations": results})
             yield event({"type": "done"})
@@ -100,7 +111,7 @@ async def run_predict(
             con.rollback()
             yield event({"type": "error", "message": str(e)})
         finally: 
-            cur.close(); con.close()
+            cur.close(); release_db_conn(con)
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",

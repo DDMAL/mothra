@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
+from authapi import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,6 +28,9 @@ app.include_router(encode_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
 app.include_router(inference_router, prefix="/api")
 app.include_router(ic_router, prefix="/api")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():

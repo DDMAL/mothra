@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import psycopg2, psycopg2.errors
 
-from auth_api import get_current_user, get_db_conn, verify_password, hash_password, STORAGE_QUOTA_BYTES
+from auth_api import get_current_user, get_db_conn, release_db_conn, verify_password, hash_password, STORAGE_QUOTA_BYTES
 
 router = APIRouter()
 
@@ -26,7 +26,7 @@ def update_me(body: UpdateUserBody, user=Depends(get_current_user)):
     except psycopg2.errors.UniqueViolation:
         con.rollback()
         cur.close()
-        con.close()
+        release_db_conn(con)
         raise HTTPException(status_code=409, detail="username or email already taken")
     cur.execute(
         "SELECT id, username, email, first_name, last_name, created_at FROM users WHERE id=%s",
@@ -34,7 +34,7 @@ def update_me(body: UpdateUserBody, user=Depends(get_current_user)):
     )
     row = cur.fetchone()
     cur.close()
-    con.close()
+    release_db_conn(con)
     return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4], "createdAt": str(row[5])}
 
 class ChangePasswordBody(BaseModel):
@@ -47,13 +47,13 @@ def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
     cur = con.cursor()
     cur.execute("SELECT password_hash FROM users WHERE id=%s", (user["id"],))
     row = cur.fetchone()
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     if not row or not verify_password(body.old_password, row[0]):
         raise HTTPException(status_code=400, detail="old password is incorrect")
     con = get_db_conn(); cur = con.cursor()
     cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
                 (hash_password(body.new_password), user["id"]))
-    con.commit(); cur.close(); con.close()
+    con.commit(); cur.close(); release_db_conn(con)
     return {"ok": True}
 
 @router.get("/me/usage")
@@ -93,7 +93,7 @@ def get_usage(user=Depends(get_current_user)):
     """, (uid,))
     logs = cur.fetchone()
 
-    cur.close(); con.close()
+    cur.close(); release_db_conn(con)
     return {
         "projects": {"total": proj[0], "active": proj[1], "deleted": proj[0] - proj[1]},
         "images": {"count": imgs[0], "bytes": imgs[1]},
@@ -123,5 +123,5 @@ def delete_me(user=Depends(get_current_user)):
         con.rollback()
         raise HTTPException(status_code=500, detail="account deletion failed")
     finally:
-        cur.close(); con.close()
+        cur.close(); release_db_conn(con)
     return {"ok": True}

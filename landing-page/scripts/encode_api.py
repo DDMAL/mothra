@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response, JSONResponse, StreamingResponse
-
+from datetime import datetime, timedelta
 
 from pathlib import Path
 import sys
@@ -53,7 +53,27 @@ def _image_dimensions(header: bytes) -> Optional[tuple]:
             return w, h
     return None
 
-_sessions: dict[str, dict] = {}
+_SESSION_TTL = timedelta(hours=1)
+_sessions: dict[str, tuple[datetime, dict]] = {}
+
+def _session_put(sid: str, data: dict) -> None:
+    _sessions[sid] = (datetime.utcnow() + _SESSION_TTL, data)
+    now = datetime.utcnow()
+    for k in [k for k, (exp, _) in list(_sessions.items()) if exp < now]:
+        _sessions.pop(k, None)
+        (MANIFEST_DIR / f"{k}.jsonld").unlink(missing_ok=True)
+
+def _session_get(sid: str) -> "dict | None":
+    entry = _sessions.get(sid)
+    if not entry:
+        return None
+    exp, data = entry
+    if exp < datetime.utcnow():
+        _sessions.pop(sid, None)
+        (MANIFEST_DIR / f"{sid}.jsonld").unlink(missing_ok=True)
+        return None
+    return data
+
 MANIFEST_DIR = Path(tempfile.gettempdir()) / "mothra_manifests"
 MANIFEST_DIR.mkdir(exist_ok=True)
 
@@ -62,7 +82,7 @@ from encode_to_mei import (
     parse_gamera_xml, parse_staves, assign_glyphs_to_staves,
     estimate_staves_from_glyphs, parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
 )
-from auth_api import get_db_conn
+from auth_api import get_db_conn, release_db_conn
 
 router = APIRouter()
 
@@ -134,7 +154,7 @@ async def encode_upload(
                     )
                     row = cur.fetchone()
                     cur.close()
-                    con.close()
+                    release_db_conn(con)
                     if row and row[0]:
                         yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
                 except Exception:
@@ -163,7 +183,7 @@ async def encode_upload(
             manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
             if manifest:
                 (MANIFEST_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
-            _sessions[session_id] = {"mei_bytes": mei_bytes_out, "stem": stem}
+            _session_put(session_id, {"mei_bytes": mei_bytes_out, "stem": stem})
             yield event({"type": "result", "session_id": session_id, "mei_base64": mei_b64, "manifest": manifest})
             yield event({"type": "stage_done", "name": "processing"})
             yield event({"type": "done"})
@@ -199,9 +219,9 @@ def get_manifest(session_id: str):
 
 @router.get("/mei/{session_id}")
 def get_mei(session_id: str):
-    if session_id not in _sessions:
+    if _session_get(session_id) is None:
         return JSONResponse(status_code=404, content={"error": "not found"})
-    s = _sessions[session_id]
+    s = _session_get(session_id)
     return Response(
         content=s["mei_bytes"],
         media_type="application/xml",
