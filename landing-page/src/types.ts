@@ -15,7 +15,7 @@ export interface Project {
   usedImageNames: string[];
   usedModelNames: string[];
   usedAnnotationNames: string[];
-  deletedAt?: number;
+  deletedAt?: string;
   lastOpenedAt?: string;
   isPinned?: boolean;
 }
@@ -53,7 +53,6 @@ export type View =
   | "processing"
   | "completion"
   | "ic"
-  | "ic-processing"
   | "ic-completion"
   | "encoding-processing"
   | "encoding-completion"

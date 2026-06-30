@@ -50,7 +50,7 @@ export function useProjectMutations(
       });
       if (!r.ok) throw new Error("failed to delete project");
       setProjects((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, deletedAt: Date.now() } : p)),
+        prev.map((p) => (p.id === id ? { ...p, deletedAt } : p)),
       );
     } catch (e) {
       onError?.((e as Error).message);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet, MeiFile } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
@@ -95,6 +95,16 @@ export default function AppRouter({
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
+  const [inferenceThreshold, setInferenceThreshold] = useState(0.5);
+  const [inferenceDevice, setInferenceDevice] = useState<"cpu" | "cuda" | "mps">("cpu");
+
+  useEffect(() => {
+    const PROJECT_VIEWS: View[] = [
+    "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion", "sending",
+    ];
+    if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
+  }, [view, selectedProject]);
+  
   switch (view) {
     case "landing":
       return (
@@ -356,11 +366,18 @@ export default function AppRouter({
     case "ic":
       return selectedProject ? (
         <InteractiveClassifier
-          images={selectedProject.images.filter((img) => {
-            if (!selectedProject.usedImageNames.includes(img.name)) return false;
-            const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
-            return p === null || p.nextStep <= 1;
-          })}
+          images={selectedProject.images
+            .filter((img) => {
+              if (!selectedProject.usedImageNames.includes(img.name)) return false;
+              const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+              return p === null || p.nextStep <= 1;
+            })
+            .sort((a, b) => {
+              const pa = getImageProgress(a.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+              const pb = getImageProgress(b.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+              return (pa?.nextStep ?? 0) - (pb?.nextStep ?? 0);
+            })
+          }
           projectId={selectedProjectId}
           setPendingXmlFile={setPendingXmlFile}
           setPendingImageFile={setPendingImageFile}
@@ -375,23 +392,6 @@ export default function AppRouter({
           }}
         />
       ) : null;
-    case "ic-processing":
-      return (
-        <ProcessingPage
-          {...STEP_TIMING}
-          singleLabel="classifying all pages"
-          onBack={() => setView("ic")}
-          onComplete={() => {
-            if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 2),
-              );
-            }
-            setView("ic-completion");
-          }}
-        />
-      );
     case "ic-completion":
       return (
         <IcCompletionTestPage
