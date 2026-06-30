@@ -432,10 +432,22 @@ export default function AppRouter({
           onLogsReady={setEncodingLogs}
         />
   ) : null;
-    case "encoding-completion":
+    case "encoding-completion": {
+      const remainingIcImages = selectedProject?.images.filter((img) => {
+        if (!selectedProject.usedImageNames.includes(img.name)) return false;
+        const p = getImageProgress(
+          img.name,
+          selectedProject.annotations ?? [],
+          selectedProject.meiFiles ?? [],
+        );
+        return p === null || p.nextStep <= 1;
+      }) ?? [];
+
       return (
         <CompletionPage
-          description="encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."
+          description={
+            remainingIcImages.length > 0 ? `encoding complete! ${remainingIcImages.length} page${remainingIcImages.length > 1 ? "s" : ""} still need${remainingIcImages.length === 1 ? "s" : ""} classifying.`
+            : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."}
           continueLabel="correction"
           onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}
@@ -443,8 +455,11 @@ export default function AppRouter({
           logContent={encodingLogs.join("\n")}
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
+          onClassifyMore={remainingIcImages.length > 0 ? () => setView("ic") : undefined}
+          classifyMoreCount={remainingIcImages.length > 0 ? remainingIcImages.length : undefined}
         />
       );
+    }
     case "neon-editor":
       return selectedProject && selectedProject.meiFiles.length > 0 ? (
         <NeonBatchEditor

@@ -13,6 +13,8 @@ interface CompletionPageProps {
   onDownloadAnnotations?: () => void;
   onDownloadAnnotationsJson?: () => void;
   onCompare?: () => void;
+  onClassifyMore?: () => void;
+  classifyMoreCount?: number;
 }
 
 export default function CompletionPage({
@@ -28,6 +30,8 @@ export default function CompletionPage({
   onDownloadAnnotations,
   onDownloadAnnotationsJson,
   onCompare,
+  onClassifyMore,
+  classifyMoreCount
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
     downloadBlob(new Blob([logContent ?? ""], { type: "text/plain" }), logsFileName!);
@@ -55,6 +59,14 @@ export default function CompletionPage({
               className="px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
             >
               {continueLabel}
+            </button>
+          )}
+          {onClassifyMore && (
+            <button
+              onClick={onClassifyMore}
+              className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+            >
+              classify more{classifyMoreCount != null ? ` (${classifyMoreCount})` : ""}
             </button>
           )}
           <button

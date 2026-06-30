@@ -68,7 +68,7 @@ async def run_predict(
             results = []
             for image_id, image_name, image_data in images:
                 yield event({"type": "log", "message": f"Processing {image_name}..."})
-                pil_img = Image.open(io.BytesIO(bytes(image_data)))
+                pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
                 inference = model(np.array(pil_img), verbose=False)[0]
                 lines = []
                 if inference.boxes is not None and len(inference.boxes):

@@ -158,8 +158,14 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 
 ## Things that don't exist yet (planned)
 
-- YOLO inference endpoint (`POST /api/predict`) — `ModelTab` uploads `.h5` files but nothing runs them
-- Real stave detection — `estimate_staves_from_glyphs()` in `encode_to_mei.py` is a heuristic placeholder
-- SSE/streaming for encoding progress — `ProcessingPage.tsx` uses fake `setTimeout` timers; logs arrive all at once
-- Batch encoding — one XML+image pair at a time currently
-- Annotation overlay viewer — `AnnotationsTab.tsx` shows filename cards only, no geometry rendered
+- Batch encoding — one XML+image pair at a time; no multi-file endpoint exists
+- JWT refresh — 72h expiry with no `POST /api/auth/refresh`; sessions drop mid-workflow
+
+## Things that have been implemented (no longer placeholders)
+
+- **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
+- **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections
+- **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines; fake `setTimeout` timers are gone
+- **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
+- **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs
+- **Soft-delete + hard-delete** — `deleted_at` is the soft-delete flag; a separate hard-delete path does `DELETE FROM project_images` + `DELETE FROM projects` to purge BYTEA data
