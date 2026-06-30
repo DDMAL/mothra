@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import { formatActivity, formatRelativeTime } from "../../utils/time";
 import type { ActivityEntry } from "../../utils/time";
 
@@ -9,7 +9,7 @@ export default function ActivityLog({ projectId }: { projectId: number }) {
 
   useEffect(() => {
     if (!open) return;
-    fetch(`/api/projects/${projectId}/activity`, { headers: authHeaders() })
+    apiFetch(`/api/projects/${projectId}/activity`)
       .then((r) => r.json())
       .then(setEntries);
   }, [open, projectId]);

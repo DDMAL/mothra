@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Project } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
 import RenameModal from "./RenameModal";
@@ -241,9 +241,7 @@ export default function ProjectDetail({
             })}
             <button
               onClick={async () => {
-                const res = await fetch(`/api/projects/${project.id}/export`, {
-                  headers: authHeaders(),
-                });
+                const res = await apiFetch(`/api/projects/${project.id}/export`);
                 downloadBlob(await res.blob(), `${project.name}.zip`);
               }}
               className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
@@ -255,9 +253,8 @@ export default function ProjectDetail({
           <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">
             <button
               onClick={async () => {
-                const res = await fetch(
+                const res = await apiFetch(
                   `/api/projects/${project.id}/logs/download`,
-                  { headers: authHeaders() },
                 );
                 downloadBlob(await res.blob(), `${project.name}_logs.zip`);
               }}

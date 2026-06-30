@@ -103,6 +103,8 @@ async def encode_upload(
     image_file: Optional[UploadFile] = FAPIFile(None),
     project_id: Optional[int] = Form(None),
     image_name: Optional[str] = Form(None),
+    clef_shape: Optional[str] = Form(None),
+    clef_line: Optional[int] = Form(None),
 ):
     # read file bytes before entering the sync generator
     xml_bytes = await xml_file.read()
@@ -174,7 +176,11 @@ async def encode_upload(
             yield event({"type": "stage", "name": "processing"})
             stem = Path(xml_filename).stem
             image_ref = Path(image_filename) if image_filename else Path("")
-            mei_bytes_out = build_mei(glyphs_by_stave, staves, image_ref, page_w, page_h, stem)
+            mei_bytes_out = build_mei(
+                glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
+                clef_shape=clef_shape or "C",
+                clef_line=clef_line or 3,
+            )
             validation_warnings = validate_mei(mei_bytes_out)
             for w in validation_warnings:
                 yield event({"type": "log", "message": f"[warn] {w}"})
@@ -228,3 +234,26 @@ def get_mei(session_id: str):
         headers={"Content-Disposition": f'attachment; filename="{s["stem"]}.mei"'},
     )
 
+@router.post("/encode-batch")
+async def encode_batch(
+    xml_files: list[UploadFile] = FAPIFile(...),
+    image_files: list[UploadFile] = FAPIFile(...),
+    project_id: Optional[int] = Form(None),
+    clef_shape: Optional[str] = Form(None),
+    clef_line: Optional[int] = Form(None),
+):
+    
+    # Read all bytes eagerly before entering the sync generator
+    pairs = [
+        (await x.read(), x.filename, await img.read(), img.filename)
+        for x, img in zip(xml_files, image_files)
+    ]
+
+    def generate():
+        def event(obj): return f"data: {json.dumps(obj)}\n\n"
+        all_results = []
+        for i, (xml_bytes, xml_fn, img_bytes, img_fn) in enumerate(pairs):
+            yield event({"type": "item_start", "index": i, "name": img_fn, "total": len(pairs)})
+            # run the same parse/encode logic as encode_upload's generate()
+            # yield stage/log events with an extra "item": i field
+            

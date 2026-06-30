@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Project, MeiFile } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import CompletionPage from "./CompletionPage";
 import MeiCompareModal from "./MeiCompareModal";
 
@@ -28,9 +28,7 @@ export default function NeonCompletionPage({
         }
         setLoadingCompare(true);
         try {
-            const r = await fetch(`/api/projects/${project.id}`, {
-                headers: authHeaders(),
-            });
+            const r = await apiFetch(`/api/projects/${project.id}`);
             if (r.ok) {
                 const data = await r.json();
                 const files: MeiFile[] = (data.meiFiles ?? []).map(

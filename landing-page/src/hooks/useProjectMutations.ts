@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { authHeaders } from "./useAuth";
+import { apiFetch } from "../lib/apiFetch";
 import type { Project } from "../types";
 import { normalizeProjects } from "../utils/projects";
 
@@ -11,9 +11,9 @@ export function useProjectMutations(
 ) {
   const createProject = async (name: string) => {
     try {
-      const r = await fetch("/api/projects", {
+      const r = await apiFetch("/api/projects", {
         method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
       if (!r.ok) throw new Error("failed to create project");
@@ -26,9 +26,9 @@ export function useProjectMutations(
 
   const renameProject = async (id: number, newName: string) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newName }),
       });
       if (!r.ok) throw new Error("failed to rename project");
@@ -43,9 +43,9 @@ export function useProjectMutations(
   const deleteProject = async (id: number) => {
     const deletedAt = new Date().toISOString();
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deletedAt }),
       });
       if (!r.ok) throw new Error("failed to delete project");
@@ -59,9 +59,8 @@ export function useProjectMutations(
 
   const restoreProject = async (id: number) => {
     try {
-      const r = await fetch(`/api/projects/${id}/restore`, {
+      const r = await apiFetch(`/api/projects/${id}/restore`, {
         method: "POST",
-        headers: authHeaders(),
       });
       if (!r.ok) throw new Error("failed to restore project");
       setProjects((prev) =>
@@ -74,9 +73,8 @@ export function useProjectMutations(
 
   const permanentlyDeleteProject = async (id: number) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "DELETE",
-        headers: authHeaders(),
       });
       if (!r.ok) throw new Error("failed to permanently delete project");
       setProjects((prev) => prev.filter((p) => p.id !== id));
@@ -86,21 +84,20 @@ export function useProjectMutations(
   };
 
   const duplicateProject = async (id: number) => {
-    const r = await fetch(`/api/projects/${id}/duplicate`, {
+    const r = await apiFetch(`/api/projects/${id}/duplicate`, {
       method: "POST",
-      headers: authHeaders(),
     });
     if (!r.ok) throw new Error("duplicate failed");
     const newProject: Project = normalizeProjects([await r.json()])[0];
     setProjects(prev => [newProject, ...prev]);
     return newProject;
-  }
-  
+  };
+
   const updateProjectSteps = async (id: number, steps: number) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stepsUnlocked: steps }),
       });
       if (!r.ok) return;
@@ -114,9 +111,9 @@ export function useProjectMutations(
 
   const updateUsedImageNames = async (id: number, names: string[]) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usedImageNames: names }),
       });
       if (!r.ok) return;
@@ -130,9 +127,9 @@ export function useProjectMutations(
 
   const updateUsedModelNames = async (id: number, names: string[]) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usedModelNames: names }),
       });
       if (!r.ok) return;
@@ -146,9 +143,9 @@ export function useProjectMutations(
 
   const updateUsedAnnotationNames = async (id: number, names: string[]) => {
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usedAnnotationNames: names }),
       });
       if (!r.ok) return;
@@ -171,9 +168,9 @@ export function useProjectMutations(
       return prev.map((p) => (p.id === id ? { ...p, isPinned: newIsPinned! } : p));
     });
     try {
-      const r = await fetch(`/api/projects/${id}`, {
+      const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isPinned: newIsPinned }),
       });
       if (!r.ok) throw new Error("failed to update pin");

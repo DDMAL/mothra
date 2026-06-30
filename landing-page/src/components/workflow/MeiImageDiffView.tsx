@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ZoneDiff } from "../../utils/meiZoneDiff";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 
 interface MeiImageDiffViewProps {
   imageId: string | null;
@@ -18,7 +18,7 @@ export default function MeiImageDiffView({ imageId, diff, imageName }: MeiImageD
   useEffect(() => {
     if (!imageId) return;
     let url: string | null = null;
-    fetch(`/api/images/${imageId}`, { headers: authHeaders() })
+    apiFetch(`/api/images/${imageId}`)
       .then((r) => (r.ok ? r.blob() : Promise.reject("fetch failed")))
       .then((blob) => {
         url = URL.createObjectURL(blob);

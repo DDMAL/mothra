@@ -4,7 +4,7 @@ import { getImageProgress } from "../../utils/imageStep";
 import * as pdfjsLib from "pdfjs-dist";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { AuthImage } from "../shared/AuthImage";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
@@ -63,7 +63,7 @@ export default function ImageTab({
   useEffect(() => {
     if (quickLookTab !== "info" || !quickLookId) return;
     setQuickLookMeta(null);
-    fetch(`/api/images/${quickLookId}/meta`, { headers: authHeaders() })
+    apiFetch(`/api/images/${quickLookId}/meta`)
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(setQuickLookMeta)
       .catch(() => setQuickLookMeta({ mimeType: "unknown", sizeBytes: 0, createdAt: null }));

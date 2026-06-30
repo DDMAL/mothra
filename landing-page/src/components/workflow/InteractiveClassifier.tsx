@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectImage } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import { AuthImage } from "../shared/AuthImage";
 
 interface InteractiveClassifierProps {
@@ -59,7 +59,7 @@ export default function InteractiveClassifier({
 
     fetch(`/api/projects/${projectId}/ic/start`, {
       method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageName: img.name }),
     })
       .then(async (r) => {
@@ -103,9 +103,8 @@ export default function InteractiveClassifier({
     setError(null);
     try {
       // 1. Finalise the IC session → GameraXML.
-      const r = await fetch(`/api/ic/${sessionId}/complete`, {
+      const r = await apiFetch(`/api/ic/${sessionId}/complete`, {
         method: "POST",
-        headers: authHeaders(),
       });
       if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
       const data = await r.json();
@@ -117,9 +116,7 @@ export default function InteractiveClassifier({
       });
 
       // 2. Fetch the page image bytes so the encoder can read its size.
-      const imgResp = await fetch(`/api/images/${img.id}`, {
-        headers: authHeaders(),
-      });
+      const imgResp = await apiFetch(`/api/images/${img.id}`);
       if (!imgResp.ok) throw new Error(`image fetch failed (${imgResp.status})`);
       const blob = await imgResp.blob();
       const imageFile = new File([blob], img.name, {

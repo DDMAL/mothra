@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Project } from "../types";
-import { authHeaders } from "./useAuth";
+import { apiFetch } from "../lib/apiFetch";
 import { downloadBlob } from "../utils/download";
 import type { MeiFile } from "../types";
 
@@ -40,9 +40,9 @@ export function useEncodingFlow(
       imageName: pendingImageFile?.name ?? undefined,
     };
     if (selectedProjectId) {
-      const r = await fetch(`/api/projects/${selectedProjectId}/mei`, {
+      const r = await apiFetch(`/api/projects/${selectedProjectId}/mei`, {
       method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: newMeiFile.name,
         xmlContent: xmlText,

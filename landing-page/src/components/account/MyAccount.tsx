@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { CurrentUser } from "../../hooks/useAuth";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import type { Project } from "../../types";
 import Modal from "../shared/Modal";
 
@@ -99,14 +99,14 @@ export default function MyAccount({
 
   useEffect(() => {
     if (tab !== "files") return;
-    fetch("/api/me/usage", { headers: authHeaders() })
+    apiFetch("/api/me/usage")
       .then((r) => r.json())
       .then(setUsage);
   }, [tab]);
 
   useEffect(() => {
     if (!showDeleteAccount) return;
-    fetch("/api/projects", { headers: authHeaders() })
+    apiFetch("/api/projects")
       .then((r) => r.json())
       .then((projects: Project[]) => {
         const active = projects.filter((p) => !p.deletedAt);
@@ -153,9 +153,9 @@ export default function MyAccount({
       pendingField === "username"
         ? { username: pendingValue }
         : { email: pendingValue };
-    const res = await fetch("/api/me", {
+    const res = await apiFetch("/api/me", {
       method: "PATCH",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     if (res.status === 409) {
@@ -439,12 +439,9 @@ export default function MyAccount({
                 setPwError("passwords do not match");
                 return;
               }
-              const res = await fetch("/api/me/password", {
+              const res = await apiFetch("/api/me/password", {
                 method: "PATCH",
-                headers: {
-                  ...authHeaders(),
-                  "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   old_password: oldPw,
                   new_password: newPw,
@@ -493,10 +490,7 @@ export default function MyAccount({
           <div className="flex gap-3 justify-center">
             <button
               onClick={async () => {
-                await fetch("/api/me", {
-                  method: "DELETE",
-                  headers: authHeaders(),
-                });
+                await apiFetch("/api/me", { method: "DELETE" });
                 onLogout();
               }}
               className="px-6 py-2.5 bg-[#1E6B70] text-white font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { Project, MeiFile } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import { downloadBlob } from "../../utils/download";
 
 type Tab = "text" | "score";
@@ -131,9 +131,7 @@ export default function MeiViewerModal({ file, project, onClose }: Props) {
             return;
         }
         setScoreState({ status: "loading" });
-        fetch(`/api/images/${imgRecord.id}`, {
-            headers: authHeaders()
-        })
+        apiFetch(`/api/images/${imgRecord.id}`)
             .then((r) => (r.ok ? r.blob() : Promise.reject()))
             .then((blob) => {
                 const url = URL.createObjectURL(blob);

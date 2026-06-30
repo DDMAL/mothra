@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Project, MeiFile } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { downloadBlob } from "../../utils/download";
 import ContextMenu from "../shared/ContextMenu";
@@ -44,9 +44,8 @@ export default function MeiTab({
     const blob = new Blob([file.xmlContent ?? ""], { type: "application/mei" });
     const form = new FormData();
     form.append("file", blob, file.name);
-    const r = await fetch("/api/validate-mei", {
+    const r = await apiFetch("/api/validate-mei", {
       method: "POST",
-      headers: authHeaders(),
       body: form,
     });
     const result = await r.json();
@@ -192,12 +191,9 @@ export default function MeiTab({
                           ? "Mark as Corrected"
                           : "Mark as Uncorrected",
                         onClick: () => {
-                          fetch(`/api/projects/${project.id}/mei/${file.id}`, {
+                          apiFetch(`/api/projects/${project.id}/mei/${file.id}`, {
                             method: "PATCH",
-                            headers: {
-                              ...authHeaders(),
-                              "Content-Type": "application/json",
-                            },
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ corrected: newCorrected }),
                           });
                           onUpdateProject({

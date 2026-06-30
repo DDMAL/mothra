@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 
 interface AuthImageProps {
   src: string;
@@ -18,7 +18,7 @@ export function AuthImage({
   useEffect(() => {
     let revoked = false;
     let objectUrl: string | null = null;
-    fetch(src, { headers: authHeaders() })
+    apiFetch(src)
       .then((r) => r.blob())
       .then((blob) => {
         if (revoked) return;

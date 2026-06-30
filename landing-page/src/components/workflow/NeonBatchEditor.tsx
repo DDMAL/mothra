@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { Project, MeiFile } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 
 interface BatchSession {
   session_id: string;
@@ -45,12 +45,9 @@ export default function NeonBatchEditor({
     async function initSessions() {
       const results = await Promise.all(
         meiFiles.map(async (file) => {
-          const r = await fetch(
+          const r = await apiFetch(
             `/api/projects/${project.id}/mei/${file.id}/edit-session`,
-            {
-              method: "POST",
-              headers: authHeaders(),
-            },
+            { method: "POST" },
           );
           if (!r.ok) return [file.id, null] as const;
           const data: BatchSession = await r.json();
@@ -107,9 +104,9 @@ export default function NeonBatchEditor({
     triggerNeonSave();
     // brief wait for the async PUT inside Neon's updateDatabase() to complete
     await new Promise((r) => setTimeout(r, 800));
-    await fetch(`/api/projects/${project.id}/mei/${currentFile.id}`, {
+    await apiFetch(`/api/projects/${project.id}/mei/${currentFile.id}`, {
       method: "PATCH",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ corrected: true }),
     });
     setCorrected((prev) => new Set([...prev, currentFile.id]));

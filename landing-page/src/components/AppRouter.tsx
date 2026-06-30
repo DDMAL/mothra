@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet, MeiFile } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
-import { authHeaders } from "../hooks/useAuth";
+import { apiFetch } from "../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
@@ -141,9 +141,9 @@ export default function AppRouter({
             setSelectedProjectId(id);
             setView("project");
             const now = new Date().toISOString();
-            fetch(`/api/projects/${id}`, {
+            apiFetch(`/api/projects/${id}`, {
               method: "PUT",
-              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ lastOpenedAt: now }),
             });
             setProjects((prev) =>
@@ -204,11 +204,10 @@ export default function AppRouter({
           onUploadImage={async (file) => {
             const form = new FormData();
             form.append("file", file);
-            const r = await fetch(
+            const r = await apiFetch(
               `/api/projects/${selectedProject.id}/images`,
               {
                 method: "POST",
-                headers: authHeaders(),
                 body: form,
               },
             );
@@ -223,31 +222,29 @@ export default function AppRouter({
           onUploadModel={async (file: File) => {
             const form = new FormData();
             form.append("file", file);
-            const r = await fetch(
+            const r = await apiFetch(
               `/api/projects/${selectedProject.id}/models`,
               {
                 method: "POST",
-                headers: authHeaders(),
                 body: form,
               });
             return r.json();
           }}
           onDeleteModel={async (modelId) => {
-            await fetch(
+            await apiFetch(
               `/api/projects/${selectedProject.id}/models/${modelId}`,
-              { method: "DELETE", headers: authHeaders() },
+              { method: "DELETE" },
             );
           }}
           onDeleteAnnotation={async (annotationId) => {
-            await fetch(
+            await apiFetch(
               `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
-              { method: "DELETE", headers: authHeaders() },
+              { method: "DELETE" },
             );
           }}
           onDownloadAnnotation={async (annotationId, format) => {
-            const r = await fetch(
+            const r = await apiFetch(
               `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
-              { headers: authHeaders() },
             );
             const data = await r.json();
             const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
@@ -261,17 +258,16 @@ export default function AppRouter({
             }
           }}
           onDeleteMei={async (meiId) => {
-            await fetch(
+            await apiFetch(
               `/api/projects/${selectedProject.id}/mei/${meiId}`,
-              { method: "DELETE", headers: authHeaders() },
+              { method: "DELETE" },
             );
           }}
           onDeleteImage={async (imageId) => {
-            const r = await fetch(
+            const r = await apiFetch(
               `/api/projects/${selectedProject.id}/images/${imageId}`,
               {
                 method: "DELETE",
-                headers: authHeaders(),
               },
             );
             if (!r.ok) {
@@ -312,9 +308,9 @@ export default function AppRouter({
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
-            return fetch(`/api/projects/${selectedProject.id}/predict`, {
+            return apiFetch(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
-              headers: { ...authHeaders(), "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 model_id: usedModelId,
                 image_ids: usedImageIds,
@@ -343,9 +339,8 @@ export default function AppRouter({
             selectedProject?.annotations?.length
               ? async () => {
                   for (const ann of selectedProject.annotations) {
-                    const r = await fetch(
+                    const r = await apiFetch(
                       `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
-                      { headers: authHeaders() },
                     );
                     const data = await r.json();
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
@@ -358,9 +353,8 @@ export default function AppRouter({
             selectedProject?.annotations?.length
               ? async () => {
                   for (const ann of selectedProject.annotations) {
-                    const r = await fetch(
+                    const r = await apiFetch(
                       `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
-                      { headers: authHeaders() },
                     );
                     const data = await r.json();
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
@@ -443,7 +437,7 @@ export default function AppRouter({
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }
-            return fetch("/api/encode-upload", { method: "POST", body: form, signal });
+            return apiFetch("/api/encode-upload", { method: "POST", body: form, signal });
           }}
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}

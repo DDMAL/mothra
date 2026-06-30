@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { AnnotationSet } from "../../types";
-import { authHeaders } from "../../hooks/useAuth";
+import { apiFetch } from "../../lib/apiFetch";
 
 interface BBox {
     cls: number;
@@ -83,12 +83,10 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
             return;
         }
         Promise.all([
-            fetch(`/api/projects/${projectId}/annotations/${set.id}`, {
-                headers: authHeaders(),
-            }).then((r) => (r.ok ? r.json() : Promise.reject("annotation fetch failed"))),
-            fetch(set.imageSrc, {
-                headers: authHeaders(),
-            }).then((r) => (r.ok ? r.blob(): Promise.reject("image fetch failed"))),
+            apiFetch(`/api/projects/${projectId}/annotations/${set.id}`)
+                .then((r) => (r.ok ? r.json() : Promise.reject("annotation fetch failed"))),
+            apiFetch(set.imageSrc)
+                .then((r) => (r.ok ? r.blob(): Promise.reject("image fetch failed"))),
         ])
             .then(([ann, blob]) => {
                 const imageUrl = URL.createObjectURL(blob);

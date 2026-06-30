@@ -4,11 +4,12 @@ import Footer from "./components/layout/Footer";
 import AppRouter from "./components/AppRouter";
 import type { View, Project } from "./types";
 import type { CurrentUser } from "./hooks/useAuth";
-import { getToken, setToken, clearToken, authHeaders } from "./hooks/useAuth";
+import { getToken, setToken, clearToken } from "./hooks/useAuth";
 import { normalizeProjects } from "./utils/projects";
 import { useProjectMutations } from "./hooks/useProjectMutations";
 import { useEncodingFlow } from "./hooks/useEncodingFlow";
 import { useScrollFade } from "./hooks/useScrollFade";
+import { apiFetch, registerUnauthenticatedHandler } from "./lib/apiFetch";
 
 export default function App() {
   const [view, setView] = useState<View>("landing");
@@ -40,7 +41,7 @@ export default function App() {
   const handleLoginSuccess = (user: CurrentUser, token: string) => {
     setToken(token);
     setCurrentUser(user);
-    fetch("/api/projects", { headers: authHeaders() })
+    apiFetch("/api/projects")
       .then((r) => r.json())
       .then((data) => setProjects(normalizeProjects(data)));
     setView("projects");
@@ -55,15 +56,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    registerUnauthenticatedHandler(handleLogout);
+  }, []);
+  
+  useEffect(() => {
     const token = getToken();
     if (!token) return;
-    fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } })
+    apiFetch("/api/me")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((user) => {
         setCurrentUser(user);
-        return fetch("/api/projects", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        return apiFetch("/api/projects");
       })
       .then((r) => r.json())
       .then((data) => setProjects(normalizeProjects(data)))
