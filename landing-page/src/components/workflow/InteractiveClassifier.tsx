@@ -11,6 +11,10 @@ interface InteractiveClassifierProps {
   // Advance to the encoding step (also unlocks step 2). Called once the
   // GameraXML + image have been staged via the setters above.
   onEncode: () => void;
+  clefShape: "C" | "F";
+  onClefShapeChange: (s: "C" | "F") => void;
+  clefLine: number;
+  onClefLineChange: (n: number) => void;
 }
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -21,6 +25,10 @@ export default function InteractiveClassifier({
   setPendingXmlFile,
   setPendingImageFile,
   onEncode,
+  clefShape,
+  onClefShapeChange,
+  clefLine,
+  onClefLineChange
 }: InteractiveClassifierProps) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [icUrl, setIcUrl] = useState<string | null>(null);
@@ -149,6 +157,22 @@ export default function InteractiveClassifier({
             {img ? ` — ${img.name}` : ""}
           </span>
         )}
+        <div className="flex items-center gap-2 text-white/80 text-sm">
+          <span className="text-white/50 text-xs">clef</span>
+          <select
+            value={clefShape}
+            onChange={e => onClefShapeChange(e.target.value as "C" | "F")}
+            className="bg-transparent border border-white/30 rounded px-1 text-sm cursor-pointer text-white"
+          >
+            <option value="C">C</option>
+            <option value="F">F</option>
+          </select>
+          <input
+            type="number" min={1} max={5} value={clefLine}
+            onChange={e => onClefLineChange(Number(e.target.value))}
+            className="w-10 bg-transparent border border-white/30 rounded px-1 text-sm text-center text-white"
+          />
+        </div>
         <div className="flex-1" />
         {status === "ready" && !sessionId && (
           <span className="text-white/80 text-sm">

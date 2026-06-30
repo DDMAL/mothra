@@ -64,8 +64,9 @@ export default function ImageTab({
     if (quickLookTab !== "info" || !quickLookId) return;
     setQuickLookMeta(null);
     fetch(`/api/images/${quickLookId}/meta`, { headers: authHeaders() })
-      .then((r) => r.json())
-      .then(setQuickLookMeta);
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(setQuickLookMeta)
+      .catch(() => setQuickLookMeta({ mimeType: "unknown", sizeBytes: 0, createdAt: null }));
   }, [quickLookTab, quickLookId]);
 
   const formatBytes = (b: number) =>

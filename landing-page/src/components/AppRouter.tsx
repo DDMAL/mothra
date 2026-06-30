@@ -95,8 +95,13 @@ export default function AppRouter({
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
+  // thread inference settings
   const [inferenceThreshold, setInferenceThreshold] = useState(0.5);
   const [inferenceDevice, setInferenceDevice] = useState<"cpu" | "cuda" | "mps">("cpu");
+
+  // thread clef settings
+  const [clefShape, setClefShape] = useState<"C" | "F">("C");
+  const [clefLine, setClefLine] = useState(3);
 
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
@@ -280,6 +285,10 @@ export default function AppRouter({
             deleteProject(selectedProject.id);
             setView("projects");
           }}
+          inferenceThreshold={inferenceThreshold}
+          onInferenceThresholdChange={setInferenceThreshold}
+          inferenceDevice={inferenceDevice}
+          onInferenceDeviceChange={setInferenceDevice}
         />
       ) : null;
     case "processing":
@@ -309,6 +318,8 @@ export default function AppRouter({
               body: JSON.stringify({
                 model_id: usedModelId,
                 image_ids: usedImageIds,
+                confidence_threshold: inferenceThreshold,
+                device: inferenceDevice,
               }),
               signal,
             });
@@ -381,6 +392,10 @@ export default function AppRouter({
           projectId={selectedProjectId}
           setPendingXmlFile={setPendingXmlFile}
           setPendingImageFile={setPendingImageFile}
+          clefShape={clefShape}
+          onClefShapeChange={setClefShape}
+          clefLine={clefLine}
+          onClefLineChange={setClefLine}
           onEncode={() => {
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
@@ -423,6 +438,8 @@ export default function AppRouter({
             if (pendingImageFile) {
               form.append("image_file", pendingImageFile);
               form.append("image_name", pendingImageFile.name);
+              form.append("clef_shape", clefShape);
+              form.append("clef_line", String(clefLine));
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }

@@ -202,6 +202,12 @@ def _migrate_db():
         cur.close()
         con.close()
 
+    # startup cleanup of neon manifests to prevent excess accumulation
+    import time as _time
+    _now = _time.time()
+    for _f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
+        if _now - _f.stat().st_mtime > 86400:
+            _f.unlink(missing_ok=True)
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
@@ -714,6 +720,14 @@ async def put_mei_content(project_id: int, mei_id: str, token: str, request: Req
 
 @router.post("/projects/{project_id}/mei/{mei_id}/edit-session")
 def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_user)):
+   
+   # proactive cleanup of neon manifests to prevent excess accumulation
+    import time as _time
+    _now = _time.time()
+    for _f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
+        if _now - _f.stat().st_mtime > 86400:
+            _f.unlink(missing_ok=True)
+
     con = get_db_conn(); cur = con.cursor()
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
     row = cur.fetchone()
@@ -909,11 +923,20 @@ def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
             (str(_uuid.uuid4()), new_id, img_name, mime, data, now)
         )
 
+    import shutil
+
     cur.execute("SELECT name, file_path FROM project_models WHERE project_id=%s", (project_id,))
     for model_name, file_path in cur.fetchall():
+        new_model_id = str(_uuid.uuid4())
+        new_file_path = None
+        if file_path and Path(file_path).exists():
+            new_model_dir = MODELS_DIR / str(new_id)
+            new_model_dir.mkdir(parents=True, exist_ok=True)
+            new_file_path = str(new_model_dir / f"{new_model_id}.pt")
+            shutil.copy2(file_path, new_file_path)
         cur.execute(
             "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s, %s, %s, %s)",
-            (str(_uuid.uuid4()), new_id, model_name, file_path)
+            (new_model_id, new_id, model_name, new_file_path)
         )
 
     con.commit()
@@ -971,5 +994,5 @@ def download_project_logs(project_id: int, user=Depends(get_current_user)):
     return Response(
         content=buf.read(),
         media_type="application/zip",
-        headers={"Content-Dispositon": f'attachment; filename="{safe_name}_logs.zip"'}
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_logs.zip"'}
     )

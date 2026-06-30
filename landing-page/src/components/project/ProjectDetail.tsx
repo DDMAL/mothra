@@ -39,6 +39,10 @@ interface ProjectDetailProps {
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
+  inferenceThreshold: number;
+  onInferenceThresholdChange: (v: number) => void;
+  inferenceDevice: "cpu" | "cuda" | "mps";
+  onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
 }
 
 export default function ProjectDetail({
@@ -60,6 +64,10 @@ export default function ProjectDetail({
   onDownloadAnnotation,
   onDeleteMei,
   onDeleteProject,
+  inferenceThreshold,
+  onInferenceThresholdChange,
+  inferenceDevice,
+  onInferenceDeviceChange,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files"
@@ -504,6 +512,10 @@ export default function ProjectDetail({
                 onUsedNamesChange={onUsedNamesChange}
                 onUploadModel={onUploadModel}
                 setValidationError={setValidationError}
+                inferenceThreshold={inferenceThreshold}
+                onInferenceThresholdChange={onInferenceThresholdChange}
+                inferenceDevice={inferenceDevice}
+                onInferenceDeviceChange={onInferenceDeviceChange}
               />
             )}
             {activeTab === "annotations" && (

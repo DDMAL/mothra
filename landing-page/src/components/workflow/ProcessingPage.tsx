@@ -49,6 +49,9 @@ export default function ProcessingPage({
   const startTimeRef = useRef(Date.now());
   const progressRef = useRef(0);
 
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+
   useEffect(() => {
     if (!logs || logs.length === 0) return;
     const totalMs = 100 * (intervalMs ?? 100);
@@ -104,7 +107,6 @@ export default function ProcessingPage({
 
   useEffect(() => {
     if (streamRequest) return;
-
     const reveal = (stageIdx: number, key: keyof Stage, ms: number) =>
       setTimeout(
         () =>
@@ -139,7 +141,6 @@ export default function ProcessingPage({
         });
       }
     }, intervalMs);
-
     return () => {
       timers.forEach(clearTimeout);
       clearInterval(interval);
@@ -148,6 +149,13 @@ export default function ProcessingPage({
 
   useEffect(() => {
     if (!streamRequest) return;
+    setStreamError(null);
+    setProgress(0);
+    setStages([{ text: false, check: false}, { text: false, check: false }, { text: false, check: false }]);
+    setRevealedLogs([]);
+    completedRef.current = false;
+    startTimeRef.current = Date.now();
+
     const abort = new AbortController();
     streamAbortRef.current = abort;
 
@@ -158,7 +166,12 @@ export default function ProcessingPage({
       const collectedLogs: string[] = [];
       try {
         const resp = await streamRequest!(abort.signal);
-        if (!resp.ok || !resp.body) return;
+        if (!resp.ok || !resp.body) {
+          const msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
+          setStreamError(msg);
+          setRevealedLogs(prev => [...prev, `error: ${msg}`]);
+          return;
+        }
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
@@ -188,23 +201,28 @@ export default function ProcessingPage({
               setRevealedLogs((prev) => [...prev, ev.message]);
             }
             if (ev.type === "result" && onResult) onResult(ev);
-            if (ev.type === "error") setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
+            if (ev.type === "error") {
+              setStreamError(ev.message);
+              setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
+            }
             if (ev.type === "done" && !completedRef.current) {
               completedRef.current = true;
               onLogsReady?.(collectedLogs);
               setTimeout(onComplete, completionDelayMs);
             }
-          }
+          } 
         }
       } catch (e) {
-        if ((e as Error).name !== "AbortError")
-          setRevealedLogs((prev) => [...prev, `error: ${(e as Error).message}`]);
+        if ((e as Error).name !== "AbortError") {
+          const msg = (e as Error).message;
+          setStreamError(msg);
+          setRevealedLogs((prev) => [...prev, `error: ${msg}`]);
+        }
       }
     }
-
     run();
     return () => abort.abort();
-  }, []);
+  }, [retryKey]);
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
@@ -275,6 +293,17 @@ export default function ProcessingPage({
             </span>
           )}
         </div>
+        {streamError && !done && (
+          <div className="mt-4 flex flex-col items-start gap-2">
+            <p className="text-red-200 text-sm font-mono">{streamError}</p>
+            <button
+              onClick={() => setRetryKey(k => k + 1)}
+              className="px-4 py-2 bg-white text-[#4AADAA] rounded-xl font-semibold text-sm hover:opacity-90 cursor-pointer"
+            >
+              retry
+            </button>
+          </div>
+        )}
 
         <div className="mt-4">
           <button

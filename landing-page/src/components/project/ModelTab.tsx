@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Project, ProjectModel } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { authHeaders } from "../../hooks/useAuth";
@@ -16,6 +16,10 @@ interface ModelTabProps {
   onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
   setValidationError: (e: string | null) => void;
+  inferenceThreshold: number;
+  onInferenceThresholdChange: (v: number) => void;
+  inferenceDevice: "cpu" | "cuda" | "mps";
+  onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
 }
 
 export default function ModelTab({
@@ -26,8 +30,14 @@ export default function ModelTab({
   onUsedNamesChange,
   onUploadModel,
   setValidationError,
+  inferenceThreshold,
+  onInferenceThresholdChange,
+  inferenceDevice,
+  onInferenceDeviceChange,
 }: ModelTabProps) {
   const modelFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -122,6 +132,48 @@ export default function ModelTab({
               </svg>
             )}
           />
+        )}
+
+        {usedNames.models.length > 0 && (
+          <div className="mt-4">
+            <button
+              onClick={() => setSettingsOpen(o => !o)}
+              className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+            >
+              {settingsOpen ? "▾" : "▸"} inference settings
+            </button>
+            {settingsOpen && (
+              <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-4 text-sm text-white">
+                <label className="flex flex-col gap-1">
+                  <span className="text-white/70 text-xs">
+                    confidence threshold: {inferenceThreshold.toFixed(2)}
+                  </span>
+                  <input
+                    type="range" min={0} max={1} step={0.05}
+                    value={inferenceThreshold}
+                    onChange={(e) => onInferenceThresholdChange(Number(e.target.value))}
+                    className="accent-[#1D3335]"
+                  />
+                </label>
+                <div className="flex flex-col gap-1">
+                  <span className="text-white/70 text-xs">device</span>
+                  <div className="flex gap-3">
+                    {(["cpu", "cuda", "mps"] as const).map(d => (
+                      <label key={d} className="flex items-center gap-1 cursor-pointer">
+                        <input
+                          type="radio" name="inference-device" value={d}
+                          checked={inferenceDevice === d}
+                          onChange={() => onInferenceDeviceChange(d)}
+                          className="accent-[#1D3335]"
+                        />
+                        {d}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
