@@ -1,14 +1,15 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
-from authapi import limiter
+from auth_api import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-import os
-from dotenv import load_dotenv
-load_dotenv()
 
 from auth_api import router as auth_router
 from encode_api import router as encode_router

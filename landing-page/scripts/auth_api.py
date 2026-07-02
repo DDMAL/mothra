@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
 from slowapi import Limiter
-from slowwapi.util import get_remote_address
+from slowapi.util import get_remote_address
 import psycopg2, psycopg2.extras, psycopg2.errors, os, secrets, json, mimetypes, hashlib, base64
 import uuid as _uuid
 from datetime import datetime, timedelta
@@ -43,10 +43,6 @@ MODELS_DIR = Path(__file__).parent / "stored_models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR = Path(__file__).parent.parent / "public" / "neon" / "samples" / "manifests"
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def get_db_conn():
-    return psycopg2.connect(os.environ["DATABASE_URL"])
 
 def init_db():
     con = get_db_conn()
@@ -306,7 +302,7 @@ class LoginBody(BaseModel):
 
 @router.post("/register")
 @limiter.limit("5/minute")
-def register(body: RegisterBody):
+def register(request: Request, body: RegisterBody):
     con = get_db_conn()
     cur = con.cursor()
     try: 
@@ -331,7 +327,7 @@ def register(body: RegisterBody):
 
 @router.post("/login")
 @limiter.limit("10/minute")
-def login(body: LoginBody):
+def login(request: Request, body: LoginBody):
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(

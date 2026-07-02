@@ -1,14 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "../lib/apiFetch";
+import { toast } from "../lib/toast";
 import type { Project } from "../types";
 import { normalizeProjects } from "../utils/projects";
 
 type SetProjects = Dispatch<SetStateAction<Project[]>>;
 
-export function useProjectMutations(
-  setProjects: SetProjects,
-  onError?: (message: string) => void,
-) {
+export function useProjectMutations(setProjects: SetProjects) {
   const createProject = async (name: string) => {
     try {
       const r = await apiFetch("/api/projects", {
@@ -20,7 +18,7 @@ export function useProjectMutations(
       const project = await r.json();
       setProjects((prev) => [...prev, project]);
     } catch (e) {
-      onError?.((e as Error).message);
+     toast.error((e as Error).message);
     }
   };
 
@@ -36,7 +34,7 @@ export function useProjectMutations(
         prev.map((p) => (p.id === id ? { ...p, name: newName } : p)),
       );
     } catch (e) {
-      onError?.((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 
@@ -53,7 +51,7 @@ export function useProjectMutations(
         prev.map((p) => (p.id === id ? { ...p, deletedAt } : p)),
       );
     } catch (e) {
-      onError?.((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 
@@ -67,7 +65,7 @@ export function useProjectMutations(
         prev.map((p) => (p.id === id ? { ...p, deletedAt: undefined } : p)),
       );
     } catch (e) {
-      onError?.((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 
@@ -79,7 +77,7 @@ export function useProjectMutations(
       if (!r.ok) throw new Error("failed to permanently delete project");
       setProjects((prev) => prev.filter((p) => p.id !== id));
     } catch (e) {
-      onError?.((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 
@@ -179,7 +177,7 @@ export function useProjectMutations(
       setProjects((prev) =>
         prev.map((p) => (p.id === id ? { ...p, isPinned: !newIsPinned } : p)),
       );
-      onError?.((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 

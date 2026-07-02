@@ -1,4 +1,5 @@
 import { authHeaders, setToken, clearToken } from "../hooks/useAuth";
+import { toast } from "./toast";
 
 // replaces raw fetch() for all /api/* calls
 let onUnauthenticated: (() => void) | null = null;
@@ -21,6 +22,7 @@ export async function apiFetch(
     // attempt a silent refresh
     const refresh = await fetch("/api/auth/refresh", { headers: authHeaders() });
     if (!refresh.ok) {
+        toast.info("Your session has expired. Please log in again.");
         onUnauthenticated?.();
         return resp;
     }
