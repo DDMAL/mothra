@@ -436,6 +436,8 @@ def build_mei(
     manuscript_name: str,
     syllable_gap_mult: float = SYLLABLE_GAP_MULTIPLIER,
     text_alignment: dict | None = None,
+    clef_shape: str = "C",
+    clef_line: int = 3,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
@@ -517,8 +519,8 @@ def build_mei(
         "n": "1",
         "lines": "4",
         "notationtype": "neume",
-        "clef.shape": "C",
-        "clef.line": "3",
+        "clef.shape": clef_shape,
+        "clef.line": str(clef_line),
     })
 
     section = ET.SubElement(score, _tag("section"))
@@ -554,8 +556,8 @@ def build_mei(
         clef_id = str(uuid.uuid4()).replace("-", "")[:12]
         clef_attrs: dict[str, str] = {
             XML_ID: f"clef-{clef_id}",
-            "shape": "C",
-            "line": "3",
+            "shape": clef_shape,
+            "line": str(clef_line),
         }
         if stave_idx in clef_zone_ids:
             clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
@@ -589,7 +591,7 @@ def build_mei(
                 for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
                     nc_cy = glyph.uly + spec.y_fraction * glyph.nrows
-                    pname, oct_str = _nc_pitch(nc_cy, line_ys)
+                    pname, oct_str = _nc_pitch(nc_cy, line_ys, clef_line)
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
                         "facs": f"#z-{glyph.id}",

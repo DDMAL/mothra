@@ -20,7 +20,6 @@ import InteractiveClassifier from "./workflow/InteractiveClassifier";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
-import TextFinding from "./workflow/TextFinding";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
 
@@ -106,7 +105,7 @@ export default function AppRouter({
 
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
-    "project", "processing", "completion", "ic", "text-finding", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion", "sending",
+    "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion", "sending",
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
@@ -286,7 +285,6 @@ export default function AppRouter({
           onInferenceThresholdChange={setInferenceThreshold}
           inferenceDevice={inferenceDevice}
           onInferenceDeviceChange={setInferenceDevice}
-          onGoToTextFinding={() => setView("text-finding")}
         />
       ) : null;
     case "processing":
@@ -299,6 +297,20 @@ export default function AppRouter({
                 selectedProjectId,
                 Math.max(selectedProject.stepsUnlocked, 1),
               );
+              // Silently fork off the text path here, under the hood — no
+              // user action starts it and nothing blocks on it. Results
+              // land in text_alignments whenever each run finishes and
+              // surface later in the "text" tab; encoding picks them up
+              // automatically too. Best-effort: failures here must never
+              // affect the visible (music-path) pipeline.
+              selectedProject.images
+                .filter((img) => selectedProject.usedImageNames.includes(img.name))
+                .forEach((img) => {
+                  apiFetch(
+                    `/api/projects/${selectedProjectId}/text-finding/run?image_name=${encodeURIComponent(img.name)}`,
+                    { method: "POST" },
+                  ).catch(() => {});
+                });
             }
             setView("completion");
           }}
@@ -368,7 +380,6 @@ export default function AppRouter({
                 }
               : undefined
           }
-          onGoToTextFinding={() => setView("text-finding")}
         />
       );
     case "ic":
@@ -404,26 +415,6 @@ export default function AppRouter({
           }}
         />
       ) : null;
-    case "text-finding":
-      return selectedProject ? (
-       <TextFinding
-         images={selectedProject.images.filter((img) =>
-           selectedProject.usedImageNames.includes(img.name),
-         )}
-         projectId={selectedProjectId}
-         onBack={() => setView("project")}
-         onResult={(alignment) => {
-           if (!selectedProjectId) return;
-           setProjects((prev) =>
-             prev.map((p) =>
-               p.id === selectedProjectId
-                 ? { ...p, textAlignments: [...p.textAlignments, alignment] }
-                 : p,
-             ),
-           );
-         }}
-       />
-     ) : null;
     case "ic-completion":
       return (
         <IcCompletionTestPage

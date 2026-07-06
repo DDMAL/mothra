@@ -64,7 +64,6 @@ export type View =
   | "completion"
   | "ic"
   | "ic-completion"
-  | "text-finding"
   | "encoding-processing"
   | "encoding-completion"
   | "sending"

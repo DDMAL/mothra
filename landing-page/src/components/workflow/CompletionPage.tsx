@@ -15,7 +15,6 @@ interface CompletionPageProps {
   onCompare?: () => void;
   onClassifyMore?: () => void;
   classifyMoreCount?: number;
-  onGoToTextFinding?: () => void;
 }
 
 export default function CompletionPage({
@@ -32,7 +31,6 @@ export default function CompletionPage({
   onDownloadAnnotationsJson,
   onCompare,
   onClassifyMore,
-  onGoToTextFinding,
   classifyMoreCount,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
@@ -69,14 +67,6 @@ export default function CompletionPage({
               className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
             >
               classify more{classifyMoreCount != null ? ` (${classifyMoreCount})` : ""}
-            </button>
-          )}
-          {onGoToTextFinding && (
-            <button
-              onClick={onGoToTextFinding}
-              className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
-            >
-              find text
             </button>
           )}
           <button
