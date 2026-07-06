@@ -30,6 +30,28 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # OCR text) since we call it directly instead of going through main()/argparse.
 RECOGNITION_MODEL = _find_tridis_model()
 
+def _bbox_overlap_ratio(line_bbox: list[float], music_bbox: list[float]) -> float:
+    """Fraction of line_bbox's own area covered by music_bbox."""
+    lx0, ly0, lx1, ly1 = line_bbox
+    mx0, my0, mx1, my1 = music_bbox
+    iw = max(0.0, min(lx1, mx1) - max(lx0, mx0))
+    ih = max(0.0, min(ly1, my1) - max(ly0, my0))
+    line_area = max(1.0, (lx1 - lx0) * (ly1 - ly0))
+    return (iw * ih) / line_area
+
+def filter_lines_over_music(lines: list[dict], music_boxes: list[list[float]], threshold: float = 0.3) -> tuple[list[dict], int]:
+    """Drop detected text lines that mostly overlap a YOLO music region - BLLA over-segmentation artifacts from neume notation, not real chant text."""
+    if not music_boxes:
+        return lines, 0
+    kept, dropped = [], 0
+    for line in lines:
+        if any(_bbox_overlap_ratio(line["bbox"], mb) > threshold for mb in music_boxes):
+            dropped += 1
+            continue
+        kept.append(line)
+    return kept, dropped
+
+
 class _QueueLogHandler(logging.Handler):
     """Relays one request's log records onto a queue for SSE relay.
 
@@ -57,9 +79,11 @@ class _QueueLogHandler(logging.Handler):
 async def run_text_pipeline(
     image: UploadFile = File(...),
     folio: Optional[str] = Form(None),
+    music_boxes: Optional[str] = Form(None)
 ):
     image_bytes = await image.read()
     image_filename = image.filename or "page.jpg"
+    parsed_music_boxes = json.loads(music_boxes) if music_boxes else []
 
     def generate():
         def event(obj):
@@ -114,6 +138,11 @@ async def run_text_pipeline(
             payload = _build_pipeline_payload(
                 collection, str(image_path), manifest, folio=folio, mode="ocr_only",
             )
+            if parsed_music_boxes:
+                kept_lines, n_dropped = filter_lines_over_music(payload["lines"], parsed_music_boxes)
+                payload["lines"] = kept_lines
+                if n_dropped:
+                    yield event({"type": "log", "message": f"dropped {n_dropped} line(s) overlapping YOLO music regions"})
             mei_json_path = tmp_dir / "mei_alignment.json"
             _write_mei_json(payload, str(mei_json_path))
             text_alignment = json.loads(mei_json_path.read_text())
