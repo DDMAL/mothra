@@ -9,6 +9,7 @@ import ActivityLog from "./ActivityLog";
 import ImageTab from "./ImageTab";
 import ModelTab from "./ModelTab";
 import MeiTab from "./MeiTab";
+import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
 
@@ -72,7 +73,7 @@ export default function ProjectDetail({
   onGoToTextFinding,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei files"
+    "images" | "models" | "annotations" | "mei files" | "text"
   >("images");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
@@ -99,11 +100,11 @@ export default function ProjectDetail({
   };
 
   const tabs = [
-    "images",
-    "models",
-    ...(stepsUnlocked >= 1 ? ["annotations"] : []),
-    ...(stepsUnlocked >= 3 ? ["mei files"] : []),
-  ] as const;
+     "images",
+     "models",
+     ...(stepsUnlocked >= 1 ? ["annotations", "text"] : []),
+     ...(stepsUnlocked >= 3 ? ["mei files"] : []),
+   ] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -534,6 +535,12 @@ export default function ProjectDetail({
                 section={annSection}
                 usedNames={usedNames}
                 onUsedNamesChange={onUsedNamesChange}
+              />
+            )}
+            {activeTab === "text" && (
+              <TextAlignmentsTab
+                textAlignments={project.textAlignments}
+                projectId={project.id}
               />
             )}
             {activeTab === "mei files" && (

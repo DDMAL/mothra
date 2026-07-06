@@ -388,11 +388,11 @@ def _project_row_to_dict(cur, row, username):
         for r in cur.fetchall()
     ]
     cur.execute(
-         "SELECT id, image_name, median_line_spacing, syllable_count"
+         "SELECT id, image_id, image_name, median_line_spacing, syllable_count"
         " FROM text_alignments WHERE project_id=%s", (pid,)
     )
     text_alignments = [
-        {"id": r[0], "imageName": r[1], "medianLineSpacing": r[2], "syllableCount": r[3]}
+        {"id": r[0], "imageName": r[2], "imageSrc": f"/api/images/{r[1]}" if r[1] else None, "medianLineSpacing": r[3], "syllableCount": r[4]}
         for r in cur.fetchall()
     ]
     return {
@@ -463,13 +463,14 @@ def list_projects(user=Depends(get_current_user)):
         })
 
     cur.execute(
-        "SELECT project_id, id, image_name, median_line_spacing, syllable_count"
+        "SELECT project_id, id, image_id, image_name, median_line_spacing, syllable_count"
         " FROM text_alignments WHERE project_id IN %s", (pids,)
     )
     text_by_pid: dict = {}
-    for pid, tid, img_name, spacing, syl_count in cur.fetchall():
+    for pid, tid, img_id, img_name, spacing, syl_count in cur.fetchall():
         text_by_pid.setdefault(pid, []).append({
             "id": tid, "imageName": img_name,
+            "imageSrc": f"/api/images/{img_id}" if img_id else None,
             "medianLineSpacing": spacing, "syllableCount": syl_count,
         })
 
@@ -986,6 +987,27 @@ async def get_annotation_txt(
         raise HTTPException(status_code=404)
     return {"yoloTxt": row[0], "imageName": row[1]}
 
+@router.get("/projects/{project_id}/text-alignments/{alignment_id}")
+async def get_text_alignment(
+    project_id: int,
+    alignment_id: str,
+    user=Depends(get_current_user),
+):
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT t.alignment_json, t.image_name"
+        " FROM text_alignments t"
+        " JOIN projects p ON p.id = t.project_id"
+        " WHERE t.id = %s AND t.project_id = %s AND p.user_id = %s",
+        (alignment_id, project_id, user["id"]),
+    )
+    row = cur.fetchone()
+    cur.close(); release_db_conn(con)
+    if not row:
+        raise HTTPException(status_code=404)
+    return {"alignmentJson": row[0], "imageName": row[1]}
+    
 
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):

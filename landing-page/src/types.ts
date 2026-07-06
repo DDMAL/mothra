@@ -24,6 +24,7 @@ export interface Project {
 export interface TextAlignment {
   id: string;
   imageName: string;
+  imageSrc?: string;
   medianLineSpacing: number;
   syllableCount: number;
 }
