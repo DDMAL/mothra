@@ -18,7 +18,16 @@ export interface Project {
   deletedAt?: string;
   lastOpenedAt?: string;
   isPinned?: boolean;
+  textAlignments: TextAlignment[];
 }
+
+export interface TextAlignment {
+  id: string;
+  imageName: string;
+  medianLineSpacing: number;
+  syllableCount: number;
+}
+
 export interface ProjectModel {
   id: string;
   name: string;
@@ -54,6 +63,7 @@ export type View =
   | "completion"
   | "ic"
   | "ic-completion"
+  | "text-finding"
   | "encoding-processing"
   | "encoding-completion"
   | "sending"

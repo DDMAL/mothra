@@ -43,6 +43,7 @@ interface ProjectDetailProps {
   onInferenceThresholdChange: (v: number) => void;
   inferenceDevice: "cpu" | "cuda" | "mps";
   onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
+  onGoToTextFinding?: () => void;
 }
 
 export default function ProjectDetail({
@@ -68,6 +69,7 @@ export default function ProjectDetail({
   onInferenceThresholdChange,
   inferenceDevice,
   onInferenceDeviceChange,
+  onGoToTextFinding,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files"
@@ -248,6 +250,16 @@ export default function ProjectDetail({
             >
               export all files ↓
             </button>
+            {onGoToTextFinding && stepsUnlocked >= 1 && (
+              <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">
+                <button
+                  onClick={onGoToTextFinding}
+                  className="w-full text-xs text-white/60 hover:text-white text-left cursor-pointer transition-colors"
+                >
+                  text finding →
+                </button>
+              </div>
+            )}
           </div>
           <ActivityLog projectId={project.id} />
           <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">

@@ -12,6 +12,8 @@ Usage:
         [--manuscript "CH-Fco Ms. 2_006r"]
 """
 
+from __future__ import annotations
+
 import argparse
 import base64
 import json
