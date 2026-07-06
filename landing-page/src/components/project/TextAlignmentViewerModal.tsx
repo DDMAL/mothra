@@ -11,7 +11,7 @@ interface SylBox {
 type ViewState =
     | { status: "loading" }
     | { status: "error"; message: string }
-    | { status: "ready"; imageUrl: string; boxes: SylBox[] };
+    | { status: "ready"; imageUrl: string; boxes: SylBox[]; logText: string };
 
 const BOX_COLOR = "#4AADAA";
 
@@ -23,6 +23,7 @@ interface Props {
 
 export default function TextAlignmentViewerModal({ alignment, projectId, onClose }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading"});
+    const [logsOpen, setLogsOpen] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
 
@@ -73,6 +74,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                     status: "ready",
                     imageUrl,
                     boxes: parsed.syl_boxes ?? [],
+                    logText: (data as { logText?: string }).logText ?? "",
                 });
             })
             .catch(() =>
@@ -108,7 +110,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                             {viewState.message}
                         </div>
                     ) : (
-                        <div className="p-4 flex justify-center">
+                        <div className="p-4 flex flex-col items-center">
                             <div className="relative inline-block">
                                 <img
                                     ref={imgRef}
@@ -121,6 +123,29 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                     ref={canvasRef}
                                     className="absolute inset-0 pointer-events-none"
                                 />
+                            </div>
+                            <div className="mt-4 w-full">
+                                <button
+                                    onClick={() => setLogsOpen((o) => !o)}
+                                    className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
+                                >
+                                    {logsOpen ? "v" : ">"} view logs
+                                </button>
+                                {logsOpen && (
+                                    <div className="mt-2 bg-[#1D3335] rounded-xl h-32 w-full overflow-y-auto p-3">
+                                        {viewState.logText ? (
+                                            viewState.logText.split("\n").map((line, i) => (
+                                                <div key={i} className="text-white/70 text-xs font-mono leading-5">
+                                                    {line}
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-white/30 text-xs font-mono">
+                                                no logs recorded for this run
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

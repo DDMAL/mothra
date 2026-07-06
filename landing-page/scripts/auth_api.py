@@ -133,6 +133,7 @@ def init_db():
             alignment_json TEXT NOT NULL,
             median_line_spacing REAL DEFAULT 0,
             syllable_count INTEGER DEFAULT 0,
+            log_text TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
@@ -237,6 +238,17 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE projects ADD COLUMN used_annotation_names TEXT DEFAULT '[]'")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE text_alignments ADD COLUMN log_text TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
@@ -996,7 +1008,7 @@ async def get_text_alignment(
     con = get_db_conn()
     cur = con.cursor()
     cur.execute(
-        "SELECT t.alignment_json, t.image_name"
+        "SELECT t.alignment_json, t.image_name, t.log_text"
         " FROM text_alignments t"
         " JOIN projects p ON p.id = t.project_id"
         " WHERE t.id = %s AND t.project_id = %s AND p.user_id = %s",
@@ -1006,7 +1018,7 @@ async def get_text_alignment(
     cur.close(); release_db_conn(con)
     if not row:
         raise HTTPException(status_code=404)
-    return {"alignmentJson": row[0], "imageName": row[1]}
+    return {"alignmentJson": row[0], "imageName": row[1], "logText": row[2]}
     
 
 @router.get("/projects/{project_id}/export")

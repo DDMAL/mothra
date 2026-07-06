@@ -7,6 +7,7 @@ import uuid as _uuid
 import io
 
 from auth_api import get_db_conn, get_current_user, release_db_conn
+from text_api import stream_text_finding
 
 router = APIRouter()
 
@@ -58,17 +59,17 @@ async def run_predict(
             yield event({"type": "stage", "name": "validating"})
             images = []
             for iid in image_ids:
-                cur.execute("SELECT name, data FROM project_images WHERE id=%s AND project_id=%s", 
+                cur.execute("SELECT name, data, mime_type FROM project_images WHERE id=%s AND project_id=%s",
                             (iid, project_id))
                 r = cur.fetchone()
-                if r: images.append((iid, r[0], r[1]))
+                if r: images.append((iid, r[0], r[1], r[2] or "image/png"))
             yield event({"type": "log", "message": f"{len(images)} image(s) ready"})
             yield event({"type": "stage_done", "name": "validating"})
 
             # stage 3 - processing
             yield event({"type": "stage", "name": "processing"})
             results = []
-            for image_id, image_name, image_data in images:
+            for image_id, image_name, image_data, mime_type in images:
                 yield event({"type": "log", "message": f"Processing {image_name}..."})
                 pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
                 inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
@@ -97,6 +98,18 @@ async def run_predict(
                     "txtName": f"annotation-{ann_id}.txt",
                     "jsonName": "", "detectionCount": len(lines),
                 })
+
+                # Hand off to mothra-text now that this image's YOLO boxes
+                # exist — runs as part of this same processing stage, in
+                # the same stream, so its logs show up right here. Failures
+                # are downgraded to log lines: text-finding must never fail
+                # the visible (music-path) pipeline.
+                yield event({"type": "log", "message": f"{image_name}: starting text-finding..."})
+                for text_ev in stream_text_finding(project_id, image_id, image_name, bytes(image_data), mime_type):
+                    if text_ev.get("type") == "log":
+                        yield event(text_ev)
+                    elif text_ev.get("type") == "error":
+                        yield event({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
             yield event({"type": "stage_done", "name": "processing"})
             yield event({"type": "result", "annotations": results})
             yield event({"type": "done"})

@@ -114,46 +114,67 @@ def _stream_multipart(url: str, fields: dict[str, str], files: list[tuple], time
         for raw_line in resp:
             yield raw_line.decode()
 
+def stream_text_finding(project_id: int, image_id: str, image_name: str, image_bytes: bytes, mime_type: str):
+    """Run text-finding for one image, yielding raw event dicts (not
+    SSE-formatted) and persisting the result to text_alignments on completion.
+
+    Shared by the standalone endpoint below and by inference_api.py's
+    combined processing pipeline, which calls this immediately after YOLO
+    produces this same image's boxes — mothra-text's music-region filter
+    (_music_boxes_for_image) is re-derived here from whatever annotation
+    row is freshest at call time, so it picks up boxes YOLO just committed.
+    """
+    music_boxes = _music_boxes_for_image(project_id, image_name, image_bytes)
+    collected_logs: list[str] = []
+    try:
+        for line in _stream_multipart(
+            f"{TEXT_API_URL}/run",
+            fields={"folio": image_name, "music_boxes": json.dumps(music_boxes)},
+            files=[("image", image_name, mime_type, image_bytes)],
+        ):
+            if not line.startswith("data: "):
+                continue
+            ev = json.loads(line[len("data: "):])
+            if ev.get("type") == "log":
+                collected_logs.append(ev.get("message", ""))
+            if ev.get("type") == "result":
+                alignment = ev["text_alignment"]
+                con = get_db_conn()
+                cur = con.cursor()
+                try:
+                    aid = _uuid.uuid4().hex
+                    cur.execute(
+                        "INSERT INTO text_alignments"
+                        " (id, project_id, image_id, image_name, alignment_json,"
+                        " median_line_spacing, syllable_count, log_text)"
+                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (aid, project_id, image_id, image_name,
+                            json.dumps(alignment),
+                            alignment.get("median_line_spacing", 0.0),
+                            len(alignment.get("syl_boxes", [])),
+                            "\n".join(collected_logs),
+                        ),
+                    )
+                    con.commit()
+                finally:
+                    cur.close()
+                    release_db_conn(con)
+                ev = {**ev, "alignment_id": aid}
+            yield ev
+    except urllib.error.URLError as exc:
+        yield {"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"}
+
+
 @router.post("/projects/{project_id}/text-finding/run")
 def run_text_finding(project_id: int, image_name: str, user=Depends(get_current_user)):
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
-    music_boxes = _music_boxes_for_image(project_id, image_name, image_bytes)
-    
+
     def generate():
         def event(obj):
             return f"data: {json.dumps(obj)}\n\n"
-        try:
-            for line in _stream_multipart(f"{TEXT_API_URL}/run", fields={"folio": image_name}, files=[("image", image_name, mime_type, image_bytes)],
-                                          ):
-                if not line.startswith("data: "): 
-                    continue
-                ev = json.loads(line[len("data: "):])
-                if ev.get("type") == "result":
-                    alignment = ev["text_alignment"]
-                    con = get_db_conn()
-                    cur = con.cursor()
-                    try:
-                        aid = _uuid.uuid4().hex
-                        cur.execute(
-                            "INSERT INTO text_alignments"
-                            " (id, project_id, image_id, image_name, alignment_json,"
-                            " median_line_spacing, syllable_count)"
-                            " VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                            (aid, project_id, image_id, image_name,
-                                json.dumps(alignment),
-                                alignment.get("median_line_spacing", 0.0),
-                                len(alignment.get("syl_boxes", [])),
-                            ),
-                        )
-                        con.commit()
-                    finally:
-                        cur.close()
-                        release_db_conn(con)
-                    ev = {**ev, "alignment_id": aid}
-                yield event(ev)
-        except urllib.error.URLError as exc:
-            yield event({"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"})
-    
+        for ev in stream_text_finding(project_id, image_id, image_name, image_bytes, mime_type):
+            yield event(ev)
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",

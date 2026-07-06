@@ -297,20 +297,6 @@ export default function AppRouter({
                 selectedProjectId,
                 Math.max(selectedProject.stepsUnlocked, 1),
               );
-              // Silently fork off the text path here, under the hood — no
-              // user action starts it and nothing blocks on it. Results
-              // land in text_alignments whenever each run finishes and
-              // surface later in the "text" tab; encoding picks them up
-              // automatically too. Best-effort: failures here must never
-              // affect the visible (music-path) pipeline.
-              selectedProject.images
-                .filter((img) => selectedProject.usedImageNames.includes(img.name))
-                .forEach((img) => {
-                  apiFetch(
-                    `/api/projects/${selectedProjectId}/text-finding/run?image_name=${encodeURIComponent(img.name)}`,
-                    { method: "POST" },
-                  ).catch(() => {});
-                });
             }
             setView("completion");
           }}
