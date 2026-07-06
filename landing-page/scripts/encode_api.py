@@ -144,6 +144,22 @@ async def encode_upload(
 
             # stage: validating
             yield event({"type": "stage", "name": "validating"})
+            text_alignment = None
+            if project_id and image_name:
+                try:
+                    con = get_db_conn()
+                    cur = con.cursor()
+                    cur.execute("SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                        " ORDER BY created_at DESC LIMIT 1",
+                        (image_name, project_id),)
+                    row = cur.fetchone()
+                    cur.close()
+                    release_db_conn(con)
+                    if row and row[0]: 
+                        text_alignment = json.loads(row[0])
+                        yield event({"type": "log", "message": f"{len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
+                except Exception:
+                    pass
             yolo_stave_hints = []
             if project_id and image_name:
                 try:
@@ -180,6 +196,7 @@ async def encode_upload(
                 glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
                 clef_shape=clef_shape or "C",
                 clef_line=clef_line or 3,
+                text_alignment=text_alignment,
             )
             validation_warnings = validate_mei(mei_bytes_out)
             for w in validation_warnings:

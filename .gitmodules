@@ -4,3 +4,6 @@
 [submodule "ic"]
 	path = ic
 	url = https://github.com/DDMAL/Standalone-Interactive-Classifier.git
+[submodule "mothra-text"]
+	path = mothra-text
+	url = https://github.com/DDMAL/mothra-text.git

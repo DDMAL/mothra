@@ -160,6 +160,28 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
             clusters[-1].append(glyph)
     return clusters
 
+def match_syllable_text(cluster: list[Glyph], syl_boxes: list[dict]) -> str:
+    """Match a neume cluster to the syl_boxes entry with the largest x-overlap
+    on the same row (both segmentations read the stave left-to-right).
+    Falls back to "-" when nothing overlaps or no alignment was supplied."""
+    if not syl_boxes or not cluster:
+        return "-"
+    c_ulx = min(g.ulx for g in cluster)
+    c_lrx = max(g.lrx for g in cluster)
+    c_cy = sum(g.cy for g in cluster) / len(cluster)
+    best, best_overlap = None, 0
+    for box in syl_boxes:
+        b_ulx, b_uly = box["ul"]
+        b_lrx, b_lry = box["lr"]
+        b_cy = (b_uly + b_lry) / 2
+        if abs(b_cy - c_cy) > (b_lry - b_uly) * 4:
+            continue  # different row band
+        overlap = min(c_lrx, b_lrx) - max(c_ulx, b_ulx)
+        if overlap > best_overlap:
+            best, best_overlap = box, overlap
+    return best["syl"] if best else "-"
+
+
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
     """Parse YOLO annotation text into StaveBbox hints for staff lines.
 
@@ -411,6 +433,7 @@ def build_mei(
     image_h: int,
     manuscript_name: str,
     syllable_gap_mult: float = SYLLABLE_GAP_MULTIPLIER,
+    text_alignment: dict | None = None,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
@@ -513,6 +536,8 @@ def build_mei(
         "facs": "#surface-0001",
     })
 
+    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
+
     for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
         staff_glyphs = glyphs_by_stave[stave_idx]
         if not staff_glyphs:
@@ -551,7 +576,7 @@ def build_mei(
             })
             syl_id = str(uuid.uuid4()).replace("-", "")[:12]
             syl = ET.SubElement(syllable, _tag("syl"), {XML_ID: f"syl-{syl_id}"})
-            syl.text = "-"
+            syl.text = match_syllable_text(cluster, syl_boxes)
             for glyph in cluster:
                 neume = ET.SubElement(syllable, _tag("neume"), {
                     XML_ID: f"neume-{glyph.id}",

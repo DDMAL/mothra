@@ -124,6 +124,18 @@ def init_db():
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS text_alignments (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id),
+            image_id TEXT,
+            image_name TEXT NOT NULL,
+            alignment_json TEXT NOT NULL,
+            median_line_spacing REAL DEFAULT 0,
+            syllable_count INTEGER DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
 
     # performance: db indexes
     for _idx in [
@@ -133,6 +145,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_annotations_pid    ON annotations(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)"
     ]:
         cur.execute(_idx)
     con.commit()
@@ -374,6 +387,14 @@ def _project_row_to_dict(cur, row, username):
         }
         for r in cur.fetchall()
     ]
+    cur.execute(
+         "SELECT id, image_name, median_line_spacing, syllable_count"
+        " FROM text_alignments WHERE project_id=%s", (pid,)
+    )
+    text_alignments = [
+        {"id": r[0], "imageName": r[1], "medianLineSpacing": r[2], "syllableCount": r[3]}
+        for r in cur.fetchall()
+    ]
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -384,6 +405,7 @@ def _project_row_to_dict(cur, row, username):
         "lastOpenedAt": str(last_opened_at) if last_opened_at else None,
         "isPinned": bool(is_pinned),
         "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
+        "textAlignments": text_alignments,
     }
 
 def _log_activity(cur, project_id: int, action_type: str, detail: str = ""):
@@ -440,6 +462,17 @@ def list_projects(user=Depends(get_current_user)):
             "txtName": f"annotation-{aid}.txt", "jsonName": "",
         })
 
+    cur.execute(
+        "SELECT project_id, id, image_name, median_line_spacing, syllable_count"
+        " FROM text_alignments WHERE project_id IN %s", (pids,)
+    )
+    text_by_pid: dict = {}
+    for pid, tid, img_name, spacing, syl_count in cur.fetchall():
+        text_by_pid.setdefault(pid, []).append({
+            "id": tid, "imageName": img_name,
+            "medianLineSpacing": spacing, "syllableCount": syl_count,
+        })
+
     result = []
     for row in rows:
         pid = row[0]
@@ -456,6 +489,7 @@ def list_projects(user=Depends(get_current_user)):
             "lastOpenedAt": str(row[6]) if row[6] else None,
             "isPinned": bool(row[7]),
             "usedAnnotationNames": json.loads(row[8] or "[]"),
+            "textAlignments": text_by_pid.get(pid, []),
         })
     cur.close()
     release_db_conn(con)
