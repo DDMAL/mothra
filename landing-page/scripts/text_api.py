@@ -79,7 +79,7 @@ def run_text_finding(project_id: int, image_name: str, user=Depends(get_current_
                     continue
                 ev = json.loads(line[len("data: "):])
                 if ev.get("type") == "result":
-                    alignment = ev["text-alignment"]
+                    alignment = ev["text_alignment"]
                     con = get_db_conn()
                     cur = con.cursor()
                     try:

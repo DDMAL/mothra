@@ -53,15 +53,6 @@ async def run_predict(
             model = YOLO(model_row[0])
             yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
             yield event({"type": "stage_done", "name": "checking"})
-            inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
-            lines = []
-            if inference.boxes is not None and len(inference.boxes):
-                for box in inference.boxes:
-                    if float(box.conf[0]) < body.confidence_threshold:
-                        continue
-                    cls = int(box.cls[0])
-                    x, y, w, h = box.xywhn[0].tolist()
-                    lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
 
             # stage 2 - validatin
             yield event({"type": "stage", "name": "validating"})
@@ -80,10 +71,12 @@ async def run_predict(
             for image_id, image_name, image_data in images:
                 yield event({"type": "log", "message": f"Processing {image_name}..."})
                 pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-                inference = model(np.array(pil_img), verbose=False)[0]
+                inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
                 lines = []
                 if inference.boxes is not None and len(inference.boxes):
                     for box in inference.boxes:
+                        if float(box.conf[0]) < body.confidence_threshold:
+                            continue
                         cls = int(box.cls[0])
                         x, y, w, h = box.xywhn[0].tolist()
                         lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")

@@ -5,9 +5,12 @@ Mirrors the SSE event contract used by inference_api.py's /predict and
 encode_api.py's /encode-upload: stage -> stage_done -> log -> result -> done.
 """
 import json
+import logging
+import queue
 import shutil
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -17,10 +20,38 @@ from fastapi.responses import StreamingResponse
 
 MOTHRA_TEXT_DIR = Path(__file__).resolve().parent.parent / "mothra-text"
 sys.path.insert(0, str(MOTHRA_TEXT_DIR))
-from run_pipeline import run, _build_pipeline_payload, _write_mei_json
+from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# run_pipeline.main() resolves this as the --recognition-model CLI default
+# (_DEFAULT_RECOGNITION_MODEL); run() itself defaults to None (stub mode, empty
+# OCR text) since we call it directly instead of going through main()/argparse.
+RECOGNITION_MODEL = _find_tridis_model()
+
+class _QueueLogHandler(logging.Handler):
+    """Relays one request's log records onto a queue for SSE relay.
+
+    Filtered by thread identity so concurrent /run requests (each with its
+    own worker thread) don't cross-talk on the shared root logger.
+    """
+
+    def __init__(self, q: "queue.Queue[dict]"):
+        super().__init__()
+        self.q = q
+        self.thread_ident: Optional[int] = None
+        self.setFormatter(logging.Formatter("%(message)s"))
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        if self.thread_ident is None or record.thread != self.thread_ident:
+            return
+        try:
+            message = self.format(record)
+        except Exception:
+            message = record.getMessage()
+        self.q.put({"type": "log", "message": f"[{record.levelname}] {message}"})
+
 
 @app.post("/run")
 async def run_text_pipeline(
@@ -35,6 +66,10 @@ async def run_text_pipeline(
             return f"data: {json.dumps(obj)}\n\n"
 
         tmp_dir = Path(tempfile.mkdtemp())
+        log_queue: "queue.Queue[dict]" = queue.Queue()
+        handler = _QueueLogHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
         try:
             yield event({"type": "stage", "name": "checking"})
             image_path = tmp_dir / image_filename
@@ -43,15 +78,39 @@ async def run_text_pipeline(
             yield event({"type": "stage_done", "name": "checking"})
 
             yield event({"type": "stage", "name": "validating"})
-            yield event({"type": "log", "message": "running Kraken segmentation + HTR (OCR-only mode)..."})
+            if RECOGNITION_MODEL:
+                yield event({"type": "log", "message": f"running Kraken segmentation + HTR (OCR-only mode, model={Path(RECOGNITION_MODEL).name})..."})
+            else:
+                yield event({"type": "log", "message": "running Kraken segmentation + HTR (OCR-only mode, STUB — no recognition model installed, text will be empty)..."})
             yield event({"type": "stage_done", "name": "validating"})
 
             yield event({"type": "stage", "name": "processing"})
-            collection, manifest = run(
-                image_path=str(image_path),
-                folio=folio,
-                ocr_only_mode=True,
-            )
+            result_holder: dict = {}
+
+            def _worker():
+                handler.thread_ident = threading.current_thread().ident
+                try:
+                    result_holder["value"] = run(
+                        image_path=str(image_path),
+                        folio=folio,
+                        recognition_model=RECOGNITION_MODEL,
+                        ocr_only_mode=True,
+                    )
+                except Exception as exc:
+                    result_holder["error"] = exc
+            
+            worker = threading.Thread(target=_worker, daemon=True)
+            worker.start()
+
+            while worker.is_alive() or not log_queue.empty():
+                try:
+                    yield event(log_queue.get(timeout=0.2))
+                except queue.Empty:
+                    continue
+            worker.join()
+            if "error" in result_holder:
+                raise result_holder["error"]
+            collection, manifest = result_holder["value"]
             payload = _build_pipeline_payload(
                 collection, str(image_path), manifest, folio=folio, mode="ocr_only",
             )
@@ -66,6 +125,7 @@ async def run_text_pipeline(
         except Exception as e:
             yield event({"type": "error", "message": str(e)})
         finally:
+            root_logger.removeHandler(handler)
             shutil.rmtree(tmp_dir, ignore_errors=True)
     
     return StreamingResponse(
