@@ -1,3 +1,5 @@
+export type ModelKind = "yolo" | "segmentation" | "recognition";
+
 export interface ProjectImage {
   id: string;
   name: string;
@@ -32,6 +34,7 @@ export interface TextAlignment {
 export interface ProjectModel {
   id: string;
   name: string;
+  kind: ModelKind;
 }
 
 export interface AnnotationSet {

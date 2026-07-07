@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File as FAPIFile
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response
 from pydantic import BaseModel
 from pathlib import Path
@@ -233,6 +233,24 @@ def _migrate_db():
     finally:
         cur.close()
         release_db_conn(con)
+    
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_models ADD COLUMN kind TEXT DEFAULT 'yolo'")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_project_models_kind ON project_models(project_id, kind)")
+    con.commit()
+    cur.close()
+    release_db_conn(con)
 
     con = get_db_conn()
     cur = con.cursor()
@@ -381,8 +399,8 @@ def _project_row_to_dict(cur, row, username):
     pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json = row
     cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
-    cur.execute("SELECT id, name FROM project_models WHERE project_id=%s", (pid,))
-    models = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
+    cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
+    models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
     mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4]}
            for r in cur.fetchall()]
@@ -447,10 +465,10 @@ def list_projects(user=Depends(get_current_user)):
     for pid, iid, iname in cur.fetchall():
         images_by_pid.setdefault(pid, []).append({"id": iid, "name": iname})
 
-    cur.execute("SELECT project_id, id, name FROM project_models WHERE project_id IN %s", (pids,))
+    cur.execute("SELECT project_id, id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id IN %s", (pids,))
     models_by_pid: dict = {}
-    for pid, mid, mname in cur.fetchall():
-        models_by_pid.setdefault(pid, []).append({"id": mid, "name": mname})
+    for pid, mid, mname, mkind in cur.fetchall():
+        models_by_pid.setdefault(pid, []).append({"id": mid, "name": mname, "kind": mkind})
 
     cur.execute(
         "SELECT project_id, id, name, xml_content, corrected, image_name"
@@ -922,13 +940,32 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
     return {"session_id": session_id, "manifest_id": manifest_id}
 
 # models
+ALLOWED_MODEL_KINDS = {"yolo", "segmentation", "recognition"}
+def get_model_file_path(cur, project_id: int, model_id: str, kind: str) -> Optional[tuple]:
+    """Resolve a project_models row to (file_path, name), scoped to both
+    project and kind so a client can't point e.g. a YOLO model id at the
+    OCR slot. Returns None if not found, wrong kind, or file_path is empty.
+    Takes a cursor (not a connection) so callers can reuse their own
+    request-scoped transaction instead of checking out a second connection.
+    """
+    cur.execute(
+        "SELECT file_path, name FROM project_models WHERE id=%s AND project_id=%s AND kind=%s",
+        (model_id, project_id, kind),
+    )
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return None
+    return row[0], row[1]
 
 @router.post("/projects/{project_id}/models")
 async def add_model(
     project_id: int, 
     file: UploadFile = FAPIFile(...), 
+    kind: str = Form("yolo"),
     user=Depends(get_current_user)
 ):
+    if kind not in ALLOWED_MODEL_KINDS:
+        raise HTTPException(status_code=400, detail=f"invalid model kind: {kind}")
     con = get_db_conn()
     cur = con.cursor()
     cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
@@ -940,18 +977,19 @@ async def add_model(
     model_id = _uuid.uuid4().hex
     dest_dir = MODELS_DIR / str(project_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    file_path = dest_dir / f"{model_id}.pt"
+    ext = Path(file.filename).suffix if file.filename else ""
+    file_path = dest_dir / f"{model_id}{ext}"
     model_bytes = await file.read()
     file_path.write_bytes(model_bytes)
     cur.execute(
-        "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s,%s,%s, %s)",
-        (model_id, project_id, file.filename, str(file_path))
+        "INSERT INTO project_models (id, project_id, name, file_path, kind) VALUES (%s,%s,%s, %s, %s)",
+        (model_id, project_id, file.filename, str(file_path), kind)
     )
-    _log_activity(cur, project_id, "model_added", file.filename)
+    _log_activity(cur, project_id, "model_added", f"{file.filename} ({kind})")
     con.commit()
     cur.close()
     release_db_conn(con)
-    return {"id": model_id, "name": file.filename}
+    return {"id": model_id, "name": file.filename, "kind": kind}
 
 @router.delete("/projects/{project_id}/models/{model_id}")
 def delete_model(project_id: int, model_id: str, user=Depends(get_current_user)):
@@ -1081,18 +1119,19 @@ def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
 
     import shutil
 
-    cur.execute("SELECT name, file_path FROM project_models WHERE project_id=%s", (project_id,))
-    for model_name, file_path in cur.fetchall():
+    cur.execute("SELECT name, file_path, kind FROM project_models WHERE project_id=%s", (project_id,))
+    for model_name, file_path, model_kind in cur.fetchall():
         new_model_id = str(_uuid.uuid4())
         new_file_path = None
         if file_path and Path(file_path).exists():
             new_model_dir = MODELS_DIR / str(new_id)
             new_model_dir.mkdir(parents=True, exist_ok=True)
-            new_file_path = str(new_model_dir / f"{new_model_id}.pt")
+            ext = Path(file_path).suffix
+            new_file_path = str(new_model_dir / f"{new_model_id}{ext}")
             shutil.copy2(file_path, new_file_path)
         cur.execute(
-            "INSERT INTO project_models (id, project_id, name, file_path) VALUES (%s, %s, %s, %s)",
-            (new_model_id, new_id, model_name, new_file_path)
+            "INSERT INTO project_models (id, project_id, name, file_path, kind) VALUES (%s, %s, %s, %s, %s)",
+            (new_model_id, new_id, model_name, new_file_path, model_kind)
         )
 
     con.commit()

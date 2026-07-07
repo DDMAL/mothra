@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { Project, ProjectModel } from "../../types";
+import type { Project, ProjectModel, ModelKind } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { apiFetch } from "../../lib/apiFetch";
 import Modal from "../shared/Modal";
@@ -8,13 +8,41 @@ import AssetGrid from "../shared/AssetGrid";
 import RenameModal from "./RenameModal";
 import FileDropZone from "../shared/FileDropZone";
 
+
+const KIND_EXTENSIONS: Record<ModelKind, RegExp> = {
+  yolo: /\.pt$/i,
+  segmentation: /\.(mlmodel|safetensors)$/i,
+  recognition: /\.(mlmodel|safetensors)$/i,
+};
+const KIND_ACCEPT: Record<ModelKind, string> = {
+  yolo: ".pt",
+  segmentation: ".mlmodel,.safetensors",
+  recognition: ".mlmodel,.safetensors",
+};
+const KIND_DROPZONE_LABEL: Record<ModelKind, string> = {
+  yolo: "drag & drop .pt files here",
+  segmentation: "drag & drop .mlmodel / .safetensors files here",
+  recognition: "drag & drop .mlmodel / .safetensors files here",
+};
+const KIND_OPTION_LABEL: Record<ModelKind, string> = {
+  yolo: "YOLO detection model (.pt)",
+  segmentation: "text segmentation model (.mlmodel / .safetensors)",
+  recognition: "OCR / recognition model (.mlmodel / .safetensors)",
+};
+const KIND_BADGE: Record<ModelKind, string> = {
+  yolo: "PT",
+  segmentation: "SEG",
+  recognition: "OCR",
+};
+
+
 interface ModelTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectModel>>;
   usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
   onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
-  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string, kind: ModelKind }>;
   setValidationError: (e: string | null) => void;
   inferenceThreshold: number;
   onInferenceThresholdChange: (v: number) => void;
@@ -22,10 +50,10 @@ interface ModelTabProps {
   onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
   textColumnCount: "auto" | "1" | "2";
   onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
-  textSegmentationModel: string;
-  onTextSegmentationModelChange: (v: string) => void;
-  textRecognitionModel: string;
-  onTextRecognitionModelChange: (v: string) => void;
+  textSegmentationModelId: string;
+  onTextSegmentationModelIdChange: (v: string) => void;
+  textRecognitionModelId: string;
+  onTextRecognitionModelIdChange: (v: string) => void;
   textDevice: "cpu" | "cuda";
   onTextDeviceChange: (v: "cpu" | "cuda") => void;
   textColumnBimodalThreshold: number;
@@ -46,10 +74,10 @@ export default function ModelTab({
   onInferenceDeviceChange,
   textColumnCount,
   onTextColumnCountChange,
-  textSegmentationModel,
-  onTextSegmentationModelChange,
-  textRecognitionModel,
-  onTextRecognitionModelChange,
+  textSegmentationModelId,
+  onTextSegmentationModelIdChange,
+  textRecognitionModelId,
+  onTextRecognitionModelIdChange,
   textDevice,
   onTextDeviceChange,
   textColumnBimodalThreshold,
@@ -61,6 +89,11 @@ export default function ModelTab({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [textSettingsOpen, setTextSettingsOpen] = useState(false);
   const [textAdvancedOpen, setTextAdvancedOpen] = useState(false);
+
+  const [uploadKind, setUploadKind] = useState<ModelKind>("yolo");
+
+  const segmentationModels = project.models.filter((m) => m.kind === "segmentation");
+  const recognitionModels = project.models.filter((m) => m.kind === "recognition");
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -91,17 +124,18 @@ export default function ModelTab({
   };
 
   const handleModelFiles = async (files: FileList | File[]) => {
-    const valid = Array.from(files).filter((f) => /\.pt$/i.test(f.name));
+    const valid = Array.from(files).filter((f) => KIND_EXTENSIONS[uploadKind].test(f.name));
     if (valid.length === 0) return;
     const entries = await Promise.all(
       valid.map(async (f) => {
-        const result = await onUploadModel(f);
-        return { id: result.id, name: result.name || f.name };
+        const result = await onUploadModel(f, uploadKind);
+        return { id: result.id, name: result.name || f.name, kind: result.kind ?? uploadKind };
       }),
     );
     onUpdateProject({ ...project, models: [...project.models, ...entries] });
     section.setUploadModal(false);
     section.setDragging(false);
+    setUploadKind("yolo");
   };
 
   const totalModelPages = Math.ceil(project.models.length / ITEMS_PER_PAGE);
@@ -122,34 +156,12 @@ export default function ModelTab({
             section={section}
             usedNames={usedNames.models}
             totalPages={totalModelPages}
-            renderThumbnail={() => (
-              <svg
-                width="56"
-                height="64"
-                viewBox="0 0 56 64"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z"
-                  fill="white"
-                  fillOpacity="0.25"
-                />
-                <path
-                  d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z"
-                  fill="white"
-                  fillOpacity="0.45"
-                />
-                <text
-                  x="28"
-                  y="46"
-                  textAnchor="middle"
-                  fill="white"
-                  fontSize="16"
-                  fontWeight="bold"
-                  fontFamily="monospace"
-                >
-                  PT
+            renderThumbnail={(item) => (
+              <svg width="56" height="64" viewBox="0 0 56 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 0H36L56 20V60C56 62.2 54.2 64 52 64H4C1.8 64 0 62.2 0 60V4C0 1.8 1.8 0 4 0Z" fill="white" fillOpacity="0.25" />
+                <path d="M36 0L56 20H40C37.8 20 36 18.2 36 16V0Z" fill="white" fillOpacity="0.45" />
+                <text x="28" y="46" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold" fontFamily="monospace">
+                  {KIND_BADGE[item.kind]}
                 </text>
               </svg>
             )}
@@ -228,29 +240,41 @@ export default function ModelTab({
                 </div>
 
                 <label className="flex flex-col gap-1">
-                  <span className="text-white/70 text-xs">
-                    custom segmentation model (optional path)
-                  </span>
-                  <input
-                    type="text"
-                    value={textSegmentationModel}
-                    onChange={(e) => onTextSegmentationModelChange(e.target.value)}
-                    placeholder="default: Kraken's built-in BLLA model"
-                    className="bg-transparent border border-white/30 rounded px-2 py-1 text-sm text-white placeholder:text-white/40 outline-none"
-                  />
+                  <span className="text-white/70 text-xs">custom segmentation model</span>
+                  <select
+                    value={textSegmentationModelId}
+                    onChange={(e) => onTextSegmentationModelIdChange(e.target.value)}
+                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                  >
+                    <option value="">default: Kraken's built-in BLLA model</option>
+                    {segmentationModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  {segmentationModels.length === 0 && (
+                    <span className="text-white/40 text-xs italic">
+                      no segmentation models uploaded yet — upload one above (type: text segmentation model)
+                    </span>
+                  )}
                 </label>
 
                 <label className="flex flex-col gap-1">
-                  <span className="text-white/70 text-xs">
-                    custom OCR model (optional path)
-                  </span>
-                  <input
-                    type="text"
-                    value={textRecognitionModel}
-                    onChange={(e) => onTextRecognitionModelChange(e.target.value)}
-                    placeholder="default: auto-detected Tridis model (or stub if not installed)"
-                    className="bg-transparent border border-white/30 rounded px-2 py-1 text-sm text-white placeholder:text-white/40 outline-none"
-                  />
+                  <span className="text-white/70 text-xs">custom OCR model</span>
+                  <select
+                    value={textRecognitionModelId}
+                    onChange={(e) => onTextRecognitionModelIdChange(e.target.value)}
+                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                  >
+                    <option value="">default: auto-detected Tridis model (or stub if not installed)</option>
+                    {recognitionModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  {recognitionModels.length === 0 && (
+                    <span className="text-white/40 text-xs italic">
+                      no OCR models uploaded yet — upload one above (type: OCR / recognition model)
+                    </span>
+                  )}
                 </label>
 
                 <div>
@@ -313,31 +337,23 @@ export default function ModelTab({
           y={section.menu.y}
           onClose={() => section.setMenu(null)}
           items={[
-            {
-              label: "Use Model",
-              onClick: () => {
-                const model = project.models.find(
-                  (m) => m.id === section.menu!.id,
-                );
-                if (model && !usedNames.models.includes(model.name))
-                  onUsedNamesChange({
-                    ...usedNames,
-                    models: [...usedNames.models, model.name],
-                  });
-                section.setMenu(null);
-                setValidationError(null);
-              },
-            },
-            {
-              label: "Delete Model",
-              onClick: () => deleteModel(section.menu!.id),
-            },
+            ...(project.models.find((m) => m.id === section.menu!.id)?.kind === "yolo"
+              ? [{
+                  label: "Use Model",
+                  onClick: () => {
+                    const model = project.models.find((m) => m.id === section.menu!.id);
+                    if (model && !usedNames.models.includes(model.name))
+                      onUsedNamesChange({ ...usedNames, models: [...usedNames.models, model.name] });
+                    section.setMenu(null);
+                    setValidationError(null);
+                  },
+                }]
+              : []),
+            { label: "Delete Model", onClick: () => deleteModel(section.menu!.id) },
             {
               label: "Rename Model",
               onClick: () => {
-                const m = project.models.find(
-                  (m) => m.id === section.menu!.id,
-                )!;
+                const m = project.models.find((m) => m.id === section.menu!.id)!;
                 section.setRenameModal({ id: section.menu!.id });
                 section.setRenameName(m.name);
                 section.setMenu(null);
@@ -362,47 +378,46 @@ export default function ModelTab({
           onClose={() => {
             section.setUploadModal(false);
             section.setDragging(false);
+            setUploadKind("yolo");
           }}
         >
           <h2 className="text-xl text-[#1D3335] text-center">upload model</h2>
-          <FileDropZone
-            dragging={section.dragging}
-            onDragOver={(e) => {
-              e.preventDefault();
-              section.setDragging(true);
-            }}
-            onDragEnter={(e) => {
-              e.preventDefault();
-              section.setDragging(true);
-            }}
-            onDragLeave={() => section.setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleModelFiles(e.dataTransfer.files);
-            }}
-            onClick={() => modelFileInputRef.current?.click()}
-            label="drag & drop .pt files here"
-          >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                modelFileInputRef.current?.click();
-              }}
-              className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-[#1D3335]/70">model type</span>
+              <select
+                value={uploadKind}
+                onChange={(e) => setUploadKind(e.target.value as ModelKind)}
+                className="border border-[#1D3335]/30 rounded px-2 py-1 text-sm text-[#1D3335] bg-white/60"
+              >
+                {(["yolo", "segmentation", "recognition"] as const).map((k) => (
+                  <option key={k} value={k}>{KIND_OPTION_LABEL[k]}</option>
+                ))}
+              </select>
+            </label>
+            <FileDropZone
+              dragging={section.dragging}
+              onDragOver={(e) => { e.preventDefault(); section.setDragging(true); }}
+              onDragEnter={(e) => { e.preventDefault(); section.setDragging(true); }}
+              onDragLeave={() => section.setDragging(false)}
+              onDrop={(e) => { e.preventDefault(); handleModelFiles(e.dataTransfer.files); }}
+              onClick={() => modelFileInputRef.current?.click()}
+              label={KIND_DROPZONE_LABEL[uploadKind]}
             >
-              select files
-            </button>
-          </FileDropZone>
-          <input
-            ref={modelFileInputRef}
-            type="file"
-            accept=".pt"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) handleModelFiles(e.target.files);
-            }}
-          />
+              <button
+                onClick={(e) => { e.stopPropagation(); modelFileInputRef.current?.click(); }}
+                className="text-sm text-[#1D3335] underline hover:opacity-70 cursor-pointer"
+              >
+                select files
+              </button>
+            </FileDropZone>
+            <input
+              ref={modelFileInputRef}
+              type="file"
+              accept={KIND_ACCEPT[uploadKind]}
+              multiple
+              className="hidden"
+              onChange={(e) => { if (e.target.files) handleModelFiles(e.target.files); }}
+            />
         </Modal>
       )}
     </>

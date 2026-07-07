@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project, AnnotationSet, MeiFile } from "../types";
+import type { View, Project, AnnotationSet, MeiFile, ModelKind } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch } from "../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../utils/imageStep";
@@ -101,8 +101,8 @@ export default function AppRouter({
 
   // thread text-finding settings (mothra-text optional inputs)
   const [textColumnCount, setTextColumnCount] = useState<"auto" | "1" | "2">("auto");
-  const [textSegmentationModel, setTextSegmentationModel] = useState("");
-  const [textRecognitionModel, setTextRecognitionModel] = useState("");
+  const [textSegmentationModelId, setTextSegmentationModelId] = useState("");
+  const [textRecognitionModelId, setTextRecognitionModelId] = useState("");
   const [textDevice, setTextDevice] = useState<"cpu" | "cuda">("cpu");
   const [textColumnBimodalThreshold, setTextColumnBimodalThreshold] = useState(0.5);
 
@@ -226,9 +226,10 @@ export default function AppRouter({
             }
             return r.json();
           }}
-          onUploadModel={async (file: File) => {
+          onUploadModel={async (file: File, kind: ModelKind) => {
             const form = new FormData();
             form.append("file", file);
+            form.append("kind", kind);
             const r = await apiFetch(
               `/api/projects/${selectedProject.id}/models`,
               {
@@ -294,10 +295,10 @@ export default function AppRouter({
           onInferenceDeviceChange={setInferenceDevice}
           textColumnCount={textColumnCount}
           onTextColumnCountChange={setTextColumnCount}
-          textSegmentationModel={textSegmentationModel}
-          onTextSegmentationModelChange={setTextSegmentationModel}
-          textRecognitionModel={textRecognitionModel}
-          onTextRecognitionModelChange={setTextRecognitionModel}
+          textSegmentationModelId={textSegmentationModelId}
+          onTextSegmentationModelIdChange={setTextSegmentationModelId}
+          textRecognitionModelId={textRecognitionModelId}
+          onTextRecognitionModelIdChange={setTextRecognitionModelId}
           textDevice={textDevice}
           onTextDeviceChange={setTextDevice}
           textColumnBimodalThreshold={textColumnBimodalThreshold}
@@ -334,8 +335,8 @@ export default function AppRouter({
                 confidence_threshold: inferenceThreshold,
                 device: inferenceDevice,
                 text_column_count: textColumnCount === "auto" ? null : Number(textColumnCount),
-                text_segmentation_model: textSegmentationModel.trim() || null,
-                text_recognition_model: textRecognitionModel.trim() || null,
+                text_segmentation_model_id: textSegmentationModelId || null,
+                text_recognition_model_id: textRecognitionModelId || null,
                 text_device: textDevice,
                 text_column_bimodal_threshold: textColumnBimodalThreshold,
               }),

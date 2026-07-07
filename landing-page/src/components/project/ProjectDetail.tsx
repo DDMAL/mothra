@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Project } from "../../types";
+import type { Project, ModelKind } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -33,7 +33,7 @@ interface ProjectDetailProps {
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
-  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
@@ -46,10 +46,10 @@ interface ProjectDetailProps {
   onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
   textColumnCount: "auto" | "1" | "2";
   onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
-  textSegmentationModel: string;
-  onTextSegmentationModelChange: (v: string) => void;
-  textRecognitionModel: string;
-  onTextRecognitionModelChange: (v: string) => void;
+  textSegmentationModelId: string;
+  onTextSegmentationModelIdChange: (v: string) => void;
+  textRecognitionModelId: string;
+  onTextRecognitionModelIdChange: (v: string) => void;
   textDevice: "cpu" | "cuda";
   onTextDeviceChange: (v: "cpu" | "cuda") => void;
   textColumnBimodalThreshold: number;
@@ -81,10 +81,10 @@ export default function ProjectDetail({
   onInferenceDeviceChange,
   textColumnCount,
   onTextColumnCountChange,
-  textSegmentationModel,
-  onTextSegmentationModelChange,
-  textRecognitionModel,
-  onTextRecognitionModelChange,
+  textSegmentationModelId,
+  onTextSegmentationModelIdChange,
+  textRecognitionModelId,
+  onTextRecognitionModelIdChange,
   textDevice,
   onTextDeviceChange,
   textColumnBimodalThreshold,
@@ -536,10 +536,10 @@ export default function ProjectDetail({
                 onInferenceDeviceChange={onInferenceDeviceChange}
                 textColumnCount={textColumnCount}
                 onTextColumnCountChange={onTextColumnCountChange}
-                textSegmentationModel={textSegmentationModel}
-                onTextSegmentationModelChange={onTextSegmentationModelChange}
-                textRecognitionModel={textRecognitionModel}
-                onTextRecognitionModelChange={onTextRecognitionModelChange}
+                textSegmentationModelId={textSegmentationModelId}
+                onTextSegmentationModelIdChange={onTextSegmentationModelIdChange}
+                textRecognitionModelId={textRecognitionModelId}
+                onTextRecognitionModelIdChange={onTextRecognitionModelIdChange}
                 textDevice={textDevice}
                 onTextDeviceChange={onTextDeviceChange}
                 textColumnBimodalThreshold={textColumnBimodalThreshold}

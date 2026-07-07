@@ -7,7 +7,7 @@ import json
 import uuid as _uuid
 import io
 
-from auth_api import get_db_conn, get_current_user, release_db_conn
+from auth_api import get_db_conn, get_current_user, release_db_conn, get_model_file_path
 from text_api import stream_text_finding
 
 router = APIRouter()
@@ -18,8 +18,8 @@ class PredictBody(BaseModel):
     confidence_threshold: float = 0.5
     device: str = "cpu"
     text_column_count: Optional[int] = None
-    text_segmentation_model: Optional[str] = None
-    text_recognition_model: Optional[str] = None
+    text_segmentation_model_id: Optional[str] = None
+    text_recognition_model_id: Optional[str] = None
     text_device: str = "cpu"
     text_column_bimodal_threshold: float = 0.5
 
@@ -52,16 +52,32 @@ async def run_predict(
         try:
             # stage 1 - checking
             yield event({"type": "stage", "name": "checking"})
-            cur.execute("SELECT file_path, name FROM project_models WHERE id=%s AND project_id=%s",
-                        (model_id, project_id))
-            model_row = cur.fetchone()
-            if not model_row or not model_row[0]:
+            model_row = get_model_file_path(cur, project_id, model_id, "yolo")
+            if not model_row: 
                 yield event({"type": "error", "message": "Model file not found"}); return
             model = YOLO(model_row[0])
             yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
+
+            seg_model_path = None
+            if body.text_segmentation_model_id:
+                seg_row = get_model_file_path(cur, project_id, body.text_segmentation_model_id, "segmentation")
+                if seg_row:
+                    seg_model_path = seg_row[0]
+                    yield event({"type": "log", "message": f"Segmentation model: {seg_row[1]}"})
+                else:
+                    yield event({"type": "log", "message": "text-finding: custom segmentation model not found — using default"})
+            rec_model_path = None
+            if body.text_recognition_model_id:
+                rec_row = get_model_file_path(cur, project_id, body.text_recognition_model_id, "recognition")
+                if rec_row:
+                    rec_model_path = rec_row[0]
+                    yield event({"type": "log", "message": f"OCR model: {rec_row[1]}"})
+                else:
+                    yield event({"type": "log", "message": "text-finding: custom OCR model not found — using default"})
+
             yield event({"type": "stage_done", "name": "checking"})
 
-            # stage 2 - validatin
+            # stage 2 - validation
             yield event({"type": "stage", "name": "validating"})
             images = []
             for iid in image_ids:
@@ -112,11 +128,11 @@ async def run_predict(
                 # the visible (music-path) pipeline.
                 yield event({"type": "log", "message": f"{image_name}: starting text-finding..."})
                 for text_ev in stream_text_finding(
-                    project_id, image_id, image_name, 
+                    project_id, image_id, image_name,
                     bytes(image_data), mime_type,
                     column_count=body.text_column_count,
-                    segmentation_model=body.text_segmentation_model,
-                    recognition_model=body.text_recognition_model,
+                    segmentation_model=seg_model_path,
+                    recognition_model=rec_model_path,
                     device=body.text_device,
                     column_bimodal_threshold=body.text_column_bimodal_threshold,
                 ):
