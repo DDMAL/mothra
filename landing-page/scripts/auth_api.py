@@ -29,6 +29,14 @@ def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
 def get_db_conn():
     return _get_pool().getconn()
 
+def require_project_owner(cur, project_id: int, user_id: int) -> None:
+    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="project not found")
+    if row[0] != user_id:
+        raise HTTPException(status_code=403, detail="not your project")
+
 def release_db_conn(con) -> None:
     _get_pool().putconn(con)
 
@@ -546,19 +554,16 @@ def get_project(project_id: int, user=Depends(get_current_user)):
 @router.get("/projects/{project_id}/activity")
 def get_activity(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute(
+            "SELECT action_type, detail, created_at FROM activity_log"
+            " WHERE project_id=%s ORDER BY created_at DESC LIMIT 100",
+            (project_id,)
+        )
+        return [{"actionType": r[0], "detail": r[1], "createdAt": str(r[2])} for r in cur.fetchall()]
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute(
-        "SELECT action_type, detail, created_at FROM activity_log"
-        " WHERE project_id=%s ORDER BY created_at DESC LIMIT 100",
-        (project_id,)
-    )
-    entries = [{"actionType": r[0], "detail": r[1], "createdAt": str(r[2])} for r in cur.fetchall()]
-    cur.close(); release_db_conn(con)
-    return entries
 
 class CreateProjectBody(BaseModel):
     name: str
@@ -593,73 +598,64 @@ class UpdateProjectBody(BaseModel):
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        if body.name is not None:
+            cur.execute("UPDATE projects SET name=%s WHERE id=%s", (body.name, project_id))
+        if body.stepsUnlocked is not None:
+            cur.execute("UPDATE projects SET steps_unlocked=%s WHERE id=%s", (body.stepsUnlocked, project_id))
+            _log_activity(cur, project_id, "step_unlocked", str(body.stepsUnlocked))
+        if body.usedImageNames is not None:
+            cur.execute("UPDATE projects SET used_image_names=%s WHERE id=%s",
+                        (json.dumps(body.usedImageNames), project_id))
+        if body.usedModelNames is not None:
+            cur.execute("UPDATE projects SET used_model_names=%s WHERE id=%s",
+                        (json.dumps(body.usedModelNames), project_id))
+        if body.deletedAt is not None:
+            cur.execute("UPDATE projects SET deleted_at=%s WHERE id=%s", (body.deletedAt, project_id))
+        if body.lastOpenedAt is not None:
+            cur.execute("UPDATE projects SET last_opened_at=%s WHERE id=%s",
+                        (body.lastOpenedAt, project_id))
+        if body.isPinned is not None:
+            cur.execute("UPDATE projects SET is_pinned=%s WHERE id=%s", (body.isPinned, project_id))
+        if body.usedAnnotationNames is not None:
+            cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
+                        (json.dumps(body.usedAnnotationNames), project_id))
+        con.commit()
+        return {"ok": True}
+    finally:
         cur.close()
         release_db_conn(con)
-        raise HTTPException(status_code=404)
-    if body.name is not None:
-        cur.execute("UPDATE projects SET name=%s WHERE id=%s", (body.name, project_id))
-    if body.stepsUnlocked is not None:
-        cur.execute("UPDATE projects SET steps_unlocked=%s WHERE id=%s", (body.stepsUnlocked, project_id))
-        _log_activity(cur, project_id, "step_unlocked", str(body.stepsUnlocked))
-    if body.usedImageNames is not None:
-        cur.execute("UPDATE projects SET used_image_names=%s WHERE id=%s",
-                    (json.dumps(body.usedImageNames), project_id))
-    if body.usedModelNames is not None:
-        cur.execute("UPDATE projects SET used_model_names=%s WHERE id=%s",
-                    (json.dumps(body.usedModelNames), project_id))
-    if body.deletedAt is not None:
-        cur.execute("UPDATE projects SET deleted_at=%s WHERE id=%s", (body.deletedAt, project_id))
-    if body.lastOpenedAt is not None:
-        cur.execute("UPDATE projects SET last_opened_at=%s WHERE id=%s",
-                    (body.lastOpenedAt, project_id))
-    if body.isPinned is not None:
-        cur.execute("UPDATE projects SET is_pinned=%s WHERE id=%s", (body.isPinned, project_id))
-    if body.usedAnnotationNames is not None:
-        cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
-                    (json.dumps(body.usedAnnotationNames), project_id))
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"ok": True}
 
 @router.post("/projects/{project_id}/restore")
 def restore_project(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("UPDATE projects SET deleted_at=NULL WHERE id=%s", (project_id, ))
+        con.commit()
+        return {"ok": True}
+    finally:
         cur.close()
         release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute("UPDATE projects SET deleted_at=NULL WHERE id=%s", (project_id, ))
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"ok": True}
 
 @router.delete("/projects/{project_id}")
 def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("DELETE FROM annotations WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM project_logs WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM activity_log WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
+        con.commit()
+        return {"ok": True}
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute("DELETE FROM annotations WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM project_logs WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM activity_log WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
-    cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
-    con.commit()
-    cur.close(); release_db_conn(con)
-    return {"ok": True}
 
 # image endpoints
 
@@ -667,39 +663,35 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
 async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        image_id = _uuid.uuid4().hex
+        image_bytes = await file.read()
+
+        cur.execute("""
+            SELECT COALESCE(SUM(octet_length(data)), 0)
+            FROM project_images
+            WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+        """, (user["id"], ))
+        current_bytes = cur.fetchone()[0]
+
+        if current_bytes + len(image_bytes) > STORAGE_QUOTA_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Storage quota exceeded ({STORAGE_QUOTA_BYTES // (1024*1024)} MB limit)"
+            )
+
+        mime_type = file.content_type or "image/png"
+        cur.execute(
+            "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",
+            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes))
+        )
+        _log_activity(cur, project_id, "image_imported", file.filename)
+        con.commit()
+        return {"id": image_id, "name": file.filename}
+    finally:
         cur.close()
         release_db_conn(con)
-        raise HTTPException(status_code=404)
-    image_id = _uuid.uuid4().hex
-    image_bytes = await file.read()
-
-    cur.execute("""
-        SELECT COALESCE(SUM(octet_length(data)), 0)
-        FROM project_images
-        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
-    """, (user["id"], ))
-    current_bytes = cur.fetchone()[0]
-
-    if current_bytes + len(image_bytes) > STORAGE_QUOTA_BYTES:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(
-            status_code=413,
-            detail=f"Storage quota exceeded ({STORAGE_QUOTA_BYTES // (1024*1024)} MB limit)"
-        )
-    
-    mime_type = file.content_type or "image/png"
-    cur.execute(
-        "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",
-        (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes))
-    )
-    _log_activity(cur, project_id, "image_imported", file.filename)
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"id": image_id, "name": file.filename}
 
 @router.get("/images/{image_id}")
 def get_image(image_id: str, user=Depends(get_current_user)):
@@ -739,53 +731,46 @@ def get_image_meta(image_id: str, user=Depends(get_current_user)):
 def delete_image(project_id: int, image_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute(
-        "SELECT id FROM project_images WHERE id=%s AND project_id=%s", (image_id, project_id)
-    )
-    if not cur.fetchone():
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404, detail="Image not found")
-    cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
-    _log_activity(cur, project_id, "image_deleted", image_id)
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"ok": True}
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute(
+            "SELECT id FROM project_images WHERE id=%s AND project_id=%s", (image_id, project_id)
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Image not found")
+        cur.execute("DELETE FROM project_images WHERE id=%s", (image_id,))
+        _log_activity(cur, project_id, "image_deleted", image_id)
+        con.commit()
+        return {"ok": True}
+    finally:
+        cur.close()
+        release_db_conn(con)
 
 @router.delete("/projects/{project_id}/annotations/{annotation_id}")
 def delete_annotation(project_id: int, annotation_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute("DELETE FROM annotations WHERE id=%s AND project_id=%s", (annotation_id, project_id))
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"ok": True}
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("DELETE FROM annotations WHERE id=%s AND project_id=%s", (annotation_id, project_id))
+        con.commit()
+        return {"ok": True}
+    finally:
+        cur.close()
+        release_db_conn(con)
 
 @router.delete("/projects/{project_id}/mei/{mei_id}")
 def delete_mei_file(project_id: int, mei_id: str, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute("DELETE FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"ok": True}
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("DELETE FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
+        con.commit()
+        return {"ok": True}
+    finally:
+        cur.close()
+        release_db_conn(con)
 
 # mei + model endpoints
 
@@ -799,27 +784,24 @@ class AddMeiBody(BaseModel):
 def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        mei_id = _uuid.uuid4().hex
+        cur.execute(
+            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name) VALUES (%s,%s,%s,%s,%s)",
+            (mei_id, project_id, body.name, body.xmlContent, body.imageName))
+        if body.logs:
+            content = "\n".join(body.logs)
+            cur.execute(
+                "INSERT INTO project_logs (project_id, log_type, content) VALUES (%s, %s, %s)",
+                (project_id, "encoding", content)
+            )
+        _log_activity(cur, project_id, "mei_produced", body.name)
+        con.commit()
+        return {"id": mei_id}
+    finally:
         cur.close()
         release_db_conn(con)
-        raise HTTPException(status_code=404)
-    mei_id = _uuid.uuid4().hex
-    cur.execute(
-        "INSERT INTO mei_files (id, project_id, name, xml_content, image_name) VALUES (%s,%s,%s,%s,%s)",
-        (mei_id, project_id, body.name, body.xmlContent, body.imageName))
-    if body.logs:
-        content = "\n".join(body.logs)
-        cur.execute(
-            "INSERT INTO project_logs (project_id, log_type, content) VALUES (%s, %s, %s)",
-            (project_id, "encoding", content)
-        )
-    _log_activity(cur, project_id, "mei_produced", body.name)
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"id": mei_id}
 
 class UpdateMeiBody(BaseModel):
     corrected: Optional[bool] = None
@@ -828,25 +810,23 @@ class UpdateMeiBody(BaseModel):
 @router.patch("/projects/{project_id}/mei/{mei_id}")
 def update_mei(project_id: int, mei_id: str, body: UpdateMeiBody, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        if body.xmlContent is not None:
+            cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
+                        (body.xmlContent, mei_id, project_id))
+        if body.corrected is not None:
+            cur.execute("UPDATE mei_files SET corrected=%s WHERE id=%s AND project_id=%s",
+                        (1 if body.corrected else 0, mei_id, project_id))
+            if body.corrected:
+                cur.execute("SELECT name FROM mei_files WHERE id=%s",
+                            (mei_id,))
+                name_row = cur.fetchone()
+                _log_activity(cur, project_id, "mei_corrected", name_row[0] if name_row else "")
+        con.commit()
+        return {"ok": True}
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    if body.xmlContent is not None:
-        cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
-                    (body.xmlContent, mei_id, project_id))
-    if body.corrected is not None:
-        cur.execute("UPDATE mei_files SET corrected=%s WHERE id=%s AND project_id=%s",
-                    (1 if body.corrected else 0, mei_id, project_id))
-        if body.corrected:
-            cur.execute("SELECT name FROM mei_files WHERE id=%s", 
-                        (mei_id,))
-            name_row = cur.fetchone()
-            _log_activity(cur, project_id, "mei_corrected", name_row[0] if name_row else "")
-    con.commit()
-    cur.close(); release_db_conn(con)
-    return {"ok": True}
 
 @router.get("/projects/{project_id}/mei/{mei_id}/content")
 def get_mei_content(project_id: int, mei_id: str, token: str):
@@ -882,29 +862,26 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
             _f.unlink(missing_ok=True)
 
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute("SELECT name, image_name FROM mei_files WHERE id=%s AND project_id=%s",
-                (mei_id, project_id))
-    mei_row = cur.fetchone()
-    if not mei_row: 
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404, detail="MEI not found")
-    mei_name, image_name = mei_row
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("SELECT name, image_name FROM mei_files WHERE id=%s AND project_id=%s",
+                    (mei_id, project_id))
+        mei_row = cur.fetchone()
+        if not mei_row:
+            raise HTTPException(status_code=404, detail="MEI not found")
+        mei_name, image_name = mei_row
 
-    image_data_uri = None
-    if image_name:
-        cur.execute("SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
-                    (project_id, image_name))
-        img_row = cur.fetchone()
-        if img_row:
-            img_data, mime_type = img_row
-            mime = mime_type or "image/jpeg"
-            image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(img_data)).decode()}"
-    cur.close(); release_db_conn(con)
+        image_data_uri = None
+        if image_name:
+            cur.execute("SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
+                        (project_id, image_name))
+            img_row = cur.fetchone()
+            if img_row:
+                img_data, mime_type = img_row
+                mime = mime_type or "image/jpeg"
+                image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(img_data)).decode()}"
+    finally:
+        cur.close(); release_db_conn(con)
 
     edit_token = _make_edit_token(project_id, mei_id)
     session_id = _uuid.uuid4().hex[:8]
@@ -968,53 +945,47 @@ async def add_model(
         raise HTTPException(status_code=400, detail=f"invalid model kind: {kind}")
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        model_id = _uuid.uuid4().hex
+        dest_dir = MODELS_DIR / str(project_id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        ext = Path(file.filename).suffix if file.filename else ""
+        file_path = dest_dir / f"{model_id}{ext}"
+        model_bytes = await file.read()
+        file_path.write_bytes(model_bytes)
+        cur.execute(
+            "INSERT INTO project_models (id, project_id, name, file_path, kind) VALUES (%s,%s,%s, %s, %s)",
+            (model_id, project_id, file.filename, str(file_path), kind)
+        )
+        _log_activity(cur, project_id, "model_added", f"{file.filename} ({kind})")
+        con.commit()
+        return {"id": model_id, "name": file.filename, "kind": kind}
+    finally:
         cur.close()
         release_db_conn(con)
-        raise HTTPException(status_code=404)
-    model_id = _uuid.uuid4().hex
-    dest_dir = MODELS_DIR / str(project_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename).suffix if file.filename else ""
-    file_path = dest_dir / f"{model_id}{ext}"
-    model_bytes = await file.read()
-    file_path.write_bytes(model_bytes)
-    cur.execute(
-        "INSERT INTO project_models (id, project_id, name, file_path, kind) VALUES (%s,%s,%s, %s, %s)",
-        (model_id, project_id, file.filename, str(file_path), kind)
-    )
-    _log_activity(cur, project_id, "model_added", f"{file.filename} ({kind})")
-    con.commit()
-    cur.close()
-    release_db_conn(con)
-    return {"id": model_id, "name": file.filename, "kind": kind}
 
 @router.delete("/projects/{project_id}/models/{model_id}")
 def delete_model(project_id: int, model_id: str, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute(
+            "SELECT file_path FROM project_models WHERE id=%s AND project_id=%s",
+            (model_id, project_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="model not found")
+        file_path = row[0]
+        if file_path:
+            Path(file_path).unlink(missing_ok=True)
+        cur.execute("DELETE FROM project_models WHERE id=%s", (model_id,))
+        _log_activity(cur, project_id, "model_deleted", model_id)
+        con.commit()
+        return {"ok": True}
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    cur.execute(
-        "SELECT file_path FROM project_models WHERE id=%s AND project_id=%s",
-        (model_id, project_id)
-    )
-    row = cur.fetchone()
-    if not row:
-        cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404, detail="model not found")
-    file_path = row[0]
-    if file_path:
-        Path(file_path).unlink(missing_ok=True)
-    cur.execute("DELETE FROM project_models WHERE id=%s", (model_id,))
-    _log_activity(cur, project_id, "model_deleted", model_id)
-    con.commit()
-    cur.close(); release_db_conn(con)
-    return {"ok": True}
 
 @router.get("/projects/{project_id}/annotations/{annotation_id}")
 async def get_annotation_txt(
@@ -1062,17 +1033,16 @@ async def get_text_alignment(
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("SELECT name FROM projects WHERE id=%s", (project_id, ))
+        project_name = cur.fetchone()[0]
+        cur.execute("SELECT name, mime_type, data FROM project_images WHERE project_id=%s", (project_id, ))
+        images = cur.fetchall()
+        cur.execute("SELECT name, xml_content FROM mei_files WHERE project_id=%s", (project_id, ))
+        mei_files = cur.fetchall()
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    project_name = row[1]
-    cur.execute("SELECT name, mime_type, data FROM project_images WHERE project_id=%s", (project_id, ))
-    images = cur.fetchall()
-    cur.execute("SELECT name, xml_content FROM mei_files WHERE project_id=%s", (project_id, ))
-    mei_files = cur.fetchall()
-    cur.close(); release_db_conn(con)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1150,25 +1120,24 @@ def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
 @router.get("/projects/{project_id}/logs/download")
 def download_project_logs(project_id: int, user=Depends(get_current_user)):
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("SELECT user_id, name FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("SELECT name FROM projects WHERE id=%s", (project_id, ))
+        project_name = cur.fetchone()[0]
+
+        cur.execute(
+            "SELECT action_type, detail, created_at FROM activity_log WHERE project_id=%s ORDER BY created_at ASC",
+            (project_id,)
+        )
+        activity_rows = cur.fetchall()
+
+        cur.execute(
+            "SELECT content, created_at FROM project_logs WHERE project_id=%s AND log_type='encoding' ORDER BY created_at ASC",
+            (project_id,)
+        )
+        encoding_rows = cur.fetchall()
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    project_name = row[1]
-
-    cur.execute(
-        "SELECT action_type, detail, created_at FROM activity_log WHERE project_id=%s ORDER BY created_at ASC",
-        (project_id,)
-    )
-    activity_rows = cur.fetchall()
-
-    cur.execute(
-        "SELECT content, created_at FROM project_logs WHERE project_id=%s AND log_type='encoding' ORDER BY created_at ASC",
-        (project_id,)
-    )
-    encoding_rows = cur.fetchall()
-    cur.close(); release_db_conn(con)
 
     activity_lines = [
         f"[{r[2]}] {r[0]}: {r[1]}" for r in activity_rows

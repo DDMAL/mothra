@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 import json
 import uuid as _uuid
 import io
 
-from auth_api import get_db_conn, get_current_user, release_db_conn, get_model_file_path
+from auth_api import get_db_conn, get_current_user, release_db_conn, get_model_file_path, require_project_owner
 from text_api import stream_text_finding
 
 router = APIRouter()
@@ -31,12 +31,11 @@ async def run_predict(
 ):
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id, ))
-    row = cur.fetchone()
-    if not row or row[0] != user["id"]:
+    try:
+        require_project_owner(cur, project_id, user["id"])
+    finally:
         cur.close(); release_db_conn(con)
-        raise HTTPException(status_code=404)
-    
+
     model_id = body.model_id
     image_ids = body.image_ids
 

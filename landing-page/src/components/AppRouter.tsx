@@ -236,6 +236,10 @@ export default function AppRouter({
                 method: "POST",
                 body: form,
               });
+              if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                throw new Error((d as { detail?: string }).detail || "upload failed");
+              }
             return r.json();
           }}
           onDeleteModel={async (modelId) => {
