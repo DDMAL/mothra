@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from PIL import Image
 
-from auth_api import get_current_user, get_db_conn, release_db_conn, require_project_owner
+from auth_api import get_current_user, db_cursor, require_project_owner
 
 router = APIRouter()
 
@@ -28,9 +28,7 @@ TEXT_API_URL = os.environ.get("TEXT_API_URL", "http://localhost:8002").rstrip("/
 
 def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[str, bytes, str]:
     """Return (image_id, data, mime_type) for a project image the user owns."""
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
+    with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user_id)
         cur.execute(
             "SELECT id, data, mime_type FROM project_images WHERE project_id=%s AND name=%s", (project_id, image_name),
@@ -39,9 +37,6 @@ def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[str,
         if not img:
             raise HTTPException(status_code=404, detail="image not found")
         return img[0], bytes(img[1]), (img[2] or "image/png")
-    finally:
-        cur.close()
-        release_db_conn(con)
 
 def _music_boxes_for_image(project_id: int, image_name: str, image_bytes: bytes) -> list[list[float]]:
     """Return YOLO-detected music-region boxes in absolute pixel coords
@@ -50,9 +45,7 @@ def _music_boxes_for_image(project_id: int, image_name: str, image_bytes: bytes)
     Best-effort — any failure here should not block text-finding.
     """
     try:
-        con = get_db_conn()
-        cur = con.cursor()
-        try:
+        with db_cursor() as (con, cur):
             cur.execute(
                 "SELECT yolo_txt FROM annotations"
                 " WHERE project_id=%s AND image_name=%s"
@@ -60,9 +53,6 @@ def _music_boxes_for_image(project_id: int, image_name: str, image_bytes: bytes)
                 (project_id, image_name),
             )
             row = cur.fetchone()
-        finally:
-            cur.close()
-            release_db_conn(con)
         if not row or not row[0].strip():
             return []
         with Image.open(io.BytesIO(image_bytes)) as im:
@@ -157,9 +147,7 @@ def stream_text_finding(
                 collected_logs.append(ev.get("message", ""))
             if ev.get("type") == "result":
                 alignment = ev["text_alignment"]
-                con = get_db_conn()
-                cur = con.cursor()
-                try:
+                with db_cursor() as (con, cur):
                     aid = _uuid.uuid4().hex
                     cur.execute(
                         "INSERT INTO text_alignments"
@@ -174,9 +162,6 @@ def stream_text_finding(
                         ),
                     )
                     con.commit()
-                finally:
-                    cur.close()
-                    release_db_conn(con)
                 ev = {**ev, "alignment_id": aid}
             yield ev
     except urllib.error.URLError as exc:
@@ -207,3 +192,23 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/projects/{project_id}/text-alignments/{alignment_id}")
+async def get_text_alignment(
+    project_id: int,
+    alignment_id: str,
+    user=Depends(get_current_user),
+):
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT t.alignment_json, t.image_name, t.log_text"
+            " FROM text_alignments t"
+            " JOIN projects p ON p.id = t.project_id"
+            " WHERE t.id = %s AND t.project_id = %s AND p.user_id = %s",
+            (alignment_id, project_id, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404)
+    return {"alignmentJson": row[0], "imageName": row[1], "logText": row[2]}
