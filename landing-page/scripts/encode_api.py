@@ -63,7 +63,7 @@ def _session_put(sid: str, data: dict) -> None:
         _sessions.pop(k, None)
         (MANIFEST_DIR / f"{k}.jsonld").unlink(missing_ok=True)
 
-def _session_get(sid: str) -> "dict | None":
+def _session_get(sid: str) -> Optional[dict]:
     entry = _sessions.get(sid)
     if not entry:
         return None

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 from pathlib import Path
+from typing import Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import psycopg2, psycopg2.errors, os, secrets, hashlib, base64
@@ -13,7 +14,7 @@ limiter = Limiter(key_func=get_remote_address)
 # connection pooling
 from psycopg2 import pool as _pg_pool
 
-_db_pool: "_pg_pool.ThreadedConnectionPool | None" = None
+_db_pool: Optional["_pg_pool.ThreadedConnectionPool"] = None
 
 def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
     global _db_pool

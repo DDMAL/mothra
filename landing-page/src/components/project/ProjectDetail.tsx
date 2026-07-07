@@ -3,6 +3,8 @@ import type { Project, ModelKind } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
+import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
+import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import ActivityLog from "./ActivityLog";
@@ -40,20 +42,8 @@ interface ProjectDetailProps {
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
-  inferenceThreshold: number;
-  onInferenceThresholdChange: (v: number) => void;
-  inferenceDevice: "cpu" | "cuda" | "mps";
-  onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
-  textColumnCount: "auto" | "1" | "2";
-  onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
-  textSegmentationModelId: string;
-  onTextSegmentationModelIdChange: (v: string) => void;
-  textRecognitionModelId: string;
-  onTextRecognitionModelIdChange: (v: string) => void;
-  textDevice: "cpu" | "cuda";
-  onTextDeviceChange: (v: "cpu" | "cuda") => void;
-  textColumnBimodalThreshold: number;
-  onTextColumnBimodalThresholdChange: (v: number) => void;
+  inferenceSettings: ReturnType<typeof useInferenceSettings>;
+  textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
 
 export default function ProjectDetail({
@@ -75,20 +65,8 @@ export default function ProjectDetail({
   onDownloadAnnotation,
   onDeleteMei,
   onDeleteProject,
-  inferenceThreshold,
-  onInferenceThresholdChange,
-  inferenceDevice,
-  onInferenceDeviceChange,
-  textColumnCount,
-  onTextColumnCountChange,
-  textSegmentationModelId,
-  onTextSegmentationModelIdChange,
-  textRecognitionModelId,
-  onTextRecognitionModelIdChange,
-  textDevice,
-  onTextDeviceChange,
-  textColumnBimodalThreshold,
-  onTextColumnBimodalThresholdChange,
+  inferenceSettings,
+  textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files" | "text"
@@ -530,20 +508,8 @@ export default function ProjectDetail({
                 onUsedNamesChange={onUsedNamesChange}
                 onUploadModel={onUploadModel}
                 setValidationError={setValidationError}
-                inferenceThreshold={inferenceThreshold}
-                onInferenceThresholdChange={onInferenceThresholdChange}
-                inferenceDevice={inferenceDevice}
-                onInferenceDeviceChange={onInferenceDeviceChange}
-                textColumnCount={textColumnCount}
-                onTextColumnCountChange={onTextColumnCountChange}
-                textSegmentationModelId={textSegmentationModelId}
-                onTextSegmentationModelIdChange={onTextSegmentationModelIdChange}
-                textRecognitionModelId={textRecognitionModelId}
-                onTextRecognitionModelIdChange={onTextRecognitionModelIdChange}
-                textDevice={textDevice}
-                onTextDeviceChange={onTextDeviceChange}
-                textColumnBimodalThreshold={textColumnBimodalThreshold}
-                onTextColumnBimodalThresholdChange={onTextColumnBimodalThresholdChange}
+                inferenceSettings={inferenceSettings}
+                textFindingSettings={textFindingSettings}
               />
             )}
             {activeTab === "annotations" && (

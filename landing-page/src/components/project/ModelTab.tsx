@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import type { Project, ProjectModel, ModelKind } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
+import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
+import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import { apiFetch } from "../../lib/apiFetch";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
@@ -44,20 +46,8 @@ interface ModelTabProps {
   onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string, kind: ModelKind }>;
   setValidationError: (e: string | null) => void;
-  inferenceThreshold: number;
-  onInferenceThresholdChange: (v: number) => void;
-  inferenceDevice: "cpu" | "cuda" | "mps";
-  onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
-  textColumnCount: "auto" | "1" | "2";
-  onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
-  textSegmentationModelId: string;
-  onTextSegmentationModelIdChange: (v: string) => void;
-  textRecognitionModelId: string;
-  onTextRecognitionModelIdChange: (v: string) => void;
-  textDevice: "cpu" | "cuda";
-  onTextDeviceChange: (v: "cpu" | "cuda") => void;
-  textColumnBimodalThreshold: number;
-  onTextColumnBimodalThresholdChange: (v: number) => void;
+  inferenceSettings: ReturnType<typeof useInferenceSettings>;
+  textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
 
 export default function ModelTab({
@@ -68,21 +58,8 @@ export default function ModelTab({
   onUsedNamesChange,
   onUploadModel,
   setValidationError,
-  inferenceThreshold,
-  onInferenceThresholdChange,
-  inferenceDevice,
-  onInferenceDeviceChange,
-  textColumnCount,
-  onTextColumnCountChange,
-  textSegmentationModelId,
-  onTextSegmentationModelIdChange,
-  textRecognitionModelId,
-  onTextRecognitionModelIdChange,
-  textDevice,
-  onTextDeviceChange,
-  textColumnBimodalThreshold,
-  onTextColumnBimodalThresholdChange
-
+  inferenceSettings,
+  textFindingSettings,
 }: ModelTabProps) {
   const modelFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -180,12 +157,12 @@ export default function ModelTab({
               <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-4 text-sm text-white">
                 <label className="flex flex-col gap-1">
                   <span className="text-white/70 text-xs">
-                    confidence threshold: {inferenceThreshold.toFixed(2)}
+                    confidence threshold: {inferenceSettings.threshold.toFixed(2)}
                   </span>
                   <input
                     type="range" min={0} max={1} step={0.05}
-                    value={inferenceThreshold}
-                    onChange={(e) => onInferenceThresholdChange(Number(e.target.value))}
+                    value={inferenceSettings.threshold}
+                    onChange={(e) => inferenceSettings.patch({ threshold: Number(e.target.value) })}
                     className="accent-[#1D3335]"
                   />
                 </label>
@@ -196,8 +173,8 @@ export default function ModelTab({
                       <label key={d} className="flex items-center gap-1 cursor-pointer">
                         <input
                           type="radio" name="inference-device" value={d}
-                          checked={inferenceDevice === d}
-                          onChange={() => onInferenceDeviceChange(d)}
+                          checked={inferenceSettings.device === d}
+                          onChange={() => inferenceSettings.patch({ device: d })}
                           className="accent-[#1D3335]"
                         />
                         {d}
@@ -229,8 +206,8 @@ export default function ModelTab({
                           type="radio"
                           name="text-column-count"
                           value={c}
-                          checked={textColumnCount === c}
-                          onChange={() => onTextColumnCountChange(c)}
+                          checked={textFindingSettings.columnCount === c}
+                          onChange={() => textFindingSettings.patch({ columnCount: c })}
                           className="accent-[#1D3335]"
                         />
                         {c === "auto" ? "auto-detect" : c}
@@ -242,8 +219,8 @@ export default function ModelTab({
                 <label className="flex flex-col gap-1">
                   <span className="text-white/70 text-xs">custom segmentation model</span>
                   <select
-                    value={textSegmentationModelId}
-                    onChange={(e) => onTextSegmentationModelIdChange(e.target.value)}
+                    value={textFindingSettings.segmentationModelId}
+                    onChange={(e) => textFindingSettings.patch({ segmentationModelId: e.target.value })}
                     className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
                   >
                     <option value="">default: Kraken's built-in BLLA model</option>
@@ -261,8 +238,8 @@ export default function ModelTab({
                 <label className="flex flex-col gap-1">
                   <span className="text-white/70 text-xs">custom OCR model</span>
                   <select
-                    value={textRecognitionModelId}
-                    onChange={(e) => onTextRecognitionModelIdChange(e.target.value)}
+                    value={textFindingSettings.recognitionModelId}
+                    onChange={(e) => textFindingSettings.patch({ recognitionModelId: e.target.value })}
                     className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
                   >
                     <option value="">default: auto-detected Tridis model (or stub if not installed)</option>
@@ -295,8 +272,8 @@ export default function ModelTab({
                                 type="radio"
                                 name="text-device"
                                 value={d}
-                                checked={textDevice === d}
-                                onChange={() => onTextDeviceChange(d)}
+                                checked={textFindingSettings.device === d}
+                                onChange={() => textFindingSettings.patch({ device: d })}
                                 className="accent-[#1D3335]"
                               />
                               {d}
@@ -306,18 +283,18 @@ export default function ModelTab({
                       </div>
                       <label className="flex flex-col gap-1">
                         <span className="text-white/70 text-xs">
-                          column-split sensitivity: {textColumnBimodalThreshold.toFixed(2)}
-                          {textColumnCount === "1" && " (ignored — column count forced to 1)"}
+                          column-split sensitivity: {textFindingSettings.columnBimodalThreshold.toFixed(2)}
+                          {textFindingSettings.columnCount === "1" && " (ignored — column count forced to 1)"}
                         </span>
                         <input
                           type="range"
                           min={0}
                           max={1}
                           step={0.05}
-                          value={textColumnBimodalThreshold}
-                          disabled={textColumnCount === "1"}
+                          value={textFindingSettings.columnBimodalThreshold}
+                          disabled={textFindingSettings.columnCount === "1"}
                           onChange={(e) =>
-                            onTextColumnBimodalThresholdChange(Number(e.target.value))
+                            textFindingSettings.patch({ columnBimodalThreshold: Number(e.target.value) })
                           }
                           className="accent-[#1D3335] disabled:opacity-40"
                         />
