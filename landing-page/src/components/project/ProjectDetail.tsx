@@ -44,6 +44,16 @@ interface ProjectDetailProps {
   onInferenceThresholdChange: (v: number) => void;
   inferenceDevice: "cpu" | "cuda" | "mps";
   onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
+  textColumnCount: "auto" | "1" | "2";
+  onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
+  textSegmentationModel: string;
+  onTextSegmentationModelChange: (v: string) => void;
+  textRecognitionModel: string;
+  onTextRecognitionModelChange: (v: string) => void;
+  textDevice: "cpu" | "cuda";
+  onTextDeviceChange: (v: "cpu" | "cuda") => void;
+  textColumnBimodalThreshold: number;
+  onTextColumnBimodalThresholdChange: (v: number) => void;
 }
 
 export default function ProjectDetail({
@@ -69,6 +79,16 @@ export default function ProjectDetail({
   onInferenceThresholdChange,
   inferenceDevice,
   onInferenceDeviceChange,
+  textColumnCount,
+  onTextColumnCountChange,
+  textSegmentationModel,
+  onTextSegmentationModelChange,
+  textRecognitionModel,
+  onTextRecognitionModelChange,
+  textDevice,
+  onTextDeviceChange,
+  textColumnBimodalThreshold,
+  onTextColumnBimodalThresholdChange,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files" | "text"
@@ -514,6 +534,16 @@ export default function ProjectDetail({
                 onInferenceThresholdChange={onInferenceThresholdChange}
                 inferenceDevice={inferenceDevice}
                 onInferenceDeviceChange={onInferenceDeviceChange}
+                textColumnCount={textColumnCount}
+                onTextColumnCountChange={onTextColumnCountChange}
+                textSegmentationModel={textSegmentationModel}
+                onTextSegmentationModelChange={onTextSegmentationModelChange}
+                textRecognitionModel={textRecognitionModel}
+                onTextRecognitionModelChange={onTextRecognitionModelChange}
+                textDevice={textDevice}
+                onTextDeviceChange={onTextDeviceChange}
+                textColumnBimodalThreshold={textColumnBimodalThreshold}
+                onTextColumnBimodalThresholdChange={onTextColumnBimodalThresholdChange}
               />
             )}
             {activeTab === "annotations" && (

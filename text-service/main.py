@@ -79,11 +79,21 @@ class _QueueLogHandler(logging.Handler):
 async def run_text_pipeline(
     image: UploadFile = File(...),
     folio: Optional[str] = Form(None),
-    music_boxes: Optional[str] = Form(None)
+    music_boxes: Optional[str] = Form(None),
+    column_count: Optional[int] = Form(None),
+    segmentation_model: Optional[str] = Form(None),
+    recognition_model: Optional[str] = Form(None),
+    device: str = Form("cpu"),
+    column_bimodal_threshold: float = Form(0.5),
 ):
     image_bytes = await image.read()
     image_filename = image.filename or "page.jpg"
     parsed_music_boxes = json.loads(music_boxes) if music_boxes else []
+
+    # Empty/omitted recognition_model means "use text-service's own default"
+    # (the auto-detected Tridis model, same as mothra-text's own CLI default
+    # via _DEFAULT_RECOGNITION_MODEL) — NOT run()'s bare None (stub mode).
+    effective_recognition_model = recognition_model or RECOGNITION_MODEL
 
     def generate():
         def event(obj):
@@ -102,10 +112,14 @@ async def run_text_pipeline(
             yield event({"type": "stage_done", "name": "checking"})
 
             yield event({"type": "stage", "name": "validating"})
-            if RECOGNITION_MODEL:
-                yield event({"type": "log", "message": f"running Kraken segmentation + HTR (OCR-only mode, model={Path(RECOGNITION_MODEL).name})..."})
+            if effective_recognition_model:
+                yield event({"type": "log", "message": f"running Kraken segmentation + HTR (OCR-only mode, model={Path(effective_recognition_model).name})..."})
             else:
                 yield event({"type": "log", "message": "running Kraken segmentation + HTR (OCR-only mode, STUB — no recognition model installed, text will be empty)..."})
+            if segmentation_model:
+                yield event({"type": "log", "message": f"using custom segmentation model: {segmentation_model}"})
+            if column_count:
+                yield event({"type": "log", "message": f"column count forced to {column_count}"})
             yield event({"type": "stage_done", "name": "validating"})
 
             yield event({"type": "stage", "name": "processing"})
@@ -117,7 +131,11 @@ async def run_text_pipeline(
                     result_holder["value"] = run(
                         image_path=str(image_path),
                         folio=folio,
-                        recognition_model=RECOGNITION_MODEL,
+                        segmentation_model=segmentation_model,
+                        recognition_model=effective_recognition_model,
+                        device=device,
+                        column_bimodal_threshold=column_bimodal_threshold,
+                        column_count=column_count,
                         ocr_only_mode=True,
                     )
                 except Exception as exc:

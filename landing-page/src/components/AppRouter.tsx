@@ -99,6 +99,13 @@ export default function AppRouter({
   const [inferenceThreshold, setInferenceThreshold] = useState(0.5);
   const [inferenceDevice, setInferenceDevice] = useState<"cpu" | "cuda" | "mps">("cpu");
 
+  // thread text-finding settings (mothra-text optional inputs)
+  const [textColumnCount, setTextColumnCount] = useState<"auto" | "1" | "2">("auto");
+  const [textSegmentationModel, setTextSegmentationModel] = useState("");
+  const [textRecognitionModel, setTextRecognitionModel] = useState("");
+  const [textDevice, setTextDevice] = useState<"cpu" | "cuda">("cpu");
+  const [textColumnBimodalThreshold, setTextColumnBimodalThreshold] = useState(0.5);
+
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
   const [clefLine, setClefLine] = useState(3);
@@ -285,6 +292,16 @@ export default function AppRouter({
           onInferenceThresholdChange={setInferenceThreshold}
           inferenceDevice={inferenceDevice}
           onInferenceDeviceChange={setInferenceDevice}
+          textColumnCount={textColumnCount}
+          onTextColumnCountChange={setTextColumnCount}
+          textSegmentationModel={textSegmentationModel}
+          onTextSegmentationModelChange={setTextSegmentationModel}
+          textRecognitionModel={textRecognitionModel}
+          onTextRecognitionModelChange={setTextRecognitionModel}
+          textDevice={textDevice}
+          onTextDeviceChange={setTextDevice}
+          textColumnBimodalThreshold={textColumnBimodalThreshold}
+          onTextColumnBimodalThresholdChange={setTextColumnBimodalThreshold}
         />
       ) : null;
     case "processing":
@@ -316,6 +333,11 @@ export default function AppRouter({
                 image_ids: usedImageIds,
                 confidence_threshold: inferenceThreshold,
                 device: inferenceDevice,
+                text_column_count: textColumnCount === "auto" ? null : Number(textColumnCount),
+                text_segmentation_model: textSegmentationModel.trim() || null,
+                text_recognition_model: textRecognitionModel.trim() || null,
+                text_device: textDevice,
+                text_column_bimodal_threshold: textColumnBimodalThreshold,
               }),
               signal,
             });

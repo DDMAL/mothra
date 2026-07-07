@@ -20,6 +20,16 @@ interface ModelTabProps {
   onInferenceThresholdChange: (v: number) => void;
   inferenceDevice: "cpu" | "cuda" | "mps";
   onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
+  textColumnCount: "auto" | "1" | "2";
+  onTextColumnCountChange: (v: "auto" | "1" | "2") => void;
+  textSegmentationModel: string;
+  onTextSegmentationModelChange: (v: string) => void;
+  textRecognitionModel: string;
+  onTextRecognitionModelChange: (v: string) => void;
+  textDevice: "cpu" | "cuda";
+  onTextDeviceChange: (v: "cpu" | "cuda") => void;
+  textColumnBimodalThreshold: number;
+  onTextColumnBimodalThresholdChange: (v: number) => void;
 }
 
 export default function ModelTab({
@@ -34,10 +44,23 @@ export default function ModelTab({
   onInferenceThresholdChange,
   inferenceDevice,
   onInferenceDeviceChange,
+  textColumnCount,
+  onTextColumnCountChange,
+  textSegmentationModel,
+  onTextSegmentationModelChange,
+  textRecognitionModel,
+  onTextRecognitionModelChange,
+  textDevice,
+  onTextDeviceChange,
+  textColumnBimodalThreshold,
+  onTextColumnBimodalThresholdChange
+
 }: ModelTabProps) {
   const modelFileInputRef = useRef<HTMLInputElement>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [textSettingsOpen, setTextSettingsOpen] = useState(false);
+  const [textAdvancedOpen, setTextAdvancedOpen] = useState(false);
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -169,6 +192,114 @@ export default function ModelTab({
                       </label>
                     ))}
                   </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {usedNames.models.length > 0 && (
+          <div className="mt-2">
+            <button
+              onClick={() => setTextSettingsOpen((o) => !o)}
+              className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+            >
+              {textSettingsOpen ? "▾" : "▸"} text-finding settings
+            </button>
+            {textSettingsOpen && (
+              <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-4 text-sm text-white">
+                <div className="flex flex-col gap-1">
+                  <span className="text-white/70 text-xs">column count</span>
+                  <div className="flex gap-3">
+                    {(["auto", "1", "2"] as const).map((c) => (
+                      <label key={c} className="flex items-center gap-1 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="text-column-count"
+                          value={c}
+                          checked={textColumnCount === c}
+                          onChange={() => onTextColumnCountChange(c)}
+                          className="accent-[#1D3335]"
+                        />
+                        {c === "auto" ? "auto-detect" : c}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-white/70 text-xs">
+                    custom segmentation model (optional path)
+                  </span>
+                  <input
+                    type="text"
+                    value={textSegmentationModel}
+                    onChange={(e) => onTextSegmentationModelChange(e.target.value)}
+                    placeholder="default: Kraken's built-in BLLA model"
+                    className="bg-transparent border border-white/30 rounded px-2 py-1 text-sm text-white placeholder:text-white/40 outline-none"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-white/70 text-xs">
+                    custom OCR model (optional path)
+                  </span>
+                  <input
+                    type="text"
+                    value={textRecognitionModel}
+                    onChange={(e) => onTextRecognitionModelChange(e.target.value)}
+                    placeholder="default: auto-detected Tridis model (or stub if not installed)"
+                    className="bg-transparent border border-white/30 rounded px-2 py-1 text-sm text-white placeholder:text-white/40 outline-none"
+                  />
+                </label>
+
+                <div>
+                  <button
+                    onClick={() => setTextAdvancedOpen((o) => !o)}
+                    className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+                  >
+                    {textAdvancedOpen ? "▾" : "▸"} advanced
+                  </button>
+                  {textAdvancedOpen && (
+                    <div className="mt-2 flex flex-col gap-4 pl-3 border-l border-white/20">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-white/70 text-xs">device</span>
+                        <div className="flex gap-3">
+                          {(["cpu", "cuda"] as const).map((d) => (
+                            <label key={d} className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="text-device"
+                                value={d}
+                                checked={textDevice === d}
+                                onChange={() => onTextDeviceChange(d)}
+                                className="accent-[#1D3335]"
+                              />
+                              {d}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-white/70 text-xs">
+                          column-split sensitivity: {textColumnBimodalThreshold.toFixed(2)}
+                          {textColumnCount === "1" && " (ignored — column count forced to 1)"}
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={textColumnBimodalThreshold}
+                          disabled={textColumnCount === "1"}
+                          onChange={(e) =>
+                            onTextColumnBimodalThresholdChange(Number(e.target.value))
+                          }
+                          className="accent-[#1D3335] disabled:opacity-40"
+                        />
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

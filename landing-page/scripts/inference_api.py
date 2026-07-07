@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
@@ -16,6 +17,11 @@ class PredictBody(BaseModel):
     image_ids: list[str]
     confidence_threshold: float = 0.5
     device: str = "cpu"
+    text_column_count: Optional[int] = None
+    text_segmentation_model: Optional[str] = None
+    text_recognition_model: Optional[str] = None
+    text_device: str = "cpu"
+    text_column_bimodal_threshold: float = 0.5
 
 @router.post("/projects/{project_id}/predict")
 async def run_predict(
@@ -105,7 +111,15 @@ async def run_predict(
                 # are downgraded to log lines: text-finding must never fail
                 # the visible (music-path) pipeline.
                 yield event({"type": "log", "message": f"{image_name}: starting text-finding..."})
-                for text_ev in stream_text_finding(project_id, image_id, image_name, bytes(image_data), mime_type):
+                for text_ev in stream_text_finding(
+                    project_id, image_id, image_name, 
+                    bytes(image_data), mime_type,
+                    column_count=body.text_column_count,
+                    segmentation_model=body.text_segmentation_model,
+                    recognition_model=body.text_recognition_model,
+                    device=body.text_device,
+                    column_bimodal_threshold=body.text_column_bimodal_threshold,
+                ):
                     if text_ev.get("type") == "log":
                         yield event(text_ev)
                     elif text_ev.get("type") == "error":

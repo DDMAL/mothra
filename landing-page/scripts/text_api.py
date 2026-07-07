@@ -13,6 +13,7 @@ import os
 import urllib.error
 import urllib.request
 import uuid as _uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -114,7 +115,17 @@ def _stream_multipart(url: str, fields: dict[str, str], files: list[tuple], time
         for raw_line in resp:
             yield raw_line.decode()
 
-def stream_text_finding(project_id: int, image_id: str, image_name: str, image_bytes: bytes, mime_type: str):
+def stream_text_finding(
+        project_id: int,
+        image_id: str,
+        image_name: str,
+        image_bytes: bytes,
+        mime_type: str,
+        column_count: Optional[int] = None,
+        segmentation_model: Optional[str] = None,
+        recognition_model: Optional[str] = None,
+        device: str = "cpu",
+        column_bimodal_threshold: float = 0.5,):
     """Run text-finding for one image, yielding raw event dicts (not
     SSE-formatted) and persisting the result to text_alignments on completion.
 
@@ -126,10 +137,22 @@ def stream_text_finding(project_id: int, image_id: str, image_name: str, image_b
     """
     music_boxes = _music_boxes_for_image(project_id, image_name, image_bytes)
     collected_logs: list[str] = []
+    fields = {
+        "folio": image_name,
+        "music_boxes": json.dumps(music_boxes),
+        "device": device,
+        "column_bimodal_threshold": str(column_bimodal_threshold),
+    }
+    if column_count is not None:
+        fields["column_count"] = str(column_count)
+    if segmentation_model:
+        fields["segmentation_model"] = segmentation_model
+    if recognition_model:
+        fields["recognition_model"] = recognition_model
     try:
         for line in _stream_multipart(
             f"{TEXT_API_URL}/run",
-            fields={"folio": image_name, "music_boxes": json.dumps(music_boxes)},
+            fields=fields,
             files=[("image", image_name, mime_type, image_bytes)],
         ):
             if not line.startswith("data: "):
@@ -166,13 +189,22 @@ def stream_text_finding(project_id: int, image_id: str, image_name: str, image_b
 
 
 @router.post("/projects/{project_id}/text-finding/run")
-def run_text_finding(project_id: int, image_name: str, user=Depends(get_current_user)):
+def run_text_finding(project_id: int, image_name: str, column_count: Optional[int] = None,
+    segmentation_model: Optional[str] = None,
+    recognition_model: Optional[str] = None,
+    device: str = "cpu",
+    column_bimodal_threshold: float = 0.5, user=Depends(get_current_user)):
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
 
     def generate():
         def event(obj):
             return f"data: {json.dumps(obj)}\n\n"
-        for ev in stream_text_finding(project_id, image_id, image_name, image_bytes, mime_type):
+        for ev in stream_text_finding(project_id, image_id, image_name, image_bytes, mime_type, column_count=column_count,
+            segmentation_model=segmentation_model,
+            recognition_model=recognition_model,
+            device=device,
+            column_bimodal_threshold=column_bimodal_threshold,
+        ):
             yield event(ev)
 
     return StreamingResponse(
