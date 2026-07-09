@@ -24,6 +24,8 @@ from auth_api import get_current_user, db_cursor, require_project_owner
 router = APIRouter()
 
 MUSIC_CLASS_ID = 1
+TEXT_CLASS_ID = 0 # mothra's raw YOLO numbering
+MOTHRA_TEXT_MASK_CLASS_ID = 1 # mothra-text's OWN numbering
 TEXT_API_URL = os.environ.get("TEXT_API_URL", "http://localhost:8002").rstrip("/")
 
 def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[str, bytes, str]:
@@ -78,6 +80,55 @@ def _music_boxes_for_image(project_id: int, image_name: str, image_bytes: bytes)
     except Exception:
         return []
 
+def _mask_json_for_image(project_id: int, image_name: str, image_bytes: bytes) -> Optional[str]:
+    """Auto-derive a mothra-text mask JSON string from this image's own
+    latest YOLO annotation row, using Mothra's raw "text" class (classId 0
+    in Mothra's own numbering — unrelated to mothra-text's own classId 1
+    for "text to keep" in its mask JSON; this function bridges the two).
+
+    Returns None (not an empty-list JSON) when there's no annotation yet or
+    no text boxes found, so callers can distinguish "no mask available"
+    from "mask with zero boxes" — the latter would black out the entire
+    image, which is never the intent when nothing was detected.
+
+    Best-effort — any failure here should not block text-finding.
+    """
+    try:
+        with db_cursor() as (con, cur):
+            cur.execute(
+                "SELECT yolo_txt FROM annotations"
+                " WHERE project_id=%s AND image_name=%s"
+                " ORDER BY created_at DESC LIMIT 1",
+                (project_id, image_name),
+            )
+            row = cur.fetchone()
+        if not row or not row[0].strip():
+            return None
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            page_w, page_h = im.size
+        annotations = []
+        for line in row[0].strip().splitlines():
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            try:
+                cls, cx, cy, bw, bh = (float(p) for p in parts[:5])
+            except ValueError:
+                continue
+            if int(cls) != TEXT_CLASS_ID:
+                continue
+            px_w, px_h = bw * page_w, bh * page_h
+            px_x = (cx * page_w) - px_w / 2
+            px_y = (cy * page_h) - px_h / 2
+            annotations.append({
+                "classId": MOTHRA_TEXT_MASK_CLASS_ID,
+                "bbox": [px_x, px_y, px_w, px_h],
+            })
+        if not annotations:
+            return None
+        return json.dumps({"annotations": annotations})
+    except Exception:
+        return None
 
 def _stream_multipart(url: str, fields: dict[str, str], files: list[tuple], timeout: int=600):
     """POST multipart/form-data and yield decoded response lines (SSE passthrough)."""
@@ -110,7 +161,11 @@ def stream_text_finding(
         segmentation_model: Optional[str] = None,
         recognition_model: Optional[str] = None,
         device: str = "cpu",
-        column_bimodal_threshold: float = 0.5,):
+        column_bimodal_threshold: float = 0.5,
+        masking_enabled: bool = True,
+        mask_padding: int = 15,
+        mask_json_override: Optional[str] = None,
+    ):
     """Run text-finding for one image, yielding raw event dicts (not
     SSE-formatted) and persisting the result to text_alignments on completion.
 
@@ -121,12 +176,17 @@ def stream_text_finding(
     row is freshest at call time, so it picks up boxes YOLO just committed.
     """
     music_boxes = _music_boxes_for_image(project_id, image_name, image_bytes)
+    mask_json = mask_json_override
+    if masking_enabled and not mask_json:
+        mask_json = _mask_json_for_image(project_id, image_name, image_bytes)
     collected_logs: list[str] = []
     fields = {
         "folio": image_name,
         "music_boxes": json.dumps(music_boxes),
         "device": device,
         "column_bimodal_threshold": str(column_bimodal_threshold),
+        "masking_enabled": "true" if masking_enabled else "false",
+        "mask_padding": str(mask_padding),
     }
     if column_count is not None:
         fields["column_count"] = str(column_count)
@@ -134,6 +194,8 @@ def stream_text_finding(
         fields["segmentation_model"] = segmentation_model
     if recognition_model:
         fields["recognition_model"] = recognition_model
+    if mask_json:
+        fields["mask_json"] = mask_json
     try:
         for line in _stream_multipart(
             f"{TEXT_API_URL}/run",
@@ -173,7 +235,11 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
     segmentation_model: Optional[str] = None,
     recognition_model: Optional[str] = None,
     device: str = "cpu",
-    column_bimodal_threshold: float = 0.5, user=Depends(get_current_user)):
+    column_bimodal_threshold: float = 0.5, 
+    user=Depends(get_current_user),
+    masking_enabled: bool = True,
+    mask_padding: int = 15,
+):
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
 
     def generate():
@@ -184,6 +250,8 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
             recognition_model=recognition_model,
             device=device,
             column_bimodal_threshold=column_bimodal_threshold,
+            masking_enabled=masking_enabled,
+            mask_padding=mask_padding
         ):
             yield event(ev)
 

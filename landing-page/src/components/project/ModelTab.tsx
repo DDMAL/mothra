@@ -15,26 +15,31 @@ const KIND_EXTENSIONS: Record<ModelKind, RegExp> = {
   yolo: /\.pt$/i,
   segmentation: /\.(mlmodel|safetensors)$/i,
   recognition: /\.(mlmodel|safetensors)$/i,
+  text_mask: /\.json$/i,
 };
 const KIND_ACCEPT: Record<ModelKind, string> = {
   yolo: ".pt",
   segmentation: ".mlmodel,.safetensors",
   recognition: ".mlmodel,.safetensors",
+  text_mask: ".json",
 };
 const KIND_DROPZONE_LABEL: Record<ModelKind, string> = {
   yolo: "drag & drop .pt files here",
   segmentation: "drag & drop .mlmodel / .safetensors files here",
   recognition: "drag & drop .mlmodel / .safetensors files here",
+  text_mask: "drag & drop .json files here",
 };
 const KIND_OPTION_LABEL: Record<ModelKind, string> = {
   yolo: "YOLO detection model (.pt)",
   segmentation: "text segmentation model (.mlmodel / .safetensors)",
   recognition: "OCR / recognition model (.mlmodel / .safetensors)",
+  text_mask: "text-region mask JSON (.json)",
 };
 const KIND_BADGE: Record<ModelKind, string> = {
   yolo: "PT",
   segmentation: "SEG",
   recognition: "OCR",
+  text_mask: "MASK",
 };
 
 
@@ -71,6 +76,7 @@ export default function ModelTab({
 
   const segmentationModels = project.models.filter((m) => m.kind === "segmentation");
   const recognitionModels = project.models.filter((m) => m.kind === "recognition");
+  const maskModels = project.models.filter((m) => m.kind === "text_mask");
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -299,6 +305,59 @@ export default function ModelTab({
                           className="accent-[#1D3335] disabled:opacity-40"
                         />
                       </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={textFindingSettings.maskingEnabled}
+                          onChange={(e) => textFindingSettings.patch({ maskingEnabled: e.target.checked })}
+                          className="accent-[#1D3335]"
+                        />
+                        <span className="text-white/70 text-xs">
+                          enable text-region masking (blacks out neume/music regions before Kraken segmentation to reduce over-segmentation artifacts)
+                        </span>
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-white/70 text-xs">
+                          mask padding: {textFindingSettings.maskPadding}px
+                          {!textFindingSettings.maskingEnabled && " (ignored — masking disabled)"}
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={50}
+                          step={1}
+                          value={textFindingSettings.maskPadding}
+                          disabled={!textFindingSettings.maskingEnabled}
+                          onChange={(e) =>
+                            textFindingSettings.patch({ maskPadding: Number(e.target.value) })
+                          }
+                          className="accent-[#1D3335] disabled:opacity-40"
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1">
+                        <span className="text-white/70 text-xs">
+                          custom mask JSON{!textFindingSettings.maskingEnabled && " (ignored — masking disabled)"}
+                        </span>
+                        <select
+                          value={textFindingSettings.maskModelId}
+                          disabled={!textFindingSettings.maskingEnabled}
+                          onChange={(e) => textFindingSettings.patch({ maskModelId: e.target.value })}
+                          className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none disabled:opacity-40"
+                        >
+                          <option value="">default: auto-derive from this image's own YOLO text detections</option>
+                          {maskModels.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                        {maskModels.length === 0 && (
+                          <span className="text-white/40 text-xs italic">
+                            no mask JSON files uploaded yet — upload one above (type: text-region mask JSON)
+                          </span>
+                        )}
+                      </label>
                     </div>
                   )}
                 </div>
@@ -366,7 +425,7 @@ export default function ModelTab({
                 onChange={(e) => setUploadKind(e.target.value as ModelKind)}
                 className="border border-[#1D3335]/30 rounded px-2 py-1 text-sm text-[#1D3335] bg-white/60"
               >
-                {(["yolo", "segmentation", "recognition"] as const).map((k) => (
+                {(["yolo", "segmentation", "recognition", "text_mask"] as const).map((k) => (
                   <option key={k} value={k}>{KIND_OPTION_LABEL[k]}</option>
                 ))}
               </select>

@@ -310,6 +310,9 @@ export default function AppRouter({
                 text_recognition_model_id: textFindingSettings.recognitionModelId || null,
                 text_device: textFindingSettings.device,
                 text_column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
+                text_masking_enabled: textFindingSettings.maskingEnabled,
+                text_mask_padding: textFindingSettings.maskPadding,
+                text_mask_model_id: textFindingSettings.maskModelId || null,
               }),
               signal,
             });

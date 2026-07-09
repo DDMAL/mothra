@@ -13,7 +13,7 @@ from auth_api import get_current_user, db_cursor, require_project_owner, _log_ac
 
 router = APIRouter()
 
-ALLOWED_MODEL_KINDS = {"yolo", "segmentation", "recognition"}
+ALLOWED_MODEL_KINDS = {"yolo", "segmentation", "recognition", "text_mask"}
 
 
 def get_model_file_path(cur, project_id: int, model_id: str, kind: str) -> Optional[tuple]:

@@ -1,4 +1,4 @@
-export type ModelKind = "yolo" | "segmentation" | "recognition";
+export type ModelKind = "yolo" | "segmentation" | "recognition" | "text_mask";
 
 export interface ProjectImage {
   id: string;

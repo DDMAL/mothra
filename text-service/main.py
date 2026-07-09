@@ -21,6 +21,8 @@ from fastapi.responses import StreamingResponse
 MOTHRA_TEXT_DIR = Path(__file__).resolve().parent.parent / "mothra-text"
 sys.path.insert(0, str(MOTHRA_TEXT_DIR))
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
+from PIL import Image as PILImage
+from steps.mothra_mask import MothraImageMask
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -50,6 +52,38 @@ def filter_lines_over_music(lines: list[dict], music_boxes: list[list[float]], t
             continue
         kept.append(line)
     return kept, dropped
+
+def _apply_mothra_mask(image_path: Path, mask_json: Optional[str], padding_px: int) -> Optional[Path]:
+    """Black out everything except mothra-detected text regions in the image
+    at image_path, replicating run_pipeline.py's main() CLI masking block
+    (which only exists in the CLI entrypoint, not in run()).
+
+    mask_json is JSON *content*, not a file path — MothraImageMask's
+    constructor only accepts a path, so this writes it to a scratch temp
+    file first and deletes that scratch file once the masker has parsed it.
+
+    Returns the path to a new temp masked-image file, or None if mask_json
+    was falsy (caller keeps using the original image_path). Caller owns
+    deleting the returned path.
+    """
+    if not mask_json:
+        return None
+    tmp_json = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as _tmpf:
+            _tmpf.write(mask_json)
+            tmp_json = _tmpf.name
+        img = PILImage.open(image_path).convert("RGB")
+        masker = MothraImageMask(tmp_json, padding_px=padding_px)
+        masked_img = masker.apply(img)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as _tmp:
+            masked_img.save(_tmp.name)
+            return Path(_tmp.name)
+    finally:
+        if tmp_json:
+            Path(tmp_json).unlink(missing_ok=True)
 
 
 class _QueueLogHandler(logging.Handler):
@@ -85,6 +119,9 @@ async def run_text_pipeline(
     recognition_model: Optional[str] = Form(None),
     device: str = Form("cpu"),
     column_bimodal_threshold: float = Form(0.5),
+    masking_enabled: bool = Form(True),
+    mask_padding: int = Form(15),
+    mask_json: Optional[str] = Form(None),
 ):
     image_bytes = await image.read()
     image_filename = image.filename or "page.jpg"
@@ -104,6 +141,7 @@ async def run_text_pipeline(
         handler = _QueueLogHandler(log_queue)
         root_logger = logging.getLogger()
         root_logger.addHandler(handler)
+        _mask_tmp: Optional[Path] = None
         try:
             yield event({"type": "stage", "name": "checking"})
             image_path = tmp_dir / image_filename
@@ -120,6 +158,20 @@ async def run_text_pipeline(
                 yield event({"type": "log", "message": f"using custom segmentation model: {segmentation_model}"})
             if column_count:
                 yield event({"type": "log", "message": f"column count forced to {column_count}"})
+
+            active_image_path = image_path
+            if masking_enabled and mask_json:
+                try:
+                    _mask_tmp = _apply_mothra_mask(image_path, mask_json, mask_padding)
+                except Exception as exc:
+                    yield event({"type": "log", "message": f"text-region masking failed, continuing unmasked: {exc}"})
+                if _mask_tmp:
+                    active_image_path = _mask_tmp
+                    yield event({"type": "log", "message": f"applied text-region mask (padding={mask_padding}px)"})
+            elif masking_enabled and not mask_json:
+                yield event({"type": "log", "message": "text-region masking enabled but no mask JSON available; running without masking"})
+            else:
+                yield event({"type": "log", "message": "text-region masking disabled; running without masking"})
             yield event({"type": "stage_done", "name": "validating"})
 
             yield event({"type": "stage", "name": "processing"})
@@ -129,7 +181,7 @@ async def run_text_pipeline(
                 handler.thread_ident = threading.current_thread().ident
                 try:
                     result_holder["value"] = run(
-                        image_path=str(image_path),
+                        image_path=str(active_image_path),
                         folio=folio,
                         segmentation_model=segmentation_model,
                         recognition_model=effective_recognition_model,
@@ -154,7 +206,7 @@ async def run_text_pipeline(
                 raise result_holder["error"]
             collection, manifest = result_holder["value"]
             payload = _build_pipeline_payload(
-                collection, str(image_path), manifest, folio=folio, mode="ocr_only",
+                collection, str(active_image_path), manifest, folio=folio, mode="ocr_only",
             )
             if parsed_music_boxes:
                 kept_lines, n_dropped = filter_lines_over_music(payload["lines"], parsed_music_boxes)
@@ -173,6 +225,8 @@ async def run_text_pipeline(
             yield event({"type": "error", "message": str(e)})
         finally:
             root_logger.removeHandler(handler)
+            if _mask_tmp:
+                _mask_tmp.unlink(missing_ok=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
     
     return StreamingResponse(

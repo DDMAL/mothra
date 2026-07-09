@@ -1,6 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from pathlib import Path
 from fastapi.responses import StreamingResponse
 import json
 import uuid as _uuid
@@ -22,6 +23,9 @@ class PredictBody(BaseModel):
     text_recognition_model_id: Optional[str] = None
     text_device: str = "cpu"
     text_column_bimodal_threshold: float = 0.5
+    text_masking_enabled: bool = True
+    text_mask_padding: int = 15
+    text_mask_model_id: Optional[str] = None
 
 @router.post("/projects/{project_id}/predict")
 async def run_predict(
@@ -69,7 +73,17 @@ async def run_predict(
                     yield event({"type": "log", "message": f"OCR model: {rec_row[1]}"})
                 else:
                     yield event({"type": "log", "message": "text-finding: custom OCR model not found — using default"})
-
+            mask_json_override = None
+            if body.text_mask_model_id:
+                mask_row = get_model_file_path(cur, project_id, body.text_mask_model_id, "text_mask")
+                if mask_row:
+                    try:
+                        mask_json_override = Path(mask_row[0]).read_text(encoding="utf-8")
+                        yield event({"type": "log", "message": f"text-region mask: {mask_row[1]}"})
+                    except Exception:
+                        yield event({"type": "log", "message": "text-finding: custom mask JSON could not be read — using auto-derived mask"})
+                else:
+                    yield event({"type": "log", "message": "text-finding: custom mask model not found — using auto-derived mask"})
             yield event({"type": "stage_done", "name": "checking"})
 
             # stage 2 - validation
@@ -130,6 +144,9 @@ async def run_predict(
                     recognition_model=rec_model_path,
                     device=body.text_device,
                     column_bimodal_threshold=body.text_column_bimodal_threshold,
+                    masking_enabled=body.text_masking_enabled,
+                    mask_padding=body.text_mask_padding,
+                    mask_json_override=mask_json_override,
                 ):
                     if text_ev.get("type") == "log":
                         yield event(text_ev)
