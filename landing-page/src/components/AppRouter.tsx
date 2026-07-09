@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project, AnnotationSet, MeiFile } from "../types";
+import type { View, Project, AnnotationSet, MeiFile, ModelKind } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
-import { apiFetch } from "../lib/apiFetch";
+import { apiFetch, apiFetchOrThrow } from "../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
+import { useInferenceSettings } from "../hooks/useInferenceSettings";
+import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
 import Hero from "./landing/Hero";
 import Features from "./landing/Features";
 import About from "./landing/About";
@@ -95,9 +97,9 @@ export default function AppRouter({
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
   const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
-  // thread inference settings
-  const [inferenceThreshold, setInferenceThreshold] = useState(0.5);
-  const [inferenceDevice, setInferenceDevice] = useState<"cpu" | "cuda" | "mps">("cpu");
+  // thread inference settings + text-finding settings (mothra-text optional inputs)
+  const inferenceSettings = useInferenceSettings();
+  const textFindingSettings = useTextFindingSettings();
 
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
@@ -204,25 +206,20 @@ export default function AppRouter({
           onUploadImage={async (file) => {
             const form = new FormData();
             form.append("file", file);
-            const r = await apiFetch(
+            const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images`,
               {
                 method: "POST",
                 body: form,
               },
             );
-            if (!r.ok) {
-              const d = await r.json().catch(() => ({}));
-              throw new Error(
-                (d as { detail?: string }).detail || "upload failed",
-              );
-            }
             return r.json();
           }}
-          onUploadModel={async (file: File) => {
+          onUploadModel={async (file: File, kind: ModelKind) => {
             const form = new FormData();
             form.append("file", file);
-            const r = await apiFetch(
+            form.append("kind", kind);
+            const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/models`,
               {
                 method: "POST",
@@ -231,13 +228,13 @@ export default function AppRouter({
             return r.json();
           }}
           onDeleteModel={async (modelId) => {
-            await apiFetch(
+            await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/models/${modelId}`,
               { method: "DELETE" },
             );
           }}
           onDeleteAnnotation={async (annotationId) => {
-            await apiFetch(
+            await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/annotations/${annotationId}`,
               { method: "DELETE" },
             );
@@ -258,33 +255,25 @@ export default function AppRouter({
             }
           }}
           onDeleteMei={async (meiId) => {
-            await apiFetch(
+            await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/mei/${meiId}`,
               { method: "DELETE" },
             );
           }}
           onDeleteImage={async (imageId) => {
-            const r = await apiFetch(
+            await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images/${imageId}`,
               {
                 method: "DELETE",
               },
             );
-            if (!r.ok) {
-              const d = await r.json().catch(() => ({}));
-              throw new Error(
-                (d as { detail?: string }).detail || "delete failed",
-              );
-            }
           }}
           onDeleteProject={() => {
             deleteProject(selectedProject.id);
             setView("projects");
           }}
-          inferenceThreshold={inferenceThreshold}
-          onInferenceThresholdChange={setInferenceThreshold}
-          inferenceDevice={inferenceDevice}
-          onInferenceDeviceChange={setInferenceDevice}
+          inferenceSettings={inferenceSettings}
+          textFindingSettings={textFindingSettings}
         />
       ) : null;
     case "processing":
@@ -314,8 +303,16 @@ export default function AppRouter({
               body: JSON.stringify({
                 model_id: usedModelId,
                 image_ids: usedImageIds,
-                confidence_threshold: inferenceThreshold,
-                device: inferenceDevice,
+                confidence_threshold: inferenceSettings.threshold,
+                device: inferenceSettings.device,
+                text_column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
+                text_segmentation_model_id: textFindingSettings.segmentationModelId || null,
+                text_recognition_model_id: textFindingSettings.recognitionModelId || null,
+                text_device: textFindingSettings.device,
+                text_column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
+                text_masking_enabled: textFindingSettings.maskingEnabled,
+                text_mask_padding: textFindingSettings.maskPadding,
+                text_mask_model_id: textFindingSettings.maskModelId || null,
               }),
               signal,
             });

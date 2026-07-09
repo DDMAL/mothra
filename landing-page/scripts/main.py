@@ -12,10 +12,15 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from auth_api import router as auth_router
+from projects_api import router as projects_router
+from images_api import router as images_router
+from mei_api import router as mei_router
+from models_api import router as models_router
 from encode_api import router as encode_router
 from account_api import router as account_router
 from inference_api import router as inference_router
 from ic_api import router as ic_router
+from text_api import router as text_router
 
 app = FastAPI()
 app.add_middleware(
@@ -25,10 +30,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router, prefix="/api")
+app.include_router(projects_router, prefix="/api")
+app.include_router(images_router, prefix="/api")
+app.include_router(mei_router, prefix="/api")
+app.include_router(models_router, prefix="/api")
 app.include_router(encode_router, prefix="/api")
 app.include_router(account_router, prefix="/api")
 app.include_router(inference_router, prefix="/api")
 app.include_router(ic_router, prefix="/api")
+app.include_router(text_router, prefix="/api")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

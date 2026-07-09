@@ -1,3 +1,5 @@
+export type ModelKind = "yolo" | "segmentation" | "recognition" | "text_mask";
+
 export interface ProjectImage {
   id: string;
   name: string;
@@ -18,10 +20,21 @@ export interface Project {
   deletedAt?: string;
   lastOpenedAt?: string;
   isPinned?: boolean;
+  textAlignments: TextAlignment[];
 }
+
+export interface TextAlignment {
+  id: string;
+  imageName: string;
+  imageSrc?: string;
+  medianLineSpacing: number;
+  syllableCount: number;
+}
+
 export interface ProjectModel {
   id: string;
   name: string;
+  kind: ModelKind;
 }
 
 export interface AnnotationSet {

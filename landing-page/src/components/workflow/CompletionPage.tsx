@@ -31,7 +31,7 @@ export default function CompletionPage({
   onDownloadAnnotationsJson,
   onCompare,
   onClassifyMore,
-  classifyMoreCount
+  classifyMoreCount,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
     downloadBlob(new Blob([logContent ?? ""], { type: "text/plain" }), logsFileName!);

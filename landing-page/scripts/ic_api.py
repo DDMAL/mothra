@@ -32,7 +32,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth_api import get_current_user, get_db_conn, release_db_conn
+from auth_api import get_current_user, db_cursor, require_project_owner
 
 router = APIRouter()
 
@@ -54,9 +54,7 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
     placeholder grid so the IC step is always exercisable without a prior
     predict run.
     """
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
+    with db_cursor() as (con, cur):
         cur.execute(
             "SELECT yolo_txt FROM annotations"
             " WHERE project_id=%s AND image_name=%s"
@@ -66,9 +64,6 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
         row = cur.fetchone()
         if row and row[0].strip():
             return row[0].encode(), "yolo"
-    finally:
-        cur.close()
-        release_db_conn(con)
 
     try:
         from PIL import Image  # available in the mothra venv
@@ -163,15 +158,8 @@ class IcStartRequest(BaseModel):
 
 def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[bytes, str]:
     """Return ``(data, mime_type)`` for a project image the user owns."""
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("SELECT user_id FROM projects WHERE id=%s", (project_id,))
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="project not found")
-        if row[0] != user_id:
-            raise HTTPException(status_code=403, detail="not your project")
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user_id)
         cur.execute(
             "SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
             (project_id, image_name),
@@ -180,9 +168,6 @@ def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[byte
         if not img:
             raise HTTPException(status_code=404, detail="image not found")
         return bytes(img[0]), (img[1] or "image/png")
-    finally:
-        cur.close()
-        release_db_conn(con)
 
 
 @router.post("/projects/{project_id}/ic/start")

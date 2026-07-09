@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import psycopg2, psycopg2.errors
 
-from auth_api import get_current_user, get_db_conn, release_db_conn, verify_password, hash_password, STORAGE_QUOTA_BYTES
+from auth_api import get_current_user, db_cursor, verify_password, hash_password, STORAGE_QUOTA_BYTES
 
 router = APIRouter()
 
@@ -15,26 +15,21 @@ class UpdateUserBody(BaseModel):
 def update_me(body: UpdateUserBody, user=Depends(get_current_user)):
     if not body.username and not body.email:
         return user
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        if body.username:
-            cur.execute("UPDATE users SET username = %s WHERE id = %s", (body.username, user["id"]))
-        if body.email:
-            cur.execute("UPDATE users SET email = %s WHERE id = %s", (body.email, user["id"]))
-        con.commit()
-    except psycopg2.errors.UniqueViolation:
-        con.rollback()
-        cur.close()
-        release_db_conn(con)
-        raise HTTPException(status_code=409, detail="username or email already taken")
-    cur.execute(
-        "SELECT id, username, email, first_name, last_name, created_at FROM users WHERE id=%s",
-        (user["id"],)
-    )
-    row = cur.fetchone()
-    cur.close()
-    release_db_conn(con)
+    with db_cursor() as (con, cur):
+        try:
+            if body.username:
+                cur.execute("UPDATE users SET username = %s WHERE id = %s", (body.username, user["id"]))
+            if body.email:
+                cur.execute("UPDATE users SET email = %s WHERE id = %s", (body.email, user["id"]))
+            con.commit()
+        except psycopg2.errors.UniqueViolation:
+            con.rollback()
+            raise HTTPException(status_code=409, detail="username or email already taken")
+        cur.execute(
+            "SELECT id, username, email, first_name, last_name, created_at FROM users WHERE id=%s",
+            (user["id"],)
+        )
+        row = cur.fetchone()
     return {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3], "lastName": row[4], "createdAt": str(row[5])}
 
 class ChangePasswordBody(BaseModel):
@@ -43,57 +38,53 @@ class ChangePasswordBody(BaseModel):
 
 @router.patch("/me/password")
 def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
-    con = get_db_conn()
-    cur = con.cursor()
-    cur.execute("SELECT password_hash FROM users WHERE id=%s", (user["id"],))
-    row = cur.fetchone()
-    cur.close(); release_db_conn(con)
+    with db_cursor() as (con, cur):
+        cur.execute("SELECT password_hash FROM users WHERE id=%s", (user["id"],))
+        row = cur.fetchone()
     if not row or not verify_password(body.old_password, row[0]):
         raise HTTPException(status_code=400, detail="old password is incorrect")
-    con = get_db_conn(); cur = con.cursor()
-    cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
-                (hash_password(body.new_password), user["id"]))
-    con.commit(); cur.close(); release_db_conn(con)
+    with db_cursor() as (con, cur):
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
+                    (hash_password(body.new_password), user["id"]))
+        con.commit()
     return {"ok": True}
 
 @router.get("/me/usage")
 def get_usage(user=Depends(get_current_user)):
-    con = get_db_conn(); cur = con.cursor()
     uid = user["id"]
+    with db_cursor() as (con, cur):
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE deleted_at IS NULL) AS active
+            FROM projects WHERE user_id = %s
+        """, (uid,))
+        proj = cur.fetchone()
 
-    cur.execute("""
-        SELECT
-            COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE deleted_at IS NULL) AS active
-        FROM projects WHERE user_id = %s
-    """, (uid,))
-    proj = cur.fetchone()
+        cur.execute("""
+            SELECT COUNT(*), COALESCE(SUM(octet_length(data)), 0)
+            FROM project_images
+            WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+        """, (uid,))
+        imgs = cur.fetchone()
 
-    cur.execute("""
-        SELECT COUNT(*), COALESCE(SUM(octet_length(data)), 0)
-        FROM project_images
-        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
-    """, (uid,))
-    imgs = cur.fetchone()
+        cur.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(octet_length(xml_content)), 0),
+                COUNT(*) FILTER (WHERE corrected = 1)
+            FROM mei_files
+            WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+        """, (uid,))
+        mei = cur.fetchone()
 
-    cur.execute("""
-        SELECT
-            COUNT(*),
-            COALESCE(SUM(octet_length(xml_content)), 0),
-            COUNT(*) FILTER (WHERE corrected = 1)
-        FROM mei_files
-        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
-    """, (uid,))
-    mei = cur.fetchone()
+        cur.execute("""
+            SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
+            FROM project_logs
+            WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
+        """, (uid,))
+        logs = cur.fetchone()
 
-    cur.execute("""
-        SELECT COUNT(*), COALESCE(SUM(octet_length(content)), 0)
-        FROM project_logs
-        WHERE project_id IN (SELECT id FROM projects WHERE user_id = %s)
-    """, (uid,))
-    logs = cur.fetchone()
-
-    cur.close(); release_db_conn(con)
     return {
         "projects": {"total": proj[0], "active": proj[1], "deleted": proj[0] - proj[1]},
         "images": {"count": imgs[0], "bytes": imgs[1]},
@@ -105,23 +96,21 @@ def get_usage(user=Depends(get_current_user)):
 
 @router.delete("/me")
 def delete_me(user=Depends(get_current_user)):
-    con = get_db_conn(); cur = con.cursor()
-    try:
-        cur.execute("SELECT id FROM projects WHERE user_id=%s", (user["id"], ))
-        pids = [r[0] for r in cur.fetchall()]
-        for pid in pids:
-            cur.execute("DELETE FROM annotations WHERE project_id=%s", (pid, ))
-            cur.execute("DELETE FROM activity_log WHERE project_id=%s", (pid, ))
-            cur.execute("DELETE FROM project_logs WHERE project_id=%s", (pid, ))
-            cur.execute("DELETE FROM mei_files WHERE project_id=%s", (pid, ))
-            cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
-            cur.execute("DELETE FROM project_models WHERE project_id=%s", (pid, ))
-        cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
-        cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
-        con.commit()
-    except Exception:
-        con.rollback()
-        raise HTTPException(status_code=500, detail="account deletion failed")
-    finally:
-        cur.close(); release_db_conn(con)
+    with db_cursor() as (con, cur):
+        try:
+            cur.execute("SELECT id FROM projects WHERE user_id=%s", (user["id"], ))
+            pids = [r[0] for r in cur.fetchall()]
+            for pid in pids:
+                cur.execute("DELETE FROM annotations WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM activity_log WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM project_logs WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM mei_files WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM project_models WHERE project_id=%s", (pid, ))
+            cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
+            cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise HTTPException(status_code=500, detail="account deletion failed")
     return {"ok": True}

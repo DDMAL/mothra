@@ -1,4 +1,4 @@
-import { authHeaders, setToken, clearToken } from "../hooks/useAuth";
+import { authHeaders, setToken } from "../hooks/useAuth";
 import { toast } from "./toast";
 
 // replaces raw fetch() for all /api/* calls
@@ -34,4 +34,18 @@ export async function apiFetch(
         ...init,
         headers: { Authorization: `Bearer ${access_token}`, ...(init?.headers ?? {}) },
     });
+}
+
+// convenience wrapper for callers that just want "success or throw" —
+// use for uploads/deletes instead of hand-rolling !r.ok checks per call site
+export async function apiFetchOrThrow(
+    input: RequestInfo,
+    init?: RequestInit,
+): Promise<Response> {
+    const r = await apiFetch(input, init);
+    if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error((d as { detail?: string }).detail || `request failed (${r.status})`);
+    }
+    return r;
 }

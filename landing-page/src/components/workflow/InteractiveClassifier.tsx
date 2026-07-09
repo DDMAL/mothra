@@ -57,7 +57,7 @@ export default function InteractiveClassifier({
     setIcOrigin(null);
     setSessionId(null);
 
-    fetch(`/api/projects/${projectId}/ic/start`, {
+    apiFetch(`/api/projects/${projectId}/ic/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageName: img.name }),

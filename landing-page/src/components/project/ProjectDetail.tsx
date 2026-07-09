@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
-import type { Project } from "../../types";
+import type { Project, ModelKind } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
+import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
+import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import ActivityLog from "./ActivityLog";
 import ImageTab from "./ImageTab";
 import ModelTab from "./ModelTab";
 import MeiTab from "./MeiTab";
+import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
 
@@ -32,17 +35,15 @@ interface ProjectDetailProps {
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
   onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
-  onUploadModel: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
-  inferenceThreshold: number;
-  onInferenceThresholdChange: (v: number) => void;
-  inferenceDevice: "cpu" | "cuda" | "mps";
-  onInferenceDeviceChange: (v: "cpu" | "cuda" | "mps") => void;
+  inferenceSettings: ReturnType<typeof useInferenceSettings>;
+  textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
 
 export default function ProjectDetail({
@@ -64,13 +65,11 @@ export default function ProjectDetail({
   onDownloadAnnotation,
   onDeleteMei,
   onDeleteProject,
-  inferenceThreshold,
-  onInferenceThresholdChange,
-  inferenceDevice,
-  onInferenceDeviceChange,
+  inferenceSettings,
+  textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei files"
+    "images" | "models" | "annotations" | "mei files" | "text"
   >("images");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
@@ -97,11 +96,11 @@ export default function ProjectDetail({
   };
 
   const tabs = [
-    "images",
-    "models",
-    ...(stepsUnlocked >= 1 ? ["annotations"] : []),
-    ...(stepsUnlocked >= 3 ? ["mei files"] : []),
-  ] as const;
+     "images",
+     "models",
+     ...(stepsUnlocked >= 1 ? ["annotations", "text"] : []),
+     ...(stepsUnlocked >= 3 ? ["mei files"] : []),
+   ] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -509,10 +508,8 @@ export default function ProjectDetail({
                 onUsedNamesChange={onUsedNamesChange}
                 onUploadModel={onUploadModel}
                 setValidationError={setValidationError}
-                inferenceThreshold={inferenceThreshold}
-                onInferenceThresholdChange={onInferenceThresholdChange}
-                inferenceDevice={inferenceDevice}
-                onInferenceDeviceChange={onInferenceDeviceChange}
+                inferenceSettings={inferenceSettings}
+                textFindingSettings={textFindingSettings}
               />
             )}
             {activeTab === "annotations" && (
@@ -522,6 +519,12 @@ export default function ProjectDetail({
                 section={annSection}
                 usedNames={usedNames}
                 onUsedNamesChange={onUsedNamesChange}
+              />
+            )}
+            {activeTab === "text" && (
+              <TextAlignmentsTab
+                textAlignments={project.textAlignments}
+                projectId={project.id}
               />
             )}
             {activeTab === "mei files" && (
