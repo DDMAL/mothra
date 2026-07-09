@@ -95,6 +95,7 @@ export default function AppRouter({
     togglePin,
   } = mutations;
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
+  const [annotationLogs, setAnnotationLogs] = useState<string[]>([]);
   const [originalMeiFiles, setOriginalMeiFiles] = useState<MeiFile[]>([]);
 
   // thread inference settings + text-finding settings (mothra-text optional inputs)
@@ -336,6 +337,7 @@ export default function AppRouter({
               })
               .catch(() => {});
           }}
+          onLogsReady={setAnnotationLogs}
         />
       ) : null;
     case "completion":
@@ -344,6 +346,7 @@ export default function AppRouter({
           onContinue={() => setView("ic")}
           onBackToProject={() => setView("project")}
           logsFileName="annotatorlogs.txt"
+          logContent={annotationLogs.join("\n")}
           onDownloadAnnotations={
             selectedProject?.annotations?.length
               ? async () => {
@@ -415,7 +418,6 @@ export default function AppRouter({
         <IcCompletionTestPage
           onContinue={() => setView("encoding-processing")}
           onBackToProject={() => setView("project")}
-          logsFileName="iclogs.txt"
           xmlFile={pendingXmlFile}
           onXmlFileChange={setPendingXmlFile}
           imageFile={pendingImageFile}
@@ -529,7 +531,6 @@ export default function AppRouter({
       return (
         <CompletionPage
           description="voila, sent to cantus ultimus!"
-          logsFileName="sendlogs.txt"
           continueHref="https://cantus.simssa.ca/"
           continueLabel="view on cantus ultimus"
           onBackToProject={() => setView("project")}

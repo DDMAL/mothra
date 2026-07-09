@@ -1,10 +1,8 @@
 import { useRef, useState } from "react";
-import { downloadBlob } from "../../utils/download";
 
 interface IcCompletionTestPageProps {
   onContinue: () => void;
   onBackToProject: () => void;
-  logsFileName?: string;
   xmlFile: File | null;
   onXmlFileChange: (f: File | null) => void;
   imageFile: File | null;
@@ -14,7 +12,6 @@ interface IcCompletionTestPageProps {
 export default function IcCompletionTestPage({
   onContinue,
   onBackToProject,
-  logsFileName,
   xmlFile,
   onXmlFileChange,
   imageFile,
@@ -24,10 +21,6 @@ export default function IcCompletionTestPage({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [imageDragging, setImageDragging] = useState(false);
-
-  const handleDownloadLogs = () => {
-    downloadBlob(new Blob([""], { type: "text/plain" }), logsFileName!);
-  };
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48 relative">
@@ -147,15 +140,6 @@ export default function IcCompletionTestPage({
           </p>
         )}
       </div>
-
-      {logsFileName && (
-        <button
-          onClick={handleDownloadLogs}
-          className="absolute bottom-8 left-8 text-white/60 text-sm hover:text-white cursor-pointer"
-        >
-          &gt; download {logsFileName}
-        </button>
-      )}
     </div>
   );
 }
