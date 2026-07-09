@@ -247,6 +247,7 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         cur.execute("DELETE FROM project_images WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM text_alignments WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
         con.commit()
         return {"ok": True}

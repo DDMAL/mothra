@@ -323,6 +323,18 @@ export default function AppRouter({
                 p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
               ),
             );
+            apiFetch(`/api/projects/${selectedProject.id}`)
+              .then((r) => r.json())
+              .then((fresh: Project) => {
+                setProjects((prev) =>
+                  prev.map((p) =>
+                    p.id === selectedProject.id
+                      ? { ...p, textAlignments: fresh.textAlignments }
+                      : p,
+                  ),
+                );
+              })
+              .catch(() => {});
           }}
         />
       ) : null;

@@ -113,13 +113,39 @@ uv sync
 
 ### 4. Text-finding service venv (`:8002`)
 
+First, make sure the `mothra-text` submodule is populated (it's empty if you
+cloned without `--recursive`):
+
+```bash
+git submodule update --init mothra-text
+```
+
+Then create the venv and install dependencies:
+
 ```bash
 cd text-service
 python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip install git+https://github.com/DDMAL/volpiano-display-utilities.git
+pip install -e ../mothra-text
 ```
+
+The last line installs `mothra-text` into the venv so `main.py` can import
+`run_pipeline`. If `mothra-text` has no `setup.py`/`pyproject.toml` yet,
+run uvicorn with `PYTHONPATH=../mothra-text` prepended instead.
+
+Then download the Tridis OCR recognition model (one-time, ~few hundred MB):
+
+```bash
+.venv/bin/htrmopo get 10.5281/zenodo.10788590
+```
+
+(`htrmopo` is a CLI binary, not a Python module — `python -m htrmopo` will fail.)
+
+Without this, the text-service starts but runs in stub mode — the pipeline
+completes but produces no syllables and text-finding appears to return empty
+results with no error message.
 
 ### 5. Build the embedded Neon.js editor (one-time, or after `neon/` updates)
 
@@ -217,3 +243,13 @@ npm run preview   # preview a production build locally
   `./dev.sh -b`.
 - **A port is already in use** — `./dev.sh -f`, or find and stop whatever's
   holding it: `lsof -nP -iTCP:<port> -sTCP:LISTEN`.
+- **Text-finding completes with no syllables / "no text-finding results"**
+  — the Tridis OCR model isn't installed. Run
+  `.venv/bin/htrmopo get 10.5281/zenodo.10788590` inside `text-service`
+  (step 4 above). Use the binary directly — `python -m htrmopo` will fail.
+  Without the model the service silently uses stub mode.
+- **`ModuleNotFoundError: No module named 'run_pipeline'` when starting
+  `:8002`** — the `mothra-text` submodule isn't installed in the venv. Run
+  `git submodule update --init mothra-text` from the repo root, then
+  `pip install -e ../mothra-text` inside the `text-service` venv (step 4
+  above).
