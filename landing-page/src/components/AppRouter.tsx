@@ -298,6 +298,10 @@ export default function AppRouter({
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
+            const cantusReady = 
+              !textFindingSettings.ocrOnlyMode &&
+              !!textFindingSettings.sourceId &&
+              !!textFindingSettings.folio;
             return apiFetch(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -314,6 +318,8 @@ export default function AppRouter({
                 text_masking_enabled: textFindingSettings.maskingEnabled,
                 text_mask_padding: textFindingSettings.maskPadding,
                 text_mask_model_id: textFindingSettings.maskModelId || null,
+                text_source_id: cantusReady ? Number(textFindingSettings.sourceId) : null,
+                text_folio: cantusReady ? textFindingSettings.folio : null,
               }),
               signal,
             });

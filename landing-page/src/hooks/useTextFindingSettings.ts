@@ -9,6 +9,9 @@ export interface TextFindingSettings {
   maskingEnabled: boolean;
   maskPadding: number;
   maskModelId: string;
+  ocrOnlyMode: boolean;
+  sourceId: string;
+  folio: string;
 }
 
 export function useTextFindingSettings() {
@@ -22,6 +25,10 @@ export function useTextFindingSettings() {
   const [maskPadding, setMaskPadding] = useState(15);
   const [maskModelId, setMaskModelId] = useState("");
 
+  const [ocrOnlyMode, setOcrOnlyMode] = useState(false);
+  const [sourceId, setSourceId] = useState("");
+  const [folio, setFolio] = useState("");
+
   const patch = (p: Partial<TextFindingSettings>) => {
     if (p.columnCount !== undefined) setColumnCount(p.columnCount);
     if (p.segmentationModelId !== undefined) setSegmentationModelId(p.segmentationModelId);
@@ -31,11 +38,15 @@ export function useTextFindingSettings() {
     if (p.maskingEnabled !== undefined) setMaskingEnabled(p.maskingEnabled);
     if (p.maskPadding !== undefined) setMaskPadding(p.maskPadding);
     if (p.maskModelId !== undefined) setMaskModelId(p.maskModelId);
+    if (p.ocrOnlyMode !== undefined) setOcrOnlyMode(p.ocrOnlyMode);
+    if (p.sourceId !== undefined) setSourceId(p.sourceId);
+    if (p.folio !== undefined) setFolio(p.folio);
   };
 
   return {
     columnCount, segmentationModelId, recognitionModelId, device, columnBimodalThreshold,
     maskingEnabled, maskPadding, maskModelId,
+    ocrOnlyMode, sourceId, folio,
     patch,
   };
 }

@@ -14,13 +14,15 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 MOTHRA_TEXT_DIR = Path(__file__).resolve().parent.parent / "mothra-text"
 sys.path.insert(0, str(MOTHRA_TEXT_DIR))
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
+from steps.gt_manifest import fetch_cantus_csv
+from steps.nw_chant_allocator import _folio_sort_key
 from PIL import Image as PILImage
 from steps.mothra_mask import MothraImageMask
 
@@ -31,6 +33,28 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # (_DEFAULT_RECOGNITION_MODEL); run() itself defaults to None (stub mode, empty
 # OCR text) since we call it directly instead of going through main()/argparse.
 RECOGNITION_MODEL = _find_tridis_model()
+
+import urllib.error
+from datetime import datetime, timedelta
+
+_CANTUS_CACHE_TTL = timedelta(hours=1)
+_cantus_cache: dict[int, tuple[datetime, dict]] = {}
+
+def _cantus_cache_get(source_id: int) -> Optional[dict]:
+    entry = _cantus_cache.get(source_id)
+    if not entry:
+        return None
+    exp, data = entry
+    if exp < datetime.utcnow():
+        _cantus_cache.pop(source_id, None)
+        return None
+    return data
+
+def _cantus_cache_put(source_id: int, data: dict) -> None:
+    _cantus_cache[source_id] = (datetime.utcnow() + _CANTUS_CACHE_TTL, data)
+    now = datetime.utcnow()
+    for k in [k for k, (exp, _) in list(_cantus_cache.items()) if exp < now]:
+        _cantus_cache.pop(k, None)
 
 def _bbox_overlap_ratio(line_bbox: list[float], music_bbox: list[float]) -> float:
     """Fraction of line_bbox's own area covered by music_bbox."""
@@ -109,10 +133,35 @@ class _QueueLogHandler(logging.Handler):
         self.q.put({"type": "log", "message": f"[{record.levelname}] {message}"})
 
 
+@app.get("/cantus-source/{source_id}")
+def get_cantus_source(source_id: int):
+    cached = _cantus_cache_get(source_id)
+    if cached:
+        return cached
+    try:
+        rows = fetch_cantus_csv(source_id)
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=404, detail=f"CantusDB source {source_id} not found") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach cantusdatabase.org: {exc}") from exc
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"CantusDB source {source_id} has no chants")
+    shelfmark = (rows[0].get("shelfmark") or "").strip()
+    institution = (rows[0].get("holding_institution") or "").strip()
+    name = f"{institution} - {shelfmark}" if institution and shelfmark else (institution or shelfmark or f"source {source_id}")
+    folios = sorted(
+        {(r.get("folio") or "").strip() for r in rows if (r.get("folio") or "").strip()},
+        key=_folio_sort_key,
+    )
+    data = {"sourceId": str(source_id), "name": name, "folios": folios}
+    _cantus_cache_put(source_id, data)
+    return data
+
 @app.post("/run")
 async def run_text_pipeline(
     image: UploadFile = File(...),
     folio: Optional[str] = Form(None),
+    source_id: Optional[int] = Form(None),
     music_boxes: Optional[str] = Form(None),
     column_count: Optional[int] = Form(None),
     segmentation_model: Optional[str] = Form(None),
@@ -131,6 +180,8 @@ async def run_text_pipeline(
     # (the auto-detected Tridis model, same as mothra-text's own CLI default
     # via _DEFAULT_RECOGNITION_MODEL) — NOT run()'s bare None (stub mode).
     effective_recognition_model = recognition_model or RECOGNITION_MODEL
+    if source_id is not None and not (folio or "").strip():
+        raise HTTPException(status_code=400, detail="folio is required when source_id is given")
 
     def generate():
         def event(obj):
@@ -150,7 +201,9 @@ async def run_text_pipeline(
             yield event({"type": "stage_done", "name": "checking"})
 
             yield event({"type": "stage", "name": "validating"})
-            if effective_recognition_model:
+            if source_id is not None:
+                yield event({"type": "log", "message": f"running Kraken segmentation + HTR (Cantus-aligned mode, source {source_id}, folio {folio})..."})
+            elif effective_recognition_model:
                 yield event({"type": "log", "message": f"running Kraken segmentation + HTR (OCR-only mode, model={Path(effective_recognition_model).name})..."})
             else:
                 yield event({"type": "log", "message": "running Kraken segmentation + HTR (OCR-only mode, STUB — no recognition model installed, text will be empty)..."})
@@ -188,7 +241,7 @@ async def run_text_pipeline(
                         device=device,
                         column_bimodal_threshold=column_bimodal_threshold,
                         column_count=column_count,
-                        ocr_only_mode=True,
+                        ocr_only_mode=(source_id is None),
                     )
                 except Exception as exc:
                     result_holder["error"] = exc
@@ -206,7 +259,7 @@ async def run_text_pipeline(
                 raise result_holder["error"]
             collection, manifest = result_holder["value"]
             payload = _build_pipeline_payload(
-                collection, str(active_image_path), manifest, folio=folio, mode="ocr_only",
+                collection, str(active_image_path), manifest, folio=folio, mode=("ocr_only" if source_id is None else "cantus_aligned"),
             )
             if parsed_music_boxes:
                 kept_lines, n_dropped = filter_lines_over_music(payload["lines"], parsed_music_boxes)

@@ -26,6 +26,8 @@ class PredictBody(BaseModel):
     text_masking_enabled: bool = True
     text_mask_padding: int = 15
     text_mask_model_id: Optional[str] = None
+    text_source_id: Optional[int] = None
+    text_folio: Optional[str] = None
 
 @router.post("/projects/{project_id}/predict")
 async def run_predict(
@@ -147,6 +149,8 @@ async def run_predict(
                     masking_enabled=body.text_masking_enabled,
                     mask_padding=body.text_mask_padding,
                     mask_json_override=mask_json_override,
+                    source_id=body.text_source_id if len(images) == 1 else None,
+                    folio_override=body.text_folio if len(images) == 1 else None,
                 ):
                     if text_ev.get("type") == "log":
                         yield event(text_ev)

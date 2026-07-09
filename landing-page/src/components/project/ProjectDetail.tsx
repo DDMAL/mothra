@@ -14,6 +14,7 @@ import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
+import CantusSourcePanel from "./CantusSourcePanel";
 
 const STEPS = [
   "annotate",
@@ -464,6 +465,7 @@ export default function ProjectDetail({
 
           {/* tab bar + content */}
           <div>
+            <CantusSourcePanel textFindingSettings={textFindingSettings} />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
                 <button

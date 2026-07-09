@@ -23,6 +23,12 @@ export interface Project {
   textAlignments: TextAlignment[];
 }
 
+export interface CantusSource {
+  sourceId: string;
+  name: string;
+  folios: string[];
+}
+
 export interface TextAlignment {
   id: string;
   imageName: string;
