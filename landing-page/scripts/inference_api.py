@@ -27,7 +27,6 @@ class PredictBody(BaseModel):
     text_mask_padding: int = 15
     text_mask_model_id: Optional[str] = None
     text_source_id: Optional[int] = None
-    text_folio: Optional[str] = None
 
 @router.post("/projects/{project_id}/predict")
 async def run_predict(
@@ -92,17 +91,17 @@ async def run_predict(
             yield event({"type": "stage", "name": "validating"})
             images = []
             for iid in image_ids:
-                cur.execute("SELECT name, data, mime_type FROM project_images WHERE id=%s AND project_id=%s",
+                cur.execute("SELECT name, data, mime_type, folio FROM project_images WHERE id=%s AND project_id=%s",
                             (iid, project_id))
                 r = cur.fetchone()
-                if r: images.append((iid, r[0], r[1], r[2] or "image/png"))
+                if r: images.append((iid, r[0], r[1], r[2] or "image/png", r[3]))
             yield event({"type": "log", "message": f"{len(images)} image(s) ready"})
             yield event({"type": "stage_done", "name": "validating"})
 
             # stage 3 - processing
             yield event({"type": "stage", "name": "processing"})
             results = []
-            for image_id, image_name, image_data, mime_type in images:
+            for image_id, image_name, image_data, mime_type, image_folio in images:
                 yield event({"type": "log", "message": f"Processing {image_name}..."})
                 pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
                 inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
@@ -149,8 +148,8 @@ async def run_predict(
                     masking_enabled=body.text_masking_enabled,
                     mask_padding=body.text_mask_padding,
                     mask_json_override=mask_json_override,
-                    source_id=body.text_source_id if len(images) == 1 else None,
-                    folio_override=body.text_folio if len(images) == 1 else None,
+                    source_id=body.text_source_id if image_folio else None,
+                    folio_override=image_folio,
                 ):
                     if text_ev.get("type") == "log":
                         yield event(text_ev)

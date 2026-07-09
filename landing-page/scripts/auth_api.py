@@ -91,7 +91,8 @@ def init_db():
             project_id INTEGER REFERENCES projects(id),
             name TEXT NOT NULL,
             mime_type TEXT,
-            data BYTEA NOT NULL
+            data BYTEA NOT NULL,
+            folio TEXT
         )
     """)
     cur.execute("""
@@ -231,6 +232,17 @@ def _migrate_db():
     con = get_db_conn()
     cur = con.cursor()
     try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN folio TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
         cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
@@ -283,6 +295,17 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE text_alignments ADD COLUMN log_text TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN folio TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()

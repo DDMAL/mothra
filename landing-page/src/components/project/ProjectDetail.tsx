@@ -35,7 +35,7 @@ interface ProjectDetailProps {
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
-  onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadImage: (file: File, folio?: string) => Promise<{ id: string; name: string; folio?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
@@ -499,6 +499,8 @@ export default function ProjectDetail({
                 onUploadImage={onUploadImage}
                 onDeleteImage={onDeleteImage}
                 setValidationError={setValidationError}
+                activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
+                onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
               />
             )}
             {activeTab === "models" && (

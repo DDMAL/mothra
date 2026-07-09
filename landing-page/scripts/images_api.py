@@ -1,6 +1,7 @@
 """Project image upload/fetch/delete endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FAPIFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response
+from typing import Optional
 import psycopg2
 import uuid as _uuid
 
@@ -10,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("/projects/{project_id}/images")
-async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=Depends(get_current_user)):
+async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), folio: Optional[str] = Form(None), user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
         image_id = _uuid.uuid4().hex
@@ -31,12 +32,12 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
 
         mime_type = file.content_type or "image/png"
         cur.execute(
-            "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",
-            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes))
+            "INSERT INTO project_images (id, project_id, name, mime_type, data, folio) VALUES (%s,%s,%s,%s,%s,%s)",
+            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes), folio or None)
         )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()
-        return {"id": image_id, "name": file.filename}
+        return {"id": image_id, "name": file.filename, "folio": folio or None}
 
 
 @router.get("/images/{image_id}")

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CantusSource } from "../../types";
-import { apiFetch, apiFetchOrThrow } from "../../lib/apiFetch";
+import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 
 interface CantusSourcePanelProps {
@@ -84,6 +84,11 @@ export default function CantusSourcePanel({ textFindingSettings }: CantusSourceP
                     <option key={f} value={f}>{f}</option>
                     ))}
                 </select>
+                {folio && (
+                    <p className="text-white/50 text-xs">
+                    the next image you upload in the images tab will be tagged as folio "{folio}"
+                    </p>
+                )}
                 </div>
             )}
             </div>
