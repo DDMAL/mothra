@@ -22,6 +22,7 @@ export interface Project {
   lastOpenedAt?: string;
   isPinned?: boolean;
   textAlignments: TextAlignment[];
+  cantusSourceId?: string;
 }
 
 export interface CantusSource {

@@ -23,7 +23,7 @@ router = APIRouter()
 
 def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
                          deleted_at, last_opened_at, is_pinned, used_annotation_json,
-                         images, models, mei, annotations, text_alignments):
+                         images, models, mei, annotations, text_alignments, cantus_source_id):
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -35,6 +35,7 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
         "isPinned": bool(is_pinned),
         "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
         "textAlignments": text_alignments,
+        "cantusSourceId": cantus_source_id,
     }
 
 
@@ -55,7 +56,7 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
 
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
     cur.execute("SELECT id, name, folio FROM project_images WHERE project_id=%s", (pid,))
     images = [{"id": r[0], "name": r[1], "folio": r[2]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
@@ -73,7 +74,7 @@ def _project_row_to_dict(cur, row, username):
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
-        images, models, mei, annotations, text_alignments,
+        images, models, mei, annotations, text_alignments, cantus_source_id,
     )
 
 
@@ -82,7 +83,7 @@ def list_projects(user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, "
-            " last_opened_at, is_pinned, used_annotation_names"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
             " FROM projects WHERE user_id=%s",
             (user["id"],)
         )
@@ -132,7 +133,7 @@ def list_projects(user=Depends(get_current_user)):
 
         result = [
             _build_project_dict(
-                row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
+                row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9],
                 images=images_by_pid.get(row[0], []),
                 models=models_by_pid.get(row[0], []),
                 mei=mei_by_pid.get(row[0], []),
@@ -149,7 +150,7 @@ def get_project(project_id: int, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at,"
-            " last_opened_at, is_pinned, used_annotation_names"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
             " FROM projects WHERE id=%s AND user_id=%s",
             (project_id, user["id"])
         )
@@ -186,7 +187,7 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
             "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [],
-            "deletedAt": None, "usedAnnotationNames": []}
+            "deletedAt": None, "usedAnnotationNames": [], "cantusSourceId": None}
 
 
 class UpdateProjectBody(BaseModel):
@@ -198,6 +199,7 @@ class UpdateProjectBody(BaseModel):
     lastOpenedAt: Optional[str] = None
     isPinned: Optional[bool] = None
     usedAnnotationNames: Optional[list] = None
+    cantusSourceId: Optional[str] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -224,6 +226,8 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
         if body.usedAnnotationNames is not None:
             cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
                         (json.dumps(body.usedAnnotationNames), project_id))
+        if body.cantusSourceId is not None:
+            cur.execute("UPDATE projects SET cantus_source_id=%s WHERE id=%s", (body.cantusSourceId, project_id))
         con.commit()
         return {"ok": True}
 

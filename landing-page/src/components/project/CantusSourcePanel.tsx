@@ -1,10 +1,13 @@
-import { useState } from "react";
-import type { CantusSource } from "../../types";
+import { useState, useEffect } from "react";
+import type { CantusSource, Project } from "../../types";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 
 interface CantusSourcePanelProps {
     textFindingSettings: ReturnType<typeof useTextFindingSettings>;
+    project: Project,
+    onUpdateSourceId: (sourceId: string) => void,
+    onSourceLoaded?: (s: CantusSource | null) => void
 }
 
 export default function CantusSourcePanel({ textFindingSettings }: CantusSourcePanelProps) {
@@ -14,23 +17,37 @@ export default function CantusSourcePanel({ textFindingSettings }: CantusSourceP
     const [error, setError] = useState<string | null>(null);
     const [loadedSource, setLoadedSource] = useState<CantusSource | null>(null);
 
-    const handleLoad = async() => {
-        const trimmed = sourceIdInput.trim();
-        if (!trimmed) return;
+    const loadSource = async (id: string) => {
         setLoading(true);
         setError(null);
         try {
-            const data: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${trimmed}`).then((r) => r.json());
+            const data: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
             setLoadedSource(data);
+            onSourceLoaded?.(data);
             patch({ sourceId: data.sourceId, folio: ""});
+            onUpdateSourceId(data.sourceId);
         } catch (e) {
             setLoadedSource(null);
-            patch({ sourceId: "", folio: ""});
+            onSourceLoaded?.(null);
+            patch({ sourceId: "", folio: "" });
             setError((e as Error).message);
         } finally {
             setLoading(false);
         }
     };
+
+    const handleLoad = async() => {
+        const trimmed = sourceIdInput.trim();
+        if (trimmed) loadSource(trimmed);
+    };
+
+    useEffect(() => {
+        if (project.cantusSourceId && !sourceId) {
+            setSourceIdInput(project.cantusSourceId);
+            loadSource(project.cantusSourceId);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [project.cantusSourceId]);
 
     return (
         <div className="mb-4 bg-white/10 rounded-xl p-4 flex flex-col gap-3 text-sm text-white max-w-xl">

@@ -92,6 +92,7 @@ export default function AppRouter({
     updateUsedImageNames,
     updateUsedModelNames,
     updateUsedAnnotationNames,
+    updateCantusSourceId,
     togglePin,
   } = mutations;
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
@@ -193,6 +194,7 @@ export default function AppRouter({
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
+          onUpdateCantusSourceId={(sourceId) => updateCantusSourceId(selectedProject.id, sourceId)}
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],

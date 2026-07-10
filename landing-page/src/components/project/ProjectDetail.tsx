@@ -43,6 +43,7 @@ interface ProjectDetailProps {
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
+  onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
@@ -77,6 +78,7 @@ export default function ProjectDetail({
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -465,7 +467,11 @@ export default function ProjectDetail({
 
           {/* tab bar + content */}
           <div>
-            <CantusSourcePanel textFindingSettings={textFindingSettings} />
+            <CantusSourcePanel 
+              textFindingSettings={textFindingSettings}
+              project={project}
+              onUpdateSourceId={onUpdateCantusSourceId}
+              onSourceLoaded={setLoadedCantusSource} />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
                 <button
@@ -501,6 +507,7 @@ export default function ProjectDetail({
                 setValidationError={setValidationError}
                 activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
                 onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
+                cantusFolios={loadedCantusSource?.folios ?? []}
               />
             )}
             {activeTab === "models" && (
