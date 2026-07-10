@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 import json
 import uuid as _uuid
 import io
+from medieval_models import resolve_medieval_model_paths, TEXT_MUSIC_CLASS_MAP, STAVE_CLASS_MAP
 
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from models_api import get_model_file_path
@@ -14,7 +15,8 @@ from text_api import stream_text_finding
 router = APIRouter()
 
 class PredictBody(BaseModel):
-    model_id: str
+    model_id: Optional[str] = None
+    model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     image_ids: list[str]
     confidence_threshold: float = 0.5
     device: str = "cpu"
@@ -37,6 +39,12 @@ async def run_predict(
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
 
+    if body.model_preset == "printed":
+        raise HTTPException(status_code=400, detail="printed text detection is not available yet!")
+    if body.model_preset == "custom" and not body.model_id: 
+        raise HTTPException(status_code=400, detail="model_id is required when model_preset is 'custom'")
+    
+    model_preset = body.model_preset
     model_id = body.model_id
     image_ids = body.image_ids
 
@@ -52,11 +60,40 @@ async def run_predict(
         try:
             # stage 1 - checking
             yield event({"type": "stage", "name": "checking"})
-            model_row = get_model_file_path(cur, project_id, model_id, "yolo")
-            if not model_row: 
-                yield event({"type": "error", "message": "Model file not found"}); return
-            model = YOLO(model_row[0])
-            yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
+
+            medieval_models = None
+            class_maps = None
+            single_model = None
+            stored_model_id = model_preset
+
+            if model_preset == "medieval":
+                try:
+                    tm_path, st_path = resolve_medieval_model_paths()
+                except RuntimeError as e:
+                    yield event({"type": "error", "message": str(e)}); return
+                medieval_models = (YOLO(tm_path), YOLO(st_path))
+                class_maps = (TEXT_MUSIC_CLASS_MAP, STAVE_CLASS_MAP)
+                yield event({"type": "log", "message": "medieval manuscripts preset: loaded text/music + stave detectors"})
+            else: #custom
+                model_row = get_model_file_path(cur, project_id, model_id, "yolo")
+                if not model_row:
+                    yield event({"type": "error", "message": "Model file not found"}); return
+                single_model = YOLO(model_row[0])
+                stored_model_id = model_id
+                yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
+
+            def _append_boxes(lines, inference, cls_map):
+                if inference.boxes is None or not len(inference.boxes):
+                    return
+                for box in inference.boxes:
+                    if float(box.conf[0]) < body.confidence_threshold:
+                        continue
+                    raw_cls = int(box.cls[0])
+                    cls = cls_map.get(raw_cls) if cls_map is not None else raw_cls
+                    if cls is None:
+                        continue
+                    x, y, w, h = box.xywhn[0].tolist()
+                    lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
 
             seg_model_path = None
             if body.text_segmentation_model_id:
@@ -104,23 +141,22 @@ async def run_predict(
             for image_id, image_name, image_data, mime_type, image_folio in images:
                 yield event({"type": "log", "message": f"Processing {image_name}..."})
                 pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-                inference = model(np.array(pil_img), device=body.device, verbose=False)[0]
+                img_arr = np.array(pil_img)
                 lines = []
-                if inference.boxes is not None and len(inference.boxes):
-                    for box in inference.boxes:
-                        if float(box.conf[0]) < body.confidence_threshold:
-                            continue
-                        cls = int(box.cls[0])
-                        x, y, w, h = box.xywhn[0].tolist()
-                        lines.append(f"{cls} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
+                if medieval_models is not None:
+                    tm_model, st_model = medieval_models
+                    tm_map, st_map = class_maps
+                    _append_boxes(lines, tm_model(img_arr, device=body.device, verbose=False)[0], tm_map)
+                    _append_boxes(lines, st_model(img_arr, device=body.device, verbose=False)[0], st_map)
+                else:
+                    _append_boxes(lines, single_model(img_arr, device=body.device, verbose=False)[0], None)
                 yolo_txt = "\n".join(lines)
                 ann_id = _uuid.uuid4().hex
-                cur.execute("DELETE FROM annotations WHERE project_id=%s AND image_id=%s",
-                            (project_id, image_id))
+                cur.execute("DELETE FROM annotations WHERE project_id=%s ANd image_id=%s", (project_id, image_id))
                 cur.execute(
                     "INSERT INTO annotations (id, project_id, image_id, image_name, yolo_txt, model_id)"
                     " VALUES (%s,%s,%s,%s,%s,%s)",
-                    (ann_id, project_id, image_id, image_name, yolo_txt, model_id)
+                    (ann_id, project_id, image_id, image_name, yolo_txt, stored_model_id)
                 )
                 con.commit()
                 yield event({"type": "log", "message": f"{image_name}: {len(lines)} detection(s)"})

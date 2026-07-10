@@ -578,8 +578,17 @@ export default function ProjectDetail({
               <button
                 onClick={() => {
                   if (nextStep === 0) {
-                    if (usedNames.models.length === 0) {
-                      setValidationError("must select at least one model!");
+                    const hasUsableModel = 
+                      inferenceSettings.modelPreset === "medieval" || 
+                      (inferenceSettings.modelPreset === "custom" &&
+                        (inferenceSettings.customModelId || usedNames.models.length > 0)
+                      );
+                    if (!hasUsableModel) {
+                      setValidationError(
+                        inferenceSettings.modelPreset === "custom"
+                          ? "must select a custom YOLO model!"
+                          : "must select at least one model!",
+                      );
                       return;
                     }
                     if (usedNames.images.length === 0) {

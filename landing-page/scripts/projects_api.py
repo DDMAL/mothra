@@ -133,12 +133,13 @@ def list_projects(user=Depends(get_current_user)):
 
         result = [
             _build_project_dict(
-                row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9],
+                row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
                 images=images_by_pid.get(row[0], []),
                 models=models_by_pid.get(row[0], []),
                 mei=mei_by_pid.get(row[0], []),
                 annotations=ann_by_pid.get(row[0], []),
                 text_alignments=text_by_pid.get(row[0], []),
+                cantus_source_id=row[9],
             )
             for row in rows
         ]

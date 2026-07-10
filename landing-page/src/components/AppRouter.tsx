@@ -301,11 +301,13 @@ export default function AppRouter({
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
+            const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
             return apiFetch(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                model_id: usedModelId,
+                model_preset: inferenceSettings.modelPreset,
+                model_id: inferenceSettings.modelPreset === "custom" ? resolvedCustomModelId : null,
                 image_ids: usedImageIds,
                 confidence_threshold: inferenceSettings.threshold,
                 device: inferenceSettings.device,

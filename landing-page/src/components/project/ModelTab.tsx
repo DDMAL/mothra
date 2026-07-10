@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import type { Project, ProjectModel, ModelKind } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
@@ -71,12 +71,14 @@ export default function ModelTab({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [textSettingsOpen, setTextSettingsOpen] = useState(false);
   const [textAdvancedOpen, setTextAdvancedOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [uploadKind, setUploadKind] = useState<ModelKind>("yolo");
 
   const segmentationModels = project.models.filter((m) => m.kind === "segmentation");
   const recognitionModels = project.models.filter((m) => m.kind === "recognition");
   const maskModels = project.models.filter((m) => m.kind === "text_mask");
+  const yoloModels = project.models.filter((m) => m.kind === "yolo");
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -127,6 +129,20 @@ export default function ModelTab({
     (section.page + 1) * ITEMS_PER_PAGE,
   );
 
+  useEffect(() => {
+    if (
+      usedNames.models.length > 0 && inferenceSettings.modelPreset === "medieval" && !inferenceSettings.customModelId
+    ) {
+      const usedModel = project.models.find(
+        (m) => m.kind === "yolo" && usedNames.models.includes(m.name),
+      );
+      if (usedModel) {
+        inferenceSettings.patch({ modelPreset: "custom", customModelId: usedModel.id });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [project.id]);
+
   return (
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
@@ -150,8 +166,72 @@ export default function ModelTab({
             )}
           />
         )}
+        <div className="mt-4">
+          <button
+            onClick={() => setAdvancedOpen((o) => !o)}
+            className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+          >
+            {advancedOpen ? "▾" : "▸"} advanced: layer separation model
+          </button>
+          {advancedOpen && (
+            <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-3 text-sm text-white">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio" name="model-preset" value="medieval"
+                  checked={inferenceSettings.modelPreset === "medieval"}
+                  onChange={() => inferenceSettings.patch({ modelPreset: "medieval" })}
+                  className="accent-[#1D3335] mt-0.5"
+                />
+                <span>
+                  medieval manuscripts <span className="text-white/50">(default)</span>
+                  <br />
+                  <span className="text-white/50 text-xs">
+                    bundled text/music + stave detectors — no upload required
+                  </span>
+                </span>
+              </label>
 
-        {usedNames.models.length > 0 && (
+              <label className="flex items-start gap-2 cursor-not-allowed opacity-50">
+                <input type="radio" name="model-preset" value="printed" disabled className="accent-[#1D3335] mt-0.5" />
+                <span>
+                  printed text{" "}
+                  <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">coming soon</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio" name="model-preset" value="custom"
+                  checked={inferenceSettings.modelPreset === "custom"}
+                  onChange={() => inferenceSettings.patch({ modelPreset: "custom" })}
+                  className="accent-[#1D3335] mt-0.5"
+                />
+                <span>custom model <span className="text-white/50">(advanced)</span></span>
+              </label>
+
+              {inferenceSettings.modelPreset === "custom" && (
+                <label className="flex flex-col gap-1 pl-6">
+                  <span className="text-white/70 text-xs">YOLO model</span>
+                  <select
+                    value={inferenceSettings.customModelId}
+                    onChange={(e) => inferenceSettings.patch({ customModelId: e.target.value })}
+                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                  >
+                    <option value="">select an uploaded model…</option>
+                    {yoloModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  {yoloModels.length === 0 && (
+                    <span className="text-white/40 text-xs italic">
+                      no YOLO models uploaded yet — upload one above (type: YOLO detection model)
+                    </span>
+                  )}
+                </label>
+              )}
+            </div>
+          )}
+        </div>
           <div className="mt-4">
             <button
               onClick={() => setSettingsOpen(o => !o)}
@@ -191,7 +271,6 @@ export default function ModelTab({
               </div>
             )}
           </div>
-        )}
 
         {usedNames.models.length > 0 && (
           <div className="mt-2">
