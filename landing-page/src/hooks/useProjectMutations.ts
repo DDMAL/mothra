@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/apiFetch";
 import { toast } from "../lib/toast";
 import type { Project } from "../types";
 import { normalizeProjects } from "../utils/projects";
+import CantusSourcePanel from "../components/project/CantusSourcePanel";
 
 type SetProjects = Dispatch<SetStateAction<Project[]>>;
 
@@ -157,6 +158,22 @@ export function useProjectMutations(setProjects: SetProjects) {
     }
   };
 
+  const updateCantusSourceId = async (id: number, sourceId: string) => {
+    try {
+      const r = await apiFetch(`/api/projects/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cantusSourceId: sourceId }),
+      });
+      if (!r.ok) return;
+      setProjects((prev) => 
+        prev.map((p) => (p.id === id ? { ...p, cantusSourceId: sourceId } : p)),
+      );
+    } catch {
+      // internal bookkeeping - silent
+    }
+  };
+
   const togglePin = async (id: number) => {
     let newIsPinned: boolean | undefined;
     setProjects((prev) => {
@@ -192,6 +209,7 @@ export function useProjectMutations(setProjects: SetProjects) {
     updateUsedImageNames,
     updateUsedModelNames,
     updateUsedAnnotationNames,
+    updateCantusSourceId,
     togglePin,
   };
 }

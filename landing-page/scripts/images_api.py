@@ -1,16 +1,20 @@
 """Project image upload/fetch/delete endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FAPIFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response
+from typing import Optional
 import psycopg2
 import uuid as _uuid
+from pydantic import BaseModel
 
 from auth_api import get_current_user, db_cursor, require_project_owner, _log_activity, STORAGE_QUOTA_BYTES
 
 router = APIRouter()
 
+class UpdateImageBody(BaseModel): 
+    folio: Optional[str] = None
 
 @router.post("/projects/{project_id}/images")
-async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=Depends(get_current_user)):
+async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), folio: Optional[str] = Form(None), user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
         image_id = _uuid.uuid4().hex
@@ -31,12 +35,12 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), user=D
 
         mime_type = file.content_type or "image/png"
         cur.execute(
-            "INSERT INTO project_images (id, project_id, name, mime_type, data) VALUES (%s,%s,%s,%s,%s)",
-            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes))
+            "INSERT INTO project_images (id, project_id, name, mime_type, data, folio) VALUES (%s,%s,%s,%s,%s,%s)",
+            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes), folio or None)
         )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()
-        return {"id": image_id, "name": file.filename}
+        return {"id": image_id, "name": file.filename, "folio": folio or None}
 
 
 @router.get("/images/{image_id}")
@@ -68,6 +72,23 @@ def get_image_meta(image_id: str, user=Depends(get_current_user)):
         "sizeBytes": row[2],
         "createdAt": row[3].isoformat() if row[3] else None,
     }
+
+@router.put("/projects/{project_id}/images/{image_id}")
+def update_image(project_id: int, image_id: str, body: UpdateImageBody, user=Depends(get_current_user)):
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute(
+            "SELECT id FROM project_images WHERE id=%s AND project_id=%s", (image_id, project_id)
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Image not found")
+        cur.execute(
+            "UPDATE project_images SET folio=%s WHERE id=%s",
+            (body.folio or None, image_id),
+        )
+        con.commit()
+        return {"ok": True, "folio": body.folio or None}
+    
 
 
 @router.delete("/projects/{project_id}/images/{image_id}")

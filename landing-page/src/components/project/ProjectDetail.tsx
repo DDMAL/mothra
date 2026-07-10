@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Project, ModelKind } from "../../types";
+import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -14,6 +14,7 @@ import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
+import CantusSourcePanel from "./CantusSourcePanel";
 
 const STEPS = [
   "annotate",
@@ -34,7 +35,7 @@ interface ProjectDetailProps {
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
-  onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadImage: (file: File, folio?: string) => Promise<{ id: string; name: string; folio?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
@@ -42,6 +43,7 @@ interface ProjectDetailProps {
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
+  onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
@@ -63,6 +65,7 @@ export default function ProjectDetail({
   onDeleteModel,
   onDeleteAnnotation,
   onDownloadAnnotation,
+  onUpdateCantusSourceId,
   onDeleteMei,
   onDeleteProject,
   inferenceSettings,
@@ -76,6 +79,7 @@ export default function ProjectDetail({
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -464,6 +468,11 @@ export default function ProjectDetail({
 
           {/* tab bar + content */}
           <div>
+            <CantusSourcePanel 
+              textFindingSettings={textFindingSettings}
+              project={project}
+              onUpdateSourceId={onUpdateCantusSourceId}
+              onSourceLoaded={setLoadedCantusSource} />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
                 <button
@@ -487,6 +496,7 @@ export default function ProjectDetail({
               <div className="flex-1 border-b border-white/50" />
             </div>
 
+
             {activeTab === "images" && (
               <ImageTab
                 project={project}
@@ -497,6 +507,9 @@ export default function ProjectDetail({
                 onUploadImage={onUploadImage}
                 onDeleteImage={onDeleteImage}
                 setValidationError={setValidationError}
+                activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
+                onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
+                cantusFolios={loadedCantusSource?.folios ?? []}
               />
             )}
             {activeTab === "models" && (

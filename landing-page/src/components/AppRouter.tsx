@@ -92,6 +92,7 @@ export default function AppRouter({
     updateUsedImageNames,
     updateUsedModelNames,
     updateUsedAnnotationNames,
+    updateCantusSourceId,
     togglePin,
   } = mutations;
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
@@ -193,6 +194,7 @@ export default function AppRouter({
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
+          onUpdateCantusSourceId={(sourceId) => updateCantusSourceId(selectedProject.id, sourceId)}
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],
@@ -204,9 +206,10 @@ export default function AppRouter({
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
-          onUploadImage={async (file) => {
+          onUploadImage={async (file, folio) => {
             const form = new FormData();
             form.append("file", file);
+            if (folio) form.append("folio", folio);
             const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images`,
               {
@@ -314,6 +317,9 @@ export default function AppRouter({
                 text_masking_enabled: textFindingSettings.maskingEnabled,
                 text_mask_padding: textFindingSettings.maskPadding,
                 text_mask_model_id: textFindingSettings.maskModelId || null,
+                text_source_id: !textFindingSettings.ocrOnlyMode && textFindingSettings.sourceId
+                  ? Number(textFindingSettings.sourceId)
+                  : null,
               }),
               signal,
             });

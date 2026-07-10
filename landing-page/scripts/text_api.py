@@ -165,6 +165,8 @@ def stream_text_finding(
         masking_enabled: bool = True,
         mask_padding: int = 15,
         mask_json_override: Optional[str] = None,
+        source_id: Optional[int] = None,
+        folio_override: Optional[str] = None,
     ):
     """Run text-finding for one image, yielding raw event dicts (not
     SSE-formatted) and persisting the result to text_alignments on completion.
@@ -181,13 +183,15 @@ def stream_text_finding(
         mask_json = _mask_json_for_image(project_id, image_name, image_bytes)
     collected_logs: list[str] = []
     fields = {
-        "folio": image_name,
+        "folio": folio_override or image_name,
         "music_boxes": json.dumps(music_boxes),
         "device": device,
         "column_bimodal_threshold": str(column_bimodal_threshold),
         "masking_enabled": "true" if masking_enabled else "false",
         "mask_padding": str(mask_padding),
     }
+    if source_id is not None:
+        fields["source_id"] = str(source_id)
     if column_count is not None:
         fields["column_count"] = str(column_count)
     if segmentation_model:
@@ -239,6 +243,8 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
     user=Depends(get_current_user),
     masking_enabled: bool = True,
     mask_padding: int = 15,
+    source_id: Optional[int] = None,
+    folio: Optional[str] = None,
 ):
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
 
@@ -251,7 +257,9 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
             device=device,
             column_bimodal_threshold=column_bimodal_threshold,
             masking_enabled=masking_enabled,
-            mask_padding=mask_padding
+            mask_padding=mask_padding,
+            source_id=source_id,
+            folio_override=folio,
         ):
             yield event(ev)
 

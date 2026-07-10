@@ -4,6 +4,7 @@ export interface ProjectImage {
   id: string;
   name: string;
   src?: string;
+  folio?: string;
 }
 export interface Project {
   id: number;
@@ -21,6 +22,13 @@ export interface Project {
   lastOpenedAt?: string;
   isPinned?: boolean;
   textAlignments: TextAlignment[];
+  cantusSourceId?: string;
+}
+
+export interface CantusSource {
+  sourceId: string;
+  name: string;
+  folios: string[];
 }
 
 export interface TextAlignment {
