@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import type { CantusSource, Project } from "../../types";
+import type { CantusSource, Project, ProjectImage } from "../../types";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
+import { findFolioConflict } from "../../utils/folio";
+
 
 interface CantusSourcePanelProps {
     textFindingSettings: ReturnType<typeof useTextFindingSettings>;
@@ -10,12 +12,13 @@ interface CantusSourcePanelProps {
     onSourceLoaded?: (s: CantusSource | null) => void
 }
 
-export default function CantusSourcePanel({ textFindingSettings }: CantusSourcePanelProps) {
+export default function CantusSourcePanel({ textFindingSettings, project, onUpdateSourceId, onSourceLoaded }: CantusSourcePanelProps) {
     const { ocrOnlyMode, sourceId, folio, patch } = textFindingSettings;
     const [sourceIdInput, setSourceIdInput] = useState(sourceId);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [loadedSource, setLoadedSource] = useState<CantusSource | null>(null);
+    const [conflict, setConflict] = useState<ProjectImage | null>(null);
 
     const loadSource = async (id: string) => {
         setLoading(true);
@@ -93,7 +96,10 @@ export default function CantusSourcePanel({ textFindingSettings }: CantusSourceP
                 <p className="text-white/80 text-xs">{loadedSource.name}</p>
                 <select
                     value={folio}
-                    onChange={(e) => patch({ folio: e.target.value })}
+                    onChange={(e) => {
+                        patch({ folio: e.target.value });
+                        setConflict(findFolioConflict(project.images, e.target.value) ?? null);
+                    }}
                     className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-40"
                 >
                     <option value="">select folio...</option>
@@ -101,6 +107,11 @@ export default function CantusSourcePanel({ textFindingSettings }: CantusSourceP
                     <option key={f} value={f}>{f}</option>
                     ))}
                 </select>
+                {conflict && (
+                    <p className="text-yellow-200 text-xs">
+                        ⚠ folio "{folio}" is already used by {conflict.name}
+                    </p>
+                )}
                 {folio && (
                     <p className="text-white/50 text-xs">
                     the next image you upload in the images tab will be tagged as folio "{folio}"

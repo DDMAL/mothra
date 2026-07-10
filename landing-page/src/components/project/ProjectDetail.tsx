@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Project, ModelKind } from "../../types";
+import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -65,6 +65,7 @@ export default function ProjectDetail({
   onDeleteModel,
   onDeleteAnnotation,
   onDownloadAnnotation,
+  onUpdateCantusSourceId,
   onDeleteMei,
   onDeleteProject,
   inferenceSettings,

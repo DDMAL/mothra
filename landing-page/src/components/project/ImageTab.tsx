@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { compareFolios } from "../../utils/folio";
 import type { Project, ProjectImage } from "../../types";
 import { getImageProgress } from "../../utils/imageStep";
 import * as pdfjsLib from "pdfjs-dist";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { AuthImage } from "../shared/AuthImage";
-import { apiFetch } from "../../lib/apiFetch";
+import { apiFetch, apiFetchOrThrow } from "../../lib/apiFetch";
 import Modal from "../shared/Modal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
 import RenameModal from "./RenameModal";
 import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
+import EditFolioModal from "./EditFolioModel";
+
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -28,6 +31,7 @@ interface ImageTabProps {
   setValidationError: (e: string | null) => void;
   activeFolio?: string;
   onFolioConsumed?: () => void;
+  cantusFolios?: string[];
 }
 
 export default function ImageTab({
@@ -41,6 +45,7 @@ export default function ImageTab({
   setValidationError,
   activeFolio,
   onFolioConsumed,
+  cantusFolios = [],
 }: ImageTabProps) {
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [quickLookTab, setQuickLookTab] = useState<"preview" | "info">(
@@ -63,6 +68,14 @@ export default function ImageTab({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const [editFolioModal, setEditFolioModal] = useState<{ id: string } | null>(null);
+  const [editFolioValue, setEditFolioValue] = useState("");
+
+  const sortedImages = useMemo(
+    () => [...project.images].sort((a, b) => compareFolios(a.folio, b.folio)),
+    [project.images],
+  );
 
   useEffect(() => {
     if (quickLookTab !== "info" || !quickLookId) return;
@@ -212,8 +225,26 @@ export default function ImageTab({
     }
   };
 
-  const totalImagePages = Math.ceil(project.images.length / ITEMS_PER_PAGE);
-  const pagedImages = project.images.slice(
+  const submitEditFolio = async() => {
+    if (!editFolioModal) return;
+    const imageId = editFolioModal.id;
+    const newFolio = editFolioValue || undefined;
+    await apiFetchOrThrow(`/api/projects/${project.id}/images/${imageId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folio: newFolio ?? null }),
+    });
+    onUpdateProject({
+      ...project,
+      images: project.images.map((img) => 
+        img.id === imageId ? { ...img, folio: newFolio } : img,
+      ),
+    });
+    setEditFolioModal(null);
+  }
+
+  const totalImagePages = Math.ceil(sortedImages.length / ITEMS_PER_PAGE);
+  const pagedImages = sortedImages.slice(
     section.page * ITEMS_PER_PAGE,
     (section.page + 1) * ITEMS_PER_PAGE,
   );
@@ -228,6 +259,7 @@ export default function ImageTab({
             pageOffset={section.page * ITEMS_PER_PAGE}
             section={section}
             usedNames={usedNames.images}
+            groupBy={(img) => img.folio || "no folio"}
             totalPages={totalImagePages}
             renderThumbnail={(img) =>
               img.src ? (
@@ -298,6 +330,15 @@ export default function ImageTab({
                 section.setMenu(null);
               },
             },
+            {
+              label: "Edit Folio",
+              onClick: () => {
+                const img = project.images.find((i) => i.id === section.menu!.id)!;
+                setEditFolioModal({ id: section.menu!.id });
+                setEditFolioValue(img.folio ?? "");
+                section.setMenu(null);
+              },
+            },
           ]}
         />
       )}
@@ -312,6 +353,17 @@ export default function ImageTab({
         />
       )}
 
+      {editFolioModal && (
+        <EditFolioModal
+          image={project.images.find((i) => i.id === editFolioModal.id)!}
+          images={project.images}
+          folioOptions={cantusFolios}
+          value={editFolioValue}
+          onChange={setEditFolioValue}
+          onSubmit={submitEditFolio}
+          onClose={() => setEditFolioModal(null)}
+        />
+      )}
       {quickLookId &&
         (() => {
           const img = project.images.find((i) => i.id === quickLookId)!;
