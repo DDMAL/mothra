@@ -495,6 +495,7 @@ export default function ProjectDetail({
               <div className="flex-1 border-b border-white/50" />
             </div>
 
+
             {activeTab === "images" && (
               <ImageTab
                 project={project}
