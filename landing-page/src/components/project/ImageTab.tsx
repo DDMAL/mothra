@@ -13,6 +13,7 @@ import RenameModal from "./RenameModal";
 import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
 import EditFolioModal from "./EditFolioModel";
+import BatchTab from "./BatchTab";
 
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -32,6 +33,7 @@ interface ImageTabProps {
   activeFolio?: string;
   onFolioConsumed?: () => void;
   cantusFolios?: string[];
+  onRunBatch: (imageIds: string[], folios: string[]) => void;
 }
 
 export default function ImageTab({
@@ -46,11 +48,13 @@ export default function ImageTab({
   activeFolio,
   onFolioConsumed,
   cantusFolios = [],
+  onRunBatch,
 }: ImageTabProps) {
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [quickLookTab, setQuickLookTab] = useState<"preview" | "info">(
     "preview",
   );
+  const [subTab, setSubTab] = useState<"grid" | "batch">("grid");
   const [quickLookMeta, setQuickLookMeta] = useState<{
     mimeType: string;
     sizeBytes: number;
@@ -251,7 +255,29 @@ export default function ImageTab({
   return (
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
-        {project.images.length === 0 ? (
+        <div className="flex gap-2 mb-4" onClick={(e) => e.stopPropagation()}>
+          {(["grid", "batch"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setSubTab(t)}
+              className={`px-3 py-1 text-xs rounded-full cursor-pointer transition-colors ${
+                subTab === t ? "bg-white/20 text-white" : "text-white/50 hover:text-white/70"
+              }`}
+            >
+              {t === "grid" ? "images" : "batch run"}
+            </button>
+          ))}
+        </div>
+
+        {subTab === "batch" ? (
+          <BatchTab
+            project={project}
+            cantusFolios={cantusFolios}
+            onUploadImage={onUploadImage}
+            onUpdateProject={onUpdateProject}
+            onRunBatch={onRunBatch}
+          />
+        ) : project.images.length === 0 ? (
           <p className="text-white/70 text-sm">no images yet</p>
         ) : (
           <AssetGrid

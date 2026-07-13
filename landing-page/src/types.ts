@@ -83,4 +83,6 @@ export type View =
   | "send-completion"
   | "neon-editor"
   | "neon-completion"
-  | "neon-test";
+  | "neon-test"
+  | "text-batch-processing"
+  | "text-batch-completion";

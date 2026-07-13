@@ -11,18 +11,30 @@ import shutil
 import sys
 import tempfile
 import threading
+import uuid as _uuid
+import zipfile
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 
 MOTHRA_TEXT_DIR = Path(__file__).resolve().parent.parent / "mothra-text"
 sys.path.insert(0, str(MOTHRA_TEXT_DIR))
+BATCH_DIR = Path(tempfile.gettempdir()) / "mothra-text/batches"
+BATCH_DIR.mkdir(parents=True, exist_ok=True)
+
+# startup cleanup of old batch zips to prevent excess accumulation
+import time as _time
+_now = _time.time()
+for _f in BATCH_DIR.glob("*.zip"):
+    if _now - _f.stat().st_mtime > 86400:
+        _f.unlink(missing_ok=True)
+
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
-from steps.gt_manifest import fetch_cantus_csv
-from steps.nw_chant_allocator import _folio_sort_key
+from steps.gt_manifest import fetch_cantus_csv, make_output_stem
+from steps.nw_chant_allocator import _folio_sort_key, read_folio_state
 from PIL import Image as PILImage
 from steps.mothra_mask import MothraImageMask
 
@@ -287,3 +299,147 @@ async def run_text_pipeline(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+@app.post("/batch-run")
+async def run_text_batch(
+    images: list[UploadFile] = File(...),
+    folios: str = Form(...),
+    source_id: int = Form(...),
+    segmentation_model: Optional[str] = Form(None),
+    recognition_model: Optional[str] = Form(None),
+    device: str = Form("cpu"),
+    column_count: Optional[int] = Form(None),
+    column_bimodal_threshold: float = Form(0.5),
+):
+    folio_list = json.loads(folios)
+    if len(folio_list) != len(images):
+        raise HTTPException(status_code=400, detail="folios count must match images count")
+    if len(folio_list) < 2:
+        raise HTTPException(status_code=400, detail="batch requires at least 2 folios -  use /run for a single image")
+    
+    # Read all upload bytes up front (async) — the SSE generator below is a
+    # plain sync generator, same constraint as the existing /run endpoint.
+    image_blobs = [(img.filename or f"page_{i}.jpg", await img.read()) for i, img in enumerate(images)]
+    effective_recognition_model = recognition_model or RECOGNITION_MODEL
+
+    def generate():
+        def event(obj):
+            return f"data: {json.dumps(obj)}\n\n"
+        
+        batch_id = _uuid.uuid4().hex
+        tmp_in = Path(tempfile.mkdtemp(prefix="batch-in-"))
+        tmp_out = Path(tempfile.mkdtemp(prefix="batch-out-"))
+        log_queue: "queue.Queue[dict]" = queue.Queue()
+        handler = _QueueLogHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
+        try:
+            yield event({"type": "stage", "name": "checking"})
+            image_paths = []
+            for i, (filename, data) in enumerate(image_blobs):
+                p = tmp_in / f"{i:03d}_{filename}"
+                p.write_bytes(data)
+                image_paths.append(str(p))
+            csv_rows = fetch_cantus_csv(source_id)
+            stems = [make_output_stem(csv_rows, f) for f in folio_list]
+            yield event({"type": "log", "message": f"{len(image_paths)} image(s) staged for folios {folio_list[0]}–{folio_list[-1]}"})
+            yield event({"type": "stage_done", "name": "checking"})
+
+            yield event({"type": "stage", "name": "validating"})
+            yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(folio_list)} folio(s) (Cantus-aligned mode, source {source_id})..."})
+            if segmentation_model:
+                yield event({"type": "log", "message": f"using custom segmentation model: {segmentation_model}"})
+            if column_count:
+                yield event({"type": "log", "message": f"column count forced to {column_count}"})
+            yield event({"type": "stage_done", "name": "validating"})
+
+            yield event({"type": "stage", "name": "processing"})
+            result_holder: dict = {"completed": 0}
+            
+            def _worker():
+                handler.thread_ident = threading.current_thread().ident
+                logger = logging.getLogger(__name__)
+                prev_state = None
+                try:
+                    for i, (image_path, folio, stem) in enumerate(zip(image_paths, folio_list, stems)):
+                        logger.info("Folio %d/%d: %s", i + 1, len(folio_list), folio)
+                        state_tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+                        state_path = state_tmp.name
+                        state_tmp.close()
+                        try:
+                            collection, manifest = run(
+                                image_path=image_path,
+                                folio=folio,
+                                source_id=source_id,
+                                segmentation_model=segmentation_model,
+                                recognition_model=effective_recognition_model,
+                                device=device,
+                                column_bimodal_threshold=column_bimodal_threshold,
+                                prev_folio_state=prev_state,
+                                folio_state_out=state_path,
+                                column_count=column_count,
+                            )
+                            payload = _build_pipeline_payload(
+                                collection, image_path, manifest, folio=stem, mode="cantus_aligned",
+                            )
+                            _write_mei_json(payload, str(tmp_out / f"{stem}.json"))
+                            prev_state = read_folio_state(state_path)
+                            result_holder["completed"] += 1
+                        finally:
+                            Path(state_path).unlink(missing_ok=True)
+                except Exception as exc:
+                    result_holder["error"] = exc
+                    result_holder["failed_folio"] = folio_list[result_holder["completed"]]
+            
+            worker = threading.Thread(target=_worker, daemon=True)
+            worker.start()
+
+            while worker.is_alive() or not log_queue.empty():
+                try:
+                    yield event(log_queue.get(timeout=0.2))
+                except queue.Empty:
+                    continue
+            worker.join()
+
+            if "error" in result_holder:
+                n = len(folio_list)
+                yield event({
+                    "type": "error",
+                    "message": (
+                        f"Chain aborted at folio {result_holder['failed_folio']} "
+                        f"({result_holder['completed'] + 1}/{n}): {result_holder['error']}"
+                    ),
+                })
+                return
+            
+            output_files = sorted(tmp_out.glob("*.json"))
+            if not output_files:
+                yield event({"type": "error", "message": "batch completed but produced no output files"})
+                return
+            zip_path = BATCH_DIR / f"{batch_id}.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in output_files:
+                    zf.write(f, arcname=f.name)
+            yield event({"type": "log", "message": f"{len(output_files)} folio(s) aligned"})
+            yield event({"type": "stage_done", "name": "processing"})
+            yield event({"type": "result", "batchId": batch_id, "fileCount": len(output_files)})
+            yield event({"type": "done"})
+        except Exception as e:
+            yield event({"type": "error", "message": str(e)})
+        finally:
+            root_logger.removeHandler(handler)
+            shutil.rmtree(tmp_in, ignore_errors=True)
+            shutil.rmtree(tmp_out, ignore_errors=True)
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+@app.get("/batch-download/{batch_id}")
+def download_batch(batch_id: str):
+    zip_path = BATCH_DIR / f"{batch_id}.zip"
+    if not zip_path.is_file():
+        raise HTTPException(status_code=404, detail="batch result not found or expired")
+    return FileResponse(zip_path, media_type="application/zip", filename=f"batch-{batch_id}.zip")

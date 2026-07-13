@@ -22,6 +22,7 @@ from inference_api import router as inference_router
 from ic_api import router as ic_router
 from text_api import router as text_router
 from cantus_api import router as cantus_router
+from batch_api import router as batch_router
 
 app = FastAPI()
 app.add_middleware(
@@ -41,6 +42,7 @@ app.include_router(inference_router, prefix="/api")
 app.include_router(ic_router, prefix="/api")
 app.include_router(text_router, prefix="/api")
 app.include_router(cantus_router, prefix="/api")
+app.include_router(batch_router, prefix="/api")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

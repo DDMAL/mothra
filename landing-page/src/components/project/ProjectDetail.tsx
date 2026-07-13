@@ -46,6 +46,7 @@ interface ProjectDetailProps {
   onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
+  onRunBatch: (imageIds: string[], folios: string[]) => void;
 }
 
 export default function ProjectDetail({
@@ -70,6 +71,7 @@ export default function ProjectDetail({
   onDeleteProject,
   inferenceSettings,
   textFindingSettings,
+  onRunBatch,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files" | "text"
@@ -510,6 +512,7 @@ export default function ProjectDetail({
                 activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
                 onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
                 cantusFolios={loadedCantusSource?.folios ?? []}
+                onRunBatch={onRunBatch}
               />
             )}
             {activeTab === "models" && (

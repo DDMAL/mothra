@@ -103,6 +103,10 @@ export default function AppRouter({
   const inferenceSettings = useInferenceSettings();
   const textFindingSettings = useTextFindingSettings();
 
+  // batch text-alignment run (run_chain.py) state
+  const [batchRunIds, setBatchRunIds] = useState<{ imageIds: string[]; folios: string[] } | null>(null);
+  const [batchResult, setBatchResult] = useState<{ batchId: string; fileCount: number } | null>(null);
+
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
   const [clefLine, setClefLine] = useState(3);
@@ -110,6 +114,7 @@ export default function AppRouter({
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
     "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion", "sending",
+    "text-batch-processing", "text-batch-completion",
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
@@ -278,6 +283,10 @@ export default function AppRouter({
           }}
           inferenceSettings={inferenceSettings}
           textFindingSettings={textFindingSettings}
+          onRunBatch={(imageIds, folios) => {
+            setBatchRunIds({ imageIds, folios });
+            setView("text-batch-processing");
+          }}
         />
       ) : null;
     case "processing":
@@ -391,6 +400,51 @@ export default function AppRouter({
               : undefined
           }
         />
+      );
+    case "text-batch-processing":
+      return selectedProject && batchRunIds ? (
+        <ProcessingPage
+          onBack={() => setView("project")}
+          onComplete={() => setView("text-batch-completion")}
+          streamRequest={(signal) =>
+            apiFetch(`/api/projects/${selectedProject.id}/text-batch/run`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                image_ids: batchRunIds.imageIds,
+                folios: batchRunIds.folios,
+                source_id: Number(textFindingSettings.sourceId),
+                segmentation_model: textFindingSettings.segmentationModelId || null,
+                recognition_model: textFindingSettings.recognitionModelId || null,
+                device: textFindingSettings.device,
+                column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
+                column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
+              }),
+              signal,
+            })
+          }
+          onResult={(ev: { batchId: string; fileCount: number }) => setBatchResult(ev)}
+        />
+      ) : null;
+    case "text-batch-completion":
+      return (
+        <div className="flex flex-col items-center gap-4 mt-20 text-white">
+          <p>{batchResult?.fileCount ?? 0} folio(s) aligned.</p>
+          <button
+            onClick={() => {
+              if (!selectedProject || !batchResult) return;
+              apiFetch(`/api/projects/${selectedProject.id}/text-batch/${batchResult.batchId}/download`)
+                .then((r) => r.blob())
+                .then((blob) => downloadBlob(blob, `batch-${batchResult.batchId}.zip`));
+            }}
+            className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl cursor-pointer"
+          >
+            download ZIP
+          </button>
+          <button onClick={() => setView("project")} className="text-white/70 underline cursor-pointer">
+            back to project
+          </button>
+        </div>
       );
     case "ic":
       return selectedProject ? (
