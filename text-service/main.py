@@ -310,6 +310,10 @@ async def run_text_batch(
     device: str = Form("cpu"),
     column_count: Optional[int] = Form(None),
     column_bimodal_threshold: float = Form(0.5),
+    music_boxes: Optional[str] = Form(None),
+    mask_json_list: Optional[str] = Form(None),
+    masking_enabled: bool = Form(True),
+    mask_padding: int = Form(15),
 ):
     folio_list = json.loads(folios)
     if len(folio_list) != len(images):
@@ -317,8 +321,11 @@ async def run_text_batch(
     if len(folio_list) < 2:
         raise HTTPException(status_code=400, detail="batch requires at least 2 folios -  use /run for a single image")
     
-    # Read all upload bytes up front (async) — the SSE generator below is a
-    # plain sync generator, same constraint as the existing /run endpoint.
+    # Parallel per-folio arrays, JSON-encoded the same way `folios` already
+    # is — mirrors /run's single music_boxes/mask_json fields, pluralized.
+    parsed_music_boxes = json.loads(music_boxes) if music_boxes else [[] for _ in folio_list]
+    parsed_mask_json = json.loads(mask_json_list) if mask_json_list else [None for _ in folio_list]
+
     image_blobs = [(img.filename or f"page_{i}.jpg", await img.read()) for i, img in enumerate(images)]
     effective_recognition_model = recognition_model or RECOGNITION_MODEL
 
@@ -363,12 +370,22 @@ async def run_text_batch(
                 try:
                     for i, (image_path, folio, stem) in enumerate(zip(image_paths, folio_list, stems)):
                         logger.info("Folio %d/%d: %s", i + 1, len(folio_list), folio)
+                        active_image_path = Path(image_path)
+                        mask_tmp = None
+                        folio_mask_json = parsed_mask_json[i] if i < len(parsed_mask_json) else None
+                        if masking_enabled and folio_mask_json:
+                            try:
+                                mask_tmp = _apply_mothra_mask(active_image_path, folio_mask_json, mask_padding)
+                            except Exception as exc:
+                                logger.info("folio %s: text-region masking failed, continuing unmasked: %s", folio, exc)
+                            if mask_tmp:
+                                active_image_path = mask_tmp
                         state_tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
                         state_path = state_tmp.name
                         state_tmp.close()
                         try:
                             collection, manifest = run(
-                                image_path=image_path,
+                                image_path=str(active_image_path),
                                 folio=folio,
                                 source_id=source_id,
                                 segmentation_model=segmentation_model,
@@ -380,13 +397,31 @@ async def run_text_batch(
                                 column_count=column_count,
                             )
                             payload = _build_pipeline_payload(
-                                collection, image_path, manifest, folio=stem, mode="cantus_aligned",
+                                collection, str(active_image_path), manifest, folio=stem, mode="cantus_aligned",
                             )
+                            folio_boxes = parsed_music_boxes[i] if i < len(parsed_music_boxes) else []
+                            if folio_boxes:
+                                kept_lines, n_dropped = filter_lines_over_music(payload["lines"], folio_boxes)
+                                payload["lines"] = kept_lines
+                                if n_dropped:
+                                    logger.info("folio %s: dropped %d line(s) overlapping YOLO music regions", folio, n_dropped)
                             _write_mei_json(payload, str(tmp_out / f"{stem}.json"))
+                            # Relayed through the same log_queue the SSE loop
+                            # below already drains — batch_api.py intercepts
+                            # this event type to persist text_alignments per
+                            # folio as it completes, not just at the end.
+                            log_queue.put({
+                                "type": "folio_result",
+                                "image_index": i,
+                                "folio": folio,
+                                "text_alignment": payload,
+                            })
                             prev_state = read_folio_state(state_path)
                             result_holder["completed"] += 1
                         finally:
                             Path(state_path).unlink(missing_ok=True)
+                            if mask_tmp:
+                                mask_tmp.unlink(missing_ok=True)
                 except Exception as exc:
                     result_holder["error"] = exc
                     result_holder["failed_folio"] = folio_list[result_holder["completed"]]

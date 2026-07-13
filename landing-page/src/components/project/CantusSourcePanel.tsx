@@ -3,7 +3,7 @@ import type { CantusSource, Project, ProjectImage } from "../../types";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import { findFolioConflict } from "../../utils/folio";
-
+import { downloadBlob } from "../../utils/download";
 
 interface CantusSourcePanelProps {
     textFindingSettings: ReturnType<typeof useTextFindingSettings>;
@@ -29,6 +29,7 @@ export default function CantusSourcePanel({
     const [error, setError] = useState<string | null>(null);
     const [loadedSource, setLoadedSource] = useState<CantusSource | null>(null);
     const [conflict, setConflict] = useState<ProjectImage | null>(null);
+    const [exportError, setExportError] = useState<string | null>(null);
 
     const loadSource = async (id: string) => {
         setLoading(true);
@@ -103,7 +104,26 @@ export default function CantusSourcePanel({
             {error && <p className="text-red-200 text-xs">{error}</p>}
             {loadedSource && (
                 <div className="flex flex-col gap-2">
-                <p className="text-white/80 text-xs">{loadedSource.name}</p>
+                    <div className="flex items-center gap-2">
+                         <p className="text-white/80 text-xs">{loadedSource.name}</p>
+                         <button
+                            onClick={async () => {
+                                setExportError(null);
+                                try {
+                                    const r = await apiFetchOrThrow(
+                                        `/api/projects/${project.id}/sources/${loadedSource.sourceId}/export`,
+                                    );
+                                    downloadBlob(await r.blob(), `source-${loadedSource.sourceId}-export.zip`);
+                                } catch (e) {
+                                    setExportError((e as Error).message);
+                                }
+                            }}
+                            className="text-white/50 hover:text-white text-[10px] underline cursor-pointer"
+                        >
+                            download zip
+                        </button>
+                    </div>
+                    {exportError && <p className="text-red-200 text-xs">{exportError}</p>}
                 {imageSubTab === "grid" ? (
                     <>
                         <select

@@ -421,28 +421,73 @@ export default function AppRouter({
                 device: textFindingSettings.device,
                 column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
                 column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
+                masking_enabled: textFindingSettings.maskingEnabled,
+                mask_padding: textFindingSettings.maskPadding,
+                model_preset: inferenceSettings.modelPreset,
+                model_id: inferenceSettings.modelPreset === "custom" ? (inferenceSettings.customModelId || null) : null,
+                yolo_confidence_threshold: inferenceSettings.threshold,
+                yolo_device: inferenceSettings.device,
+                text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
+                text_music_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.device,
+                stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
+                stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
               }),
               signal,
             })
           }
-          onResult={(ev: { batchId: string; fileCount: number }) => setBatchResult(ev)}
+          onResult={(ev: { batchId: string; fileCount: number }) => {
+            setBatchResult(ev);
+            if (!selectedProject) return;
+            apiFetch(`/api/projects/${selectedProject.id}`)
+              .then((r) => r.json())
+              .then((fresh: Project) => {
+                setProjects((prev) =>
+                  prev.map((p) =>
+                    p.id === selectedProject.id
+                      ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
+                      : p,
+                  ),
+                );
+              })
+              .catch(() => {});
+          }}
         />
       ) : null;
     case "text-batch-completion":
       return (
         <div className="flex flex-col items-center gap-4 mt-20 text-white">
           <p>{batchResult?.fileCount ?? 0} folio(s) aligned.</p>
-          <button
-            onClick={() => {
-              if (!selectedProject || !batchResult) return;
-              apiFetch(`/api/projects/${selectedProject.id}/text-batch/${batchResult.batchId}/download`)
-                .then((r) => r.blob())
-                .then((blob) => downloadBlob(blob, `batch-${batchResult.batchId}.zip`));
-            }}
-            className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl cursor-pointer"
-          >
-            download ZIP
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                if (!selectedProject || !batchResult) return;
+                apiFetch(`/api/projects/${selectedProject.id}/text-batch/${batchResult.batchId}/download`)
+                  .then((r) => r.blob())
+                  .then((blob) => downloadBlob(blob, `batch-${batchResult.batchId}.zip`));
+              }}
+              className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl cursor-pointer"
+            >
+              download ZIP
+            </button>
+            <button
+              onClick={() => {
+                if (!selectedProject || !batchRunIds) { setView("project"); return; }
+                const batchNames = selectedProject.images
+                  .filter((img) => batchRunIds.imageIds.includes(img.id))
+                  .map((img) => img.name);
+                const merged = [
+                  ...selectedProject.usedImageNames,
+                  ...batchNames.filter((n) => !selectedProject.usedImageNames.includes(n)),
+                ];
+                updateUsedImageNames(selectedProject.id, merged);
+                updateProjectSteps(selectedProject.id, Math.max(selectedProject.stepsUnlocked, 1));
+                setView("ic");
+              }}
+              className="px-5 py-2 border-2 border-white text-white font-semibold rounded-xl cursor-pointer"
+            >
+              continue to interactive classifier &rarr;
+            </button>
+          </div>
           <button onClick={() => setView("project")} className="text-white/70 underline cursor-pointer">
             back to project
           </button>
