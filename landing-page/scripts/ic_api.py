@@ -216,7 +216,9 @@ def ic_complete(session_id: str, user=Depends(get_current_user)):
     ``/api/encode-upload`` flow.
     """
     try:
-        status, raw, _headers = _post_empty(f"{IC_API_URL}/sessions/{session_id}/complete")
+        status, raw, _headers = _post_empty(
+            f"{IC_API_URL}/sessions/{session_id}/complete?page=true"
+        )
     except urllib.error.HTTPError as exc:
         # IC maps an unknown/torn-down session to 404.
         raise HTTPException(status_code=exc.code, detail=f"IC complete failed: {exc.read()[:500]!r}")

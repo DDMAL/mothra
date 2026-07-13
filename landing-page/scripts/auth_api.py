@@ -275,6 +275,28 @@ def _migrate_db():
 
     con = get_db_conn()
     cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_models ADD COLUMN class_map TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+    
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_models ADD COLUMN file_hash TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
     cur.execute("CREATE INDEX IF NOT EXISTS idx_project_models_kind ON project_models(project_id, kind)")
     con.commit()
     cur.close()

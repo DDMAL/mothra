@@ -15,9 +15,16 @@ TEXT_MUSIC_FILENAME = "text_music_detector_fulldata.pt"
 STAVE_FILENAME = "stave_detector_fulldata.pt"
 HF_REPO = "DDMAL-lab/mothra-yolov11-checkpoints"
 
-# YOLO class index -> shared classId space (1=text, 2=music, 3=staves)
-TEXT_MUSIC_CLASS_MAP = {0: 1, 1: 2}
-STAVE_CLASS_MAP = {0: 3}
+# Merged 0-indexed class space written into the YOLO .txt annotation lines:
+# 0=text, 1=music, 2=staves. This matches configs/mothra_base.yaml's class
+# order and, critically, what ic_core.ingest_page_yolo expects — it adds +1
+# to each .txt class id to reach MOTHRA's 1-indexed classId space (1=Text,
+# 2=Neumes, 3=Staves). Do NOT copy the 1/2/3 maps from
+# mothra-text/scripts/run_mothra_inference.py here — those target MOTHRA
+# JSON's classId directly (no downstream shift), a different consumer than
+# this .txt-based pipeline.
+TEXT_MUSIC_CLASS_MAP = {0: 0, 1: 1}  # text_music_detector already trained 0=text, 1=music
+STAVE_CLASS_MAP = {0: 2}  # stave_detector's only class -> merged slot 2
 
 BUNDLED_DIR = Path(__file__).parent / "assets" / "models" / "medieval"
 ENV_MODELS_DIR = "MOTHRA_MEDIEVAL_MODELS_DIR"

@@ -185,35 +185,34 @@ def match_syllable_text(cluster: list[Glyph], syl_boxes: list[dict]) -> str:
 
 
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
-    """Parse YOLO annotation text into StaveBbox hints for staff lines.
-
-    Filters to boxes with width/height > 6 (wide flat shapes typical of staff lines)
-    and converts normalized coords to pixel space.
+    """Parse YOLO annotation text into staff-line glyphs, then cluster them
+    into per-system StaveBbox groups via _staves_from_staff_lines — the same
+    clustering already used for the GameraXML path. A single detected line
+    is not a stave; ~4-5 of them grouped together are.
     """
-    staves = []
+    lines: list[Glyph] = []
     for i, line in enumerate(yolo_txt.strip().splitlines()):
         parts = line.split()
         if len(parts) < 5:
             continue
         try:
-            _, cx, cy, bw, bh = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+            _, cx, cy, bw, bh = (float(parts[0]), float(parts[1]), 
+                                 float(parts[2]), float(parts[3]), float(parts[4]))
         except ValueError:
             continue
         if bh == 0 or bw / bh <= 6:
             continue
-        # Convert normalized to pixel coords
-        px_cx = cx * img_w
-        px_cy = cy * img_h
-        px_bw = bw * img_w
-        px_bh = bh * img_h
-        staves.append(StaveBbox(
-            id=f"yolo-{i}",
-            ulx=int(px_cx - px_bw / 2),
-            uly=int(px_cy - px_bh / 2),
-            lrx=int(px_cx + px_bw / 2),
-            lry=int(px_cy + px_bh / 2),
+        px_cx, px_cy = cx * img_w, cy * img_h
+        px_bw, px_bh = bw * img_w, bh * img_h
+        lines.append(Glyph(
+            id=f"yolo-line-{i}",
+            ulx=int(px_cx - px_bw / 2), uly=int(px_cy - px_bh / 2),
+            ncols=max(1, int(px_bw)), nrows=max(1, int(px_bh)),
+            class_name="staffline", confidence=1.0, state="AUTOMATIC",
         ))
-    return sorted(staves, key=lambda s: s.uly)
+    if not lines:
+        return []
+    return _staves_from_staff_lines(lines, img_w, img_h)
 
 
 def estimate_staves_from_glyphs(

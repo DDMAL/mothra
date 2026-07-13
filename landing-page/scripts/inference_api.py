@@ -14,12 +14,18 @@ from text_api import stream_text_finding
 
 router = APIRouter()
 
+CATEGORY_TO_SLOT = {"text": 0, "music": 1, "staves": 2}
+
 class PredictBody(BaseModel):
     model_id: Optional[str] = None
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     image_ids: list[str]
     confidence_threshold: float = 0.5
     device: str = "cpu"
+    text_music_confidence_threshold: Optional[float] = None
+    text_music_device: Optional[str] = None
+    stave_confidence_threshold: Optional[float] = None
+    stave_device: Optional[str] = None
     text_column_count: Optional[int] = None
     text_segmentation_model_id: Optional[str] = None
     text_recognition_model_id: Optional[str] = None
@@ -78,15 +84,20 @@ async def run_predict(
                 model_row = get_model_file_path(cur, project_id, model_id, "yolo")
                 if not model_row:
                     yield event({"type": "error", "message": "Model file not found"}); return
-                single_model = YOLO(model_row[0])
+                file_path, model_name, class_map_json = model_row
+                single_model = YOLO(file_path)
                 stored_model_id = model_id
-                yield event({"type": "log", "message": f"Model loaded: {model_row[1]}"})
+                custom_cls_map = None
+                if class_map_json:
+                    raw_map = json.loads(class_map_json)
+                    custom_cls_map = {int(k): CATEGORY_TO_SLOT[v] for k, v in raw_map.items()}
+                yield event({"type": "log", "message": f"Model loaded: {model_name}"})
 
-            def _append_boxes(lines, inference, cls_map):
+            def _append_boxes(lines, inference, cls_map, threshold):
                 if inference.boxes is None or not len(inference.boxes):
                     return
                 for box in inference.boxes:
-                    if float(box.conf[0]) < body.confidence_threshold:
+                    if float(box.conf[0]) < threshold:
                         continue
                     raw_cls = int(box.cls[0])
                     cls = cls_map.get(raw_cls) if cls_map is not None else raw_cls
@@ -135,6 +146,11 @@ async def run_predict(
             yield event({"type": "log", "message": f"{len(images)} image(s) ready"})
             yield event({"type": "stage_done", "name": "validating"})
 
+            tm_threshold = body.text_music_confidence_threshold if body.text_music_confidence_threshold is not None else body.confidence_threshold
+            tm_device = body.text_music_device or body.device
+            st_threshold = body.stave_confidence_threshold if body.stave_confidence_threshold is not None else body.confidence_threshold
+            st_device = body.stave_device or body.device
+
             # stage 3 - processing
             yield event({"type": "stage", "name": "processing"})
             results = []
@@ -146,10 +162,10 @@ async def run_predict(
                 if medieval_models is not None:
                     tm_model, st_model = medieval_models
                     tm_map, st_map = class_maps
-                    _append_boxes(lines, tm_model(img_arr, device=body.device, verbose=False)[0], tm_map)
-                    _append_boxes(lines, st_model(img_arr, device=body.device, verbose=False)[0], st_map)
+                    _append_boxes(lines, tm_model(img_arr, device=tm_device, verbose=False)[0], tm_map, tm_threshold)
+                    _append_boxes(lines, st_model(img_arr, device=st_device, verbose=False)[0], st_map, st_threshold)
                 else:
-                    _append_boxes(lines, single_model(img_arr, device=body.device, verbose=False)[0], None)
+                    _append_boxes(lines, single_model(img_arr, device=body.device, verbose=False)[0], custom_cls_map, body.confidence_threshold)
                 yolo_txt = "\n".join(lines)
                 ann_id = _uuid.uuid4().hex
                 cur.execute("DELETE FROM annotations WHERE project_id=%s ANd image_id=%s", (project_id, image_id))

@@ -43,6 +43,7 @@ export interface ProjectModel {
   id: string;
   name: string;
   kind: ModelKind;
+  classMap?: Record<string, string> | null;
 }
 
 export interface AnnotationSet {
