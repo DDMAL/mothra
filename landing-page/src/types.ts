@@ -5,6 +5,8 @@ export interface ProjectImage {
   name: string;
   src?: string;
   folio?: string;
+  sourceId?: string;
+  sourceName?: string;
 }
 export interface Project {
   id: number;

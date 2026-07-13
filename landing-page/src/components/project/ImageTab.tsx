@@ -27,13 +27,25 @@ interface ImageTabProps {
   usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
   onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
-  onUploadImage: (file: File, folio?: string) => Promise<{ id: string; name: string; folio?: string }>;
+  onUploadImage: (
+    file: File,
+    folio?: string,
+    sourceId?: string,
+    sourceName?: string,
+  ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
   activeFolio?: string;
   onFolioConsumed?: () => void;
   cantusFolios?: string[];
+  cantusSourceId?: string;
+  cantusSourceName?: string;
   onRunBatch: (imageIds: string[], folios: string[]) => void;
+  imageSubTab: "grid" | "batch";
+  onImageSubTabChange: (tab: "grid" | "batch") => void;
+  batchImages: { id: string; name: string }[];
+  batchFolioSequence: string[];
+  onBatchImageUploaded: (img: { id: string; name: string }) => void;
 }
 
 export default function ImageTab({
@@ -48,13 +60,19 @@ export default function ImageTab({
   activeFolio,
   onFolioConsumed,
   cantusFolios = [],
+  cantusSourceId,
+  cantusSourceName,
   onRunBatch,
+  imageSubTab,
+  onImageSubTabChange,
+  batchImages,
+  batchFolioSequence,
+  onBatchImageUploaded,
 }: ImageTabProps) {
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [quickLookTab, setQuickLookTab] = useState<"preview" | "info">(
     "preview",
   );
-  const [subTab, setSubTab] = useState<"grid" | "batch">("grid");
   const [quickLookMeta, setQuickLookMeta] = useState<{
     mimeType: string;
     sizeBytes: number;
@@ -77,7 +95,11 @@ export default function ImageTab({
   const [editFolioValue, setEditFolioValue] = useState("");
 
   const sortedImages = useMemo(
-    () => [...project.images].sort((a, b) => compareFolios(a.folio, b.folio)),
+    () =>
+      [...project.images].sort((a, b) => {
+        const bySource = (a.sourceName || "￿").localeCompare(b.sourceName || "￿");
+        return bySource !== 0 ? bySource : compareFolios(a.folio, b.folio);
+      }),
     [project.images],
   );
 
@@ -157,8 +179,15 @@ export default function ImageTab({
     return results;
   };
 
+  const folioAt = (seq: number): string | undefined => 
+    imageSubTab === "batch" ? batchFolioSequence[batchImages.length + seq] : activeFolio;
+
   const handleFiles = async (files: FileList | File[]) => {
     setUploadError(null);
+    if (imageSubTab === "batch" && batchFolioSequence.length === 0) {
+      setUploadError("select a start/end folio range above before uploading");
+      return;
+    }
     try {
       const all = Array.from(files);
       const imageFiles = all.filter((f) => f.type.startsWith("image/"));
@@ -166,14 +195,20 @@ export default function ImageTab({
       if (imageFiles.length === 0 && pdfFiles.length === 0) return;
       setConverting(true);
 
+      let seq = 0;
       const imageEntries = await Promise.all(
         imageFiles.map(async (f) => {
-          const result = await onUploadImage(f, activeFolio);
+          const result = await onUploadImage(f, folioAt(seq++), cantusSourceId, cantusSourceName);
+          if (imageSubTab === "batch") {
+            onBatchImageUploaded({ id: result.id, name: result.name });
+          }
           return {
             id: result.id,
             name: result.name,
             src: `/api/images/${result.id}`,
             folio: result.folio,
+            sourceId: result.sourceId,
+            sourceName: result.sourceName,
           };
         }),
       );
@@ -201,12 +236,17 @@ export default function ImageTab({
           const blob = await fetch(blobUrl).then((r) => r.blob());
           URL.revokeObjectURL(blobUrl);
           const file = new File([blob], name, { type: "image/png " });
-          const result = await onUploadImage(file, activeFolio);
+          const result = await onUploadImage(file, folioAt(seq++), cantusSourceId, cantusSourceName);
+          if (imageSubTab === "batch") {
+            onBatchImageUploaded({ id: result.id, name: result.name });
+          }
           return {
             id: result.id,
             name: result.name,
             src: `/api/images/${result.id}`,
             folio: result.folio,
+            sourceId: result.sourceId,
+            sourceName: result.sourceName,
           };
         }),
       );
@@ -215,7 +255,7 @@ export default function ImageTab({
         ...project,
         images: [...project.images, ...imageEntries, ...pdfEntries],
       });
-      if (activeFolio && (imageEntries.length > 0 || pdfEntries.length > 0)) {
+      if (imageSubTab === "grid" && activeFolio && (imageEntries.length > 0 || pdfEntries.length > 0)) {
         onFolioConsumed?.();
       }
       setConverting(false);
@@ -259,9 +299,9 @@ export default function ImageTab({
           {(["grid", "batch"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => setSubTab(t)}
+              onClick={() => onImageSubTabChange(t)}
               className={`px-3 py-1 text-xs rounded-full cursor-pointer transition-colors ${
-                subTab === t ? "bg-white/20 text-white" : "text-white/50 hover:text-white/70"
+                imageSubTab === t ? "bg-white/20 text-white" : "text-white/50 hover:text-white/70"
               }`}
             >
               {t === "grid" ? "images" : "batch run"}
@@ -269,12 +309,10 @@ export default function ImageTab({
           ))}
         </div>
 
-        {subTab === "batch" ? (
+        {imageSubTab === "batch" ? (
           <BatchTab
-            project={project}
-            cantusFolios={cantusFolios}
-            onUploadImage={onUploadImage}
-            onUpdateProject={onUpdateProject}
+            batchImages={batchImages}
+            folioSequence={batchFolioSequence}
             onRunBatch={onRunBatch}
           />
         ) : project.images.length === 0 ? (
@@ -285,7 +323,7 @@ export default function ImageTab({
             pageOffset={section.page * ITEMS_PER_PAGE}
             section={section}
             usedNames={usedNames.images}
-            groupBy={(img) => img.folio || "no folio"}
+            groupBy={(img) => img.sourceName || "no source"}
             totalPages={totalImagePages}
             renderThumbnail={(img) =>
               img.src ? (
@@ -553,7 +591,11 @@ export default function ImageTab({
                 handleFiles(e.dataTransfer.files);
               }}
               onClick={() => fileInputRef.current?.click()}
-              label="drag & drop images, folders, or PDFs here"
+              label={
+                imageSubTab === "batch"
+                  ? "drag & drop images or PDFs here, in manuscript order"
+                  : "drag & drop images, folders, or PDFs here"
+              }
             >
               <div className="flex gap-4 text-sm text-[#1D3335]">
                 <button

@@ -14,7 +14,14 @@ class UpdateImageBody(BaseModel):
     folio: Optional[str] = None
 
 @router.post("/projects/{project_id}/images")
-async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), folio: Optional[str] = Form(None), user=Depends(get_current_user)):
+async def upload_image(
+    project_id: int,
+    file: UploadFile = FAPIFile(...),
+    folio: Optional[str] = Form(None),
+    source_id: Optional[str] = Form(None),
+    source_name: Optional[str] = Form(None),
+    user=Depends(get_current_user),
+):
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
         image_id = _uuid.uuid4().hex
@@ -35,12 +42,17 @@ async def upload_image(project_id: int, file: UploadFile = FAPIFile(...), folio:
 
         mime_type = file.content_type or "image/png"
         cur.execute(
-            "INSERT INTO project_images (id, project_id, name, mime_type, data, folio) VALUES (%s,%s,%s,%s,%s,%s)",
-            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes), folio or None)
+            "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes),
+             folio or None, source_id or None, source_name or None)
         )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()
-        return {"id": image_id, "name": file.filename, "folio": folio or None}
+        return {
+            "id": image_id, "name": file.filename, "folio": folio or None,
+            "sourceId": source_id or None, "sourceName": source_name or None,
+        }
 
 
 @router.get("/images/{image_id}")

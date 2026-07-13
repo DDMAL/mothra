@@ -211,10 +211,12 @@ export default function AppRouter({
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
-          onUploadImage={async (file, folio) => {
+          onUploadImage={async (file, folio, sourceId, sourceName) => {
             const form = new FormData();
             form.append("file", file);
             if (folio) form.append("folio", folio);
+            if (sourceId) form.append("source_id", sourceId);
+            if (sourceName) form.append("source_name", sourceName);
             const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images`,
               {

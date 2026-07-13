@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
@@ -35,7 +35,12 @@ interface ProjectDetailProps {
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
-  onUploadImage: (file: File, folio?: string) => Promise<{ id: string; name: string; folio?: string }>;
+  onUploadImage: (
+    file: File,
+    folio?: string,
+    sourceId?: string,
+    sourceName?: string,
+  ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
@@ -82,6 +87,19 @@ export default function ProjectDetail({
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
+  const [imageSubTab, setImageSubTab] = useState<"grid" | "batch">("grid");
+  const [batchStartFolio, setBatchStartFolio] = useState("");
+  const [batchEndFolio, setBatchEndFolio] = useState("");
+  const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
+
+  const batchFolioSequence = useMemo(() => {
+    const folios = loadedCantusSource?.folios ?? [];
+    if (!batchStartFolio || !batchEndFolio) return [];
+    const startIdx = folios.indexOf(batchStartFolio);
+    const endIdx = folios.indexOf(batchEndFolio);
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) return [];
+    return folios.slice(startIdx, endIdx + 1);
+  }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -470,11 +488,18 @@ export default function ProjectDetail({
 
           {/* tab bar + content */}
           <div>
-            <CantusSourcePanel 
+            <CantusSourcePanel
               textFindingSettings={textFindingSettings}
               project={project}
               onUpdateSourceId={onUpdateCantusSourceId}
-              onSourceLoaded={setLoadedCantusSource} />
+              onSourceLoaded={setLoadedCantusSource}
+              imageSubTab={imageSubTab}
+              batchStartFolio={batchStartFolio}
+              batchEndFolio={batchEndFolio}
+              onBatchStartFolioChange={setBatchStartFolio}
+              onBatchEndFolioChange={setBatchEndFolio}
+              batchFolioSequence={batchFolioSequence}
+            />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
                 <button
@@ -512,7 +537,14 @@ export default function ProjectDetail({
                 activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
                 onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
                 cantusFolios={loadedCantusSource?.folios ?? []}
+                cantusSourceId={loadedCantusSource?.sourceId}
+                cantusSourceName={loadedCantusSource?.name}
                 onRunBatch={onRunBatch}
+                imageSubTab={imageSubTab}
+                onImageSubTabChange={setImageSubTab}
+                batchImages={batchImages}
+                batchFolioSequence={batchFolioSequence}
+                onBatchImageUploaded={(img) => setBatchImages((prev) => [...prev, img])}
               />
             )}
             {activeTab === "models" && (

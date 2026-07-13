@@ -92,7 +92,9 @@ def init_db():
             name TEXT NOT NULL,
             mime_type TEXT,
             data BYTEA NOT NULL,
-            folio TEXT
+            folio TEXT,
+            source_id TEXT,
+            source_name TEXT
         )
     """)
     cur.execute("""
@@ -361,6 +363,28 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE annotations ADD COLUMN model_hash TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN source_id TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN source_name TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()

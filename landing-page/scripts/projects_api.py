@@ -58,8 +58,8 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
 
 def _project_row_to_dict(cur, row, username):
     pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
-    cur.execute("SELECT id, name, folio FROM project_images WHERE project_id=%s", (pid,))
-    images = [{"id": r[0], "name": r[1], "folio": r[2]} for r in cur.fetchall()]
+    cur.execute("SELECT id, name, folio, source_id, source_name FROM project_images WHERE project_id=%s", (pid,))
+    images = [{"id": r[0], "name": r[1], "folio": r[2], "sourceId": r[3], "sourceName": r[4]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
@@ -94,10 +94,15 @@ def list_projects(user=Depends(get_current_user)):
 
         pids = tuple(r[0] for r in rows)
 
-        cur.execute("SELECT project_id, id, name, folio FROM  project_images WHERE project_id IN %s", (pids,))
+        cur.execute(
+            "SELECT project_id, id, name, folio, source_id, source_name FROM  project_images WHERE project_id IN %s",
+            (pids,),
+        )
         images_by_pid: dict = {}
-        for pid, iid, iname, ifolio in cur.fetchall():
-            images_by_pid.setdefault(pid, []).append({"id": iid, "name": iname, "folio": ifolio})
+        for pid, iid, iname, ifolio, isourceid, isourcename in cur.fetchall():
+            images_by_pid.setdefault(pid, []).append(
+                {"id": iid, "name": iname, "folio": ifolio, "sourceId": isourceid, "sourceName": isourcename}
+            )
 
         cur.execute("SELECT project_id, id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id IN %s", (pids,))
         models_by_pid: dict = {}
