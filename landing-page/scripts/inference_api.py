@@ -8,7 +8,7 @@ import uuid as _uuid
 import io
 from medieval_models import resolve_medieval_model_paths, TEXT_MUSIC_CLASS_MAP, STAVE_CLASS_MAP
 
-from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
+from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner, _log_activity
 from models_api import get_model_file_path
 from text_api import stream_text_finding
 
@@ -79,18 +79,22 @@ async def run_predict(
                     yield event({"type": "error", "message": str(e)}); return
                 medieval_models = (YOLO(tm_path), YOLO(st_path))
                 class_maps = (TEXT_MUSIC_CLASS_MAP, STAVE_CLASS_MAP)
+                model_label = "medieval manuscripts (text_music_detector_fulldata.pt + stave_detector_fulldata.pt)"
+                model_hash = None  # pinned to the git commit — no separate hash needed
                 yield event({"type": "log", "message": "medieval manuscripts preset: loaded text/music + stave detectors"})
             else: #custom
                 model_row = get_model_file_path(cur, project_id, model_id, "yolo")
                 if not model_row:
                     yield event({"type": "error", "message": "Model file not found"}); return
-                file_path, model_name, class_map_json = model_row
+                file_path, model_name, class_map_json, file_hash = model_row
                 single_model = YOLO(file_path)
                 stored_model_id = model_id
                 custom_cls_map = None
                 if class_map_json:
                     raw_map = json.loads(class_map_json)
                     custom_cls_map = {int(k): CATEGORY_TO_SLOT[v] for k, v in raw_map.items()}
+                model_label = f"custom: {model_name}"
+                model_hash = file_hash
                 yield event({"type": "log", "message": f"Model loaded: {model_name}"})
 
             def _append_boxes(lines, inference, cls_map, threshold):
@@ -146,6 +150,9 @@ async def run_predict(
             yield event({"type": "log", "message": f"{len(images)} image(s) ready"})
             yield event({"type": "stage_done", "name": "validating"})
 
+            _log_activity(cur, project_id, "predict_run", f"{model_label} on {len(images)} image(s)")
+            con.commit()
+
             tm_threshold = body.text_music_confidence_threshold if body.text_music_confidence_threshold is not None else body.confidence_threshold
             tm_device = body.text_music_device or body.device
             st_threshold = body.stave_confidence_threshold if body.stave_confidence_threshold is not None else body.confidence_threshold
@@ -170,9 +177,9 @@ async def run_predict(
                 ann_id = _uuid.uuid4().hex
                 cur.execute("DELETE FROM annotations WHERE project_id=%s ANd image_id=%s", (project_id, image_id))
                 cur.execute(
-                    "INSERT INTO annotations (id, project_id, image_id, image_name, yolo_txt, model_id)"
-                    " VALUES (%s,%s,%s,%s,%s,%s)",
-                    (ann_id, project_id, image_id, image_name, yolo_txt, stored_model_id)
+                    "INSERT INTO annotations (id, project_id, image_id, image_name, yolo_txt, model_id, model_label, model_hash)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (ann_id, project_id, image_id, image_name, yolo_txt, stored_model_id, model_label, model_hash)
                 )
                 con.commit()
                 yield event({"type": "log", "message": f"{image_name}: {len(lines)} detection(s)"})

@@ -97,6 +97,11 @@ export default function AnnotationsTab({ annotations, projectId, section, usedNa
                   {set.detectionCount} detection{set.detectionCount !== 1 ? "s" : ""}
                 </span>
               )}
+              {set.modelLabel && (
+                <span className="text-xs text-white/40 italic truncate" title={set.modelLabel}>
+                  {set.modelLabel}
+                </span>
+              )}
             </div>
           );
         })}

@@ -345,7 +345,29 @@ def _migrate_db():
     finally:
         cur.close()
         release_db_conn(con)
-        
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE annotations ADD COLUMN model_label TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE annotations ADD COLUMN model_hash TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
     # startup cleanup of neon manifests to prevent excess accumulation
     import time as _time
     _now = _time.time()

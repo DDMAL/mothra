@@ -227,6 +227,49 @@ export default function ModelTab({
                     bundled text/music + stave detectors — no upload required
                   </span>
                 </span>
+                {inferenceSettings.modelPreset === "medieval" && (
+                  <div className="pl-6 flex flex-col gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!inferenceSettings.useSharedDetectorSettings}
+                        onChange={(e) => inferenceSettings.patch({ useSharedDetectorSettings: !e.target.checked })}
+                        className="accent-[#1D3335]"
+                      />
+                      <span className="text-white/70 text-xs">tune text/music and stave detectors separately</span>
+                    </label>
+                    {!inferenceSettings.useSharedDetectorSettings && (
+                      <div className="flex flex-col gap-3 pl-3 border-l border-white/20">
+                        {(["textMusicSettings", "staveSettings"] as const).map((key) => (
+                          <div key={key} className="flex flex-col gap-1">
+                            <span className="text-white/70 text-xs">
+                              {key === "textMusicSettings" ? "text/music detector" : "stave detector"}: threshold {inferenceSettings[key].threshold.toFixed(2)}
+                            </span>
+                            <input
+                              type="range" min={0} max={1} step={0.05}
+                              value={inferenceSettings[key].threshold}
+                              onChange={(e) => inferenceSettings.patch({ [key]: { ...inferenceSettings[key], threshold: Number(e.target.value) } })}
+                              className="accent-[#1D3335]"
+                            />
+                            <div className="flex gap-3">
+                              {(["cpu", "cuda", "mps"] as const).map((d) => (
+                                <label key={d} className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="radio" name={`${key}-device`} value={d}
+                                    checked={inferenceSettings[key].device === d}
+                                    onChange={() => inferenceSettings.patch({ [key]: { ...inferenceSettings[key], device: d } })}
+                                    className="accent-[#1D3335]"
+                                  />
+                                  {d}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </label>
 
               <label className="flex items-start gap-2 cursor-not-allowed opacity-50">

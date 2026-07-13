@@ -29,13 +29,13 @@ def get_model_file_path(cur, project_id: int, model_id: str, kind: str) -> Optio
     request-scoped transaction instead of checking out a second connection.
     """
     cur.execute(
-        "SELECT file_path, name, class_map FROM project_models WHERE id=%s AND project_id=%s AND kind=%s",
+        "SELECT file_path, name, class_map, file_hash FROM project_models WHERE id=%s AND project_id=%s AND kind=%s",
         (model_id, project_id, kind),
     )
     row = cur.fetchone()
     if not row or not row[0]:
         return None
-    return row[0], row[1], row[2]
+    return row[0], row[1], row[2], row[3]
 
 import hashlib
 from model_validation import inspect_yolo_checkpoint

@@ -53,6 +53,7 @@ export interface AnnotationSet {
   jsonName: string;
   txtName: string;
   detectionCount?: number;
+  modelLabel?: string | null;
 }
 
 export interface MeiFile {

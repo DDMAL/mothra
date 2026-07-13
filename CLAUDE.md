@@ -169,3 +169,28 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 - **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
 - **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs
 - **Soft-delete + hard-delete** — `deleted_at` is the soft-delete flag; a separate hard-delete path does `DELETE FROM project_images` + `DELETE FROM projects` to purge BYTEA data
+
+## Updating the bundled medieval models
+
+`landing-page/scripts/assets/models/medieval/{text_music_detector_fulldata.pt,stave_detector_fulldata.pt}`
+are committed to the repo via Git LFS so the "medieval manuscripts" preset
+works out of the box, offline, with no HuggingFace token. When DDMAL retrains
+these checkpoints:
+
+1. Get the new `.pt` files (from HuggingFace, if you have access to the
+   gated `DDMAL-lab/mothra-yolov11-checkpoints` repo, or wherever the retrain
+   produced them).
+2. Replace the two files in place at the path above and commit normally —
+   `git add`/`git commit`/`git push` (Git LFS handles the upload
+   transparently since `*.pt` is already tracked in `.gitattributes`).
+3. No code changes needed — `landing-page/scripts/medieval_models.py`'s
+   `resolve_medieval_model_paths()` always reads whatever is at that path.
+4. If the new checkpoints use a different class ordering than
+   `0=text,1=music` (text/music detector) or `0=staves` (stave detector),
+   update `TEXT_MUSIC_CLASS_MAP`/`STAVE_CLASS_MAP` in `medieval_models.py` to
+   match — see the merged 0/1/2 (text/music/staves) slot convention
+   documented in that file.
+
+For testing an unreleased checkpoint without committing it, set
+`MOTHRA_MEDIEVAL_MODELS_DIR` to a local directory containing both filenames —
+it takes priority over the bundled copies (see `resolve_medieval_model_paths()`).
