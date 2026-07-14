@@ -563,8 +563,9 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab 
-                annotations={project.annotations} 
+              <AnnotationsTab
+                annotations={project.annotations}
+                images={project.images}
                 projectId={project.id}
                 section={annSection}
                 usedNames={usedNames}
@@ -574,6 +575,7 @@ export default function ProjectDetail({
             {activeTab === "text" && (
               <TextAlignmentsTab
                 textAlignments={project.textAlignments}
+                images={project.images}
                 projectId={project.id}
               />
             )}

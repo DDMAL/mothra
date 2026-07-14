@@ -276,10 +276,10 @@ export default function AppRouter({
             if (format === "json") {
               downloadBlob(
                 new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
-                `${stem}.json`,
+                `${stem}_annotations.json`,
               );
             } else {
-              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
             }
           }}
           onDeleteMei={async (meiId) => {
@@ -436,7 +436,7 @@ export default function AppRouter({
                     );
                     const data = await r.json();
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
-                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
                   }
                 }
               : undefined
@@ -452,7 +452,7 @@ export default function AppRouter({
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
                     downloadBlob(
                       new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
-                      `${stem}.json`,
+                      `${stem}_annotations.json`,
                     );
                   }
                 }

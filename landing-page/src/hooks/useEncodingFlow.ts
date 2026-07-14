@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { Project } from "../types";
 import { apiFetch } from "../lib/apiFetch";
 import { downloadBlob } from "../utils/download";

@@ -3,7 +3,6 @@ import { apiFetch } from "../lib/apiFetch";
 import { toast } from "../lib/toast";
 import type { Project } from "../types";
 import { normalizeProjects } from "../utils/projects";
-import CantusSourcePanel from "../components/project/CantusSourcePanel";
 
 type SetProjects = Dispatch<SetStateAction<Project[]>>;
 

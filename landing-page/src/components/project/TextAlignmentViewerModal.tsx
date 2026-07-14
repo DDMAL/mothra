@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { type View, type TextAlignment } from "../../types";
+import { type TextAlignment } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 
 interface SylBox {

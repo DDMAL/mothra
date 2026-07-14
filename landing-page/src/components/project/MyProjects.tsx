@@ -391,7 +391,11 @@ export default function MyProjects({
             {trashedProjects.map((p) => {
               const daysLeft = Math.max(
                 0,
-                30 - Math.floor((Date.now() - (p.deletedAt ?? 0)) / 86400000),
+                30 -
+                  Math.floor(
+                    (Date.now() - new Date(p.deletedAt ?? 0).getTime()) /
+                      86400000,
+                  ),
               );
               return (
                 <div
