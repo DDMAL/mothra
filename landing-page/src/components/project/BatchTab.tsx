@@ -11,11 +11,13 @@ interface BatchTabProps {
   batchImages: BatchImage[];
   folioSequence: string[];
   onUseBatch: (names: string[]) => void;
+  onDiscardBatch: (imageIds: string[]) => void;
 }
 
-export default function BatchTab({ batchImages, folioSequence, onUseBatch }: BatchTabProps) {
+export default function BatchTab({ batchImages, folioSequence, onUseBatch, onDiscardBatch }: BatchTabProps) {
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   useEffect(() => {
     setIndex((i) => Math.min(i, Math.max(0, batchImages.length - 1)));
@@ -65,13 +67,42 @@ export default function BatchTab({ batchImages, folioSequence, onUseBatch }: Bat
         </p>
       )}
 
-      <button
-        onClick={() => onUseBatch(batchImages.map((b) => b.name))}
-        disabled={countMismatch || batchImages.length === 0 || folioSequence.length === 0}
-        className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer w-fit"
-      >
-        use batch ({folioSequence.length} folios)
-      </button>
+      {!confirmDiscard ? (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => onUseBatch(batchImages.map((b) => b.name))}
+            disabled={countMismatch || batchImages.length === 0 || folioSequence.length === 0}
+            className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer w-fit"
+          >
+            use batch ({folioSequence.length} folios)
+          </button>
+          <button
+            onClick={() => setConfirmDiscard(true)}
+            className="px-5 py-2 border-2 border-red-300/60 text-red-100 font-semibold rounded-xl hover:bg-red-500/10 cursor-pointer w-fit"
+          >
+            discard batch
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 text-sm text-white">
+          <span>discard {batchImages.length} uploaded image(s)? this can't be undone.</span>
+          <button
+            onClick={() => {
+              onDiscardBatch(batchImages.map((b) => b.id));
+              setConfirmDiscard(false);
+            }}
+            className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
+          >
+            yes
+          </button>
+          <button
+            onClick={() => setConfirmDiscard(false)}
+            className="px-3 py-1 border border-white/40 text-white rounded-lg hover:opacity-90 cursor-pointer"
+          >
+            no
+          </button>
+        </div>
+      )}
 
       {expanded && (
         <QuickLookModal onClose={() => setExpanded(false)}>

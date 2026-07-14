@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { compareFolios } from "../../utils/folio";
+import { compareFolios, extractFolioFromFilename, matchCanonicalFolio } from "../../utils/folio";
+import type { FolioReviewRow } from "../../utils/folio";
+import BatchFolioReviewModal from "./BatchFolioReviewModal";
 import type { Project, ProjectImage } from "../../types";
 import { getImageProgress } from "../../utils/imageStep";
 import * as pdfjsLib from "pdfjs-dist";
@@ -47,6 +49,7 @@ interface ImageTabProps {
   onBatchImageUploaded: (img: { id: string; name: string }) => void;
   onBatchUsed: () => void;
 }
+
 
 export default function ImageTab({
   project,
@@ -182,23 +185,64 @@ export default function ImageTab({
   const folioAt = (seq: number): string | undefined => 
     imageSubTab === "batch" ? batchFolioSequence[batchImages.length + seq] : activeFolio;
 
-  const handleFiles = async (files: FileList | File[]) => {
-    setUploadError(null);
-    if (imageSubTab === "batch" && batchFolioSequence.length === 0) {
-      setUploadError("select a start/end folio range above before uploading");
-      return;
-    }
-    try {
-      const all = Array.from(files);
-      const imageFiles = all.filter((f) => f.type.startsWith("image/"));
-      const pdfFiles = all.filter((f) => f.type === "application/pdf");
-      if (imageFiles.length === 0 && pdfFiles.length === 0) return;
-      setConverting(true);
+  const [pendingBatchReview, setPendingBatchReview] = useState<{
+    imageFiles: File[];
+    pdfFiles: File[];
+    rows: FolioReviewRow[];
+  } | null>(null);
 
+  const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
+    const parsed = imageFiles.map((f, i) => {
+      const positionalFolio = folioAt(i);
+      const detectedRaw = extractFolioFromFilename(f.name);
+      const detectedCanonical = 
+        detectedRaw === undefined ? undefined : matchCanonicalFolio(cantusFolios, detectedRaw);
+      const notInSource = detectedRaw !== undefined && cantusFolios.length > 0 && detectedCanonical === undefined;
+      return { fileName: f.name, positionalFolio, detectedRaw, detectedCanonical, notInSource};
+    });
+
+    // only group folios that actually resolved to a canonical value - never
+    // group "no-detection"/"not-in-source" rows together as false duplicates
+    const counts = new Map<string, number>();
+    for (const p of parsed) {
+      if (p.detectedCanonical) counts.set(p.detectedCanonical, (counts.get(p.detectedCanonical) ?? 0) + 1);
+    }
+
+    // precedence: duplicate > not-in-source > mismatch > no-detection > match
+    return parsed.map((p): FolioReviewRow => {
+      const isDuplicate = !!p.detectedCanonical && (counts.get(p.detectedCanonical) ?? 0) > 1;
+      if (isDuplicate) {
+        return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio: p.detectedCanonical, status: "duplicate" };
+      }
+      if (p.notInSource) {
+        return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio: p.detectedRaw, status: "not-in-source" };
+      }
+      if (p.detectedRaw === undefined) {
+        return { fileName: p.fileName, positionalFolio: p.positionalFolio, status: "no-detection" };
+      }
+      const detectedFolio = p.detectedCanonical ?? p.detectedRaw;
+      const status: FolioReviewRow["status"] = detectedFolio === p.positionalFolio ? "match" : "mismatch";
+      return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio, status };
+    });
+  };
+
+  const runBatchUpload = async (
+    imageFiles: File[],
+    pdfFiles: File[],
+    folioOverride?: Map<string, string>,
+  ) => {
+    try {
+      setConverting(true);
       let seq = 0;
       const imageEntries = await Promise.all(
         imageFiles.map(async (f) => {
-          const result = await onUploadImage(f, folioAt(seq++), cantusSourceId, cantusSourceName);
+          const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
+          // only associate with the loaded Cantus source when this upload is
+          // actually being tagged with a folio - otherwise a source loaded
+          // for an earlier batch/folio pick silently leaks onto unrelated
+          // single-image uploads (CantusSourcePanel reloads project.cantusSourceId
+          // on mount regardless of which sub-tab is active).
+          const result = await onUploadImage(f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined);
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -224,19 +268,21 @@ export default function ImageTab({
 
       let done = 0;
       const pdfImages: { name: string; src: string }[] = [];
-      for (let i = 0; i < pdfFiles.length; i++) {
+      for (let i =0; i < pdfFiles.length; i++) {
         const pages = await pdfToImages(pdfFiles[i], () => {
           done++;
           setPdfProgress({ done, total });
         });
         pdfImages.push(...pages);
       }
+
       const pdfEntries = await Promise.all(
         pdfImages.map(async ({ name, src: blobUrl }) => {
           const blob = await fetch(blobUrl).then((r) => r.blob());
           URL.revokeObjectURL(blobUrl);
           const file = new File([blob], name, { type: "image/png " });
-          const result = await onUploadImage(file, folioAt(seq++), cantusSourceId, cantusSourceName);
+          const pdfFolio = folioAt(seq++);
+          const result = await onUploadImage(file, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined);
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -269,6 +315,53 @@ export default function ImageTab({
     }
   };
 
+  const handleFiles = async (files: FileList | File[]) => {
+    setUploadError(null);
+    if (pendingBatchReview) {
+      setUploadError("resolve the pending folio review before uploading more files");
+      return;
+    }
+    if (imageSubTab === "batch" && batchFolioSequence.length === 0) {
+      setUploadError("select a start/end folio range above before uploading");
+      return;
+    }
+      const all = Array.from(files);
+      const imageFiles = all.filter((f) => f.type.startsWith("image/"));
+      const pdfFiles = all.filter((f) => f.type === "application/pdf");
+      if (imageFiles.length === 0 && pdfFiles.length === 0) return;
+      if (imageSubTab === "batch" && imageFiles.length > 0) {
+        const rows = computeFolioReviewRows(imageFiles);
+        const needsReview = rows.some((r) => r.status !== "match" && r.status !== "no-detection");
+        if (needsReview) {
+          // close the upload dropzone modal so the review modal doesn't stack
+          // on top of it - detection runs BEFORE setConverting/uploading, so
+          // nothing has been sent to the backend yet at this point.
+          setPendingBatchReview({ imageFiles, pdfFiles, rows });
+          section.setUploadModal(false);
+          section.setDragging(false);
+          return;
+        }
+      }
+      await runBatchUpload(imageFiles, pdfFiles);
+  }; 
+  
+  const confirmBatchReview = async (useDetected: boolean) => {
+    if (!pendingBatchReview) return;
+    const { imageFiles, pdfFiles, rows } = pendingBatchReview;
+    setPendingBatchReview(null);
+    const override = useDetected
+      ? new Map(
+        rows
+          .filter((r) => (r.status === "match" || r.status === "mismatch") && r.detectedFolio)
+          .map((r) => [r.fileName, r.detectedFolio!] as const),
+      )
+      : undefined;
+      // reopen the existing upload-progress modal (converting/pdfProgress UI)
+      // now that a decision has been made and the actual upload is starting
+      section.setUploadModal(true);
+      await runBatchUpload(imageFiles, pdfFiles, override);
+  };
+
   const submitEditFolio = async() => {
     if (!editFolioModal) return;
     const imageId = editFolioModal.id;
@@ -292,6 +385,16 @@ export default function ImageTab({
     if (newNames.length > 0) {
       onUsedNamesChange({ ...usedNames, images: [...usedNames.images, ...newNames] });
     }
+    onBatchUsed();
+  };
+
+  const handleDiscardBatch = async (imageIds: string[]) => {
+    await Promise.all(imageIds.map((id) => onDeleteImage(id)));
+    onUpdateProject({
+      ...project,
+      images: project.images.filter((img) => !imageIds.includes(img.id)),
+    });
+    // same staging reset (clears batchImages/folio range) as after "use batch"
     onBatchUsed();
   };
 
@@ -322,6 +425,7 @@ export default function ImageTab({
             batchImages={batchImages}
             folioSequence={batchFolioSequence}
             onUseBatch={handleUseBatch}
+            onDiscardBatch={handleDiscardBatch}
           />
         ) : project.images.length === 0 ? (
           <p className="text-white/70 text-sm">no images yet</p>
@@ -434,6 +538,15 @@ export default function ImageTab({
           onChange={setEditFolioValue}
           onSubmit={submitEditFolio}
           onClose={() => setEditFolioModal(null)}
+        />
+      )}
+      {pendingBatchReview && (
+        <BatchFolioReviewModal
+          rows={pendingBatchReview.rows}
+          canUseDetected={!pendingBatchReview.rows.some((r) => r.status === "not-in-source" || r.status === "duplicate")}
+          onUseDetected={() => confirmBatchReview(true)}
+          onUsePositional={() => confirmBatchReview(false)}
+          onCancel={() => setPendingBatchReview(null)}
         />
       )}
       {quickLookId &&
