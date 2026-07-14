@@ -16,6 +16,18 @@ export default function TextAlignmentsTab({
         return <p className="mt-6 text-white/70 text-sm">no text-finding results yet</p>;
     }
 
+    // textAlignments arrives oldest-first; label reruns of the same image
+    // "name", "name (1)", "name (2)", ... in run order so users can tell
+    // multiple text-finding passes on one image apart.
+    const seenCounts = new Map<string, number>();
+    const labelById = new Map<string, string>();
+    for (const set of textAlignments) {
+        const baseName = set.imageName.replace(/\.[^.]+$/, "");
+        const n = seenCounts.get(baseName) ?? 0;
+        seenCounts.set(baseName, n + 1);
+        labelById.set(set.id, n === 0 ? baseName : `${baseName} (${n})`);
+    }
+
     return (
     <>
       {viewSet && (
@@ -23,6 +35,7 @@ export default function TextAlignmentsTab({
           alignment={viewSet}
           projectId={projectId}
           onClose={() => setViewSet(null)}
+          label={labelById.get(viewSet.id)}
         />
       )}
       <div className="mt-6 grid grid-cols-5 gap-4">
@@ -47,7 +60,7 @@ export default function TextAlignmentsTab({
               </div>
             </div>
             <span className="text-sm text-white truncate">
-              {set.imageName.replace(/\.[^.]+$/, "")}
+              {labelById.get(set.id)}
             </span>
             <span className="text-xs text-white/50">
               {set.syllableCount} syllable{set.syllableCount !== 1 ? "s" : ""}

@@ -51,7 +51,6 @@ interface ProjectDetailProps {
   onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
-  onRunBatch: (imageIds: string[], folios: string[]) => void;
 }
 
 export default function ProjectDetail({
@@ -76,7 +75,6 @@ export default function ProjectDetail({
   onDeleteProject,
   inferenceSettings,
   textFindingSettings,
-  onRunBatch,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
     "images" | "models" | "annotations" | "mei files" | "text"
@@ -539,12 +537,16 @@ export default function ProjectDetail({
                 cantusFolios={loadedCantusSource?.folios ?? []}
                 cantusSourceId={loadedCantusSource?.sourceId}
                 cantusSourceName={loadedCantusSource?.name}
-                onRunBatch={onRunBatch}
                 imageSubTab={imageSubTab}
                 onImageSubTabChange={setImageSubTab}
                 batchImages={batchImages}
                 batchFolioSequence={batchFolioSequence}
                 onBatchImageUploaded={(img) => setBatchImages((prev) => [...prev, img])}
+                onBatchUsed={() => {
+                  setBatchImages([]);
+                  setBatchStartFolio("");
+                  setBatchEndFolio("");
+                }}
               />
             )}
             {activeTab === "models" && (

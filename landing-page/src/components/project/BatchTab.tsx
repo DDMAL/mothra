@@ -10,10 +10,10 @@ interface BatchImage {
 interface BatchTabProps {
   batchImages: BatchImage[];
   folioSequence: string[];
-  onRunBatch: (imageIds: string[], folios: string[]) => void;
+  onUseBatch: (names: string[]) => void;
 }
 
-export default function BatchTab({ batchImages, folioSequence, onRunBatch }: BatchTabProps) {
+export default function BatchTab({ batchImages, folioSequence, onUseBatch }: BatchTabProps) {
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
 
@@ -66,11 +66,11 @@ export default function BatchTab({ batchImages, folioSequence, onRunBatch }: Bat
       )}
 
       <button
-        onClick={() => onRunBatch(batchImages.map((b) => b.id), folioSequence)}
+        onClick={() => onUseBatch(batchImages.map((b) => b.name))}
         disabled={countMismatch || batchImages.length === 0 || folioSequence.length === 0}
         className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer w-fit"
       >
-        run batch ({folioSequence.length} folios)
+        use batch ({folioSequence.length} folios)
       </button>
 
       {expanded && (

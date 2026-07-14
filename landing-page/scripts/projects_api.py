@@ -69,7 +69,7 @@ def _project_row_to_dict(cur, row, username):
     annotations = [_map_annotation_row(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
     cur.execute(
         "SELECT id, image_id, image_name, median_line_spacing, syllable_count"
-        " FROM text_alignments WHERE project_id=%s", (pid,)
+        " FROM text_alignments WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
     text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()]
     return _build_project_dict(
@@ -129,7 +129,7 @@ def list_projects(user=Depends(get_current_user)):
 
         cur.execute(
             "SELECT project_id, id, image_id, image_name, median_line_spacing, syllable_count"
-            " FROM text_alignments WHERE project_id IN %s", (pids,)
+            " FROM text_alignments WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         text_by_pid: dict = {}
         for pid, tid, img_id, img_name, spacing, syl_count in cur.fetchall():

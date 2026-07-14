@@ -248,6 +248,7 @@ async def run_text_pipeline(
                     result_holder["value"] = run(
                         image_path=str(active_image_path),
                         folio=folio,
+                        source_id=source_id,
                         segmentation_model=segmentation_model,
                         recognition_model=effective_recognition_model,
                         device=device,
@@ -405,7 +406,9 @@ async def run_text_batch(
                                 payload["lines"] = kept_lines
                                 if n_dropped:
                                     logger.info("folio %s: dropped %d line(s) overlapping YOLO music regions", folio, n_dropped)
-                            _write_mei_json(payload, str(tmp_out / f"{stem}.json"))
+                            mei_json_path = tmp_out / f"{stem}.json"
+                            _write_mei_json(payload, str(mei_json_path))
+                            text_alignment = json.loads(mei_json_path.read_text())
                             # Relayed through the same log_queue the SSE loop
                             # below already drains — batch_api.py intercepts
                             # this event type to persist text_alignments per
@@ -414,7 +417,7 @@ async def run_text_batch(
                                 "type": "folio_result",
                                 "image_index": i,
                                 "folio": folio,
-                                "text_alignment": payload,
+                                "text_alignment": text_alignment,
                             })
                             prev_state = read_folio_state(state_path)
                             result_holder["completed"] += 1

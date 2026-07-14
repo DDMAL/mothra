@@ -40,12 +40,12 @@ interface ImageTabProps {
   cantusFolios?: string[];
   cantusSourceId?: string;
   cantusSourceName?: string;
-  onRunBatch: (imageIds: string[], folios: string[]) => void;
   imageSubTab: "grid" | "batch";
   onImageSubTabChange: (tab: "grid" | "batch") => void;
   batchImages: { id: string; name: string }[];
   batchFolioSequence: string[];
   onBatchImageUploaded: (img: { id: string; name: string }) => void;
+  onBatchUsed: () => void;
 }
 
 export default function ImageTab({
@@ -62,12 +62,12 @@ export default function ImageTab({
   cantusFolios = [],
   cantusSourceId,
   cantusSourceName,
-  onRunBatch,
   imageSubTab,
   onImageSubTabChange,
   batchImages,
   batchFolioSequence,
   onBatchImageUploaded,
+  onBatchUsed,
 }: ImageTabProps) {
   const [quickLookId, setQuickLookId] = useState<string | null>(null);
   const [quickLookTab, setQuickLookTab] = useState<"preview" | "info">(
@@ -287,6 +287,14 @@ export default function ImageTab({
     setEditFolioModal(null);
   }
 
+  const handleUseBatch = (names: string[]) => {
+    const newNames = names.filter((n) => !usedNames.images.includes(n));
+    if (newNames.length > 0) {
+      onUsedNamesChange({ ...usedNames, images: [...usedNames.images, ...newNames] });
+    }
+    onBatchUsed();
+  };
+
   const totalImagePages = Math.ceil(sortedImages.length / ITEMS_PER_PAGE);
   const pagedImages = sortedImages.slice(
     section.page * ITEMS_PER_PAGE,
@@ -313,7 +321,7 @@ export default function ImageTab({
           <BatchTab
             batchImages={batchImages}
             folioSequence={batchFolioSequence}
-            onRunBatch={onRunBatch}
+            onUseBatch={handleUseBatch}
           />
         ) : project.images.length === 0 ? (
           <p className="text-white/70 text-sm">no images yet</p>
