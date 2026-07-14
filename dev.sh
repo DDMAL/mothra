@@ -128,7 +128,19 @@ start() {
 
 echo "${C_OK}Mothra dev${C_RST}  web:${C_WEB}$WEB_PORT${C_RST}  backend:${C_API}$API_PORT${C_RST}  ic:${C_IC}$IC_PORT${C_RST}  text:${C_TEXT}$TEXT_PORT${C_RST}   ${C_DIM}(Ctrl-C to stop all)${C_RST}"
 
-start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" "$IC_BIN"
+# Share the landing-page's Neon DATABASE_URL with the IC process so IC
+# sessions are persisted with the mothra project (see ic/api db_store.py).
+# Empty → IC uses its in-memory store and sessions vanish on restart.
+IC_DB_URL=""
+ENV_FILE="$ROOT/landing-page/scripts/.env"
+if [ -f "$ENV_FILE" ]; then
+  IC_DB_URL="$(sed -n 's/^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" | head -1)"
+  IC_DB_URL="${IC_DB_URL%\"}"; IC_DB_URL="${IC_DB_URL#\"}"
+  IC_DB_URL="${IC_DB_URL%\'}"; IC_DB_URL="${IC_DB_URL#\'}"
+fi
+[ -n "$IC_DB_URL" ] || echo "${C_DIM}note: no DATABASE_URL found — IC sessions won't persist across restarts${C_RST}"
+
+start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start backend "$C_API" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort
