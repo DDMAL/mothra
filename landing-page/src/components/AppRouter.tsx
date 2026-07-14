@@ -67,6 +67,16 @@ interface AppRouterProps {
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
   handleEncodeResult: (ev: { session_id: string; mei_base64: string; manifest: Record<string, unknown> | null }) => void;
+  pendingBatchPairs: { xmlFile: File; imageFile: File }[];
+  setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  handleEncodeBatchResult: (ev: {
+    item: number;
+    session_id: string;
+    mei_base64: string;
+    manifest: Record<string, unknown> | null;
+    image_name?: string;
+    stem?: string;
+  }) => void;
 }
 
 export default function AppRouter({
@@ -90,6 +100,9 @@ export default function AppRouter({
   handleLogout,
   mutations,
   handleEncodeResult,
+  pendingBatchPairs, 
+  setPendingBatchPairs,
+  handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
     createProject,
@@ -116,6 +129,7 @@ export default function AppRouter({
   // batch text-alignment run (run_chain.py) state
   const [batchRunIds, setBatchRunIds] = useState<{ imageIds: string[]; folios: string[] } | null>(null);
   const [batchResult, setBatchResult] = useState<{ batchId: string; fileCount: number } | null>(null);
+  const [batchSummary, setBatchSummary] = useState<{succeeded: unknown[]; failed: unknown[]} | null>(null);
 
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
@@ -486,18 +500,15 @@ export default function AppRouter({
             })
           }
           projectId={selectedProjectId}
-          setPendingXmlFile={setPendingXmlFile}
-          setPendingImageFile={setPendingImageFile}
           clefShape={clefShape}
           onClefShapeChange={setClefShape}
           clefLine={clefLine}
           onClefLineChange={setClefLine}
-          onEncode={() => {
+          onEncodeBatch={(pairs) => {
+            setPendingBatchPairs(pairs);
+            setBatchSummary(null);
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 2),
-              );
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 2));
             }
             setView("encoding-processing");
           }}
@@ -514,7 +525,36 @@ export default function AppRouter({
           onImageFileChange={setPendingImageFile}
         />
       );
-    case "encoding-processing":
+    case "encoding-processing": {
+      if (pendingBatchPairs.length > 0) {
+        return (
+          <ProcessingPage
+            {...STEP_TIMING}
+            logs={encodingLogs}
+            onBack={() => setView("ic")}
+            onComplete={() => {
+              if (selectedProjectId && selectedProject) {
+                updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
+              }
+              setPendingBatchPairs([]);
+              setView("encoding-completion");
+            }}
+            streamRequest={(signal) => {
+              const form = new FormData();
+              pendingBatchPairs.forEach((pair) => form.append("xml_files", pair.xmlFile));
+              pendingBatchPairs.forEach((pair) => form.append("image_files", pair.imageFile));
+              pendingBatchPairs.forEach((pair) => form.append("image_names", pair.imageFile.name));
+              form.append("clef_shape", clefShape);
+              form.append("clef_line", String(clefLine));
+              if (selectedProjectId) form.append("project_id", String(selectedProjectId));
+              return apiFetch("/api/encode-batch", { method: "POST", body: form, signal });
+            }}
+            onResult={handleEncodeBatchResult}
+            onLogsReady={setEncodingLogs}
+            onBatchDone={setBatchSummary}
+          />
+        );
+      }
       return pendingXmlFile ? (
         <ProcessingPage
           {...STEP_TIMING}
@@ -543,7 +583,8 @@ export default function AppRouter({
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}
         />
-  ) : null;
+      ) : null;
+    }
     case "encoding-completion": {
       const remainingIcImages = selectedProject?.images.filter((img) => {
         if (!selectedProject.usedImageNames.includes(img.name)) return false;
@@ -555,11 +596,20 @@ export default function AppRouter({
         return p === null || p.nextStep <= 1;
       }) ?? [];
 
+      const batchDescription = batchSummary
+        ? `batch encoding complete: ${batchSummary.succeeded.length} succeeded${
+            batchSummary.failed.length ? `, ${batchSummary.failed.length} failed` : ""
+          }.`
+        : null;
+
       return (
         <CompletionPage
           description={
-            remainingIcImages.length > 0 ? `encoding complete! ${remainingIcImages.length} page${remainingIcImages.length > 1 ? "s" : ""} still need${remainingIcImages.length === 1 ? "s" : ""} classifying.`
-            : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."}
+            batchDescription ??
+            (remainingIcImages.length > 0
+              ? `encoding complete! ${remainingIcImages.length} page${remainingIcImages.length > 1 ? "s" : ""} still need${remainingIcImages.length === 1 ? "s" : ""} classifying.`
+              : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus.")
+          }
           continueLabel="correction"
           onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}

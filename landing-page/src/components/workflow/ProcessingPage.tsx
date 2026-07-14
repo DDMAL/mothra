@@ -16,6 +16,7 @@ interface ProcessingPageProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onResult?: (data: any) => void;
   onLogsReady?: (logs: string[]) => void
+  onBatchDone?: (summary: { succeeded: unknown[]; failed: unknown[]; }) => void;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -30,6 +31,7 @@ export default function ProcessingPage({
   streamRequest,
   onResult,
   onLogsReady,
+  onBatchDone,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -48,9 +50,12 @@ export default function ProcessingPage({
   const logEndRef = useRef<HTMLDivElement>(null);
   const startTimeRef = useRef(Date.now());
   const progressRef = useRef(0);
+  const itemProgressRef = useRef<{ index: number; total: number; name?: string } | null>(null);
 
   const [streamError, setStreamError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+
+  const [itemProgress, setItemProgress] = useState<{ index: number; total: number; name?: string } | null>(null);
 
   useEffect(() => {
     if (!logs || logs.length === 0) return;
@@ -75,6 +80,10 @@ export default function ProcessingPage({
     useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
+
+    useEffect(() => {
+      itemProgressRef.current = itemProgress;
+    }, [itemProgress]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -153,6 +162,7 @@ export default function ProcessingPage({
     setProgress(0);
     setStages([{ text: false, check: false}, { text: false, check: false }, { text: false, check: false }]);
     setRevealedLogs([]);
+    setItemProgress(null);
     completedRef.current = false;
     startTimeRef.current = Date.now();
 
@@ -184,6 +194,10 @@ export default function ProcessingPage({
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             const ev = JSON.parse(line.slice(6));
+            if (ev.type === "item_start") {
+              setItemProgress({ index: ev.item, total: ev.total, name: ev.name });
+              setStages([{ text: false, check: false }, { text: false, check: false }, { text: false, check: false }]);
+            }
             if (ev.type === "stage") {
               const idx = STAGE_IDX[ev.name];
               if (idx !== undefined)
@@ -193,12 +207,16 @@ export default function ProcessingPage({
               const idx = STAGE_IDX[ev.name];
               if (idx !== undefined) {
                 setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, check: true } : s)));
-                setProgress(STAGE_PROGRESS[ev.name] ?? 0);
+                const stagePct = STAGE_PROGRESS[ev.name] ?? 0;
+                const ip = itemProgressRef.current;
+                setProgress(ip ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100) : stagePct);
               }
             }
             if (ev.type === "log") {
-              collectedLogs.push(ev.message);
-              setRevealedLogs((prev) => [...prev, ev.message]);
+              const ip = itemProgressRef.current;
+              const line =  `[${ev.item + 1}/${ip?.total ?? "?"}] error: ${ev.message}`
+              collectedLogs.push(line);
+              setRevealedLogs((prev) => [...prev, line]);
             }
             if (ev.type === "result" && onResult) onResult(ev);
             if (ev.type === "error") {
@@ -208,6 +226,9 @@ export default function ProcessingPage({
             if (ev.type === "done" && !completedRef.current) {
               completedRef.current = true;
               onLogsReady?.(collectedLogs);
+              if (ev.succeeded || ev.failed) {
+                onBatchDone?.({ succeeded: ev.succeeded ?? [], failed: ev.failed ?? [] });
+              }
               setTimeout(onComplete, completionDelayMs);
             }
           } 
@@ -227,6 +248,12 @@ export default function ProcessingPage({
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
       <div className="w-full max-w-2xl">
+        {itemProgress && (
+          <div className="text-white/70 text-sm font-mono mb-2">
+            encoding {itemProgress.index + 1} of {itemProgress.total}
+            {itemProgress.name ? ` - ${itemProgress.name}` : ""}
+          </div>
+        )}
         {singleLabel ? (
           <div className="text-4xl font-bold italic text-white leading-snug">
             {singleLabel}...{" "}
