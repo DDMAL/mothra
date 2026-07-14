@@ -26,6 +26,7 @@ import io
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -140,6 +141,13 @@ def _post_empty(url: str, timeout: int = 120):
         return resp.status, resp.read(), resp.headers
 
 
+def _get(url: str, timeout: int = 30):
+    """GET and return ``(status, body_bytes)``. Raises ``HTTPError`` on 4xx/5xx."""
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
 def _ic_unreachable(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=502,
@@ -156,37 +164,73 @@ class IcStartRequest(BaseModel):
     imageName: str
 
 
-def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[bytes, str]:
-    """Return ``(data, mime_type)`` for a project image the user owns."""
+def _project_image(
+    project_id: int, image_name: str, user_id: int
+) -> tuple[str, bytes, str]:
+    """Return ``(image_id, data, mime_type)`` for a project image the user owns."""
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user_id)
         cur.execute(
-            "SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
+            "SELECT id, data, mime_type FROM project_images"
+            " WHERE project_id=%s AND name=%s",
             (project_id, image_name),
         )
         img = cur.fetchone()
         if not img:
             raise HTTPException(status_code=404, detail="image not found")
-        return bytes(img[0]), (img[1] or "image/png")
+        return img[0], bytes(img[1]), (img[2] or "image/png")
 
 
 @router.post("/projects/{project_id}/ic/start")
 def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_user)):
-    """Stage one project page + its bboxes in IC and return its deep-link.
+    """Resume — or stage — this project page in IC and return its deep-link.
 
-    Reads the page image from the DB, generates bbox annotations for it,
-    and *stages* them via IC's ``POST /staging`` — the session itself is
-    created by the user on IC's create-session screen (so they can add
-    training data and pick a vocabulary). Returns the ``?staged=…`` URL the
-    frontend embeds; the created session id comes back via postMessage.
+    Reads the page image from the DB, then:
+
+    * If IC has a saved, still-editable session for this exact
+      ``(project_id, image_id)``, return a ``?session=…`` deep-link so the
+      user resumes their prior work (the session id is echoed back and also
+      re-broadcast via postMessage when the SPA opens it).
+    * Otherwise generate bbox annotations and *stage* them via IC's
+      ``POST /staging`` (tagged with the project + image id so the created
+      session is resumable next time), returning the ``?staged=…`` URL. The
+      session is created by the user on IC's create-session screen and its
+      id comes back via postMessage.
     """
-    image_bytes, mime_type = _project_image(project_id, body.imageName, user["id"])
-    annotations, ann_format = generate_bboxes(image_bytes, project_id, body.imageName)
+    image_id, image_bytes, mime_type = _project_image(
+        project_id, body.imageName, user["id"]
+    )
 
+    # Resume a previously-saved session for this page, if one exists.
+    try:
+        _, raw = _get(
+            f"{IC_API_URL}/sessions/lookup"
+            f"?project_id={project_id}"
+            f"&image_id={urllib.parse.quote(str(image_id))}"
+        )
+        existing = json.loads(raw).get("session_id")
+    except urllib.error.HTTPError:
+        existing = None  # 404 = nothing to resume
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+
+    if existing:
+        return {
+            "session_id": existing,
+            "ic_url": f"{IC_PUBLIC_URL}/?session={existing}&embed=1",
+            "resumed": True,
+        }
+
+    # Nothing saved — stage the page + bboxes fresh.
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, body.imageName)
     try:
         status, raw = _post_multipart(
             f"{IC_API_URL}/staging",
-            fields={"annotations_format": ann_format},
+            fields={
+                "annotations_format": ann_format,
+                "project_id": str(project_id),
+                "image_id": str(image_id),
+            },
             files=[
                 ("page_image", body.imageName, mime_type, image_bytes),
                 ("annotations", "annotations.json", "application/json", annotations),
@@ -205,6 +249,7 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
     return {
         "staging_id": staging_id,
         "ic_url": f"{IC_PUBLIC_URL}/?staged={staging_id}&embed=1",
+        "resumed": False,
     }
 
 

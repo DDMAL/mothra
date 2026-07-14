@@ -248,6 +248,12 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM text_alignments WHERE project_id=%s", (project_id,))
+        # IC persists its sessions (incl. page-image BYTEA) in a table it
+        # owns; purge this project's rows too. Guarded by to_regclass since
+        # the table only exists once the IC service has run against this DB.
+        cur.execute("SELECT to_regclass('ic_sessions')")
+        if cur.fetchone()[0] is not None:
+            cur.execute("DELETE FROM ic_sessions WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM projects WHERE id=%s", (project_id,))
         con.commit()
         return {"ok": True}
