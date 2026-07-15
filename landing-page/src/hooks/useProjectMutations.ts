@@ -157,6 +157,22 @@ export function useProjectMutations(setProjects: SetProjects) {
     }
   };
 
+  const updateCantusSourceId = async (id: number, sourceId: string) => {
+    try {
+      const r = await apiFetch(`/api/projects/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cantusSourceId: sourceId }),
+      });
+      if (!r.ok) return;
+      setProjects((prev) => 
+        prev.map((p) => (p.id === id ? { ...p, cantusSourceId: sourceId } : p)),
+      );
+    } catch {
+      // internal bookkeeping - silent
+    }
+  };
+
   const togglePin = async (id: number) => {
     let newIsPinned: boolean | undefined;
     setProjects((prev) => {
@@ -192,6 +208,7 @@ export function useProjectMutations(setProjects: SetProjects) {
     updateUsedImageNames,
     updateUsedModelNames,
     updateUsedAnnotationNames,
+    updateCantusSourceId,
     togglePin,
   };
 }

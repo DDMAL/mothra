@@ -9,8 +9,6 @@ import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
 import Hero from "./landing/Hero";
-import Features from "./landing/Features";
-import About from "./landing/About";
 import Documentation from "./documentation/Documentation";
 import AuthPage from "./auth/AuthPage";
 import MyAccount from "./account/MyAccount";
@@ -24,6 +22,16 @@ import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
+
+// A project's used images are eligible for the batch (cross-folio-aware)
+// text-finding pipeline only when every one of them was tagged with a folio
+// against the project's single Cantus source at upload time.
+function computeBatchRun(project: Project): { imageIds: string[]; folios: string[] } | null {
+  if (!project.cantusSourceId) return null;
+  const used = project.images.filter((img) => project.usedImageNames.includes(img.name));
+  if (used.length === 0 || !used.every((img) => img.folio)) return null;
+  return { imageIds: used.map((img) => img.id), folios: used.map((img) => img.folio!) };
+}
 
 function yoloTxtToJson(yoloTxt: string, imageName: string): string {
   const annotations = yoloTxt
@@ -57,6 +65,16 @@ interface AppRouterProps {
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
   handleEncodeResult: (ev: { session_id: string; mei_base64: string; manifest: Record<string, unknown> | null }) => void;
+  pendingBatchPairs: { xmlFile: File; imageFile: File }[];
+  setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  handleEncodeBatchResult: (ev: {
+    item: number;
+    session_id: string;
+    mei_base64: string;
+    manifest: Record<string, unknown> | null;
+    image_name?: string;
+    stem?: string;
+  }) => void;
 }
 
 export default function AppRouter({
@@ -80,6 +98,9 @@ export default function AppRouter({
   handleLogout,
   mutations,
   handleEncodeResult,
+  pendingBatchPairs, 
+  setPendingBatchPairs,
+  handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
     createProject,
@@ -92,6 +113,7 @@ export default function AppRouter({
     updateUsedImageNames,
     updateUsedModelNames,
     updateUsedAnnotationNames,
+    updateCantusSourceId,
     togglePin,
   } = mutations;
   const [encodingLogs, setEncodingLogs] = useState<string[]>([]);
@@ -101,6 +123,11 @@ export default function AppRouter({
   // thread inference settings + text-finding settings (mothra-text optional inputs)
   const inferenceSettings = useInferenceSettings();
   const textFindingSettings = useTextFindingSettings();
+
+  // batch text-alignment run (run_chain.py) state
+  const [batchRunIds, setBatchRunIds] = useState<{ imageIds: string[]; folios: string[] } | null>(null);
+  const [batchResult, setBatchResult] = useState<{ batchId: string; fileCount: number } | null>(null);
+  const [batchSummary, setBatchSummary] = useState<{succeeded: unknown[]; failed: unknown[]} | null>(null);
 
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
@@ -121,11 +148,8 @@ export default function AppRouter({
             onGetStarted={() => setView("register")}
             onViewWalkthrough={() => setView("docs")}
           />
-          <Features />
         </main>
       );
-    case "about":
-      return <About />;
     case "docs":
       return <Documentation onHome={() => setView("landing")} />;
     case "account":
@@ -176,7 +200,11 @@ export default function AppRouter({
             if (step >= 4) setView("sending");
             else if (step >= 3) setView("neon-editor");
             else if (step >= 1) setView("ic");
-            else setView("processing");
+            else {
+              setBatchRunIds(computeBatchRun(selectedProject));
+              setBatchResult(null);
+              setView("processing");
+            }
           }}
           onUpdateProject={(updated) =>
             setProjects((prev) =>
@@ -184,7 +212,11 @@ export default function AppRouter({
             )
           }
           onStepClick={(step) => {
-            if (step === 0) setView("processing");
+            if (step === 0) {
+              setBatchRunIds(computeBatchRun(selectedProject));
+              setBatchResult(null);
+              setView("processing");
+            }
             else if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
@@ -193,6 +225,7 @@ export default function AppRouter({
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
+          onUpdateCantusSourceId={(sourceId) => updateCantusSourceId(selectedProject.id, sourceId)}
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],
@@ -204,9 +237,12 @@ export default function AppRouter({
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
-          onUploadImage={async (file) => {
+          onUploadImage={async (file, folio, sourceId, sourceName) => {
             const form = new FormData();
             form.append("file", file);
+            if (folio) form.append("folio", folio);
+            if (sourceId) form.append("source_id", sourceId);
+            if (sourceName) form.append("source_name", sourceName);
             const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images`,
               {
@@ -249,10 +285,10 @@ export default function AppRouter({
             if (format === "json") {
               downloadBlob(
                 new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
-                `${stem}.json`,
+                `${stem}_annotations.json`,
               );
             } else {
-              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
             }
           }}
           onDeleteMei={async (meiId) => {
@@ -291,6 +327,33 @@ export default function AppRouter({
             setView("completion");
           }}
           streamRequest={(signal) => {
+            if (batchRunIds) {
+              return apiFetch(`/api/projects/${selectedProject.id}/text-batch/run`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  image_ids: batchRunIds.imageIds,
+                  folios: batchRunIds.folios,
+                  source_id: Number(textFindingSettings.sourceId),
+                  segmentation_model: textFindingSettings.segmentationModelId || null,
+                  recognition_model: textFindingSettings.recognitionModelId || null,
+                  device: textFindingSettings.device,
+                  column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
+                  column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
+                  masking_enabled: textFindingSettings.maskingEnabled,
+                  mask_padding: textFindingSettings.maskPadding,
+                  model_preset: inferenceSettings.modelPreset,
+                  model_id: inferenceSettings.modelPreset === "custom" ? (inferenceSettings.customModelId || null) : null,
+                  yolo_confidence_threshold: inferenceSettings.threshold,
+                  yolo_device: inferenceSettings.device,
+                  text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
+                  text_music_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.device,
+                  stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
+                  stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
+                }),
+                signal,
+              });
+            }
             const usedModelId =
               selectedProject.models.find((m) =>
                 (selectedProject.usedModelNames ?? []).includes(m.name),
@@ -298,14 +361,20 @@ export default function AppRouter({
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
+            const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
             return apiFetch(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                model_id: usedModelId,
+                model_preset: inferenceSettings.modelPreset,
+                model_id: inferenceSettings.modelPreset === "custom" ? resolvedCustomModelId : null,
                 image_ids: usedImageIds,
                 confidence_threshold: inferenceSettings.threshold,
                 device: inferenceSettings.device,
+                text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
+                text_music_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.device,
+                stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
+                stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
                 text_column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
                 text_segmentation_model_id: textFindingSettings.segmentationModelId || null,
                 text_recognition_model_id: textFindingSettings.recognitionModelId || null,
@@ -314,14 +383,44 @@ export default function AppRouter({
                 text_masking_enabled: textFindingSettings.maskingEnabled,
                 text_mask_padding: textFindingSettings.maskPadding,
                 text_mask_model_id: textFindingSettings.maskModelId || null,
+                text_source_id: !textFindingSettings.ocrOnlyMode && textFindingSettings.sourceId
+                  ? Number(textFindingSettings.sourceId)
+                  : null,
               }),
               signal,
             });
           }}
-          onResult={(ev: { annotations: AnnotationSet[] }) => {
+          onResult={(ev) => {
+            if (batchRunIds) {
+              setBatchResult(ev as { batchId: string; fileCount: number });
+              apiFetch(`/api/projects/${selectedProject.id}`)
+                .then((r) => r.json())
+                .then((fresh: Project) => {
+                  setProjects((prev) =>
+                    prev.map((p) =>
+                      p.id === selectedProject.id
+                        ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
+                        : p,
+                    ),
+                  );
+                })
+                .catch(() => {});
+              return;
+            }
+            const { annotations } = ev as { annotations: AnnotationSet[] };
             setProjects((prev) =>
               prev.map((p) =>
-                p.id === selectedProject.id ? { ...p, annotations: ev.annotations } : p,
+                p.id === selectedProject.id
+                  ? {
+                      ...p,
+                      annotations: [
+                        ...p.annotations.filter(
+                          (a) => !annotations.some((na) => na.imageName === a.imageName),
+                        ),
+                        ...annotations,
+                      ],
+                    }
+                  : p,
               ),
             );
             apiFetch(`/api/projects/${selectedProject.id}`)
@@ -330,7 +429,7 @@ export default function AppRouter({
                 setProjects((prev) =>
                   prev.map((p) =>
                     p.id === selectedProject.id
-                      ? { ...p, textAlignments: fresh.textAlignments }
+                      ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
                       : p,
                   ),
                 );
@@ -356,7 +455,7 @@ export default function AppRouter({
                     );
                     const data = await r.json();
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
-                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}.txt`);
+                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
                   }
                 }
               : undefined
@@ -372,9 +471,19 @@ export default function AppRouter({
                     const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
                     downloadBlob(
                       new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
-                      `${stem}.json`,
+                      `${stem}_annotations.json`,
                     );
                   }
+                }
+              : undefined
+          }
+          onDownloadZip={
+            batchResult && selectedProject
+              ? async () => {
+                  const r = await apiFetch(
+                    `/api/projects/${selectedProject.id}/text-batch/${batchResult.batchId}/download`,
+                  );
+                  downloadBlob(await r.blob(), `batch-${batchResult.batchId}.zip`);
                 }
               : undefined
           }
@@ -396,18 +505,15 @@ export default function AppRouter({
             })
           }
           projectId={selectedProjectId}
-          setPendingXmlFile={setPendingXmlFile}
-          setPendingImageFile={setPendingImageFile}
           clefShape={clefShape}
           onClefShapeChange={setClefShape}
           clefLine={clefLine}
           onClefLineChange={setClefLine}
-          onEncode={() => {
+          onEncodeBatch={(pairs) => {
+            setPendingBatchPairs(pairs);
+            setBatchSummary(null);
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 2),
-              );
+              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 2));
             }
             setView("encoding-processing");
           }}
@@ -424,7 +530,36 @@ export default function AppRouter({
           onImageFileChange={setPendingImageFile}
         />
       );
-    case "encoding-processing":
+    case "encoding-processing": {
+      if (pendingBatchPairs.length > 0) {
+        return (
+          <ProcessingPage
+            {...STEP_TIMING}
+            logs={encodingLogs}
+            onBack={() => setView("ic")}
+            onComplete={() => {
+              if (selectedProjectId && selectedProject) {
+                updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
+              }
+              setPendingBatchPairs([]);
+              setView("encoding-completion");
+            }}
+            streamRequest={(signal) => {
+              const form = new FormData();
+              pendingBatchPairs.forEach((pair) => form.append("xml_files", pair.xmlFile));
+              pendingBatchPairs.forEach((pair) => form.append("image_files", pair.imageFile));
+              pendingBatchPairs.forEach((pair) => form.append("image_names", pair.imageFile.name));
+              form.append("clef_shape", clefShape);
+              form.append("clef_line", String(clefLine));
+              if (selectedProjectId) form.append("project_id", String(selectedProjectId));
+              return apiFetch("/api/encode-batch", { method: "POST", body: form, signal });
+            }}
+            onResult={handleEncodeBatchResult}
+            onLogsReady={setEncodingLogs}
+            onBatchDone={setBatchSummary}
+          />
+        );
+      }
       return pendingXmlFile ? (
         <ProcessingPage
           {...STEP_TIMING}
@@ -453,7 +588,8 @@ export default function AppRouter({
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}
         />
-  ) : null;
+      ) : null;
+    }
     case "encoding-completion": {
       const remainingIcImages = selectedProject?.images.filter((img) => {
         if (!selectedProject.usedImageNames.includes(img.name)) return false;
@@ -465,11 +601,20 @@ export default function AppRouter({
         return p === null || p.nextStep <= 1;
       }) ?? [];
 
+      const batchDescription = batchSummary
+        ? `batch encoding complete: ${batchSummary.succeeded.length} succeeded${
+            batchSummary.failed.length ? `, ${batchSummary.failed.length} failed` : ""
+          }.`
+        : null;
+
       return (
         <CompletionPage
           description={
-            remainingIcImages.length > 0 ? `encoding complete! ${remainingIcImages.length} page${remainingIcImages.length > 1 ? "s" : ""} still need${remainingIcImages.length === 1 ? "s" : ""} classifying.`
-            : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus."}
+            batchDescription ??
+            (remainingIcImages.length > 0
+              ? `encoding complete! ${remainingIcImages.length} page${remainingIcImages.length > 1 ? "s" : ""} still need${remainingIcImages.length === 1 ? "s" : ""} classifying.`
+              : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus.")
+          }
           continueLabel="correction"
           onContinue={() => setView("neon-editor")}
           onBackToProject={() => setView("project")}

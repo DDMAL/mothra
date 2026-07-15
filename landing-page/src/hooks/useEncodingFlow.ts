@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { Project } from "../types";
 import { apiFetch } from "../lib/apiFetch";
 import { downloadBlob } from "../utils/download";
@@ -21,6 +21,44 @@ export function useEncodingFlow(
     bytes: string;
     stem: string;
   } | null>(null);
+  const [pendingBatchPairs, setPendingBatchPairs] = useState<{ xmlFile: File; imageFile: File }[]>([]);
+  const [batchResults, setBatchResults] = useState<{ sessionId: string; stem: string; manifest: Record<string, unknown> | null; imageName?: string }[]>([]);
+
+  const handleEncodeBatchResult = async (ev: {
+    item: number;
+    session_id: string;
+    mei_base64: string;
+    manifest: Record<string, unknown> | null;
+    image_name?: string;
+    stem?: string;
+  }) => {
+    const pair = pendingBatchPairs[ev.item];
+    const stem = ev.stem ?? pair?.xmlFile.name.replace(/\.xml$/i, "") ?? `item-${ev.item}`;
+    const imageName = pair?.imageFile.name ?? ev.image_name;
+    const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) => c.charCodeAt(0));
+    const xmlText = new TextDecoder().decode(xmlBytes);
+    const newMeiFile: MeiFile = {
+      id: crypto.randomUUID(),
+      name: `${stem}.mei`,
+      xmlContent: xmlText,
+      corrected: false,
+      imageName,
+    };
+    if (selectedProjectId) {
+      const r = await apiFetch(`/api/projects/${selectedProjectId}/mei`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newMeiFile.name, xmlContent: xmlText, imageName: imageName ?? null, logs: [] }),
+      });
+      const saved = await r.json();
+      newMeiFile.id = saved.id;
+    }
+    setProjects((prev) =>
+      prev.map((p) => (p.id === selectedProjectId ? { ...p, meiFiles: [...p.meiFiles, newMeiFile] } : p)),
+    );
+    setBatchResults((prev) => [...prev, { sessionId: ev.session_id, stem, manifest: ev.manifest, imageName }]);
+  };
+
 
   const handleEncodeResult = async (ev: {
     session_id: string;
@@ -92,5 +130,10 @@ export function useEncodingFlow(
     handleDownloadManifest,
     handleDownloadMei,
     handleEncodeResult,
+    pendingBatchPairs,
+    setPendingBatchPairs,
+    batchResults,
+    setBatchResults,
+    handleEncodeBatchResult,
   };
 }

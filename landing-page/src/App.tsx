@@ -33,6 +33,9 @@ export default function App() {
     handleDownloadManifest,
     handleDownloadMei,
     handleEncodeResult,
+    pendingBatchPairs,
+    setPendingBatchPairs,
+    handleEncodeBatchResult,
   } = useEncodingFlow(selectedProjectId, setProjects);
 
   useScrollFade(view);
@@ -81,7 +84,6 @@ export default function App() {
         onLogin={() => setView("login")}
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
-        onAbout={() => setView("about")}
         onDocs={() => setView("docs")}
         onHome={() => setView("landing")}
         onAccount={() => setView("account")}
@@ -107,6 +109,9 @@ export default function App() {
         handleLogout={handleLogout}
         mutations={mutations}
         handleEncodeResult={handleEncodeResult}
+        pendingBatchPairs={pendingBatchPairs}
+        setPendingBatchPairs={setPendingBatchPairs}
+        handleEncodeBatchResult={handleEncodeBatchResult}
       />
       <Footer />
     </div>

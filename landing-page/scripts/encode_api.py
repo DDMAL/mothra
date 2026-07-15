@@ -255,22 +255,145 @@ def get_mei(session_id: str):
 async def encode_batch(
     xml_files: list[UploadFile] = FAPIFile(...),
     image_files: list[UploadFile] = FAPIFile(...),
+    image_names: Optional[list[str]] = Form(None),
     project_id: Optional[int] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
 ):
+    if len(xml_files) != len(image_files):
+        return JSONResponse(status_code=400, content={
+            "error": f"xml_files ({len(xml_files)}) and image_files ({len(image_files)}) must be the same length",
+        })
+    if image_names is not None and len(image_names) != len(xml_files):
+        return JSONResponse(status_code=400, content={
+            "error": f"image_names ({len(image_names)}) must match xml_files ({len(xml_files)}) if provided",
+        })
     
-    # Read all bytes eagerly before entering the sync generator
-    pairs = [
-        (await x.read(), x.filename, await img.read(), img.filename)
-        for x, img in zip(xml_files, image_files)
-    ]
+    pairs = []
+    for i, (x, img) in enumerate(zip(xml_files, image_files)):
+        xml_bytes = await x.read()
+        img_bytes = await img.read()
+        name = image_names[i] if image_names else (img.filename or "")
+        pairs.append((xml_bytes, x.filename or f"item-{i}.xml", img_bytes, img.filename, name))
+
+    batch_id = _uuid.uuid4().hex[:8]
 
     def generate():
         def event(obj): return f"data: {json.dumps(obj)}\n\n"
-        all_results = []
-        for i, (xml_bytes, xml_fn, img_bytes, img_fn) in enumerate(pairs):
-            yield event({"type": "item_start", "index": i, "name": img_fn, "total": len(pairs)})
-            # run the same parse/encode logic as encode_upload's generate()
-            # yield stage/log events with an extra "item": i field
-            
+        succeeded: list[dict] = []
+        failed: list[dict] = []
+        for i, (xml_bytes, xml_fn, img_bytes, img_fn, image_name) in enumerate(pairs):
+            tmp_dir = Path(tempfile.mkdtemp())
+            session_id = _uuid.uuid4().hex[:8]
+            yield event({"type": "item_start", "item": i, "total": len(pairs), "name": img_fn or xml_fn})
+
+            try:
+                yield event({"type": "stage", "item": i, "name": "checking"})
+                xml_path = tmp_dir / "uploaded.xml"
+                xml_path.write_bytes(xml_bytes)
+                yield event({"type": "log", "item": i, "message": f"parsing GameraXML: {xml_fn}"})
+                glyphs = parse_gamera_xml(xml_path)
+                yield event({"type": "log", "item": i, "message": f" {len(glyphs)} glyphs loaded"})
+
+                page_w = page_h = 0
+                image_data_uri = None
+                if img_bytes:
+                    dims = _image_dimensions(img_bytes[:65536])
+                    if dims:
+                        page_w, page_h = dims
+                        yield event({"type": "log", "item": i, "message": f"page size: {page_w}x{page_h}px (from {img_fn})"})
+                    else:
+                        yield event({"type": "log", "item": i, "message": f"warning: could not read dimensions from {img_fn}"})
+                    mime = mimetypes.guess_type(img_fn or "")[0] or "image/jpeg"
+                    image_data_uri = f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}"
+                if not (page_w and page_h):
+                    page_w = max((g.lrx for g in glyphs), default=800) + 10
+                    page_h = max((g.lry for g in glyphs), default=1200) + 10
+                    yield event({"type": "log", "item": i, "message": f"page size: {page_w}x{page_h}px (estimated)"})
+                yield event({"type": "stage_done", "item": i, "name": "checking"})
+
+                yield event({"type": "stage", "item": i, "name": "validating"})
+                text_alignment = None
+                if project_id and image_name:
+                    try:
+                        con = get_db_conn()
+                        cur = con.cursor()
+                        cur.execute(
+                            "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                            " ORDER BY created_at DESC LIMIT 1",
+                            (image_name, project_id),
+                        )
+                        row = cur.fetchone()
+                        cur.close()
+                        release_db_conn(con)
+                        if row and row[0]:
+                            text_alignment = json.loads(row[0])
+                            yield event({"type": "log", "item": i, "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
+                    except Exception:
+                        pass
+                yolo_stave_hints = []
+                if project_id and image_name:
+                    try:
+                        con = get_db_conn()
+                        cur = con.cursor()
+                        cur.execute(
+                            "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                            "ORDER BY created_at DESC LIMIT 1",
+                            (image_name, project_id),
+                        )
+                        row = cur.fetchone()
+                        cur.close()
+                        release_db_conn(con)
+                        if row and row[0]:
+                            yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                    except Exception:
+                        pass
+                if yolo_stave_hints:
+                    staves = yolo_stave_hints
+                    yield event({"type": "log", "item": i, "message": f" {len(staves)} stave(s) from YOLO annotations"})
+                else:
+                    staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
+                    yield event({"type": "log", "item": i, "message": f" estimated {len(staves)} stave(s) from glyph positions"})
+                glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+                assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >=0)
+                yield event({"type": "log", "item": i, "message": f" {assigned} glyphs assigned to stave"})
+                yield event({"type": "stage_done", "item": i, "name": "validating"})
+
+                yield event({"type": "stage", "item": i, "name": "processing"})
+                stem = Path(xml_fn).stem
+                image_ref = Path(img_fn) if img_fn else Path("")
+                mei_bytes_out = build_mei(
+                    glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
+                    clef_shape=clef_shape or "C",
+                    clef_line=clef_line or 3,
+                    text_alignment=text_alignment,
+                )
+                validation_warnings = validate_mei(mei_bytes_out)
+                for w in validation_warnings:
+                     yield event({"type": "log", "item": i, "message": f"[warn] {w}"})
+                yield event({"type": "log", "item": i, "message": "MEI built successfully" if not validation_warnings else "MEI built with warnings"})
+                mei_b64 = base64.b64encode(mei_bytes_out).decode()
+                manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
+                if manifest:
+                    (MANIFEST_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
+                _session_put(session_id, {"mei_bytes": mei_bytes_out, "stem": stem})
+                yield event({
+                    "type": "result", "item": i, "session_id": session_id,
+                    "mei_base64": mei_b64, "manifest": manifest,
+                    "image_name": img_fn, "stem": stem,
+                })
+                yield event({"type": "stage_done", "item": i, "name": "processing"})
+                succeeded.append({"item": i, "session_id": session_id, "name": img_fn or xml_fn})
+                yield event({"type": "item_done", "item": i, "session_id": session_id})
+            except Exception as e:
+                failed.append({"item": i, "name": img_fn or xml_fn, "message": str(e)})
+                yield event({"type": "item_error", "item": i, "name": img_fn or xml_fn, "message": str(e)})
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        yield event({"type": "done", "batch_id": batch_id, "total": len(pairs), "succeeded": succeeded, "failed": failed})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

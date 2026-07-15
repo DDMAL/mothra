@@ -3,3 +3,4 @@ models/**/*.pt filter=lfs diff=lfs merge=lfs -text
 "**/mothra/Layer 2 files with images/*.zip" filter=lfs diff=lfs merge=lfs -text
 *.jpg
 *.png
+landing-page/scripts/assets/models/medieval/*.pt filter=lfs diff=lfs merge=lfs -text

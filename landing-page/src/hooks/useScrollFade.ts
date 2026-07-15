@@ -3,7 +3,7 @@ import type { View } from "../types";
 
 export function useScrollFade(view: View) {
   useEffect(() => {
-    if (view !== "landing" && view !== "about") {
+    if (view !== "landing") {
       document
         .querySelectorAll(".fade-target")
         .forEach((el) => el.classList.add("visible"));

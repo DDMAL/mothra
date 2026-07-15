@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { type View, type TextAlignment } from "../../types";
+import { type TextAlignment } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 
 interface SylBox {
@@ -19,9 +19,10 @@ interface Props {
     alignment: TextAlignment;
     projectId: number;
     onClose: () => void;
+    label?: string;
 }
 
-export default function TextAlignmentViewerModal({ alignment, projectId, onClose }: Props) {
+export default function TextAlignmentViewerModal({ alignment, projectId, onClose, label }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading"});
     const [logsOpen, setLogsOpen] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -88,7 +89,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             <div className="fixed z-50 top-[4.5rem] bottom-4 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-5xl bg-[#C8E6E3] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
                 <div className="flex items-center gap-4 px-6 py-3 border-b border-[#1D3335]/20 shrink-0">
                     <p className="font-mono text-sm text-[#1D3335] font-semibold truncate flex-1">
-                        {alignment.imageName}
+                        {label ?? alignment.imageName}
                     </p>
                     <span className="text-xs text-[#1D3335]/60">
                         {alignment.syllableCount} syllable{alignment.syllableCount !== 1 ? "s" : ""}

@@ -6,11 +6,7 @@ import { AuthImage } from "../shared/AuthImage";
 interface InteractiveClassifierProps {
   images: ProjectImage[];
   projectId: number | null;
-  setPendingXmlFile: (f: File | null) => void;
-  setPendingImageFile: (f: File | null) => void;
-  // Advance to the encoding step (also unlocks step 2). Called once the
-  // GameraXML + image have been staged via the setters above.
-  onEncode: () => void;
+  onEncodeBatch: (pairs: { xmlFile: File; imageFile: File }[]) => void;
   clefShape: "C" | "F";
   onClefShapeChange: (s: "C" | "F") => void;
   clefLine: number;
@@ -22,9 +18,7 @@ const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
 export default function InteractiveClassifier({
   images,
   projectId,
-  setPendingXmlFile,
-  setPendingImageFile,
-  onEncode,
+  onEncodeBatch,
   clefShape,
   onClefShapeChange,
   clefLine,
@@ -41,6 +35,9 @@ export default function InteractiveClassifier({
   );
   const [error, setError] = useState<string | null>(null);
   const [encoding, setEncoding] = useState(false);
+  const [queue, setQueue] = useState<{ xmlFile: File; imageFile: File }[]>([]);
+
+  const queuedNames = new Set(queue.map((p) => p.imageFile.name));
 
   const img = images[currentIdx];
   // Guards against a slow /ic/start response landing after the user has
@@ -97,7 +94,7 @@ export default function InteractiveClassifier({
     return () => window.removeEventListener("message", onMessage);
   }, [icOrigin]);
 
-  const handleEncode = useCallback(async () => {
+  const handleQueuePage = useCallback(async () => {
     if (!sessionId || !img) return;
     setEncoding(true);
     setError(null);
@@ -124,14 +121,20 @@ export default function InteractiveClassifier({
       });
 
       // 3. Hand both to the existing encode flow and advance.
-      setPendingXmlFile(xmlFile);
-      setPendingImageFile(imageFile);
-      onEncode();
+      setQueue((prev) => [...prev, { xmlFile, imageFile }]);
+      const nextIdx = images.findIndex((im, idx) => idx > currentIdx && !queuedNames.has(im.name));
+      if (nextIdx !== -1) setCurrentIdx(nextIdx);
     } catch (err) {
       setError(String((err as Error).message ?? err));
+    } finally {
       setEncoding(false);
     }
-  }, [sessionId, img, setPendingXmlFile, setPendingImageFile, onEncode]);
+  }, [sessionId, img, onEncodeBatch]);
+
+  const handleEncodeBatch = useCallback(() => {
+    if (queue.length === 0) return;
+    onEncodeBatch(queue);
+  }, [queue, onEncodeBatch]);
 
   // show 5 thumbnails at a time, centered on currentIdx
   const VISIBLE = 5;
@@ -143,8 +146,8 @@ export default function InteractiveClassifier({
   const visibleImages = images.slice(start, start + VISIBLE);
 
   return (
-    <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col pb-6">
-      <div className="flex items-center gap-6 px-8 py-5">
+    <div className="animate-fade-in flex-1 min-h-0 bg-[#4AADAA] flex flex-col pb-3">
+      <div className="flex items-center gap-6 px-8 py-3">
         <h1 className="text-4xl font-bold italic text-white">
           interactive classifier
         </h1>
@@ -176,19 +179,31 @@ export default function InteractiveClassifier({
             start the session in the classifier to enable encoding
           </span>
         )}
+        { queue.length > 0 && (
+          <span className="text-white/80 text-sm">
+            {queue.length} page{queue.length > 1 ? "s" : ""} queued
+          </span>
+        )}
         <button
-          onClick={handleEncode}
-          disabled={!sessionId || encoding}
+          onClick={handleQueuePage}
+          disabled={!sessionId || encoding || queuedNames.has(img?.name ?? "")}
           className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {encoding ? "encoding…" : "encode"}
+          {encoding ? "queuing..." : queuedNames.has(img?.name ?? "") ? "queued" : "queue page"}
+        </button>
+        <button
+          onClick={handleEncodeBatch}
+          disabled={queue.length === 0}
+          className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          encode batch ({queue.length})
         </button>
       </div>
 
       {/* canvas */}
-      <div className="flex-1 bg-[#1D3335] mx-6 rounded-2xl flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-[750px] bg-[#1D3335] mx-6 rounded-2xl flex flex-col overflow-hidden">
         {/* IC editor area */}
-        <div className="flex-1 flex items-stretch justify-stretch overflow-hidden">
+        <div className="flex-1 min-h-0 flex items-stretch justify-stretch overflow-hidden">
           {images.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-white/40 text-sm italic">
               no images selected
@@ -221,7 +236,7 @@ export default function InteractiveClassifier({
 
         {/* filmstrip for page selection */}
         {images.length > 1 && (
-          <div className="flex items-center px-6 pb-6 pt-4 gap-4">
+          <div className="flex items-center px-6 pb-2 pt-2 gap-4">
             <div className="flex-1 flex items-center justify-center gap-3">
               <button
                 onClick={() => setCurrentIdx((i) => i - 1)}
@@ -237,7 +252,7 @@ export default function InteractiveClassifier({
                   <button
                     key={thumb.id}
                     onClick={() => setCurrentIdx(globalIdx)}
-                    className={`relative w-16 aspect-square rounded-lg overflow-hidden flex-shrink-0 cursor-pointer transition-all
+                    className={`relative w-12 aspect-square rounded-lg overflow-hidden flex-shrink-0 cursor-pointer transition-all
                       ${active ? "ring-2 ring-white ring-offset-2 ring-offset-[#1D3335]" : "opacity-50 hover:opacity-80"}`}
                   >
                     <AuthImage

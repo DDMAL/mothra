@@ -12,6 +12,7 @@ interface CompletionPageProps {
   onDownloadManifest?: () => void;
   onDownloadAnnotations?: () => void;
   onDownloadAnnotationsJson?: () => void;
+  onDownloadZip?: () => void;
   onCompare?: () => void;
   onClassifyMore?: () => void;
   classifyMoreCount?: number;
@@ -29,6 +30,7 @@ export default function CompletionPage({
   onDownloadManifest,
   onDownloadAnnotations,
   onDownloadAnnotationsJson,
+  onDownloadZip,
   onCompare,
   onClassifyMore,
   classifyMoreCount,
@@ -93,7 +95,7 @@ export default function CompletionPage({
           &gt; download {logsFileName}
         </button>
       )}
-      {(onDownloadAnnotations || onDownloadAnnotationsJson) && (
+      {(onDownloadAnnotations || onDownloadAnnotationsJson || onDownloadZip) && (
         <div className="absolute bottom-8 right-8 flex flex-col items-end gap-2">
           {onDownloadAnnotations && (
             <button
@@ -109,6 +111,14 @@ export default function CompletionPage({
               className="text-white/60 text-sm hover:text-white cursor-pointer"
             >
               &gt; download annotations (.json)
+            </button>
+          )}
+          {onDownloadZip && (
+            <button
+              onClick={onDownloadZip}
+              className="text-white/60 text-sm hover:text-white cursor-pointer"
+            >
+              &gt; download batch (.zip)
             </button>
           )}
         </div>

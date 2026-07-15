@@ -3,6 +3,7 @@ import type { Project, MeiFile } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { downloadBlob } from "../../utils/download";
+import { sortBySourceThenFolio, sourceGroupLabel } from "../../utils/folio";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
 import MeiViewerModal from "./MeiViewerModal";
@@ -56,8 +57,11 @@ export default function MeiTab({
 
   const meiProduced = project.meiFiles.filter((f) => !f.corrected);
   const meiCorrected = project.meiFiles.filter((f) => !!f.corrected);
-  const activeMeiFiles =
-    meiSubTab === "mei produced" ? meiProduced : meiCorrected;
+  const activeMeiFiles = sortBySourceThenFolio(
+    meiSubTab === "mei produced" ? meiProduced : meiCorrected,
+    project.images,
+    (f) => f.imageName,
+  );
   const totalMeiPages = Math.ceil(activeMeiFiles.length / ITEMS_PER_PAGE);
   const pagedMei = activeMeiFiles.slice(
     section.page * ITEMS_PER_PAGE,
@@ -100,6 +104,7 @@ export default function MeiTab({
             section={section}
             usedNames={[]}
             totalPages={totalMeiPages}
+            groupBy={(f) => sourceGroupLabel(project.images, f.imageName)}
             renderThumbnail={() => (
               <svg
                 width="56"

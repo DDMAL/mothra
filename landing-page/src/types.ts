@@ -4,6 +4,9 @@ export interface ProjectImage {
   id: string;
   name: string;
   src?: string;
+  folio?: string;
+  sourceId?: string;
+  sourceName?: string;
 }
 export interface Project {
   id: number;
@@ -21,6 +24,13 @@ export interface Project {
   lastOpenedAt?: string;
   isPinned?: boolean;
   textAlignments: TextAlignment[];
+  cantusSourceId?: string;
+}
+
+export interface CantusSource {
+  sourceId: string;
+  name: string;
+  folios: string[];
 }
 
 export interface TextAlignment {
@@ -35,6 +45,7 @@ export interface ProjectModel {
   id: string;
   name: string;
   kind: ModelKind;
+  classMap?: Record<string, string> | null;
 }
 
 export interface AnnotationSet {
@@ -44,6 +55,7 @@ export interface AnnotationSet {
   jsonName: string;
   txtName: string;
   detectionCount?: number;
+  modelLabel?: string | null;
 }
 
 export interface MeiFile {
@@ -56,7 +68,6 @@ export interface MeiFile {
 
 export type View =
   | "landing"
-  | "about"
   | "login"
   | "register"
   | "account"

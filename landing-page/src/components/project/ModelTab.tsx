@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import type { Project, ProjectModel, ModelKind } from "../../types";
 import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
@@ -49,7 +49,12 @@ interface ModelTabProps {
   usedNames: { images: string[]; models: string[]; annotations: string[] };
   onUpdateProject: (p: Project) => void;
   onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
-  onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string, kind: ModelKind }>;
+  onUploadModel: (file: File, kind: ModelKind) => Promise<{ 
+    id: string; name: string, kind: ModelKind;
+    classMap?: Record<string, string> | null;
+    needsClassMapping?: boolean;
+    rawClassNames? : Record<string, string> | null;
+  }>;
   setValidationError: (e: string | null) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
@@ -71,12 +76,20 @@ export default function ModelTab({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [textSettingsOpen, setTextSettingsOpen] = useState(false);
   const [textAdvancedOpen, setTextAdvancedOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [uploadKind, setUploadKind] = useState<ModelKind>("yolo");
 
   const segmentationModels = project.models.filter((m) => m.kind === "segmentation");
   const recognitionModels = project.models.filter((m) => m.kind === "recognition");
   const maskModels = project.models.filter((m) => m.kind === "text_mask");
+  const yoloModels = project.models.filter((m) => m.kind === "yolo");
+
+  const [classMapModal, setClassMapModal] = useState<{
+    modelId: string; modelName: string; rawClassNames: Record<string, string>;
+  } | null>(null);
+  const [classMapDraft, setClassMapDraft] = useState<Record<string, string>>({});
+
 
   // model actions
   const deleteModel = async (id: string) => {
@@ -109,16 +122,43 @@ export default function ModelTab({
   const handleModelFiles = async (files: FileList | File[]) => {
     const valid = Array.from(files).filter((f) => KIND_EXTENSIONS[uploadKind].test(f.name));
     if (valid.length === 0) return;
-    const entries = await Promise.all(
-      valid.map(async (f) => {
-        const result = await onUploadModel(f, uploadKind);
-        return { id: result.id, name: result.name || f.name, kind: result.kind ?? uploadKind };
-      }),
-    );
+    const results = await Promise.all(valid.map((f) => onUploadModel(f, uploadKind)));
+    const entries = results.map((result, i) => ({
+      id: result.id,
+      name: result.name || valid[i].name,
+      kind: result.kind ?? uploadKind,
+      classMap: result.classMap ?? null,
+    }));
     onUpdateProject({ ...project, models: [...project.models, ...entries] });
     section.setUploadModal(false);
     section.setDragging(false);
     setUploadKind("yolo");
+
+    const pending = results.find((r) => r.needsClassMapping);
+    if (pending) {
+      setClassMapModal({ modelId: pending.id, modelName: pending.name, rawClassNames: pending.rawClassNames ?? {} });
+      setClassMapDraft({});
+    }
+  };
+
+  const submitClassMap = async() => {
+    if (!classMapModal) return;
+    const classMap = Object.fromEntries(
+      Object.entries(classMapDraft).filter(([, v]) => v !== "ignore"),
+    );
+    const r = await apiFetch(`/api/projects/${project.id}/models/${classMapModal.modelId}/class-map`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ class_map: classMap }),
+    });
+    if (r.ok) {
+      onUpdateProject({
+        ...project,
+        models: project.models.map((m) => m.id === classMapModal.modelId ? { ...m, classMap } : m),
+      });
+    }
+    setClassMapModal(null);
+    setClassMapDraft({});
   };
 
   const totalModelPages = Math.ceil(project.models.length / ITEMS_PER_PAGE);
@@ -126,6 +166,20 @@ export default function ModelTab({
     section.page * ITEMS_PER_PAGE,
     (section.page + 1) * ITEMS_PER_PAGE,
   );
+
+  useEffect(() => {
+    if (
+      usedNames.models.length > 0 && inferenceSettings.modelPreset === "medieval" && !inferenceSettings.customModelId
+    ) {
+      const usedModel = project.models.find(
+        (m) => m.kind === "yolo" && usedNames.models.includes(m.name),
+      );
+      if (usedModel) {
+        inferenceSettings.patch({ modelPreset: "custom", customModelId: usedModel.id });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [project.id]);
 
   return (
     <>
@@ -150,8 +204,115 @@ export default function ModelTab({
             )}
           />
         )}
+        <div className="mt-4">
+          <button
+            onClick={() => setAdvancedOpen((o) => !o)}
+            className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+          >
+            {advancedOpen ? "▾" : "▸"} advanced: layer separation model
+          </button>
+          {advancedOpen && (
+            <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-3 text-sm text-white">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio" name="model-preset" value="medieval"
+                  checked={inferenceSettings.modelPreset === "medieval"}
+                  onChange={() => inferenceSettings.patch({ modelPreset: "medieval" })}
+                  className="accent-[#1D3335] mt-0.5"
+                />
+                <span>
+                  medieval manuscripts <span className="text-white/50">(default)</span>
+                  <br />
+                  <span className="text-white/50 text-xs">
+                    bundled text/music + stave detectors — no upload required
+                  </span>
+                </span>
+                {inferenceSettings.modelPreset === "medieval" && (
+                  <div className="pl-6 flex flex-col gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!inferenceSettings.useSharedDetectorSettings}
+                        onChange={(e) => inferenceSettings.patch({ useSharedDetectorSettings: !e.target.checked })}
+                        className="accent-[#1D3335]"
+                      />
+                      <span className="text-white/70 text-xs">tune text/music and stave detectors separately</span>
+                    </label>
+                    {!inferenceSettings.useSharedDetectorSettings && (
+                      <div className="flex flex-col gap-3 pl-3 border-l border-white/20">
+                        {(["textMusicSettings", "staveSettings"] as const).map((key) => (
+                          <div key={key} className="flex flex-col gap-1">
+                            <span className="text-white/70 text-xs">
+                              {key === "textMusicSettings" ? "text/music detector" : "stave detector"}: threshold {inferenceSettings[key].threshold.toFixed(2)}
+                            </span>
+                            <input
+                              type="range" min={0} max={1} step={0.05}
+                              value={inferenceSettings[key].threshold}
+                              onChange={(e) => inferenceSettings.patch({ [key]: { ...inferenceSettings[key], threshold: Number(e.target.value) } })}
+                              className="accent-[#1D3335]"
+                            />
+                            <div className="flex gap-3">
+                              {(["cpu", "cuda", "mps"] as const).map((d) => (
+                                <label key={d} className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="radio" name={`${key}-device`} value={d}
+                                    checked={inferenceSettings[key].device === d}
+                                    onChange={() => inferenceSettings.patch({ [key]: { ...inferenceSettings[key], device: d } })}
+                                    className="accent-[#1D3335]"
+                                  />
+                                  {d}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </label>
 
-        {usedNames.models.length > 0 && (
+              <label className="flex items-start gap-2 cursor-not-allowed opacity-50">
+                <input type="radio" name="model-preset" value="printed" disabled className="accent-[#1D3335] mt-0.5" />
+                <span>
+                  printed text{" "}
+                  <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">coming soon</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="radio" name="model-preset" value="custom"
+                  checked={inferenceSettings.modelPreset === "custom"}
+                  onChange={() => inferenceSettings.patch({ modelPreset: "custom" })}
+                  className="accent-[#1D3335] mt-0.5"
+                />
+                <span>custom model <span className="text-white/50">(advanced)</span></span>
+              </label>
+
+              {inferenceSettings.modelPreset === "custom" && (
+                <label className="flex flex-col gap-1 pl-6">
+                  <span className="text-white/70 text-xs">YOLO model</span>
+                  <select
+                    value={inferenceSettings.customModelId}
+                    onChange={(e) => inferenceSettings.patch({ customModelId: e.target.value })}
+                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                  >
+                    <option value="">select an uploaded model…</option>
+                    {yoloModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  {yoloModels.length === 0 && (
+                    <span className="text-white/40 text-xs italic">
+                      no YOLO models uploaded yet — upload one above (type: YOLO detection model)
+                    </span>
+                  )}
+                </label>
+              )}
+            </div>
+          )}
+        </div>
           <div className="mt-4">
             <button
               onClick={() => setSettingsOpen(o => !o)}
@@ -191,7 +352,6 @@ export default function ModelTab({
               </div>
             )}
           </div>
-        )}
 
         {usedNames.models.length > 0 && (
           <div className="mt-2">
@@ -454,6 +614,37 @@ export default function ModelTab({
               className="hidden"
               onChange={(e) => { if (e.target.files) handleModelFiles(e.target.files); }}
             />
+        </Modal>
+      )}
+      {classMapModal && (
+        <Modal onClose={() => setClassMapModal(null)}>
+          <h2 className="text-xl text-[#1D3335] text-center">assign model classes</h2>
+          <p className="text-xs text-[#1D3335]/70 text-center">
+            "{classMapModal.modelName}" uses class names we don't recognize — tell us
+            which detected class is which so detections land correctly.
+          </p>
+          <div className="flex flex-col gap-2">
+            {Object.entries(classMapModal.rawClassNames).map(([idx, rawName]) => (
+              <label key={idx} className="flex items-center justify-between gap-3">
+                <span className="text-sm text-[#1D3335]">
+                  {rawName} <span className="text-[#1D3335]/50 text-xs">(class {idx})</span>
+                </span>
+                <select
+                  value={classMapDraft[idx] ?? "ignore"}
+                  onChange={(e) => setClassMapDraft((d) => ({ ...d, [idx]: e.target.value }))}
+                  className="border border-[#1D3335]/30 rounded px-2 py-1 text-sm text-[#1D3335] bg-white/60"
+                >
+                  <option value="ignore">ignore</option>
+                  <option value="text">text</option>
+                  <option value="music">music</option>
+                  <option value="staves">staves</option>
+                </select>
+              </label>
+            ))}
+          </div>
+          <button onClick={submitClassMap} className="px-4 py-2 bg-[#1D3335] text-white rounded-xl hover:opacity-90 cursor-pointer">
+            save mapping
+          </button>
         </Modal>
       )}
     </>

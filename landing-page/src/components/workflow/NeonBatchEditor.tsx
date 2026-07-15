@@ -36,8 +36,13 @@ export default function NeonBatchEditor({
   const [sessions, setSessions] = useState<Map<string, BatchSession>>(
     new Map(),
   );
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [corrected, setCorrected] = useState<Set<string>>(new Set());
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const firstUncorrected = meiFiles.findIndex((f) => !f.corrected);
+    return firstUncorrected === -1 ? 0 : firstUncorrected;
+  });
+  const [corrected, setCorrected] = useState<Set<string>>(
+    () => new Set(meiFiles.filter((f) => f.corrected).map((f) => f.id)),
+  );
   const [loading, setLoading] = useState(true);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 

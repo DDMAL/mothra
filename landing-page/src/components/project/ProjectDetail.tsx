@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { Project, ModelKind } from "../../types";
+import { useEffect, useMemo, useState } from "react";
+import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -14,6 +14,7 @@ import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
+import CantusSourcePanel from "./CantusSourcePanel";
 
 const STEPS = [
   "annotate",
@@ -34,7 +35,12 @@ interface ProjectDetailProps {
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
   onRenameProject: (newName: string) => void;
-  onUploadImage: (file: File) => Promise<{ id: string; name: string }>;
+  onUploadImage: (
+    file: File,
+    folio?: string,
+    sourceId?: string,
+    sourceName?: string,
+  ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
@@ -42,6 +48,7 @@ interface ProjectDetailProps {
   onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
+  onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
 }
@@ -63,6 +70,7 @@ export default function ProjectDetail({
   onDeleteModel,
   onDeleteAnnotation,
   onDownloadAnnotation,
+  onUpdateCantusSourceId,
   onDeleteMei,
   onDeleteProject,
   inferenceSettings,
@@ -76,6 +84,20 @@ export default function ProjectDetail({
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
+  const [imageSubTab, setImageSubTab] = useState<"grid" | "batch">("grid");
+  const [batchStartFolio, setBatchStartFolio] = useState("");
+  const [batchEndFolio, setBatchEndFolio] = useState("");
+  const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
+
+  const batchFolioSequence = useMemo(() => {
+    const folios = loadedCantusSource?.folios ?? [];
+    if (!batchStartFolio || !batchEndFolio) return [];
+    const startIdx = folios.indexOf(batchStartFolio);
+    const endIdx = folios.indexOf(batchEndFolio);
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) return [];
+    return folios.slice(startIdx, endIdx + 1);
+  }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -464,6 +486,18 @@ export default function ProjectDetail({
 
           {/* tab bar + content */}
           <div>
+            <CantusSourcePanel
+              textFindingSettings={textFindingSettings}
+              project={project}
+              onUpdateSourceId={onUpdateCantusSourceId}
+              onSourceLoaded={setLoadedCantusSource}
+              imageSubTab={imageSubTab}
+              batchStartFolio={batchStartFolio}
+              batchEndFolio={batchEndFolio}
+              onBatchStartFolioChange={setBatchStartFolio}
+              onBatchEndFolioChange={setBatchEndFolio}
+              batchFolioSequence={batchFolioSequence}
+            />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
                 <button
@@ -487,6 +521,7 @@ export default function ProjectDetail({
               <div className="flex-1 border-b border-white/50" />
             </div>
 
+
             {activeTab === "images" && (
               <ImageTab
                 project={project}
@@ -497,6 +532,21 @@ export default function ProjectDetail({
                 onUploadImage={onUploadImage}
                 onDeleteImage={onDeleteImage}
                 setValidationError={setValidationError}
+                activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
+                onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
+                cantusFolios={loadedCantusSource?.folios ?? []}
+                cantusSourceId={loadedCantusSource?.sourceId}
+                cantusSourceName={loadedCantusSource?.name}
+                imageSubTab={imageSubTab}
+                onImageSubTabChange={setImageSubTab}
+                batchImages={batchImages}
+                batchFolioSequence={batchFolioSequence}
+                onBatchImageUploaded={(img) => setBatchImages((prev) => [...prev, img])}
+                onBatchUsed={() => {
+                  setBatchImages([]);
+                  setBatchStartFolio("");
+                  setBatchEndFolio("");
+                }}
               />
             )}
             {activeTab === "models" && (
@@ -513,8 +563,9 @@ export default function ProjectDetail({
               />
             )}
             {activeTab === "annotations" && (
-              <AnnotationsTab 
-                annotations={project.annotations} 
+              <AnnotationsTab
+                annotations={project.annotations}
+                images={project.images}
                 projectId={project.id}
                 section={annSection}
                 usedNames={usedNames}
@@ -524,6 +575,7 @@ export default function ProjectDetail({
             {activeTab === "text" && (
               <TextAlignmentsTab
                 textAlignments={project.textAlignments}
+                images={project.images}
                 projectId={project.id}
               />
             )}
@@ -565,8 +617,17 @@ export default function ProjectDetail({
               <button
                 onClick={() => {
                   if (nextStep === 0) {
-                    if (usedNames.models.length === 0) {
-                      setValidationError("must select at least one model!");
+                    const hasUsableModel = 
+                      inferenceSettings.modelPreset === "medieval" || 
+                      (inferenceSettings.modelPreset === "custom" &&
+                        (inferenceSettings.customModelId || usedNames.models.length > 0)
+                      );
+                    if (!hasUsableModel) {
+                      setValidationError(
+                        inferenceSettings.modelPreset === "custom"
+                          ? "must select a custom YOLO model!"
+                          : "must select at least one model!",
+                      );
                       return;
                     }
                     if (usedNames.images.length === 0) {

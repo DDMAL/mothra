@@ -23,7 +23,7 @@ router = APIRouter()
 
 def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
                          deleted_at, last_opened_at, is_pinned, used_annotation_json,
-                         images, models, mei, annotations, text_alignments):
+                         images, models, mei, annotations, text_alignments, cantus_source_id):
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -35,14 +35,16 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
         "isPinned": bool(is_pinned),
         "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
         "textAlignments": text_alignments,
+        "cantusSourceId": cantus_source_id,
     }
 
 
-def _map_annotation_row(aid, img_id, img_name):
+def _map_annotation_row(aid, img_id, img_name, model_label=None):
     return {
         "id": aid, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "txtName": f"annotation-{aid}.txt", "jsonName": "",
+        "modelLabel": model_label,
     }
 
 
@@ -55,25 +57,25 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
 
 
 def _project_row_to_dict(cur, row, username):
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json = row
-    cur.execute("SELECT id, name FROM project_images WHERE project_id=%s", (pid,))
-    images = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
+    cur.execute("SELECT id, name, folio, source_id, source_name FROM project_images WHERE project_id=%s", (pid,))
+    images = [{"id": r[0], "name": r[1], "folio": r[2], "sourceId": r[3], "sourceName": r[4]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, xml_content, corrected, image_name FROM mei_files WHERE project_id=%s", (pid,))
     mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4]}
            for r in cur.fetchall()]
-    cur.execute("SELECT id, image_id, image_name FROM annotations WHERE project_id=%s", (pid,))
-    annotations = [_map_annotation_row(r[0], r[1], r[2]) for r in cur.fetchall()]
+    cur.execute("SELECT id, image_id, image_name, model_label FROM annotations WHERE project_id=%s", (pid,))
+    annotations = [_map_annotation_row(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
     cur.execute(
         "SELECT id, image_id, image_name, median_line_spacing, syllable_count"
-        " FROM text_alignments WHERE project_id=%s", (pid,)
+        " FROM text_alignments WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
     text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()]
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
-        images, models, mei, annotations, text_alignments,
+        images, models, mei, annotations, text_alignments, cantus_source_id,
     )
 
 
@@ -82,7 +84,7 @@ def list_projects(user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, "
-            " last_opened_at, is_pinned, used_annotation_names"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
             " FROM projects WHERE user_id=%s",
             (user["id"],)
         )
@@ -92,10 +94,15 @@ def list_projects(user=Depends(get_current_user)):
 
         pids = tuple(r[0] for r in rows)
 
-        cur.execute("SELECT project_id, id, name FROM  project_images WHERE project_id IN %s", (pids,))
+        cur.execute(
+            "SELECT project_id, id, name, folio, source_id, source_name FROM  project_images WHERE project_id IN %s",
+            (pids,),
+        )
         images_by_pid: dict = {}
-        for pid, iid, iname in cur.fetchall():
-            images_by_pid.setdefault(pid, []).append({"id": iid, "name": iname})
+        for pid, iid, iname, ifolio, isourceid, isourcename in cur.fetchall():
+            images_by_pid.setdefault(pid, []).append(
+                {"id": iid, "name": iname, "folio": ifolio, "sourceId": isourceid, "sourceName": isourcename}
+            )
 
         cur.execute("SELECT project_id, id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id IN %s", (pids,))
         models_by_pid: dict = {}
@@ -113,16 +120,16 @@ def list_projects(user=Depends(get_current_user)):
             )
 
         cur.execute(
-            "SELECT project_id, id, image_id, image_name FROM annotations WHERE project_id IN %s",
+            "SELECT project_id, id, image_id, image_name, model_label FROM annotations WHERE project_id IN %s",
             (pids,)
         )
         ann_by_pid: dict = {}
-        for pid, aid, img_id, img_name in cur.fetchall():
-            ann_by_pid.setdefault(pid, []).append(_map_annotation_row(aid, img_id, img_name))
+        for pid, aid, img_id, img_name, model_label in cur.fetchall():
+            ann_by_pid.setdefault(pid, []).append(_map_annotation_row(aid, img_id, img_name, model_label))
 
         cur.execute(
             "SELECT project_id, id, image_id, image_name, median_line_spacing, syllable_count"
-            " FROM text_alignments WHERE project_id IN %s", (pids,)
+            " FROM text_alignments WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         text_by_pid: dict = {}
         for pid, tid, img_id, img_name, spacing, syl_count in cur.fetchall():
@@ -138,6 +145,7 @@ def list_projects(user=Depends(get_current_user)):
                 mei=mei_by_pid.get(row[0], []),
                 annotations=ann_by_pid.get(row[0], []),
                 text_alignments=text_by_pid.get(row[0], []),
+                cantus_source_id=row[9],
             )
             for row in rows
         ]
@@ -149,7 +157,7 @@ def get_project(project_id: int, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at,"
-            " last_opened_at, is_pinned, used_annotation_names"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
             " FROM projects WHERE id=%s AND user_id=%s",
             (project_id, user["id"])
         )
@@ -186,7 +194,7 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
             "stepsUnlocked": 0, "usedImageNames": [], "usedModelNames": [],
-            "deletedAt": None, "usedAnnotationNames": []}
+            "deletedAt": None, "usedAnnotationNames": [], "cantusSourceId": None}
 
 
 class UpdateProjectBody(BaseModel):
@@ -198,6 +206,7 @@ class UpdateProjectBody(BaseModel):
     lastOpenedAt: Optional[str] = None
     isPinned: Optional[bool] = None
     usedAnnotationNames: Optional[list] = None
+    cantusSourceId: Optional[str] = None
 
 @router.put("/projects/{project_id}")
 def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_current_user)):
@@ -224,6 +233,8 @@ def update_project(project_id: int, body: UpdateProjectBody, user=Depends(get_cu
         if body.usedAnnotationNames is not None:
             cur.execute("UPDATE projects SET used_annotation_names=%s WHERE id=%s",
                         (json.dumps(body.usedAnnotationNames), project_id))
+        if body.cantusSourceId is not None:
+            cur.execute("UPDATE projects SET cantus_source_id=%s WHERE id=%s", (body.cantusSourceId, project_id))
         con.commit()
         return {"ok": True}
 
