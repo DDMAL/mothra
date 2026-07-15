@@ -49,7 +49,7 @@ services:
     depends_on:
       - redis
       - text-service
-    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
     volumes:
       - stored_models:/app/scripts/stored_models
 

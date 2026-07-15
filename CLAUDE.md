@@ -95,7 +95,7 @@ uvicorn main:app --reload --port 8001
 
 # Terminal 4 — Celery worker (predict/encode jobs)
 cd landing-page/scripts && source .venv/bin/activate
-celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 
 # Terminal 5 — landing-page frontend (:5173)
 cd landing-page && npm run dev
@@ -140,6 +140,16 @@ is the single source of truth for job status, so there's no Celery result
 backend configured. Known gaps: no job cancellation (`revoke`) wired up, no
 periodic cleanup of `job_uploads`/`job_sessions` rows yet, and a dead worker
 is detected via a ~90s staleness timeout rather than immediately.
+
+**The worker must run with `--pool=threads`, not Celery's default `prefork`.**
+`prefork` works by `fork()`-ing a child process per worker slot; PyTorch (and
+other native BLAS/OpenMP-using libraries pulled in by `ultralytics`) is not
+fork-safe, and a `predict.run` task will segfault the forked child almost
+immediately (`WorkerLostError: Worker exited prematurely: signal 11 (SIGSEGV)`)
+the instant it touches a loaded YOLO model — confirmed by actually running a
+predict job locally, not just by inspection. `--pool=threads` runs tasks in
+threads within one process instead, avoiding the fork entirely; concurrency is
+still real since PyTorch/numpy release the GIL during actual tensor ops.
 
 ### Deployment (Docker)
 

@@ -229,7 +229,7 @@ uvicorn main:app --reload --port 8001
 
 # Terminal 4 — Celery worker (predict/encode jobs; needs Redis running)
 cd landing-page/scripts && source .venv/bin/activate
-celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 
 # Terminal 5 — landing-page frontend (:5173)
 cd landing-page && npm run dev

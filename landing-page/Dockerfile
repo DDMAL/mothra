@@ -30,6 +30,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY scripts/requirements.txt ./scripts/requirements.txt
+# ultralytics pulls in torch/torchvision transitively; installing the
+# CPU-only build first (this app always runs inference with device="cpu" in
+# these containers — no GPU is passed through) means the requirements.txt
+# install below sees torch already satisfied and skips the much larger
+# CUDA-enabled wheel it'd otherwise resolve from PyPI.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r scripts/requirements.txt
 # Prerequisite: `git lfs pull` before `docker build` — the medieval model
 # checkpoints under scripts/assets/models/medieval/ are Git-LFS pointers
