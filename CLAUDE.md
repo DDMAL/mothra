@@ -188,6 +188,44 @@ excludes it, and `docker-compose.yml` mounts a named volume
 so uploads persist across container restarts and are visible to whichever
 service needs to read them.
 
+**Resource requirements: at least 8GB RAM, 4 CPUs for the Docker host/VM.**
+Confirmed by actually running a real predict job through the containers —
+with the default Colima allocation (2GB), `text-service`'s Kraken/HTR
+segmentation step got SIGKILL'd by the VM's OOM killer mid-request
+(`docker compose ps` shows `Exited (137)`, easy to mistake for an
+application bug rather than an OOM kill). `worker` (YOLO inference) and
+`text-service` (Kraken segmentation + HTR) are the two memory-heavy
+containers; `backend`/`ic`/`redis` are comparatively light. If you see a
+service unexpectedly exit with code 137 mid-job, check available memory
+before debugging application code.
+
+`text-service`'s recognition model (Tridis, via `htrmopo`) is baked into
+the image at build time, matching local dev's one-time manual
+`htrmopo get 10.5281/zenodo.10788590` step — without it, text-finding
+silently runs in stub mode (segmentation/YOLO still work, OCR returns no
+syllables, with a `"STUB — no recognition model installed"` log line as the
+only sign). The Zenodo record currently serves the file as
+`Tridis_v2_Medieval_EarlyModern.mlmodel`, which doesn't match the
+auto-discovery glob (`mothra-text`'s `run_pipeline.py`) expecting the exact
+name `Tridis_Medieval_EarlyModern.mlmodel` — `text-service/Dockerfile`
+renames the file post-download to work around this; if a future Zenodo
+update changes the filename again, re-check that rename step still matches.
+
+**Prefer redeploying the whole stack together over recreating one service at
+a time.** Recreating just `text-service` (e.g.
+`docker compose up -d --no-deps --build text-service`) while `worker` keeps
+running left `worker` holding a stale connection to the now-gone old
+`text-service` container — its next task sat idle instead of failing fast,
+occupying a worker thread until `worker` was manually restarted. Root cause:
+`text_api.py`'s `_stream_multipart()` passed `urlopen(..., timeout=600)` —
+a 10-minute *per-read* socket timeout, not a hard deadline, so a peer that
+goes unreachable mid-connection can tie up a thread for the full 600s before
+Python ever raises. Fixed by lowering that default to 120s (real single-image
+text-finding calls complete in well under a minute; `batch_api.py`'s
+multi-file batch call already passes its own explicit, much larger timeout
+and is unaffected). 120s is still slower than ideal for this failure mode —
+restarting dependents together after any redeploy remains the safer habit.
+
 ---
 
 ## Key files
