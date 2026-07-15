@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from celery import Celery
 from config import CELERY_BROKER_URL
 

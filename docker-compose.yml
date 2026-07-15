@@ -1,0 +1,57 @@
+services:
+  redis:
+    image: redis:7-alpine
+
+  ic:
+    build:
+      context: ./ic
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+
+  text-service:
+    build:
+      context: .
+      dockerfile: text-service/Dockerfile
+    ports:
+      - "8002:8002"
+
+  backend:
+    build:
+      context: ./landing-page
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MOTHRA_SECRET: ${MOTHRA_SECRET}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      IC_API_URL: http://ic:8000
+      IC_PUBLIC_URL: ${IC_PUBLIC_URL:-http://localhost:8000}
+      TEXT_API_URL: http://text-service:8002
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+    depends_on:
+      - redis
+      - ic
+      - text-service
+    volumes:
+      - stored_models:/app/scripts/stored_models
+
+  worker:
+    build:
+      context: ./landing-page
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MOTHRA_SECRET: ${MOTHRA_SECRET}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      TEXT_API_URL: http://text-service:8002
+    depends_on:
+      - redis
+      - text-service
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - stored_models:/app/scripts/stored_models
+
+volumes:
+  stored_models:
