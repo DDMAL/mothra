@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 import uuid as _uuid
 from typing import Optional
+from config import TEXT_API_URL
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,7 +27,6 @@ router = APIRouter()
 MUSIC_CLASS_ID = 1
 TEXT_CLASS_ID = 0 # mothra's raw YOLO numbering
 MOTHRA_TEXT_MASK_CLASS_ID = 1 # mothra-text's OWN numbering
-TEXT_API_URL = os.environ.get("TEXT_API_URL", "http://localhost:8002").rstrip("/")
 
 def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[str, bytes, str]:
     """Return (image_id, data, mime_type) for a project image the user owns."""
@@ -130,7 +130,15 @@ def _mask_json_for_image(project_id: int, image_name: str, image_bytes: bytes) -
     except Exception:
         return None
 
-def _stream_multipart(url: str, fields: dict[str, str], files: list[tuple], timeout: int=600):
+def _stream_multipart(url: str, fields: dict[str, str], files: list[tuple], timeout: int=120):
+    # Default covers this module's own single-image call below (real runs
+    # complete in well under a minute) — batch_api.py's multi-file batch
+    # call passes its own much larger explicit timeout, unaffected by this.
+    # Kept well below Celery's task-visibility timeout: urlopen's timeout is
+    # a per-read socket timeout, not a hard deadline, so a peer that goes
+    # unreachable mid-connection (e.g. its container gets recreated) can
+    # otherwise tie up a worker thread for the full duration before Python
+    # ever raises — confirmed by actually hitting this during Docker testing.
     """POST multipart/form-data and yield decoded response lines (SSE passthrough)."""
     boundary = _uuid.uuid4().hex
     body = bytearray()

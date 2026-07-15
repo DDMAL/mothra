@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { View, Project, AnnotationSet, MeiFile, ModelKind } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
-import { apiFetch, apiFetchOrThrow } from "../lib/apiFetch";
+import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
@@ -362,7 +362,7 @@ export default function AppRouter({
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
             const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
-            return apiFetch(`/api/projects/${selectedProject.id}/predict`, {
+            return apiFetchJobStream(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -387,8 +387,7 @@ export default function AppRouter({
                   ? Number(textFindingSettings.sourceId)
                   : null,
               }),
-              signal,
-            });
+            }, signal);
           }}
           onResult={(ev) => {
             if (batchRunIds) {
@@ -552,7 +551,7 @@ export default function AppRouter({
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
               if (selectedProjectId) form.append("project_id", String(selectedProjectId));
-              return apiFetch("/api/encode-batch", { method: "POST", body: form, signal });
+              return apiFetchJobStream("/api/encode-batch", { method: "POST", body: form }, signal);
             }}
             onResult={handleEncodeBatchResult}
             onLogsReady={setEncodingLogs}
@@ -583,7 +582,7 @@ export default function AppRouter({
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }
-            return apiFetch("/api/encode-upload", { method: "POST", body: form, signal });
+            return apiFetchJobStream("/api/encode-upload", { method: "POST", body: form }, signal);
           }}
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}

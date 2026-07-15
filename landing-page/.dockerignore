@@ -1,0 +1,14 @@
+node_modules
+dist
+public/neon
+scripts/.venv
+scripts/__pycache__
+scripts/stored_models
+neon/node_modules
+neon/deployment/server/Neon-gh
+neon/deployment/server/samples
+neon/dist
+neon/test
+**/__pycache__
+**/*.pyc
+.git

@@ -12,7 +12,7 @@ architecture, database schema, and coding conventions, see
 
 ## Architecture at a glance
 
-Four servers run together in dev:
+Five processes run together in dev:
 
 | Port   | Process                          | Role                                                         |
 | ------ | --------------------------------- | -------------------------------------------------------------- |
@@ -20,10 +20,17 @@ Four servers run together in dev:
 | `8001` | landing-page FastAPI (`uvicorn`)  | `/api/*`; also calls `:8000` and `:8002` server-to-server      |
 | `8000` | Interactive Classifier (`ic/`)    | IC REST API **and** the IC SPA served into an iframe            |
 | `8002` | Text-finding service (`text-service/`) | Wraps the `mothra-text` pipeline; called from `:8001`     |
+| —      | Celery worker                    | Runs `/predict`, `/encode-upload`, `/encode-batch` jobs; no port of its own |
 
 `:8000` and `:8002` are separate git submodules/services, not part of this
 folder, but they must be running for the Interactive Classifier and
 text-finding steps to work.
+
+The Celery worker also needs a running **Redis** (default
+`redis://localhost:6379/0`) — it's only the task broker, not a data store;
+job status/progress live in Postgres alongside everything else (see
+[`../CLAUDE.md`](../CLAUDE.md) for the `jobs`/`job_events`/`job_uploads`/`job_sessions`
+tables and how the job queue works end to end).
 
 ---
 
@@ -37,6 +44,15 @@ text-finding steps to work.
   `uv.lock`, requires Python ≥3.11 — `uv` will fetch it if you don't have
   one).
 - **yarn** (only needed once, to build the embedded Neon.js editor).
+- **Redis** — the Celery broker for the job queue (`/predict`, `/encode-upload`,
+  `/encode-batch`). Any local install works:
+
+  ```bash
+  brew install redis
+  brew services start redis
+  redis-cli ping   # should print PONG
+  ```
+
 - A **Postgres database** — this project is developed against
   [Neon](https://neon.tech), but the backend only talks to it via a plain
   `psycopg2` DSN, so a local Postgres install works exactly the same way.
@@ -54,7 +70,7 @@ text-finding steps to work.
 Check what you have:
 
 ```bash
-node -v && python3 --version && python3.10 --version && uv --version && yarn -v
+node -v && python3 --version && python3.10 --version && uv --version && yarn -v && redis-cli ping
 ```
 
 ---
@@ -101,8 +117,12 @@ MOTHRA_SECRET=<any long random string>
 - Optional overrides (all have working defaults, only set if you're running
   services on non-default ports/hosts): `STORAGE_QUOTA_MB` (default 500),
   `IC_API_URL` / `IC_PUBLIC_URL` (default `http://localhost:8000`),
-  `TEXT_API_URL` (default `http://localhost:8002`), `ALLOWED_ORIGINS`
-  (default `*`).
+  `TEXT_API_URL` (default `http://localhost:8002`), `CELERY_BROKER_URL`
+  (default `redis://localhost:6379/0`), `ALLOWED_ORIGINS` (default `*`).
+  These (and a few filesystem paths) have their non-secret defaults in
+  `landing-page/scripts/config.yaml` — `.env`/environment only needs to set
+  them if you're overriding a default, and `DATABASE_URL`/`MOTHRA_SECRET`
+  stay in `.env` since they're secrets.
 
 ### 3. Interactive Classifier venv (`:8000`)
 
@@ -162,7 +182,9 @@ npm run build:neon
 
 ## Running locally
 
-From the repo root, the launcher starts and stops all four servers together:
+From the repo root, the launcher starts and stops all five processes together
+(this includes the Celery worker — make sure Redis is running first, per
+Prerequisites):
 
 ```bash
 ./dev.sh
@@ -177,15 +199,17 @@ Then open **http://localhost:5173**.
 ./dev.sh -f     # free the ports first if something is already listening on them
 ./dev.sh -bf    # both
 ./dev.sh -h     # help
-Ctrl-C          # stops all four cleanly
+Ctrl-C          # stops all five cleanly
 ```
 
 Ports are overridable via env vars: `WEB_PORT`, `API_PORT`, `IC_PORT`,
-`TEXT_PORT` (e.g. `WEB_PORT=3000 ./dev.sh`).
+`TEXT_PORT` (e.g. `WEB_PORT=3000 ./dev.sh`). The Celery worker has no port of
+its own; its broker URL is overridable via `CELERY_BROKER_URL`.
 
 `dev.sh` checks for each venv/dependency before starting and tells you the
 exact command to fix it if something's missing — if in doubt, just run it
-and read the error.
+and read the error. It also soft-warns (doesn't block startup) if Redis isn't
+reachable.
 
 ### Running servers manually (one terminal each)
 
@@ -203,9 +227,44 @@ cd text-service && .venv/bin/uvicorn main:app --port 8002
 cd landing-page/scripts && source .venv/bin/activate
 uvicorn main:app --reload --port 8001
 
-# Terminal 4 — landing-page frontend (:5173)
+# Terminal 4 — Celery worker (predict/encode jobs; needs Redis running)
+cd landing-page/scripts && source .venv/bin/activate
+celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
+
+# Terminal 5 — landing-page frontend (:5173)
 cd landing-page && npm run dev
 ```
+
+---
+
+## Running with Docker Compose
+
+A root-level `docker-compose.yml` builds and runs `redis`, `ic`, `text-service`,
+and `backend`/`worker` (both from `landing-page/Dockerfile`, `worker` just
+overrides the command) as containers instead of local processes. From the
+repo root:
+
+```bash
+git submodule update --init --recursive   # if not already done
+git lfs pull                              # medieval model .pt files are LFS pointers otherwise
+
+# create a root-level .env (gitignored, separate from landing-page/scripts/.env):
+#   DATABASE_URL=postgresql://...
+#   MOTHRA_SECRET=...
+
+docker compose build
+docker compose up
+```
+
+Open **http://localhost:8001** (the backend container serves the built
+frontend directly — there's no separate `:5173` container).
+`IC_API_URL`/`TEXT_API_URL` are wired to the compose
+service names (`http://ic:8000`, `http://text-service:8002`) automatically;
+`DATABASE_URL` still points at your Postgres (Neon or otherwise) — Postgres
+itself isn't a compose service.
+
+The `text-service` image is large (pulls in `torch`/`kraken`/`htrflow`) and
+the first `docker compose build` will take a while.
 
 ---
 
@@ -253,3 +312,21 @@ npm run preview   # preview a production build locally
   `git submodule update --init mothra-text` from the repo root, then
   `pip install -e ../mothra-text` inside the `text-service` venv (step 4
   above).
+- **Celery worker crashes on startup with `KeyError: 'DATABASE_URL'`** —
+  `celery_app.py` loads `landing-page/scripts/.env` itself (via `load_dotenv()`)
+  since, unlike the backend, nothing else in the worker's import chain does.
+  If you see this, something upstream of that call got reordered — check
+  `celery_app.py` still calls `load_dotenv()` before importing `config`/`celery`.
+- **"missing celery in landing-page venv" from `dev.sh`** — same venv as the
+  backend (step 2); just re-run `pip install -r requirements.txt` there.
+- **Redis not reachable / predict-encode jobs never start** —
+  `redis-cli ping` should print `PONG`. If not, `brew services start redis`
+  (or however you installed it). `dev.sh` warns but doesn't block on this —
+  the kickoff request will still return a `job_id`, but the Celery worker
+  will never pick up the task.
+- **Predict/encoding progress bar never moves / hangs forever** — check the
+  `[worker]`-tagged log lines for a traceback, and/or query the `jobs` table
+  directly (`SELECT status FROM jobs ORDER BY created_at DESC LIMIT 5`) to see
+  if the job ever left `pending`. `GET /api/jobs/{id}/stream` also gives up
+  and surfaces an error after ~90s of no new events if `status` is stuck on
+  `running` (worker crash without a clean error event).

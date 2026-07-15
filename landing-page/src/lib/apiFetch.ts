@@ -49,3 +49,17 @@ export async function apiFetchOrThrow(
     }
     return r;
 }
+
+// kicks off a job (POST returning {job_id}) then connects to its SSE
+// stream — the returned Response is exactly what ProcessingPage.tsx's
+// streamRequest contract expects, so no change is needed there.
+export async function apiFetchJobStream(
+    kickoffUrl: string,
+    kickoffInit: RequestInit,
+    signal: AbortSignal,
+): Promise<Response> {
+    const kickoff = await apiFetch(kickoffUrl, { ...kickoffInit, signal });
+    if (!kickoff.ok) return kickoff;
+    const { job_id } = await kickoff.json();
+    return apiFetch(`/api/jobs/${job_id}/stream`, { signal });
+}

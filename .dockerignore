@@ -1,0 +1,8 @@
+.git
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.venv
+landing-page/dist
+landing-page/public/neon
+ic/api/src/ic_api/static

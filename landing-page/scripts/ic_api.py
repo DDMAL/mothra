@@ -31,16 +31,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from config import IC_API_URL, IC_PUBLIC_URL
 
 from auth_api import get_current_user, db_cursor, require_project_owner
 
 router = APIRouter()
-
-# Where this backend reaches the IC API (server-to-server) and where the
-# browser/iframe reaches the IC SPA. Kept separate so a deployment can
-# point them at different origins; for local dev both are :8000.
-IC_API_URL = os.environ.get("IC_API_URL", "http://localhost:8000").rstrip("/")
-IC_PUBLIC_URL = os.environ.get("IC_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 
 
 # ---------------------------------------------------------------------------
