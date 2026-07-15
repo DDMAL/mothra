@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 import uuid as _uuid
 from typing import Optional
+from config import TEXT_API_URL
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,7 +27,6 @@ router = APIRouter()
 MUSIC_CLASS_ID = 1
 TEXT_CLASS_ID = 0 # mothra's raw YOLO numbering
 MOTHRA_TEXT_MASK_CLASS_ID = 1 # mothra-text's OWN numbering
-TEXT_API_URL = os.environ.get("TEXT_API_URL", "http://localhost:8002").rstrip("/")
 
 def _project_image(project_id: int, image_name: str, user_id: int) -> tuple[str, bytes, str]:
     """Return (image_id, data, mime_type) for a project image the user owns."""

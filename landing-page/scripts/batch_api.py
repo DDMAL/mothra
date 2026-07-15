@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
-from inference_api import resolve_yolo_models, write_annotation
+from yolo_inference import resolve_yolo_models, write_annotation
 
 router = APIRouter()
 

@@ -1,0 +1,18 @@
+# Non-secret paths and service URLs. Env vars override these at runtime
+# (see config.py) — set container hostnames via environment in
+# docker-compose.yml rather than editing this file per environment.
+# DATABASE_URL / MOTHRA_SECRET are secrets and stay out of this file —
+# they come from .env / the process environment only.
+paths:
+  models_dir: stored_models
+  neon_manifests_dir: ../public/neon/samples/manifests
+  mock_data_dir: mock_data
+  medieval_models_dir: assets/models/medieval
+
+services:
+  ic_api_url: http://localhost:8000
+  ic_public_url: http://localhost:8000
+  text_api_url: http://localhost:8002
+
+celery:
+  broker_url: redis://localhost:6379/0
