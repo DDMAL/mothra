@@ -285,7 +285,7 @@ async def encode_batch(
         for i, (xml_bytes, xml_fn, img_bytes, img_fn, image_name) in enumerate(pairs):
             tmp_dir = Path(tempfile.mkdtemp())
             session_id = _uuid.uuid4().hex[:8]
-            yield event({"type": "item_start", "index": i, "name": img_fn, "total": len(pairs), "name": img_fn or xml_fn})
+            yield event({"type": "item_start", "item": i, "total": len(pairs), "name": img_fn or xml_fn})
 
             try:
                 yield event({"type": "stage", "item": i, "name": "checking"})

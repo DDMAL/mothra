@@ -415,7 +415,17 @@ export default function AppRouter({
             const { annotations } = ev as { annotations: AnnotationSet[] };
             setProjects((prev) =>
               prev.map((p) =>
-                p.id === selectedProject.id ? { ...p, annotations } : p,
+                p.id === selectedProject.id
+                  ? {
+                      ...p,
+                      annotations: [
+                        ...p.annotations.filter(
+                          (a) => !annotations.some((na) => na.imageName === a.imageName),
+                        ),
+                        ...annotations,
+                      ],
+                    }
+                  : p,
               ),
             );
             apiFetch(`/api/projects/${selectedProject.id}`)
@@ -424,7 +434,7 @@ export default function AppRouter({
                 setProjects((prev) =>
                   prev.map((p) =>
                     p.id === selectedProject.id
-                      ? { ...p, textAlignments: fresh.textAlignments }
+                      ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
                       : p,
                   ),
                 );

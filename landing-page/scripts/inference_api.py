@@ -226,12 +226,21 @@ async def run_predict(
             # stage 2 - validation
             yield event({"type": "stage", "name": "validating"})
             images = []
+            skipped = []
             for iid in image_ids:
                 cur.execute("SELECT name, data, mime_type, folio FROM project_images WHERE id=%s AND project_id=%s",
                             (iid, project_id))
                 r = cur.fetchone()
-                if r: images.append((iid, r[0], r[1], r[2] or "image/png", r[3]))
+                if not r:
+                    continue
+                cur.execute("SELECT 1 FROM annotations WHERE project_id=%s AND image_id=%s", (project_id, iid))
+                if cur.fetchone():
+                    skipped.append(r[0])
+                    continue
+                images.append((iid, r[0], r[1], r[2] or "image/png", r[3]))
             yield event({"type": "log", "message": f"{len(images)} image(s) ready"})
+            if skipped:
+                yield event({"type": "log", "message": f"skipping {len(skipped)} already-annotated image(s): {', '.join(skipped)}"})
             yield event({"type": "stage_done", "name": "validating"})
 
             _log_activity(cur, project_id, "predict_run", f"{yolo_models.model_label} on {len(images)} image(s)")

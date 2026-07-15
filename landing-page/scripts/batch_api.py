@@ -74,7 +74,16 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
     
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
-        images = [_project_image_by_id(cur, project_id, iid) for iid in body.image_ids]
+        already_aligned = set()
+        for iid in body.image_ids:
+            cur.execute("SELECT 1 FROM text_alignments WHERE project_id=%s AND image_id=%s", (project_id, iid))
+            if cur.fetchone():
+                already_aligned.add(iid)
+        pairs = [(iid, folio) for iid, folio in zip(body.image_ids, body.folios) if iid not in already_aligned]
+        image_ids = [p[0] for p in pairs]
+        folios = [p[1] for p in pairs]
+        images = [_project_image_by_id(cur, project_id, iid) for iid in image_ids]
+    skipped_count = len(body.image_ids) - len(image_ids)
 
     def generate():
         def event(obj):
@@ -82,6 +91,12 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
         con = get_db_conn()
         cur = con.cursor()
         try:
+            if skipped_count:
+                yield event({"type": "log", "message": f"skipping {skipped_count} image(s) that already have text alignments"})
+            if not image_ids:
+                yield event({"type": "log", "message": "nothing to do — all selected images already have text alignments"})
+                yield event({"type": "done"})
+                return
             yield event({"type": "stage", "name": "checking"})
             try:
                 yolo_models, load_logs = resolve_yolo_models(
@@ -100,7 +115,7 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
             # the exact sequence /predict already does per single image.
             music_boxes_by_index = []
             mask_json_by_index = []
-            for i, (image_id, (name, data, mime)) in enumerate(zip(body.image_ids, images)):
+            for i, (image_id, (name, data, mime)) in enumerate(zip(image_ids, images)):
                 pil_img = Image.open(io.BytesIO(data)).convert("RGB")
                 img_arr = np.array(pil_img)
                 yolo_txt = yolo_models.infer(img_arr)
@@ -117,7 +132,7 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
             yield event({"type": "stage_done", "name": "checking"})
 
             yield event({"type": "stage", "name": "validating"})
-            yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(body.folios)} folio(s) (Cantus-aligned mode, source {body.source_id})..."})
+            yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(folios)} folio(s) (Cantus-aligned mode, source {body.source_id})..."})
             if body.segmentation_model:
                 yield event({"type": "log", "message": f"using custom segmentation model: {body.segmentation_model}"})
             if body.column_count:
@@ -126,7 +141,7 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
 
             yield event({"type": "stage", "name": "processing"})
             fields = {
-                "folios": json.dumps(body.folios),
+                "folios": json.dumps(folios),
                 "source_id": str(body.source_id),
                 "device": body.device,
                 "column_bimodal_threshold": str(body.column_bimodal_threshold),
@@ -149,7 +164,7 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
                 ev = json.loads(line[len("data: "):])
                 if ev.get("type") == "folio_result":
                     idx = ev["image_index"]
-                    image_id = body.image_ids[idx]
+                    image_id = image_ids[idx]
                     image_name = images[idx][0]
                     alignment = ev["text_alignment"]
                     aid = _uuid.uuid4().hex
