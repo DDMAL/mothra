@@ -9,8 +9,6 @@ import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
 import Hero from "./landing/Hero";
-import Features from "./landing/Features";
-import About from "./landing/About";
 import Documentation from "./documentation/Documentation";
 import AuthPage from "./auth/AuthPage";
 import MyAccount from "./account/MyAccount";
@@ -150,11 +148,8 @@ export default function AppRouter({
             onGetStarted={() => setView("register")}
             onViewWalkthrough={() => setView("docs")}
           />
-          <Features />
         </main>
       );
-    case "about":
-      return <About />;
     case "docs":
       return <Documentation onHome={() => setView("landing")} />;
     case "account":

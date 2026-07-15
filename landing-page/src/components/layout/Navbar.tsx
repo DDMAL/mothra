@@ -5,7 +5,6 @@ interface NavbarProps {
   onLogin?: () => void;
   onGetStarted?: () => void;
   onMyProjects?: () => void;
-  onAbout?: () => void;
   currentUser?: CurrentUser | null;
   onLogout?: () => void;
   onHome?: () => void;
@@ -17,7 +16,6 @@ export default function Navbar({
   onLogin,
   onGetStarted,
   onMyProjects,
-  onAbout,
   currentUser,
   onLogout,
   onHome,
@@ -35,16 +33,6 @@ export default function Navbar({
         mothra
       </button>
       <div className="hidden sm:flex items-center gap-6 flex-1">
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            onAbout?.();
-          }}
-          className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
-        >
-          about mothra
-        </a>
         <a
           href="#"
           onClick={(e) => {

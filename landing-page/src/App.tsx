@@ -84,7 +84,6 @@ export default function App() {
         onLogin={() => setView("login")}
         onGetStarted={() => setView("register")}
         onMyProjects={() => setView("projects")}
-        onAbout={() => setView("about")}
         onDocs={() => setView("docs")}
         onHome={() => setView("landing")}
         onAccount={() => setView("account")}

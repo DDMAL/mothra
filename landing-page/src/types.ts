@@ -68,7 +68,6 @@ export interface MeiFile {
 
 export type View =
   | "landing"
-  | "about"
   | "login"
   | "register"
   | "account"

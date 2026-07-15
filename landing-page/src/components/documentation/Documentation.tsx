@@ -17,6 +17,7 @@ const WALKTHROUGH_ITEMS = [
   "models",
   "annotations",
   "interactive classifier",
+  "encoding",
   "neon",
   "sending mei files to cantus ultimus",
   "saving and exporting data",
@@ -113,7 +114,9 @@ export default function Documentation({ onHome: _onHome }: DocumentationProps) {
             onNavigateWalkthrough={() => navigate("walkthrough")}
           />
         )}
-        {section === "walkthrough" && <DocsWalkthrough />}
+        {section === "walkthrough" && (
+          <DocsWalkthrough scrollTarget={scrollTarget} />
+        )}
       </main>
     </div>
   );
