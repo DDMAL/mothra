@@ -214,7 +214,8 @@ export default function ProcessingPage({
             }
             if (ev.type === "log") {
               const ip = itemProgressRef.current;
-              const line =  `[${ev.item + 1}/${ip?.total ?? "?"}] error: ${ev.message}`
+              const prefix = typeof ev.item === "number" ? `[${ev.item + 1}/${ip?.total ?? "?"}] ` : "";
+              const line = `${prefix}${ev.message}`;
               collectedLogs.push(line);
               setRevealedLogs((prev) => [...prev, line]);
             }
