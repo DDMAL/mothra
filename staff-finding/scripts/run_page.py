@@ -423,6 +423,11 @@ def _write_jsomr_json(
                 "x_end": fit.x_end,
                 "y_values": fit.y_values,
             },
+            "centerline_page": {
+                "x_start": int(fit.x_start + fit.x_page_offset),
+                "x_end":   int(fit.x_end   + fit.x_page_offset),
+                "y_values": [round(y + fit.y_page_offset, 1) for y in fit.y_values],
+            },
             "fit": {
                 "method": "quadratic_huber",
                 "coefficients": fit.coefficients,

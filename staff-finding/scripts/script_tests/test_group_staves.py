@@ -112,17 +112,16 @@ def test_grouping_with_missing_line_no_interpolation():
 
 
 def test_grouping_with_missing_line_and_interpolation():
-    # Interpolation is currently stubbed (returns empty list; MVP deferred).
-    # This test verifies that grouping still runs correctly with
-    # interpolate_missing=True and that the stave grouping is sound.
-    # The missing-line case uses a high scale_unit so the 50-px gap within
-    # stave 1 stays below the cut threshold and both staves stay intact.
+    # Stave 0 has 4 lines (mode), stave 1 has only 3 — one line is missing.
+    # With interpolate_missing=True the pipeline should synthesise the gap.
+    # The high scale_unit keeps the 50-px intra-stave gap below the cut
+    # threshold so both staves stay intact.
     ys_stave_0 = [100, 130, 160, 190]
     ys_stave_1 = [400, 430, 480]  # widest internal gap is 50
     ys = ys_stave_0 + ys_stave_1
     fits = [make_fit_at_y(y) for y in ys]
     result = group_staves(fits, scale_unit=55.0, interpolate_missing=True)
-    print(f"missing-line (interp ON, stub): "
+    print(f"missing-line (interp ON): "
           f"stave_ids={[a.stave_id for a in result.assignments]}, "
           f"mode={result.mode_lines_per_stave}, "
           f"n_interpolated={len(result.interpolated_lines)}")
@@ -130,8 +129,10 @@ def test_grouping_with_missing_line_and_interpolation():
     assert stave_ids[:4] == [0, 0, 0, 0]
     assert stave_ids[4:] == [1, 1, 1]
     assert result.mode_lines_per_stave == 4
-    # Interpolation is stubbed; interpolated_lines is empty until implemented.
-    assert result.interpolated_lines == []
+    # Stave 1 is short by one line; interpolation should produce exactly one
+    # synthetic line for it.
+    assert len(result.interpolated_lines) == 1
+    assert result.interpolated_lines[0].stave_id == 1
 
 
 def test_failed_fits_excluded_from_grouping():

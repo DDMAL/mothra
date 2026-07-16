@@ -1,0 +1,3 @@
+page,variant,gt_source,n_gt,n_pred,n_matched,n_unmatched_pred,n_unmatched_gt,precision,recall,f1,split_ratio,mean_y_mae_px,match_threshold_px,scale_unit_px
+GentAnt1475_0017_AC_rightcrop,sauvola_no_bgr,corrected,86,86,86,0,0,1.0,1.0,1.0,1.0,1.69,7.5,15.0
+GentAnt1475_0017_AC_rightcrop,otsu_no_bgr,corrected,86,81,78,3,8,0.963,0.907,0.9341,0.9419,2.02,7.5,15.0
