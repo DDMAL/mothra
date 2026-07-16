@@ -10,10 +10,10 @@ from typing import Optional
 from celery_app import celery_app
 from job_store import publish_event, fetch_upload, drop_upload, session_put
 from auth_api import get_db_conn, release_db_conn
-from image_utils import image_dimensions
 from encode_to_mei import (
-    parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs, 
+    parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
+    image_dimensions,
 )
 
 def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h):

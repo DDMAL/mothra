@@ -160,7 +160,11 @@ submodule), and `backend`/`worker` (both from the same new `landing-page/Dockerf
 `worker` just overrides the `command:`). Before building:
 `git submodule update --init --recursive` (submodules aren't checked out by a
 plain clone) and `git lfs pull` (the medieval model `.pt` files are LFS
-pointers until then). `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level
+pointers until then) — this requires `git-lfs` to be installed and
+registered once per machine (`brew install git-lfs && git lfs install`)
+*before* pulling; otherwise `git lfs pull` silently no-ops and the `.pt`
+files stay as tiny pointer text, which only surfaces later as a prediction
+failure, not a clear error at pull time. `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level
 `.env` (gitignored, separate from `landing-page/scripts/.env`) that Compose
 auto-loads. This is now the only deployment path — the old `render.yaml`
 Render Blueprint (single-service, no worker, no Redis) has been retired; it
@@ -235,6 +239,13 @@ restarting dependents together after any redeploy remains the safer habit.
 | `landing-page/scripts/main.py` | FastAPI app, CORS, mounts routers |
 | `landing-page/scripts/auth_api.py` | Auth endpoints, DB init (incl. job-queue tables), project CRUD, image storage |
 | `landing-page/scripts/account_api.py` | Profile update, password change, account delete |
+| `landing-page/scripts/projects_api.py` | Project CRUD, export/duplicate, activity/log-download endpoints |
+| `landing-page/scripts/images_api.py` | Project image upload/fetch/delete endpoints |
+| `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start` and related IC-step endpoints |
+| `landing-page/scripts/inference_api.py` | `POST /projects/{id}/predict` kickoff endpoint (enqueues `tasks_predict.py`), annotation CRUD |
+| `landing-page/scripts/mei_api.py` | MEI file CRUD, Neon batch-editor edit-session bootstrap |
+| `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups to the text-service for the final "send to Cantus Ultimus" step |
+| `landing-page/scripts/model_validation.py` | Validates uploaded YOLO checkpoints, derives text/music/staves class maps |
 | `landing-page/scripts/config.py` / `config.yaml` | Centralized non-secret paths + service URLs, env-var overridable |
 | `landing-page/scripts/celery_app.py` | Celery app instance/config; entrypoint for `celery -A celery_app.celery_app worker` |
 | `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events, staged uploads, encode session/manifest storage |
