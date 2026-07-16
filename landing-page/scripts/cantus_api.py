@@ -7,6 +7,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from config import TEXT_API_URL
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -14,7 +15,6 @@ from auth_api import get_current_user
 
 router = APIRouter()
 
-TEXT_API_URL = os.environ.get("TEXT_API_URL", "http://localhost:8002").rstrip("/")
 
 @router.get("/cantus/source/{source_id}")
 def get_cantus_source(source_id: int, user=Depends(get_current_user)):

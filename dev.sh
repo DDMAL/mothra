@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Mothra local dev launcher — starts all four web-app servers together and
+# Mothra local dev launcher — starts all five web-app servers together and
 # tears them all down on Ctrl-C. See CLAUDE.md for the architecture.
 #
 #   :5173  landing-page frontend  (Vite)      — open this in the browser
@@ -8,9 +8,12 @@
 #   :8000  Interactive Classifier (ic-api)    — IC REST API + IC SPA (iframe)
 #   :8002  text-finding service   (uvicorn)   — mothra-text wrapper; reached
 #                                                server-to-server from :8001
+#   —      celery worker (predict/encode jobs) — no port; job state lives in
+#                                                Postgres, Redis is only the
+#                                                task broker/transport
 #
 # Usage:
-#   ./dev.sh              start all four
+#   ./dev.sh              start all five
 #   ./dev.sh -b           rebuild the IC frontend bundle first (do this when
 #                         the IC submodule's frontend changed; otherwise the
 #                         iframe serves a stale build — see the binarize bug)
@@ -19,6 +22,9 @@
 #   ./dev.sh -h           help
 #
 # Ports are overridable: WEB_PORT=3000 ./dev.sh
+# Requires a running Redis reachable at CELERY_BROKER_URL (default
+# redis://localhost:6379/0) — e.g. `brew services start redis`. Redis is
+# only the Celery task broker; job state/progress lives in Postgres.
 set -o pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,16 +33,17 @@ WEB_PORT="${WEB_PORT:-5173}"
 API_PORT="${API_PORT:-8001}"
 IC_PORT="${IC_PORT:-8000}"
 TEXT_PORT="${TEXT_PORT:-8002}"
+CELERY_BROKER_URL="${CELERY_BROKER_URL:-redis://localhost:6379/0}"
 
 BUILD_IC=0
 FORCE=0
 
 # --- colours (skipped when not a tty) --------------------------------------
 if [ -t 1 ]; then
-  C_IC=$'\033[36m'; C_API=$'\033[33m'; C_WEB=$'\033[35m'; C_TEXT=$'\033[34m'
+  C_IC=$'\033[36m'; C_API=$'\033[33m'; C_WEB=$'\033[35m'; C_TEXT=$'\033[34m'; C_WORKER=$'\033[92m'
   C_OK=$'\033[32m'; C_ERR=$'\033[31m'; C_DIM=$'\033[2m'; C_RST=$'\033[0m'
 else
-  C_IC=''; C_API=''; C_WEB=''; C_TEXT=''; C_OK=''; C_ERR=''; C_DIM=''; C_RST=''
+  C_IC=''; C_API=''; C_WEB=''; C_TEXT=''; C_WORKER=''; C_OK=''; C_ERR=''; C_DIM=''; C_RST=''
 fi
 
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -64,17 +71,26 @@ free_port() {
 IC_BIN="$ROOT/ic/api/.venv/bin/ic-api"
 API_UVICORN="$ROOT/landing-page/scripts/.venv/bin/uvicorn"
 TEXT_BIN="$ROOT/text-service/.venv/bin/uvicorn"
+WORKER_BIN="$ROOT/landing-page/scripts/.venv/bin/celery"
 
 [ -x "$IC_BIN" ]      || die "missing IC venv: $IC_BIN
   → cd ic/api && uv sync"
 [ -x "$API_UVICORN" ] || die "missing landing-page venv: $API_UVICORN
   → cd landing-page/scripts && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+[ -x "$WORKER_BIN" ]  || die "missing celery in landing-page venv: $WORKER_BIN
+  → cd landing-page/scripts && source .venv/bin/activate && pip install -r requirements.txt"
 [ -d "$ROOT/landing-page/node_modules" ] || die "landing-page deps not installed
   → cd landing-page && npm install"
 [ -f "$ROOT/landing-page/scripts/.env" ] || echo "${C_ERR}warning:${C_RST} landing-page/scripts/.env not found — backend may fail (DATABASE_URL/MOTHRA_SECRET)" >&2
 [ -x "$TEXT_BIN" ] || die "missing text-finding venv: $TEXT_BIN
     → cd text-service && python3.10 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt \
       && pip install git+https://github.com/DDMAL/volpiano-display-utilities.git"
+
+if command -v redis-cli >/dev/null 2>&1; then
+  redis-cli -u "$CELERY_BROKER_URL" ping >/dev/null 2>&1 || echo "${C_ERR}warning:${C_RST} Redis (Celery broker) not reachable at $CELERY_BROKER_URL — predict/encode jobs will fail to enqueue" >&2
+else
+  echo "${C_ERR}warning:${C_RST} redis-cli not found — skipping Redis reachability check" >&2
+fi
 
 # --- preflight: ports ------------------------------------------------------
 for pair in "web:$WEB_PORT" "backend:$API_PORT" "ic:$IC_PORT" "text:$TEXT_PORT"; do
@@ -143,6 +159,7 @@ fi
 start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start backend "$C_API" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
+start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort
 
 echo "${C_DIM}→ open http://localhost:$WEB_PORT${C_RST}"

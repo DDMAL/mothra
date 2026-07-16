@@ -10,6 +10,7 @@ upstream HF repo is gated and returns 401 unauthenticated).
 import os
 from functools import lru_cache
 from pathlib import Path
+from config import MEDIEVAL_MODELS_DIR as BUNDLED_DIR
 
 TEXT_MUSIC_FILENAME = "text_music_detector_fulldata.pt"
 STAVE_FILENAME = "stave_detector_fulldata.pt"
@@ -26,7 +27,6 @@ HF_REPO = "DDMAL-lab/mothra-yolov11-checkpoints"
 TEXT_MUSIC_CLASS_MAP = {0: 0, 1: 1}  # text_music_detector already trained 0=text, 1=music
 STAVE_CLASS_MAP = {0: 2}  # stave_detector's only class -> merged slot 2
 
-BUNDLED_DIR = Path(__file__).parent / "assets" / "models" / "medieval"
 ENV_MODELS_DIR = "MOTHRA_MEDIEVAL_MODELS_DIR"
 ENV_HF_TOKEN = "MOTHRA_HF_TOKEN"
 

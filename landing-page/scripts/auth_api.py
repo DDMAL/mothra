@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from config import MODELS_DIR, NEON_MANIFESTS_DIR
 import psycopg2, psycopg2.errors, os, secrets, hashlib, base64
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
@@ -45,9 +46,7 @@ ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
 
-MODELS_DIR = Path(__file__).parent / "stored_models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-NEON_MANIFESTS_DIR = Path(__file__).parent.parent / "public" / "neon" / "samples" / "manifests"
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
 
 @contextmanager
@@ -157,6 +156,42 @@ def init_db():
         )
     """)
 
+    # job queue
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            job_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            project_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS job_events (
+            id SERIAL PRIMARY KEY,
+            job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+            payload JSONB NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS job_uploads (
+            upload_id TEXT PRIMARY KEY,
+            data BYTEA NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS job_sessions (
+            session_id TEXT PRIMARY KEY,
+            mei_bytes BYTEA NOT NULL,
+            stem TEXT NOT NULL,
+            manifest JSONB,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
     # performance: db indexes
     for _idx in [
         "CREATE INDEX IF NOT EXISTS idx_project_images_pid ON project_images(project_id)",
@@ -165,7 +200,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_annotations_pid    ON annotations(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)"
+        "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_status        ON jobs(status)",
     ]:
         cur.execute(_idx)
     con.commit()
