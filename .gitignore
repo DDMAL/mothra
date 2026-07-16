@@ -50,6 +50,7 @@ landing-page/public/neon/
 
 # Vite build output
 landing-page/dist/
+landing-page/.vite/
 
 # Claude Code local config
 .claude/
