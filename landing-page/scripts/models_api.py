@@ -12,6 +12,7 @@ import json
 from pydantic import BaseModel
 
 from auth_api import get_current_user, db_cursor, require_project_owner, _log_activity, MODELS_DIR
+from config import SKIP_YOLO
 
 router = APIRouter()
 
@@ -60,7 +61,7 @@ async def add_model(
         file_path.write_bytes(model_bytes)
 
         class_map_json, names = None, None
-        if kind == "yolo":
+        if kind == "yolo" and not SKIP_YOLO:
             try:
                 inspection = inspect_yolo_checkpoint(str(file_path))
             except ValueError as e:
@@ -69,6 +70,10 @@ async def add_model(
             names = inspection["names"]
             if inspection["class_map"] is not None:
                 class_map_json = json.dumps(inspection["class_map"])
+        # SKIP_YOLO: store without inspection (no ultralytics). class_map stays
+        # None → the client sees needsClassMapping and maps text/music/staves by
+        # hand via PUT .../class-map. rawClassNames is unavailable since we never
+        # loaded the checkpoint.
         
         file_hash = hashlib.sha256(model_bytes).hexdigest()
         cur.execute(
