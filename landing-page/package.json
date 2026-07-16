@@ -1,0 +1,36 @@
+{
+  "name": "mothra-landing-page",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "lint": "eslint .",
+    "format": "prettier --write src/",
+    "preview": "vite preview",
+    "build:neon": "cd neon && npx yarn install --frozen-lockfile --silent && export NODE_OPTIONS=--openssl-legacy-provider && npm run build && mkdir -p ../public/neon && cp -r deployment/server/Neon-gh ../public/neon/ && cp deployment/server/editor.html ../public/neon/editor.html",
+    "build": "npm run build:neon && tsc -b && vite build"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.0.227",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "eslint": "^10.4.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "tailwindcss": "^4.3.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.60.0",
+    "vite": "^8.0.16"
+  }
+}

@@ -1,0 +1,9 @@
+[submodule "landing-page/neon"]
+	path = landing-page/neon
+	url = https://github.com/DDMAL/Neon.git
+[submodule "ic"]
+	path = ic
+	url = https://github.com/DDMAL/Standalone-Interactive-Classifier.git
+[submodule "mothra-text"]
+	path = mothra-text
+	url = https://github.com/DDMAL/mothra-text.git
