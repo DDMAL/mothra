@@ -54,3 +54,5 @@ landing-page/.vite/
 
 # Claude Code local config
 .claude/
+
+.idea
