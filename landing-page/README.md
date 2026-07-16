@@ -16,7 +16,7 @@ Five processes run together in dev:
 
 | Port   | Process                          | Role                                                         |
 | ------ | --------------------------------- | -------------------------------------------------------------- |
-| `5173` | Vite dev server (this folder)     | Open this in the browser; proxies `/api`, `/neon` → `:8001`    |
+| `5173` | Vite dev server (this folder)     | Open this in the browser; proxies `/api`, `/neon`, `/Neon-gh` → `:8001` |
 | `8001` | landing-page FastAPI (`uvicorn`)  | `/api/*`; also calls `:8000` and `:8002` server-to-server      |
 | `8000` | Interactive Classifier (`ic/`)    | IC REST API **and** the IC SPA served into an iframe            |
 | `8002` | Text-finding service (`text-service/`) | Wraps the `mothra-text` pipeline; called from `:8001`     |
@@ -241,8 +241,62 @@ cd landing-page && npm run dev
 
 A root-level `docker-compose.yml` builds and runs `redis`, `ic`, `text-service`,
 and `backend`/`worker` (both from `landing-page/Dockerfile`, `worker` just
-overrides the command) as containers instead of local processes. From the
-repo root:
+overrides the command) as containers instead of local processes.
+
+### Docker prerequisites
+
+These are easy to skip and each one fails in a confusing, non-obvious way if
+missed — check all three before your first build:
+
+- **`git-lfs`** — the bundled medieval model `.pt` files
+  (`landing-page/scripts/assets/models/medieval/*.pt`) are stored via Git
+  LFS. If `git-lfs` isn't installed, `git lfs pull` below silently does
+  nothing useful (no error, but the files stay as tiny LFS pointer text
+  instead of real model weights) and prediction fails at runtime with an
+  unhelpful error. Install and register it **once per machine**, before
+  cloning or pulling:
+
+  ```bash
+  brew install git-lfs
+  git lfs install
+  ```
+
+- **`docker-buildx`** — required by Docker Compose to actually honor
+  `landing-page/.dockerignore`. Without it, `docker compose build` silently
+  falls back to Docker's legacy builder, which ignores `.dockerignore`
+  entirely — the build context balloons to several GB (pulling in
+  `node_modules`, Python `.venv`s, `scripts/stored_models`, etc.) and builds
+  take far longer than they should, with no error telling you why. Confirmed
+  by hitting this directly during testing. Check you have it:
+
+  ```bash
+  docker buildx version
+  ```
+
+  Docker Desktop bundles this already. On Colima (or any Docker CLI-only
+  setup), install explicitly:
+
+  ```bash
+  brew install docker docker-compose docker-buildx colima
+  ```
+
+- **At least 8GB RAM / 4 CPUs allocated to the Docker host/VM.** `worker`
+  (YOLO inference) and `text-service` (Kraken segmentation + HTR) are both
+  memory-heavy; Colima's 2GB default isn't enough and causes `text-service`
+  to get silently OOM-killed mid-request (`docker compose ps` shows
+  `Exited (137)`, easy to mistake for an application bug). Confirmed by
+  hitting this directly during testing. If using Colima:
+
+  ```bash
+  colima start --memory 8 --cpu 4
+  ```
+
+  (Already running with less? `colima stop` first, then start again with
+  the flags above.)
+
+### Build and run
+
+From the repo root:
 
 ```bash
 git submodule update --init --recursive   # if not already done
@@ -265,6 +319,13 @@ itself isn't a compose service.
 
 The `text-service` image is large (pulls in `torch`/`kraken`/`htrflow`) and
 the first `docker compose build` will take a while.
+
+**Prefer redeploying the whole stack together** (`docker compose up -d --build`)
+over recreating a single service in isolation
+(`docker compose up -d --no-deps --build text-service`) — doing the latter
+while other services keep running can leave a dependent service (e.g.
+`worker`) holding a stale connection to the now-gone old container. See
+[`../CLAUDE.md`](../CLAUDE.md)'s Deployment section for the full story.
 
 ---
 
@@ -330,3 +391,22 @@ npm run preview   # preview a production build locally
   if the job ever left `pending`. `GET /api/jobs/{id}/stream` also gives up
   and surfaces an error after ~90s of no new events if `status` is stuck on
   `running` (worker crash without a clean error event).
+- **`docker compose build` takes forever / build context is several GB** —
+  you're missing `docker-buildx`; Compose has silently fallen back to the
+  legacy builder, which ignores `.dockerignore`. Check with
+  `docker buildx version`, install with
+  `brew install docker docker-compose docker-buildx colima` (Docker Desktop
+  already bundles it).
+- **Medieval preset prediction fails, or the bundled `.pt` files look tiny
+  (a few hundred bytes of text, not real model weights)** — `git-lfs` isn't
+  installed/registered, so `git lfs pull` did nothing. Run
+  `brew install git-lfs && git lfs install` **once**, then `git lfs pull`
+  again.
+- **A container (usually `text-service`) exits with code 137 mid-job** —
+  it was OOM-killed. Colima's default 2GB isn't enough; run
+  `colima stop && colima start --memory 8 --cpu 4`.
+- **A job silently hangs after redeploying just one container** (e.g.
+  `docker compose up -d --no-deps --build text-service`) — a dependent
+  service (usually `worker`) is holding a stale connection to the old,
+  now-gone container. Restart it, or redeploy the whole stack together
+  (`docker compose up -d --build`) instead of one service at a time.
