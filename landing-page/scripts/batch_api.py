@@ -25,6 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
+from job_store import create_job
+from tasks_text_batch import run_text_batch_task
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
@@ -82,118 +84,14 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
         pairs = [(iid, folio) for iid, folio in zip(body.image_ids, body.folios) if iid not in already_aligned]
         image_ids = [p[0] for p in pairs]
         folios = [p[1] for p in pairs]
-        images = [_project_image_by_id(cur, project_id, iid) for iid in image_ids]
     skipped_count = len(body.image_ids) - len(image_ids)
 
-    def generate():
-        def event(obj):
-            return f"data: {json.dumps(obj)}\n\n"
-        con = get_db_conn()
-        cur = con.cursor()
-        try:
-            if skipped_count:
-                yield event({"type": "log", "message": f"skipping {skipped_count} image(s) that already have text alignments"})
-            if not image_ids:
-                yield event({"type": "log", "message": "nothing to do — all selected images already have text alignments"})
-                yield event({"type": "done"})
-                return
-            yield event({"type": "stage", "name": "checking"})
-            try:
-                yolo_models, load_logs = resolve_yolo_models(
-                    cur, project_id, body.model_preset, body.model_id,
-                    body.yolo_confidence_threshold, body.yolo_device,
-                    body.text_music_confidence_threshold, body.text_music_device,
-                    body.stave_confidence_threshold, body.stave_device,
-                )
-            except (RuntimeError, ValueError) as e:
-                yield event({"type": "error", "message": str(e)}); return
-            for msg in load_logs:
-                yield event({"type": "log", "message": msg})
+    job_id = _uuid.uuid4().hex[:8]
+    task_body = {**body.model_dump(), "image_ids": image_ids, "folios": folios, "skipped_count": skipped_count}
+    create_job(job_id, "text_batch", project_id, params={"project_id": project_id, "body": task_body})
+    run_text_batch_task.apply_async(kwargs={"job_id": job_id, "project_id": project_id, "body": task_body}, task_id=job_id)
+    return {"job_id": job_id}
 
-            # layer separation - run YOLO per folio, write annotations, and
-            # derive music_boxes/mask before handing off to text-service:
-            # the exact sequence /predict already does per single image.
-            music_boxes_by_index = []
-            mask_json_by_index = []
-            for i, (image_id, (name, data, mime)) in enumerate(zip(image_ids, images)):
-                pil_img = Image.open(io.BytesIO(data)).convert("RGB")
-                img_arr = np.array(pil_img)
-                yolo_txt = yolo_models.infer(img_arr)
-                write_annotation(
-                    cur, con, project_id, image_id, name, yolo_txt,
-                    yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
-                )
-                music_boxes_by_index.append(_music_boxes_for_image(project_id, name, data))
-                mask_json_by_index.append(
-                    _mask_json_for_image(project_id, name, data) if body.masking_enabled else None
-                )
-                n_detections = len(yolo_txt.splitlines()) if yolo_txt else 0
-                yield event({"type": "log", "message": f"{name}: layer separation done ({n_detections} detection(s))"})
-            yield event({"type": "stage_done", "name": "checking"})
-
-            yield event({"type": "stage", "name": "validating"})
-            yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(folios)} folio(s) (Cantus-aligned mode, source {body.source_id})..."})
-            if body.segmentation_model:
-                yield event({"type": "log", "message": f"using custom segmentation model: {body.segmentation_model}"})
-            if body.column_count:
-                yield event({"type": "log", "message": f"column count forced to {body.column_count}"})
-            yield event({"type": "stage_done", "name": "validating"})
-
-            yield event({"type": "stage", "name": "processing"})
-            fields = {
-                "folios": json.dumps(folios),
-                "source_id": str(body.source_id),
-                "device": body.device,
-                "column_bimodal_threshold": str(body.column_bimodal_threshold),
-                "masking_enabled": "true" if body.masking_enabled else "false",
-                "mask_padding": str(body.mask_padding),
-                "music_boxes": json.dumps(music_boxes_by_index),
-                "mask_json_list": json.dumps(mask_json_by_index),
-            }
-            if body.segmentation_model:
-                fields["segmentation_model"] = body.segmentation_model
-            if body.recognition_model:
-                fields["recognition_model"] = body.recognition_model
-            if body.column_count is not None:
-                fields["column_count"] = str(body.column_count)
-            files = [("images", name, mime, data) for name, data, mime in images]
-
-            for line in _stream_multipart(f"{TEXT_API_URL}/batch-run", fields=fields, files=files, timeout=1800):
-                if not line.startswith("data: "):
-                    continue
-                ev = json.loads(line[len("data: "):])
-                if ev.get("type") == "folio_result":
-                    idx = ev["image_index"]
-                    image_id = image_ids[idx]
-                    image_name = images[idx][0]
-                    alignment = ev["text_alignment"]
-                    aid = _uuid.uuid4().hex
-                    cur.execute(
-                        "INSERT INTO text_alignments"
-                        " (id, project_id, image_id, image_name, alignment_json,"
-                        " median_line_spacing, syllable_count, log_text)"
-                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (aid, project_id, image_id, image_name, json.dumps(alignment),
-                         alignment.get("median_line_spacing", 0.0),
-                         len(alignment.get("syl_boxes", [])), ""),
-                    )
-                    con.commit()
-                    yield event({"type": "log", "message": f"{image_name}: {len(alignment.get('syl_boxes', []))} syllable(s) aligned"})
-                    continue
-                yield event(ev)
-        except urllib.error.URLError as exc:
-            yield event({"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"})
-        except Exception as e:
-            yield event({"type": "error", "message": str(e)})
-        finally:
-            cur.close(); release_db_conn(con)
-
-    
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 @router.get("/projects/{project_id}/text-batch/{batch_id}/download")
 def download_text_batch(project_id: int, batch_id: str, user=Depends(get_current_user)):

@@ -145,8 +145,12 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
         _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename, 
                     project_id, image_name, clef_shape, clef_line, include_name_fields=False)
         publish({"type": "done"})
+        drop_upload(xml_upload_id)
+        if image_upload_id:
+            drop_upload(image_upload_id)
     except Exception as e:
         publish({"type": "error", "message": str(e)})
+        # leave the upload rows in place so a retry can still fetch them
     finally:
         drop_upload(xml_upload_id)
         if image_upload_id:
@@ -173,13 +177,12 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})
             publish({"type": "item_done", "item": i, "session_id": session_id})
+            drop_upload(item["xml_upload_id"])
+            drop_upload(item["image_upload_id"])
         except JobCancelled:
             return
         except Exception as e:
             failed.append({"item": i, "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
             publish({"type": "item_error", "item": i,
                      "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
-        finally:
-            drop_upload(item["xml_upload_id"])
-            drop_upload(item["image_upload_id"])
     publish({"type": "done", "total": len(items), "succeeded": succeeded, "failed": failed})

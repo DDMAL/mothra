@@ -41,7 +41,6 @@ async def encode_upload(
     image_filename = image_file.filename if image_file else None
 
     job_id = new_job_id()
-    create_job(job_id, "encode_upload", project_id)
     xml_upload_id = _uuid.uuid4().hex
     stage_upload(xml_upload_id, xml_bytes)
     image_upload_id = None
@@ -49,20 +48,18 @@ async def encode_upload(
         image_upload_id = _uuid.uuid4().hex
         stage_upload(image_upload_id, image_bytes)
 
-    run_encode_upload_task.apply_async(
-        kwargs={
-            "job_id": job_id,
-            "xml_upload_id": xml_upload_id,
-            "xml_filename": xml_filename,
-            "image_upload_id": image_upload_id,
-            "image_filename": image_filename,
-            "project_id": project_id,
-            "image_name": image_name,
-            "clef_shape": clef_shape,
-            "clef_line": clef_line,
-        },
-        task_id=job_id,
-    )
+    kwargs = {
+        "xml_upload_id": xml_upload_id,
+        "xml_filename": xml_filename,
+        "image_upload_id": image_upload_id,
+        "image_filename": image_filename,
+        "project_id": project_id,
+        "image_name": image_name,
+        "clef_shape": clef_shape,
+        "clef_line": clef_line,
+    }
+    create_job(job_id, "encode_upload", project_id, params=kwargs)
+    run_encode_upload_task.apply_async(kwargs={"job_id": job_id, **kwargs}, task_id=job_id)
     return JSONResponse({"job_id": job_id})
 
 @router.post("/validate-mei")
@@ -129,15 +126,12 @@ async def encode_batch(
         })
     
     job_id = new_job_id()
-    create_job(job_id, "encode_batch", project_id)
-    run_encode_batch_task.apply_async(
-        kwargs={
-            "job_id": job_id,
-            "items": items,
-            "project_id": project_id,
-            "clef_shape": clef_shape,
-            "clef_line": clef_line,
-        },
-        task_id=job_id,
-    )
+    kwargs = {
+        "items": items,
+        "project_id": project_id,
+        "clef_shape": clef_shape,
+        "clef_line": clef_line,
+    }
+    create_job(job_id, "encode_batch", project_id, params=kwargs)
+    run_encode_batch_task.apply_async(kwargs={"job_id": job_id, **kwargs}, task_id=job_id)
     return JSONResponse({"job_id": job_id})

@@ -336,7 +336,7 @@ export default function AppRouter({
           }}
           streamRequest={(signal, onJobId) => {
             if (batchRunIds) {
-              return apiFetch(`/api/projects/${selectedProject.id}/text-batch/run`, {
+              return apiFetchJobStream(`/api/projects/${selectedProject.id}/text-batch/run`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -359,8 +359,7 @@ export default function AppRouter({
                   stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
                   stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
                 }),
-                signal,
-              });
+              }, signal, onJobId);
             }
             const usedModelId =
               selectedProject.models.find((m) =>

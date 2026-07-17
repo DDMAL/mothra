@@ -43,11 +43,9 @@ async def run_predict(
     if body.model_preset == "custom" and not body.model_id: 
         raise HTTPException(status_code=400, detail="model_id is required when model_preset is 'custom'")
     job_id = _uuid.uuid4().hex[:8]
-    create_job(job_id, "predict", project_id)
-    run_predict_task.apply_async(
-        kwargs={"job_id": job_id, "project_id": project_id, "body": body.model_dump()},
-        task_id=job_id,
-    )
+    kwargs = {"job_id": job_id, "project_id": project_id, "body": body.model_dump()}
+    create_job(job_id, "predict", project_id, params={k: v for k, v in kwargs.items() if k != "job_id"})
+    run_predict_task.apply_async(kwargs=kwargs, task_id=job_id)
     return {"job_id": job_id}
 
 @router.delete("/projects/{project_id}/annotations/{annotation_id}")
