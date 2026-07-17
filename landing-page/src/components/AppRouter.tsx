@@ -140,9 +140,33 @@ export default function AppRouter({
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
   const [clefLine, setClefLine] = useState(3);
 
+  const [sendingBundle, setSendingBundle] = useState(false);
+  const [sendBundleError, setSendBundleError] = useState<string | null>(null);
+
+  const handleSendToCantus = async () => {
+    if (!selectedProject?.cantusSourceId) {
+      setSendBundleError("link a Cantus source to this project first");
+      return;
+    }
+    setSendingBundle(true);
+    setSendBundleError(null);
+    try {
+      const r = await apiFetchOrThrow(`/api/projects/${selectedProject.id}/sources/${selectedProject.cantusSourceId}/cantus-bundle`);
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition") ?? "";
+      const match = cd.match(/filename="?([^"]+)"?/);
+      downloadBlob(blob, match ? match[1] : `cantus-bundle-${selectedProject.cantusSourceId}.zip`);
+      setView("send-completion");
+    } catch (e) {
+      setSendBundleError(e instanceof Error ? e.message : "failed to prepare bundle");
+    } finally {
+      setSendingBundle(false);
+    }
+  };
+  
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
-    "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion", "sending",
+    "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion",
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
@@ -204,7 +228,7 @@ export default function AppRouter({
               selectedProject.annotations ?? [],
               selectedProject.meiFiles ?? [],
             );
-            if (step >= 4) setView("sending");
+            if (step >= 4) handleSendToCantus();
             else if (step >= 3) setView("neon-editor");
             else if (step >= 1 || SKIP_PREDICT) setView("ic");
             else {
@@ -229,7 +253,9 @@ export default function AppRouter({
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
           }}
-          onSendToCantus={() => setView("sending")}
+          onSendToCantus={handleSendToCantus}
+          sendingBundle={sendingBundle}
+          sendBundleError={sendBundleError}
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
@@ -665,25 +691,18 @@ export default function AppRouter({
         <NeonCompletionPage
           project={selectedProject}
           originalMeiFiles={originalMeiFiles}
-          onSendToCantus={() => setView("sending")}
+          onSendToCantus={handleSendToCantus}
+          sendingBundle={sendingBundle}
+          sendBundleError={sendBundleError}
           onBackToProject={() => setView("project")}
         />
       ) : null;
-    case "sending":
-      return (
-        <ProcessingPage
-          {...STEP_TIMING}
-          singleLabel="sending..."
-          onBack={() => setView("project")}
-          onComplete={() => setView("send-completion")}
-        />
-      );
     case "send-completion":
       return (
         <CompletionPage
-          description="voila, sent to cantus ultimus!"
+          description="MEI bundle downloaded! hand this zip off to a Cantus Ultimus maintainer — it includes a README.txt with the exact steps to commit it to production_mei_files and index it."
           continueHref="https://cantus.simssa.ca/"
-          continueLabel="view on cantus ultimus"
+          continueLabel="view cantus ultimus"
           onBackToProject={() => setView("project")}
         />
       );

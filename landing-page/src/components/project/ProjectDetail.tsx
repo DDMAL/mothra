@@ -35,6 +35,8 @@ interface ProjectDetailProps {
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
+  sendingBundle?: boolean;
+  sendBundleError?: string | null;
   onRenameProject: (newName: string) => void;
   onUploadImage: (
     file: File,
@@ -64,6 +66,8 @@ export default function ProjectDetail({
   stepsUnlocked,
   onStepClick,
   onSendToCantus,
+  sendingBundle = false,
+  sendBundleError = null,
   onRenameProject,
   onUploadImage,
   onUploadModel,
@@ -610,11 +614,16 @@ export default function ProjectDetail({
                 meiSection.clearSelection();
                 onSendToCantus();
               }}
-              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+              disabled={sendingBundle}
+              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-default"
             >
-              send to cantus ultimus &rarr;
+              {sendingBundle ? "preparing bundle..." : (<>send to cantus ultimus &rarr;</>)}
             </button>
-          ) : (() => {
+          ) : null}
+          {sendBundleError && (
+            <p className="text-red-200 text-xs text-center">{sendBundleError}</p>
+          )}
+          {meiSection.selectedIds.size === 0 && (() => {
             const annotations = project.annotations ?? [];
             const meiFiles = project.meiFiles ?? [];
             const nextStep = minNextStep(usedNames.images, annotations, meiFiles);

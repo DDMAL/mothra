@@ -13,6 +13,7 @@ per-image IC/encoding flow, since batch IC doesn't exist yet.
 """
 import io
 import json
+import re
 import urllib.error
 import urllib.request
 import uuid as _uuid
@@ -160,4 +161,70 @@ def export_source_annotations(project_id: int, source_id: str, user=Depends(get_
     return Response(
         content=buf.getvalue(), media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="source-{source_id}-export.zip"'},
+    )
+
+def _get_cantus_siglum(source_id: str) -> Optional[str]:
+    try:
+        with urllib.request.urlopen(f"{TEXT_API_URL}/cantus-source/{source_id}", timeout=15) as resp:
+            return json.loads(resp.read().decode()).get("siglum")
+    except Exception:
+        return None
+    
+def _sanitize_stem(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", s.strip()) if s else ""
+
+def _cantus_bundle_readme(source_id: str, siglum: str, filenames: list[str]) -> str:
+    files_list = "\n".join(f"  - {f}" for f in filenames)
+    return (
+        "This bundle contains corrected MEI files ready for Cantus Ultimus indexing.\n\n"
+        f"To publish:\n"
+        f"  1. Place these files under production_mei_files/{source_id}/ (DDMAL/production_mei_files repo)\n"
+        f"  2. Commit and push to that repo's main branch\n"
+        f"  3. Pull the updated submodule into the running Cantus Ultimus deployment\n"
+        f"  4. Inside the Cantus Ultimus container, run:\n"
+        f"     python manage.py index_manuscript_mei {source_id} --mei-dir production_mei_files/{source_id}\n"
+        f"     (confirm {source_id} is the correct manuscript_id — it may differ from the CantusDB source ID)\n\n"
+        f"Files in this bundle ({len(filenames)}):\n{files_list}\n"
+    )
+
+@router.get("/projects/{project_id}/sources/{source_id}/cantus-bundle")
+def cantus_bundle(project_id: int, source_id: str, user=Depends(get_current_user)):
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("""
+            SELECT m.name, m.xml_content, pi.folio
+            FROM mei_files m
+            JOIN project_images pi ON pi.project_id = m.project_id AND pi.name = m.image_name
+            WHERE m.project_id=%s AND pi.source_id=%s AND m.corrected=1
+              AND m.xml_content IS NOT NULL
+              AND m.created_at = (
+                  SELECT MAX(m2.created_at) FROM mei_files m2
+                  WHERE m2.project_id = m.project_id AND m2.image_name = m.image_name
+              )
+        """, (project_id, source_id))
+        rows = cur.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail=(
+                "no corrected MEI files found for this Cantus source yet — "
+                "correct at least one MEI file in Neon before sending to Cantus Ultimus"
+            ))
+
+        siglum = _get_cantus_siglum(source_id) or f"source-{source_id}"
+        buf = io.BytesIO()
+        used_stems, filenames = set(), []
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, xml_content, folio in rows:
+                stem = _sanitize_stem(folio) or _sanitize_stem(name) or "unknown"
+                unique_stem, n = stem, 2
+                while unique_stem in used_stems:
+                    unique_stem = f"{stem}-{n}"; n += 1
+                used_stems.add(unique_stem)
+                mei_filename = f"{siglum}_{unique_stem}.mei"
+                zf.writestr(mei_filename, xml_content)
+                filenames.append(mei_filename)
+            zf.writestr("README.txt", _cantus_bundle_readme(source_id, siglum, filenames))
+
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="cantus-bundle-{source_id}.zip"'},
     )

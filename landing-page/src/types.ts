@@ -37,6 +37,7 @@ export interface TextAlignment {
   id: string;
   imageName: string;
   imageSrc?: string;
+  siglum?: string;
   medianLineSpacing: number;
   syllableCount: number;
 }
@@ -80,7 +81,6 @@ export type View =
   | "ic-completion"
   | "encoding-processing"
   | "encoding-completion"
-  | "sending"
   | "send-completion"
   | "neon-editor"
   | "neon-completion"

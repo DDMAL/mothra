@@ -5,6 +5,7 @@ Mirrors the SSE event contract used by inference_api.py's /predict and
 encode_api.py's /encode-upload: stage -> stage_done -> log -> result -> done.
 """
 import json
+import re
 import logging
 import queue
 import shutil
@@ -165,7 +166,10 @@ def get_cantus_source(source_id: int):
         {(r.get("folio") or "").strip() for r in rows if (r.get("folio") or "").strip()},
         key=_folio_sort_key,
     )
-    data = {"sourceId": str(source_id), "name": name, "folios": folios}
+    m = re.search(r"\(([^)]+)\)$", institution) if institution else None
+    institution_code = m.group(1) if m else institution
+    siglum = f"{institution_code} {shelfmark}".strip() if institution_code and shelfmark else None
+    data = {"sourceId": str(source_id), "name": name, "folios": folios, "siglum": siglum}
     _cantus_cache_put(source_id, data)
     return data
 
