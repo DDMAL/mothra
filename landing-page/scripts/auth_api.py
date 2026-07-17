@@ -429,6 +429,63 @@ def _migrate_db():
         cur.close()
         release_db_conn(con)
 
+    # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN params JSONB")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+        con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN retry_of TEXT REFERENCES jobs(job_id)")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # mei_files: needed so the cantus-bundle export (section 8) can pick the
+    # latest revision per image_name, mirroring how annotations/text_alignments
+    # already do `ORDER BY created_at DESC LIMIT 1`.
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE mei_files ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # refresh_tokens: new table for section 5
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            revoked_at TIMESTAMPTZ
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)")
+    con.commit()
+    cur.close(); release_db_conn(con)
+
+
     # startup cleanup of neon manifests to prevent excess accumulation
     import time as _time
     _now = _time.time()

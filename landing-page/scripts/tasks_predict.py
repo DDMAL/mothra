@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 
 from celery_app import celery_app
-from job_store import publish_event
+from job_store import publish_event, check_cancelled, JobCancelled
 from auth_api import get_db_conn, release_db_conn, _log_activity
 from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
@@ -88,6 +88,7 @@ def run_predict_task(job_id, project_id, body):
         publish({"type": "stage", "name": "processing"})
         results = []
         for image_id, image_name, image_data, mime_type, image_folio in images:
+            check_cancelled(job_id)
             publish({"type": "log", "message": f"Processing {image_name}..."})
             pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
             img_arr = np.array(pil_img)
@@ -127,6 +128,9 @@ def run_predict_task(job_id, project_id, body):
         publish({"type": "stage_done", "name": "processing"})
         publish({"type": "result", "annotations": results})
         publish({"type": "done"})
+    except JobCancelled:
+        con.rollback()
+        return
     except Exception as e:
         con.rollback()
         publish({"type": "error", "message": str(e)})

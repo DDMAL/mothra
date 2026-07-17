@@ -57,9 +57,11 @@ export async function apiFetchJobStream(
     kickoffUrl: string,
     kickoffInit: RequestInit,
     signal: AbortSignal,
+    onJobId?: (jobId: string) => void,
 ): Promise<Response> {
     const kickoff = await apiFetch(kickoffUrl, { ...kickoffInit, signal });
     if (!kickoff.ok) return kickoff;
     const { job_id } = await kickoff.json();
+    onJobId?.(job_id);
     return apiFetch(`/api/jobs/${job_id}/stream`, { signal });
 }

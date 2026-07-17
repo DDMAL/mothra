@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { apiFetch } from "../../lib/apiFetch";
 
 interface Stage {
   text: boolean;
@@ -12,7 +13,7 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
-  streamRequest?: (signal: AbortSignal) => Promise<Response>;
+  streamRequest?: (signal: AbortSignal, onJobId?: (id: string) => void) => Promise<Response>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onResult?: (data: any) => void;
   onLogsReady?: (logs: string[]) => void
@@ -45,6 +46,7 @@ export default function ProcessingPage({
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const jobIdRef = useRef<string | null>(null);
   const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
   const [timeDisplay, setTimeDisplay] = useState<string>("estimating...")
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -175,7 +177,7 @@ export default function ProcessingPage({
     async function run() {
       const collectedLogs: string[] = [];
       try {
-        const resp = await streamRequest!(abort.signal);
+        const resp = await streamRequest!(abort.signal, (id) => { jobIdRef.current = id; });
         if (!resp.ok || !resp.body) {
           const msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
           setStreamError(msg);
@@ -302,7 +304,12 @@ export default function ProcessingPage({
             <div className="flex items-center gap-3 text-sm text-white">
               <span> are you sure? </span>
               <button
-                onClick={() => { streamAbortRef.current?.abort(); onBack(); }}
+                onClick={async () => { 
+                  streamAbortRef.current?.abort(); 
+                  if (jobIdRef.current) {
+                    apiFetch(`/api/jobs/${jobIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
+                  }
+                  onBack(); }}
                 className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
               >
                 yes

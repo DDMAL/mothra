@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from celery_app import celery_app
-from job_store import publish_event, fetch_upload, drop_upload, session_put
+from job_store import publish_event, fetch_upload, drop_upload, session_put, check_cancelled, JobCancelled
 from auth_api import get_db_conn, release_db_conn
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
@@ -159,6 +159,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
     
     succeeded, failed = [], []
     for i, item in enumerate(items):
+        check_cancelled(job_id)
         publish({"type": "item_start", "item": i, "total": len(items),
                  "name": item["image_filename"] or item["xml_filename"]})
         xml_bytes = fetch_upload(item["xml_upload_id"])
@@ -172,6 +173,8 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})
             publish({"type": "item_done", "item": i, "session_id": session_id})
+        except JobCancelled:
+            return
         except Exception as e:
             failed.append({"item": i, "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
             publish({"type": "item_error", "item": i,

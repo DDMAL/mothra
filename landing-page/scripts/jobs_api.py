@@ -1,16 +1,18 @@
 import asyncio
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from celery_app import celery_app
+from auth_api import get_current_user, require_project_owner, db_cursor
 from job_store import get_events_since, get_job_status, publish_event
 
 router = APIRouter()
 
 POLL_INTERVAL_SECONDS = 0.5
 STALE_JOB_TIMEOUT_SECONDS = 90
-TERMINAL_TYPES = {"done", "error"}
+TERMINAL_TYPES = {"done", "error", "cancelled"}
 
 @router.get("/jobs/{job_id}/stream")
 async def stream_job(job_id: str):
@@ -50,3 +52,20 @@ async def stream_job(job_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, user=Depends(get_current_user)):
+    with db_cursor() as (con, cur):
+        cur.execute("SELECT project_id, status FROM jobs WHERE job_id=%s", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="job not found")
+        project_id, status = row
+        if project_id is not None:
+            require_project_owner(cur, project_id, user["id"])
+        if status in ("succeeded", "failed", "cancelled"):
+            return {"ok": True, "status": status}
+
+    await asyncio.to_thread(celery_app.control.revoke, job_id, terminate=True, signal="SIGTERM")
+    await asyncio.to_thread(publish_event, job_id, {"type": "cancelled", "message": "cancelled by user"})
+    return {"ok": True}

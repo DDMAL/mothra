@@ -334,7 +334,7 @@ export default function AppRouter({
             }
             setView("completion");
           }}
-          streamRequest={(signal) => {
+          streamRequest={(signal, onJobId) => {
             if (batchRunIds) {
               return apiFetch(`/api/projects/${selectedProject.id}/text-batch/run`, {
                 method: "POST",
@@ -395,7 +395,7 @@ export default function AppRouter({
                   ? Number(textFindingSettings.sourceId)
                   : null,
               }),
-            }, signal);
+            }, signal, onJobId);
           }}
           onResult={(ev) => {
             if (batchRunIds) {
@@ -551,7 +551,7 @@ export default function AppRouter({
               setPendingBatchPairs([]);
               setView("encoding-completion");
             }}
-            streamRequest={(signal) => {
+            streamRequest={(signal, onJobId) => {
               const form = new FormData();
               pendingBatchPairs.forEach((pair) => form.append("xml_files", pair.xmlFile));
               pendingBatchPairs.forEach((pair) => form.append("image_files", pair.imageFile));
@@ -559,7 +559,7 @@ export default function AppRouter({
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
               if (selectedProjectId) form.append("project_id", String(selectedProjectId));
-              return apiFetchJobStream("/api/encode-batch", { method: "POST", body: form }, signal);
+              return apiFetchJobStream("/api/encode-batch", { method: "POST", body: form }, signal, onJobId);
             }}
             onResult={handleEncodeBatchResult}
             onLogsReady={setEncodingLogs}
@@ -579,7 +579,7 @@ export default function AppRouter({
             }
             setView("encoding-completion");
           }}
-          streamRequest={(signal) => {
+          streamRequest={(signal, onJobId) => {
             const form = new FormData();
             form.append("xml_file", pendingXmlFile!);
             if (pendingImageFile) {
@@ -590,7 +590,7 @@ export default function AppRouter({
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }
-            return apiFetchJobStream("/api/encode-upload", { method: "POST", body: form }, signal);
+            return apiFetchJobStream("/api/encode-upload", { method: "POST", body: form }, signal, onJobId);
           }}
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}
