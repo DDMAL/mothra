@@ -2,6 +2,22 @@ services:
   redis:
     image: redis:7-alpine
 
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mothra
+      POSTGRES_PASSWORD: mothra
+      POSTGRES_DB: mothra
+    ports:
+      - "127.0.0.1:5433:5432"   # host-only; 5433 avoids clashing with a host Postgres on 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mothra -d mothra"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
   ic:
     build:
       context: ./ic
@@ -24,7 +40,8 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      # Defaults to the bundled postgres service; set DATABASE_URL in .env to use an external/managed DB.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       IC_API_URL: http://ic:8000
@@ -32,9 +49,14 @@ services:
       TEXT_API_URL: http://text-service:8002
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     depends_on:
-      - redis
-      - ic
-      - text-service
+      redis:
+        condition: service_started
+      ic:
+        condition: service_started
+      text-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy   # init_db()/_migrate_db() run at import; wait for DB
     volumes:
       - stored_models:/app/scripts/stored_models
 
@@ -42,16 +64,21 @@ services:
     build:
       context: ./landing-page
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       TEXT_API_URL: http://text-service:8002
     depends_on:
-      - redis
-      - text-service
+      redis:
+        condition: service_started
+      text-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     command: celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
     volumes:
       - stored_models:/app/scripts/stored_models
 
 volumes:
   stored_models:
+  pgdata:
