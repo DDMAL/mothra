@@ -45,6 +45,7 @@ SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -507,6 +508,20 @@ def create_token(user_id: int) -> str:
     exp = datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
 
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+def create_refresh_token(user_id: int) -> str:
+    raw = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
+            (user_id, _hash_token(raw), expires_at),
+        )
+        con.commit()
+    return raw
+
 def _make_edit_token(project_id: int, mei_id: str) -> str:
     payload = {
         "project_id": project_id,
@@ -575,6 +590,7 @@ def register(request: Request, body: RegisterBody):
             raise HTTPException(status_code=409, detail="username or email already taken")
     return {
         "token": create_token(user_id),
+        "refresh_token": create_refresh_token(user_id),
         "user": {"id": user_id, "username": body.username, "email": body.email, "firstName": body.first_name}
     }
 
@@ -591,13 +607,43 @@ def login(request: Request, body: LoginBody):
         raise HTTPException(status_code=401, detail="invalid credentials")
     return {
         "token": create_token(row[0]),
+        "refresh_token": create_refresh_token(row[0]),
         "user": {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3]}
     }
 
 @router.post("/auth/refresh")
-def refresh_token(user=Depends(get_current_user)):
-    return {"access_token": create_token(user["id"]), "token_type": "bearer"}
+def refresh_token(x_refresh_token: str = Header(None, alias="X-Refresh-Token")):
+    if not x_refresh_token:
+        raise HTTPException(status_code=401, detail="missing refresh token")
+    token_hash = _hash_token(x_refresh_token)
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT id, user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash=%s",
+            (token_hash,),
+        )
+        row = cur.fetchone()
+        if not row or row[3] is not None or row[2] < datetime.utcnow():
+            raise HTTPException(status_code=401, detail="invalid or expired refresh token")
+        cur.execute("UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=%s", (row[0],))
+        con.commit()
+    user_id = row[1]
+    return {
+        "access_token": create_token(user_id),
+        "refresh_token": create_refresh_token(user_id),  # rotation: old is now revoked, above
+        "token_type": "bearer",
+    }
 
 @router.get("/me")
 def me(user=Depends(get_current_user)):
     return user
+
+@router.post("/auth/logout")
+def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=Depends(get_current_user)):
+    if x_refresh_token:
+        with db_cursor() as (con, cur):
+            cur.execute(
+                "UPDATE refresh_tokens SET revoked_at=NOW() WHERE token_hash=%s AND user_id=%s AND revoked_at IS NULL",
+                (_hash_token(x_refresh_token), user["id"]),
+            )
+            con.commit()
+    return {"ok": True}
