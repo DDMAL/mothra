@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: mothra
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: worker
+          image: ghcr.io/ddmal/mothra-backend:sha-6bf1c19
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - celery_app.celery_app
+            - worker
+            - --loglevel=info
+            - --pool=threads
+            - --concurrency=2
+          envFrom:
+            - configMapRef:
+                name: mothra-config
+            - secretRef:
+                name: mothra-secrets
+          volumeMounts:
+            - name: stored-models
+              mountPath: /app/scripts/stored_models
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 10"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: stored-models
+          persistentVolumeClaim:
+            claimName: mothra-stored-models

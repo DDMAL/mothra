@@ -1,13 +1,16 @@
-name: build-images
+name: ci-cd
 
-# Builds the three Mothra service images and pushes them to this repo's
+# CI: builds the three Mothra service images and pushes them to this repo's
 # GitHub Container Registry (ghcr.io/<owner>/mothra-{backend,ic,text-service}).
+# CD: after a successful build, applies the app manifests and rolls out the
+# deployments (all except redis and postgres).
 # The Celery `worker` reuses the `mothra-backend` image, so it is not built here.
 
 on:
   push:
     branches:
       - main
+      - develop
       - k8s-deployment
   workflow_dispatch:
 
@@ -79,3 +82,58 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    # Runs only after all three images are built & pushed, so the sha-tagged
+    # images are guaranteed to exist before we roll the deployments.
+    needs: build
+    runs-on: ubuntu-latest
+    # Serialize deploys per branch; don't cancel an in-flight rollout.
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout (manifests only)
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig from secret
+        env:
+          # Raw kubeconfig content stored in the KUBECONFIG repo secret.
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Pin image tag to this commit's sha
+        run: |
+          set -euo pipefail
+          TAG="sha-${GITHUB_SHA:0:7}"   # matches metadata-action type=sha,format=short
+          echo "Deploying image tag: $TAG"
+          sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" \
+            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml
+          grep -H 'image: ghcr.io' \
+            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml
+
+      - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
+        run: |
+          set -euo pipefail
+          kubectl apply \
+            -f k8s/configmap.yaml \
+            -f k8s/backend.yaml \
+            -f k8s/worker.yaml \
+            -f k8s/ic.yaml \
+            -f k8s/text-service.yaml \
+            -f k8s/ingress.yaml
+
+      - name: Roll out deployments (all except redis & postgres)
+        run: |
+          set -euo pipefail
+          for d in backend worker ic text-service; do
+            kubectl -n mothra rollout status "deploy/$d" --timeout=300s
+          done
+          kubectl -n mothra get pods

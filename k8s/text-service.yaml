@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: text-service
+  namespace: mothra
+  labels:
+    app: text-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: text-service
+  template:
+    metadata:
+      labels:
+        app: text-service
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: text-service
+          image: ghcr.io/ddmal/mothra-text-service:sha-6bf1c19
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8002
+          # No env required (port fixed in the image CMD). Kraken/HTR + the
+          # baked-in Tridis OCR model make this a memory-heavy container.
+          readinessProbe:
+            tcpSocket:
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8002
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: text-service
+  namespace: mothra
+  labels:
+    app: text-service
+spec:
+  selector:
+    app: text-service
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
