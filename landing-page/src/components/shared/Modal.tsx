@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-type ModalSize = "sm" | "lg" | "2xl";
+type ModalSize = "sm" | "lg" | "2xl" | "4xl" | "5xl";
 type ModalBackdrop = "none" | "dim" | "dark";
 
 interface ModalProps {
@@ -11,7 +11,13 @@ interface ModalProps {
   children: ReactNode;
 }
 
-const SIZE = { sm: "max-w-sm", lg: "max-w-lg", "2xl": "max-w-2xl" };
+const SIZE = {
+  sm: "max-w-sm",
+  lg: "max-w-lg",
+  "2xl": "max-w-2xl",
+  "4xl": "max-w-4xl",
+  "5xl": "max-w-5xl",
+};
 const BACKDROP = { none: "", dim: "bg-black/30", dark: "bg-black/60" };
 
 export default function Modal({
