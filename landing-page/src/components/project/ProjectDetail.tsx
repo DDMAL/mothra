@@ -7,6 +7,7 @@ import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
+import IcSessionsModal from "./IcSessionsModal";
 import ActivityLog from "./ActivityLog";
 import ImageTab from "./ImageTab";
 import ModelTab from "./ModelTab";
@@ -84,6 +85,7 @@ export default function ProjectDetail({
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [icSessionsModal, setIcSessionsModal] = useState(false);
   const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
   const [imageSubTab, setImageSubTab] = useState<"grid" | "batch">("grid");
   const [batchStartFolio, setBatchStartFolio] = useState("");
@@ -269,6 +271,14 @@ export default function ProjectDetail({
             >
               export all files ↓
             </button>
+            {stepsUnlocked >= 1 && (
+              <button
+                onClick={() => setIcSessionsModal(true)}
+                className="text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
+              >
+                manage IC sessions
+              </button>
+            )}
           </div>
           <ActivityLog projectId={project.id} />
           <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl px-5 py-3">
@@ -739,6 +749,12 @@ export default function ProjectDetail({
             onBack();
           }}
           onCancel={() => setShowDeleteModal(false)}
+        />
+      )}
+      {icSessionsModal && (
+        <IcSessionsModal
+          projectId={project.id}
+          onClose={() => setIcSessionsModal(false)}
         />
       )}
     </div>

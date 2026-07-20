@@ -144,6 +144,13 @@ def _get(url: str, timeout: int = 30):
         return resp.status, resp.read()
 
 
+def _delete(url: str, timeout: int = 30):
+    """DELETE and return ``(status, body_bytes)``. Raises ``HTTPError`` on 4xx/5xx."""
+    req = urllib.request.Request(url, method="DELETE")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
 def _ic_unreachable(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=502,
@@ -273,6 +280,32 @@ def ic_complete(session_id: str, user=Depends(get_current_user)):
         "session_id": session_id,
         "xml_base64": base64.b64encode(raw).decode(),
         "filename": f"ic-session-{session_id}.xml",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Saved-session management (frontend iframes IC's own resume UI)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/projects/{project_id}/ic/manage-url")
+def ic_manage_url(project_id: int, user=Depends(get_current_user)) -> dict:
+    """Return the deep-link mothra iframes to manage this project's IC sessions.
+
+    All the list/resume/delete logic already lives in IC's own SPA + REST
+    (``GET/DELETE /sessions``); mothra just needs the URL to embed. Because
+    ``IC_PUBLIC_URL`` is server-side config (it differs between local dev and
+    Docker), the frontend can't build this itself — same reason
+    :func:`ic_start` returns ``ic_url`` rather than the SPA hardcoding it.
+
+    The ``project_id`` scopes IC's otherwise-global session list to this
+    project (see IC's ``GET /sessions?project_id=``); the ownership check here
+    guards against embedding another user's project's sessions.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+    return {
+        "ic_url": f"{IC_PUBLIC_URL}/?manage=1&project_id={project_id}&embed=1",
     }
 
 
