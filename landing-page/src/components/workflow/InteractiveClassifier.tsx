@@ -51,6 +51,10 @@ export default function InteractiveClassifier({
   const [queueAll, setQueueAll] = useState<{ done: number; total: number } | null>(
     null,
   );
+  // Bumped to force the IC iframe to remount (and re-run its ic:ready
+  // handshake) when the batch training set changes while a create-session page
+  // is open — see the reload effect below.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const queuedNames = useMemo(
     () => new Set(queue.map((p) => p.imageFile.name)),
@@ -63,6 +67,24 @@ export default function InteractiveClassifier({
   // Guards against a slow /ic/start response landing after the user has
   // already switched pages — only the latest request may set state.
   const startSeq = useRef(0);
+
+  // Latest batch training selection, readable from the message handler below
+  // without re-subscribing the listener whenever the selection changes.
+  const trainingRef = useRef({ presets: trainingPresets, files: trainingFiles });
+  useEffect(() => {
+    trainingRef.current = { presets: trainingPresets, files: trainingFiles };
+  }, [trainingPresets, trainingFiles]);
+
+  // Reload the iframe once if a create-session page is currently open (staged,
+  // no session started yet) so a just-changed batch training set shows there
+  // immediately — the remount re-runs the ic:ready handshake and re-pulls the
+  // selection. Called from the training-set handlers rather than an effect so
+  // it only fires on a real user change (not page navigation, which already
+  // remounts the iframe via icUrl) and stays out of the resumed/live-session
+  // case (sessionId set), where reloading would blow away in-progress work.
+  const reloadOpenCreateSession = useCallback(() => {
+    if (icUrl && sessionId == null) setReloadNonce((n) => n + 1);
+  }, [icUrl, sessionId]);
 
   // Stage a fresh page + bboxes in IC whenever the selected page changes.
   useEffect(() => {
@@ -106,6 +128,20 @@ export default function InteractiveClassifier({
     function onMessage(e: MessageEvent) {
       if (icOrigin && e.origin !== icOrigin) return;
       const data = e.data;
+      // The embedded create-session screen announces readiness; reply with the
+      // batch-level training set (if any) so the user doesn't have to re-pick
+      // it on every page. The iframe seeds its own inputs from this and won't
+      // overwrite a selection already made there.
+      if (data?.type === "ic:ready") {
+        const { presets, files } = trainingRef.current;
+        if (presets.length > 0 || files.length > 0) {
+          (e.source as Window | null)?.postMessage(
+            { type: "ic:prefill-training", presets, files },
+            e.origin || "*",
+          );
+        }
+        return;
+      }
       if (data?.type === "ic:session-created" && typeof data.sessionId === "string") {
         setSessionId(data.sessionId);
       }
@@ -131,10 +167,12 @@ export default function InteractiveClassifier({
       .catch(() => setAvailablePresets([]));
   }, []);
 
-  const togglePreset = (name: string, checked: boolean) =>
+  const togglePreset = (name: string, checked: boolean) => {
     setTrainingPresets((prev) =>
       checked ? [...prev, name] : prev.filter((n) => n !== name),
     );
+    reloadOpenCreateSession();
+  };
 
   // Turn IC's GameraXML (base64) + a project image into the {xmlFile, imageFile}
   // pair the encode-batch flow consumes. Shared by the interactive "queue page"
@@ -334,9 +372,10 @@ export default function InteractiveClassifier({
                     type="file"
                     accept=".xml"
                     multiple
-                    onChange={(e) =>
-                      setTrainingFiles(Array.from(e.target.files ?? []))
-                    }
+                    onChange={(e) => {
+                      setTrainingFiles(Array.from(e.target.files ?? []));
+                      reloadOpenCreateSession();
+                    }}
                     className="block w-full text-xs text-[#1D3335]/70 file:mr-2 file:cursor-pointer file:rounded-lg file:border-0 file:bg-[#4AADAA] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:opacity-90"
                   />
                 </label>
@@ -411,7 +450,7 @@ export default function InteractiveClassifier({
             </div>
           ) : icUrl ? (
             <iframe
-              key={icUrl}
+              key={`${icUrl}:${reloadNonce}`}
               src={icUrl}
               title={`Interactive Classifier — ${img?.name ?? ""}`}
               className="flex-1 w-full border-0"
