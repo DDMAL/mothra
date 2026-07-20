@@ -23,7 +23,14 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 ### Backend
 - **FastAPI** + **uvicorn** (port 8001)
 - **PostgreSQL** via `psycopg2` — hosted on [Neon](https://neon.tech), connection string in `.env`
-- **bcrypt** for password hashing, **python-jose** for JWT (HS256, 72h expiry)
+- **bcrypt** for password hashing, **python-jose** for JWT (HS256, 72h access token expiry)
+- **Refresh tokens**: a separate, longer-lived (30-day) opaque token, hashed (SHA-256) and stored
+  in the `refresh_tokens` table, issued alongside the access token at login/register. `POST
+  /api/auth/refresh` (sent via `X-Refresh-Token` header, not `Authorization`) verifies it against
+  the table and mints a new access token + a new refresh token, revoking the old one (rotation on
+  every use). `POST /api/auth/logout` revokes the current refresh token. This replaces the old
+  `/api/auth/refresh`, which depended on `get_current_user` and so could never actually help once
+  the access token had expired — the exact case it existed to handle.
 - Vite proxies `/api`, `/neon`, `/Neon-gh` → `localhost:8001` in dev
 
 ### Database schema (auto-created on startup in `auth_api.py:init_db`)
@@ -33,14 +40,15 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `projects` | id, user_id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, last_opened_at, is_pinned |
 | `project_images` | stores image bytes as `BYTEA` |
 | `project_models` | model name references only (no file stored) |
-| `mei_files` | xml_content as TEXT, corrected flag |
+| `mei_files` | xml_content as TEXT, corrected flag, `created_at` (used to pick each image's latest MEI revision for the cantus-bundle export) |
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |
-| `jobs` | one row per predict/encode-upload/encode-batch job; `status` ∈ `pending/running/succeeded/failed` — see **Job queue** below |
+| `jobs` | one row per predict/encode-upload/encode-batch/text-batch job; `status` ∈ `pending/running/succeeded/failed/cancelled`; `params JSONB` stores the exact kickoff kwargs (needed for retry), `retry_of`/`attempt` track retry lineage — see **Job queue** below |
 | `job_events` | ordered progress-event log per job (`job_id`, `payload JSONB`) — what `GET /api/jobs/{id}/stream` polls |
 | `job_uploads` | raw XML/image bytes staged for a Celery task to pick up, keyed by a short-lived `upload_id` |
 | `job_sessions` | encode-job output (`mei_bytes`, `stem`, `manifest`) — replaces the old in-memory `_sessions` dict + `MANIFEST_DIR` tempfiles |
+| `refresh_tokens` | `user_id`, `token_hash` (SHA-256 of the raw token), `expires_at`, `revoked_at` — backs the real JWT refresh flow, see **Backend** above |
 
 Schema is migrated forward via `_migrate_db()` in `auth_api.py` — new columns are `ALTER TABLE ADD COLUMN IF NOT EXISTS` guarded with `DuplicateColumn` catch.
 
@@ -56,7 +64,7 @@ Schema is migrated forward via `_migrate_db()` in `auth_api.py` — new columns 
 | `8001` | landing-page FastAPI (`uvicorn`) | `/api/*`; also reaches IC/text-service server-to-server |
 | `8000` | IC service (`ic/` submodule) | IC REST API **and** the built IC SPA (served single-origin) |
 | `8002` | text-finding service (`text-service/`) | wraps the `mothra-text` pipeline; called from `:8001` |
-| — | Celery worker | runs `/predict`, `/encode-upload`, `/encode-batch` jobs; no port of its own |
+| — | Celery worker | runs `/predict`, `/encode-upload`, `/encode-batch`, `/text-batch/run` jobs; no port of its own |
 
 Redis (default `redis://localhost:6379/0`, override via `CELERY_BROKER_URL`) is
 **only the Celery task broker** — it holds no application state. All job
@@ -126,20 +134,51 @@ are deliberately **not** in `config.yaml` — they're secrets and stay in `.env`
 
 ### Job queue (Celery + Postgres)
 
-`POST /api/projects/{id}/predict`, `POST /api/encode-upload`, and
-`POST /api/encode-batch` no longer stream results directly — each returns
-`{"job_id": ...}` immediately after enqueuing a Celery task
-(`tasks_predict.py` / `tasks_encode.py`), and the frontend connects separately
-to `GET /api/jobs/{job_id}/stream` to watch progress. That endpoint
+`POST /api/projects/{id}/predict`, `POST /api/encode-upload`,
+`POST /api/encode-batch`, and `POST /api/projects/{id}/text-batch/run` no
+longer stream results directly — each returns `{"job_id": ...}` immediately
+after enqueuing a Celery task (`tasks_predict.py` / `tasks_encode.py` /
+`tasks_text_batch.py`), and the frontend connects separately to
+`GET /api/jobs/{job_id}/stream` to watch progress. That endpoint
 (`jobs_api.py`) polls the `job_events` table and re-emits the same
 `data: {...}\n\n` SSE frames the old in-request generator used to `yield` —
 `ProcessingPage.tsx` didn't need to change at all, only the two-step
 kickoff-then-stream wiring in `AppRouter.tsx` (via `apiFetchJobStream()` in
-`lib/apiFetch.ts`). Redis is purely the Celery broker; Postgres (`jobs`/`job_events`)
-is the single source of truth for job status, so there's no Celery result
-backend configured. Known gaps: no job cancellation (`revoke`) wired up, no
-periodic cleanup of `job_uploads`/`job_sessions` rows yet, and a dead worker
-is detected via a ~90s staleness timeout rather than immediately.
+`lib/apiFetch.ts`, which also reports the kickoff's `job_id` back via an
+`onJobId` callback so the frontend can cancel/retry it later). Redis is purely
+the Celery broker; Postgres (`jobs`/`job_events`) is the single source of
+truth for job status, so there's no Celery result backend configured. Known
+gaps: no periodic cleanup of `job_uploads`/`job_sessions` rows yet (see the
+retry note below — this got slightly more important, not less), and a dead
+worker is detected via a ~90s staleness timeout rather than immediately.
+
+**Job cancellation** (`POST /api/jobs/{id}/cancel`, `jobs_api.py`) calls
+`celery_app.control.revoke(job_id, terminate=True)` **and** flips a
+cooperative flag other tasks check between iterations
+(`job_store.check_cancelled()`, raises `JobCancelled`). Both matter: because
+the worker runs `--pool=threads` (see below), `terminate=True` cannot actually
+kill an in-flight task — there's no child OS process to signal, only a
+thread. `revoke()` alone only stops a task that hasn't started yet (workers
+check a broadcast revoked-id set before picking one up). For a task already
+running, the cooperative check inside `tasks_predict.py`'s and
+`tasks_text_batch.py`'s per-image loops (and `tasks_encode.py`'s per-item
+batch loop) is what actually stops it. If you add a new long-running task,
+it needs its own `check_cancelled()` call in its loop or cancellation will
+silently no-op for it once it's running.
+
+**Job retry** (`POST /api/jobs/{id}/retry`) replays a `failed` job's exact
+original kickoff kwargs (persisted in `jobs.params` at kickoff time) as a new
+job, linked via `jobs.retry_of`/`jobs.attempt`. This is deliberately separate
+from `ProcessingPage.tsx`'s older `retryKey`-based "restart" button, which
+just re-invokes `streamRequest` client-side with freshly-collected params —
+"retry" (server-tracked, same params) and "restart" (client-side, re-collects
+params) now coexist as distinct buttons. For `encode_upload`/`encode_batch`
+retry to work at all, `tasks_encode.py` had to stop dropping staged
+`job_uploads` rows in a blanket `finally` — they're now only dropped on the
+success path, so a failed job's XML/image bytes survive long enough to be
+retried. **This is the other half of the "known gap" above**: those rows now
+leak indefinitely for jobs that fail and are never retried, since there's
+still no TTL/cleanup job for `job_uploads`.
 
 **The worker must run with `--pool=threads`, not Celery's default `prefork`.**
 `prefork` works by `fork()`-ing a child process per worker slot; PyTorch (and
@@ -237,24 +276,25 @@ restarting dependents together after any redeploy remains the safer habit.
 | Path | Role |
 |---|---|
 | `landing-page/scripts/main.py` | FastAPI app, CORS, mounts routers |
-| `landing-page/scripts/auth_api.py` | Auth endpoints, DB init (incl. job-queue tables), project CRUD, image storage |
+| `landing-page/scripts/auth_api.py` | Auth endpoints incl. refresh-token issuance/rotation/logout, DB init (incl. job-queue + `refresh_tokens` tables), project CRUD, image storage |
 | `landing-page/scripts/account_api.py` | Profile update, password change, account delete |
 | `landing-page/scripts/projects_api.py` | Project CRUD, export/duplicate, activity/log-download endpoints |
 | `landing-page/scripts/images_api.py` | Project image upload/fetch/delete endpoints |
 | `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start` and related IC-step endpoints |
 | `landing-page/scripts/inference_api.py` | `POST /projects/{id}/predict` kickoff endpoint (enqueues `tasks_predict.py`), annotation CRUD |
 | `landing-page/scripts/mei_api.py` | MEI file CRUD, Neon batch-editor edit-session bootstrap |
-| `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups to the text-service for the final "send to Cantus Ultimus" step |
+| `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups (incl. `siglum`) to the text-service |
 | `landing-page/scripts/model_validation.py` | Validates uploaded YOLO checkpoints, derives text/music/staves class maps |
 | `landing-page/scripts/config.py` / `config.yaml` | Centralized non-secret paths + service URLs, env-var overridable |
 | `landing-page/scripts/celery_app.py` | Celery app instance/config; entrypoint for `celery -A celery_app.celery_app worker` |
-| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events, staged uploads, encode session/manifest storage |
-| `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` — polls `job_events`, re-emits SSE frames |
-| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` | Celery tasks: the actual YOLO inference / MEI-building work, run out-of-request |
+| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage |
+| `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
+| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work, run out-of-request |
 | `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`) shared by the predict task and `batch_api.py` |
 | `landing-page/scripts/encode_api.py` | `POST /api/encode-upload` / `/encode-batch` — kickoff endpoints, enqueue Celery tasks |
 | `landing-page/scripts/encode_to_mei.py` | Core encoding logic: parse XML, estimate staves, build MEI, validate |
-| `landing-page/src/lib/apiFetch.ts` | `apiFetch`/`apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper |
+| `landing-page/scripts/batch_api.py` | `POST /text-batch/run` job-queue kickoff, `GET /text-batch/{id}/download`, `GET /sources/{id}/export`, and `GET /sources/{id}/cantus-bundle` (corrected-MEI zip for manual hand-off to `production_mei_files`) |
+| `landing-page/src/lib/apiFetch.ts` | `apiFetch` (also drives the silent JWT-refresh-on-401 flow via `X-Refresh-Token`) / `apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper, reports `job_id` via an `onJobId` callback |
 | `landing-page/src/types.ts` | All shared TypeScript types |
 | `landing-page/src/components/AppRouter.tsx` | All view routing (switch on `view` string) |
 | `landing-page/src/hooks/useEncodingFlow.ts` | Encoding state: pending files, logs, MEI content |
@@ -271,10 +311,22 @@ restarting dependents together after any redeploy remains the safer habit.
 3. IC completion / upload XML output  →  view: "ic-completion"
 4. Encoding (GameraXML → MEI via encode_to_mei.py)  →  view: "encoding-processing"
 5. Neon.js batch editor for human correction  →  view: "neon-editor"
-6. Send to Cantus Ultimus  →  view: "sending"
+6. Send to Cantus Ultimus  →  downloads a corrected-MEI zip bundle (no dedicated view)
 ```
 
 `stepsUnlocked` on the project record gates which steps are accessible. It increments as each step completes and is persisted via `PUT /api/projects/{id}`.
+
+Step 6 is **not** a live push to Cantus Ultimus — the DDMAL/cantus (Cantus
+Ultimus) repo has no write API (its DRF views are all `ListAPIView`/
+`RetrieveAPIView`, GET-only). The real workflow there is manual: a maintainer
+commits correctly-named MEI files into the separate `DDMAL/production_mei_files`
+repo and runs `index_manuscript_mei` by hand. So "send to Cantus Ultimus"
+(`AppRouter.tsx`'s `handleSendToCantus`) downloads a zip from
+`GET /api/projects/{id}/sources/{sourceId}/cantus-bundle` — corrected MEI
+files renamed `{siglum}_{folio}.mei` plus a `README.txt` with the exact
+manual hand-off steps — rather than routing through any `ProcessingPage`/job
+queue (it's a fast synchronous zip build, no Celery task needed). The old
+`"sending"` view/animation and its no-op fake progress bar are gone.
 
 ---
 
@@ -293,9 +345,8 @@ restarting dependents together after any redeploy remains the safer habit.
 
 - All routers share `get_db_conn()` and `get_current_user()` from `auth_api.py` — import from there
 - Image bytes stored directly in `project_images.data BYTEA` — no file system or S3
-- `/predict`, `/encode-upload`, `/encode-batch` run as Celery tasks (`tasks_predict.py`/`tasks_encode.py`); kickoff endpoints validate synchronously, create a `jobs` row, enqueue, and return `{"job_id": ...}` — see **Job queue** above
+- `/predict`, `/encode-upload`, `/encode-batch`, `/text-batch/run` all run as Celery tasks (`tasks_predict.py`/`tasks_encode.py`/`tasks_text_batch.py`); kickoff endpoints validate synchronously, create a `jobs` row (with `params=` set to the exact kickoff kwargs, for retry), enqueue, and return `{"job_id": ...}` — see **Job queue** above
 - Encode job output (`mei_bytes`, `stem`, `manifest`) lives in the `job_sessions` Postgres table, read by `GET /mei/{id}` / `GET /manifest/{id}` — no more in-memory `_sessions` dict or `MANIFEST_DIR` tempfiles
-- `/projects/{id}/text-batch/run` (`batch_api.py`) is still synchronous — not yet converted to the job queue
 
 ---
 
@@ -314,14 +365,30 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 
 ## Things that don't exist yet (planned)
 
-- JWT refresh — 72h expiry with no `POST /api/auth/refresh`; sessions drop mid-workflow
-- Job cancellation — clicking "cancel" in `ProcessingPage` stops the browser from reading the stream but doesn't stop the Celery worker (no `revoke(..., terminate=True)`)
 - Cleanup of `job_uploads`/`job_sessions` rows — no TTL/periodic deletion yet, they accumulate
-- `/projects/{id}/text-batch/run` still runs synchronously — not yet moved to the Celery job queue
+  (and now matter slightly more: failed-but-not-yet-retried encode jobs keep their staged
+  `job_uploads` rows around on purpose, so retry can still fetch them — see **Job queue** above)
+- Health/status page — no way to check backend/Postgres/Redis/Celery-worker/IC/text-service
+  liveness from the app; not implemented
+- IIIF manifest import — no way to bulk-import project images from a IIIF manifest URL; not
+  implemented (single-file/PDF upload via `images_api.py`'s `POST /projects/{id}/images` is
+  still the only ingestion path)
 
 ## Things that have been implemented (no longer placeholders)
 
-- **Job queue** — `/predict`, `/encode-upload`, `/encode-batch` run as Celery tasks with Postgres-backed status/progress (`jobs`/`job_events`); see **Job queue** above
+- **Job queue** — `/predict`, `/encode-upload`, `/encode-batch`, `/text-batch/run` all run as
+  Celery tasks with Postgres-backed status/progress (`jobs`/`job_events`); see **Job queue** above
+- **Job cancellation** — `POST /api/jobs/{id}/cancel` combines `celery_app.control.revoke()` with
+  a cooperative in-task check, since the worker's `--pool=threads` config means `terminate=True`
+  can't actually kill an already-running task; see **Job queue** above
+- **Job retry** — `POST /api/jobs/{id}/retry` replays a failed job's stored `params` as a new,
+  lineage-tracked job; see **Job queue** above
+- **Real JWT refresh** — a separate, rotating, revocable refresh token (`refresh_tokens` table)
+  replaces the old `/api/auth/refresh`, which depended on the very access token it was meant to
+  refresh and so never worked once that token actually expired; see **Backend** above
+- **Cantus bundle export** — the old mocked "sending" animation is gone; "send to Cantus Ultimus"
+  now downloads a real zip of corrected MEI files (`GET /sources/{id}/cantus-bundle`) for manual
+  hand-off, since Cantus Ultimus has no write API; see **Workflow pipeline** above
 - **Batch encoding** — `POST /api/encode-batch` (`batch_api.py`/`tasks_encode.py`) handles multiple XML+image pairs in one job
 - **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
 - **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections

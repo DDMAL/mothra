@@ -360,6 +360,8 @@ export default function AppRouter({
             }
             setView("completion");
           }}
+          projectId={selectedProject.id}
+          jobKind={batchRunIds ? "text_batch" : "predict"}
           streamRequest={(signal, onJobId) => {
             if (batchRunIds) {
               return apiFetchJobStream(`/api/projects/${selectedProject.id}/text-batch/run`, {
@@ -576,6 +578,8 @@ export default function AppRouter({
               setPendingBatchPairs([]);
               setView("encoding-completion");
             }}
+            projectId={selectedProjectId}
+            jobKind="encode_batch"
             streamRequest={(signal, onJobId) => {
               const form = new FormData();
               pendingBatchPairs.forEach((pair) => form.append("xml_files", pair.xmlFile));
@@ -604,6 +608,8 @@ export default function AppRouter({
             }
             setView("encoding-completion");
           }}
+          projectId={selectedProjectId}
+          jobKind="encode_upload"
           streamRequest={(signal, onJobId) => {
             const form = new FormData();
             form.append("xml_file", pendingXmlFile!);

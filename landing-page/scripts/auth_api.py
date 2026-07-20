@@ -470,7 +470,13 @@ def _migrate_db():
     finally:
         cur.close(); release_db_conn(con)
 
-    # refresh_tokens: new table for section 5
+    con = get_db_conn(); cur = con.cursor()
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_uploads_created_at ON job_uploads (created_at)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_sessions_created_at ON job_sessions (created_at)")
+    con.commit()
+    cur.close(); release_db_conn(con)
+
+    # refresh_tokens
     con = get_db_conn(); cur = con.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS refresh_tokens (

@@ -11,6 +11,8 @@ import { useProjectMutations } from "./hooks/useProjectMutations";
 import { useEncodingFlow } from "./hooks/useEncodingFlow";
 import { useScrollFade } from "./hooks/useScrollFade";
 import { apiFetch, registerUnauthenticatedHandler } from "./lib/apiFetch";
+import { useActiveJobWatcher } from "./hooks/useActiveJobWatcher";
+import { toast } from "./lib/toast";
 
 export default function App() {
   const [view, setView] = useState<View>("landing");
@@ -39,6 +41,16 @@ export default function App() {
   } = useEncodingFlow(selectedProjectId, setProjects);
 
   useScrollFade(view);
+
+  useActiveJobWatcher((job, status) => {
+    toast[status === "succeeded" ? "success" : status === "failed" ? "error" : "info"](
+        `${job.kind} job ${status}`,
+        { duration: 0, action: { label: "view", onClick: () => {
+            if (job.projectId) setSelectedProjectId(job.projectId);
+            setView("project");
+        } } },
+    );
+  });
 
   const handleLoginSuccess = (user: CurrentUser, token: string) => {
     setToken(token);

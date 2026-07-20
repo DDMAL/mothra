@@ -5,6 +5,12 @@ export interface Toast {
     message: string;
     variant: ToastVariant;
     duration: number;
+    action?: ToastAction;
+}
+
+export interface ToastAction {
+    label: string;
+    onClick: () => void;
 }
 
 type Listener = () => void;
@@ -19,16 +25,12 @@ function emitChange() {
     for (const listener of listeners) listener();
 }
 
-function addToast(message: string, variant: ToastVariant, duration?: number) {
+function addToast(message: string, variant: ToastVariant, opts?: { duration?: number; action?: ToastAction }) {
     const id = nextId++;
-    const resolvedDuration = duration ?? DEFAULT_DURATION;
-    toasts = [...toasts, { id, message, variant, duration: resolvedDuration }];
+    const resolvedDuration = opts?.duration ?? DEFAULT_DURATION;
+    toasts = [...toasts, { id, message, variant, duration: resolvedDuration, action: opts?.action }];
     emitChange();
-
-    if (resolvedDuration > 0) {
-        setTimeout(() => dismissToast(id), resolvedDuration);
-    }
-
+    if (resolvedDuration > 0) setTimeout(() => dismissToast(id), resolvedDuration);
     return id;
 }
 
@@ -49,9 +51,9 @@ export function getToastSnapshot(): Toast[] {
 }
 
 export const toast = {
-    success: (message: string, duration?: number) => addToast(message, "success", duration),
-    error: (message: string, duration?: number) => addToast(message, "error", duration),
-    info: (message: string, duration?: number) => addToast(message, "info", duration),
-    warning: (message: string, duration?: number) => addToast(message, "warning", duration),
+    success: (message: string, opts?: { duration?: number; action?: ToastAction }) => addToast(message, "success", opts),
+    error: (message: string, opts?: { duration?: number; action?: ToastAction }) => addToast(message, "error", opts),
+    info: (message: string, opts?: { duration?: number; action?: ToastAction }) => addToast(message, "info", opts),
+    warning: (message: string, opts?: { duration?: number; action?: ToastAction }) => addToast(message, "warning", opts),
     dismiss: dismissToast,
-}
+};

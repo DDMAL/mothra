@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/apiFetch";
+import { registerActiveJobs, markJobSettled } from "../../lib/activeJobs";
 
 interface Stage {
   text: boolean;
@@ -18,6 +19,8 @@ interface ProcessingPageProps {
   onResult?: (data: any) => void;
   onLogsReady?: (logs: string[]) => void
   onBatchDone?: (summary: { succeeded: unknown[]; failed: unknown[]; }) => void;
+  projectId?: number | null;
+  jobKind?: string;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -35,6 +38,8 @@ export default function ProcessingPage({
   onResult,
   onLogsReady,
   onBatchDone,
+  projectId, 
+  jobKind,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -216,6 +221,7 @@ export default function ProcessingPage({
         }
         if (ev.type === "done" && !completedRef.current) {
           completedRef.current = true;
+          if (jobIdRef.current) markJobSettled(jobIdRef.current);
           onLogsReady?.(collectedLogs);
           if (ev.succeeded || ev.failed) {
             onBatchDone?.({ succeeded: ev.succeeded ?? [], failed: ev.failed ?? [] });
@@ -225,6 +231,11 @@ export default function ProcessingPage({
       }
     }
   }, [onResult, onLogsReady, onBatchDone, onComplete, completionDelayMs]);
+
+  const consumeStreamRef = useRef(consumeStream);
+  useEffect(() => {
+    consumeStreamRef.current = consumeStream;
+  }, [consumeStream]);
 
   useEffect(() => {
     if (!streamRequest) return;
@@ -241,8 +252,11 @@ export default function ProcessingPage({
 
     async function run() {
       try {
-        const resp = await streamRequest!(abort.signal, (id) => { jobIdRef.current = id; });
-        await consumeStream(resp);
+        const resp = await streamRequest!(abort.signal, (id) => { 
+          jobIdRef.current = id;
+          registerActiveJobs(id, projectId ?? null, jobKind ?? "unknown");
+        });
+        await consumeStreamRef.current(resp);
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           const msg = (e as Error).message;
@@ -253,7 +267,12 @@ export default function ProcessingPage({
     }
     run();
     return () => abort.abort();
-  }, [retryKey, consumeStream]);
+    // intentionally excludes `streamRequest`/`consumeStream` (see consumeStreamRef
+    // above) — this must only re-run on an explicit retry, not on every re-render
+    // that happens to hand ProcessingPage new inline callback props (e.g. from
+    // useActiveJobWatcher's store updates), or it kicks off a duplicate backend job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryKey]);
 
   // server-tracked retry: re-runs the failed job's stored params via the
   // backend (jobs_api.py's POST /jobs/{id}/retry) instead of restarting the
