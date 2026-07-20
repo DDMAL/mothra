@@ -14,7 +14,7 @@ class PredictBody(BaseModel):
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     image_ids: list[str]
     confidence_threshold: float = 0.5
-    device: str = "cpu"
+    device: str = "auto"   # auto → GPU if present else CPU (resolved in yolo_inference)
     text_music_confidence_threshold: Optional[float] = None
     text_music_device: Optional[str] = None
     stave_confidence_threshold: Optional[float] = None

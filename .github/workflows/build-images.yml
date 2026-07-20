@@ -41,6 +41,18 @@ jobs:
             file: ./text-service/Dockerfile
 
     steps:
+      # Reclaim ~20-30GB on the runner: the CUDA-torch (backend/worker) and
+      # kraken (text-service) images are large and can hit the ~14GB default
+      # free space, failing the build with ENOSPC. Removes preinstalled
+      # toolchains this build doesn't use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL \
+            "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          sudo docker image prune --all --force || true
+          df -h /
+
       # submodules: neon (backend), mothra-text (text-service), ic (ic image).
       # lfs: the medieval YOLO .pt weights the backend bakes in — without this
       # they are checked out as pointer stubs and inference fails at runtime.

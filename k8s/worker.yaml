@@ -17,6 +17,21 @@ spec:
     spec:
       imagePullSecrets:
         - name: ghcr-pull-secret
+      # --- GPU (MIG-backed vGPU) — mirrors Rodan k8s/33-gpu-celery.yaml ---
+      # Pinned to mothra's own GPU node (Rodan owns k3s-gpu-node-2, so no MIG
+      # contention). The NVIDIA runtime injects the MIG instance via
+      # NVIDIA_VISIBLE_DEVICES=all (container env below). We deliberately do NOT
+      # request nvidia.com/gpu: on this MIG guest the device plugin would then
+      # overwrite NVIDIA_VISIBLE_DEVICES with the parent-GPU UUID → CUDA can't
+      # open the MIG (CUDA_ERROR_NO_DEVICE). App auto-detects GPU→cuda, else cpu.
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: "true"
+        kubernetes.io/hostname: k3s-gpu-node-1
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: worker
           image: ghcr.io/ddmal/mothra-backend:sha-6bf1c19
@@ -29,6 +44,14 @@ spec:
             - --loglevel=info
             - --pool=threads
             - --concurrency=2
+          env:
+            # MIG instance is injected by the NVIDIA runtime (not the device
+            # plugin) — see the scheduling note above. compute,utility is
+            # required or cuInit → CUDA_ERROR_NO_DEVICE.
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
           envFrom:
             - configMapRef:
                 name: mothra-config
@@ -37,15 +60,25 @@ spec:
           volumeMounts:
             - name: stored-models
               mountPath: /app/scripts/stored_models
+          # Cold start on GPU (torch CUDA init + model load) is slow — gate
+          # liveness behind a generous startupProbe (like Rodan's GPU worker).
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 30"
+            periodSeconds: 30
+            timeoutSeconds: 35
+            failureThreshold: 30
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 10"
-            initialDelaySeconds: 60
+                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 30"
             periodSeconds: 60
-            timeoutSeconds: 15
+            timeoutSeconds: 40
             failureThreshold: 3
           resources:
             requests:
