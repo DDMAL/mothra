@@ -23,6 +23,13 @@ import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
 
+// Dev escape hatch for machines that can't run ultralytics: when set, the
+// predict/processing step is bypassed and "Continue" on a fresh project jumps
+// straight to the Interactive Classifier (which falls back to placeholder
+// bboxes server-side when no YOLO annotations exist). Pair with MOTHRA_SKIP_YOLO
+// on the backend so model uploads skip checkpoint inspection too.
+const SKIP_PREDICT = Boolean(import.meta.env.VITE_SKIP_PREDICT);
+
 // A project's used images are eligible for the batch (cross-folio-aware)
 // text-finding pipeline only when every one of them was tagged with a folio
 // against the project's single Cantus source at upload time.
@@ -199,7 +206,7 @@ export default function AppRouter({
             );
             if (step >= 4) setView("sending");
             else if (step >= 3) setView("neon-editor");
-            else if (step >= 1) setView("ic");
+            else if (step >= 1 || SKIP_PREDICT) setView("ic");
             else {
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
@@ -213,6 +220,7 @@ export default function AppRouter({
           }
           onStepClick={(step) => {
             if (step === 0) {
+              if (SKIP_PREDICT) { setView("ic"); return; }
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");

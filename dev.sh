@@ -116,19 +116,49 @@ fi
 # --- launch + teardown -----------------------------------------------------
 PIDS=()
 
-# Recursively kill a process and all its descendants (uvicorn --reload spawns
-# a worker child; npm spawns vite — a plain kill on the parent can orphan them).
-kill_tree() {
+# Collect a process and all its descendants (uvicorn --reload spawns a worker
+# child; npm spawns vite → esbuild — signalling only the parent can orphan
+# them). Gather the whole set BEFORE killing anything: once a parent dies,
+# pgrep -P can no longer rediscover its children.
+collect_tree() {
   local pid=$1 child
-  for child in $(pgrep -P "$pid" 2>/dev/null); do kill_tree "$child"; done
-  kill "$pid" 2>/dev/null
+  echo "$pid"
+  for child in $(pgrep -P "$pid" 2>/dev/null); do collect_tree "$child"; done
 }
 
 cleanup() {
   trap '' INT TERM EXIT          # disarm so this runs once
   echo; echo "${C_DIM}shutting down…${C_RST}"
-  local pid
-  for pid in "${PIDS[@]}"; do kill_tree "$pid"; done
+
+  local pid targets=()
+  for pid in "${PIDS[@]}"; do targets+=( $(collect_tree "$pid") ); done
+
+  # 1. Polite SIGTERM to the whole set.
+  for pid in "${targets[@]}"; do kill -TERM "$pid" 2>/dev/null; done
+
+  # 2. Wait up to 5s for graceful exit, polling so the common case (nothing
+  #    stuck) still returns in a fraction of a second.
+  local deadline=$((SECONDS + 5)) alive
+  while ((SECONDS < deadline)); do
+    alive=0
+    for pid in "${targets[@]}"; do kill -0 "$pid" 2>/dev/null && { alive=1; break; }; done
+    ((alive)) || break
+    sleep 0.2
+  done
+
+  # 3. SIGKILL any straggler. The usual one is the Celery worker: SIGINT/SIGTERM
+  #    only trigger a *warm* shutdown that blocks until its in-flight
+  #    predict/encode task finishes, so without this the whole script hangs
+  #    here (frontend already gone) until the job completes. Only SIGKILL (or a
+  #    second Ctrl-C → cold shutdown) actually stops it.
+  local forced=0
+  for pid in "${targets[@]}"; do
+    kill -0 "$pid" 2>/dev/null && { kill -9 "$pid" 2>/dev/null; forced=1; }
+  done
+  ((forced)) && echo "${C_DIM}(force-killed an unresponsive process — e.g. a Celery job mid-run)${C_RST}"
+
+  # Reap the awk log-formatters (process substitutions): they hit EOF once the
+  # services above are gone, so this returns promptly and flushes their tails.
   wait 2>/dev/null
   echo "${C_OK}all stopped.${C_RST}"
 }

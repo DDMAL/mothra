@@ -29,8 +29,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from config import IC_API_URL, IC_PUBLIC_URL
 
@@ -139,6 +140,13 @@ def _post_empty(url: str, timeout: int = 120):
 def _get(url: str, timeout: int = 30):
     """GET and return ``(status, body_bytes)``. Raises ``HTTPError`` on 4xx/5xx."""
     req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, resp.read()
+
+
+def _delete(url: str, timeout: int = 30):
+    """DELETE and return ``(status, body_bytes)``. Raises ``HTTPError`` on 4xx/5xx."""
+    req = urllib.request.Request(url, method="DELETE")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.status, resp.read()
 
@@ -272,4 +280,126 @@ def ic_complete(session_id: str, user=Depends(get_current_user)):
         "session_id": session_id,
         "xml_base64": base64.b64encode(raw).decode(),
         "filename": f"ic-session-{session_id}.xml",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Saved-session management (frontend iframes IC's own resume UI)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/projects/{project_id}/ic/manage-url")
+def ic_manage_url(project_id: int, user=Depends(get_current_user)) -> dict:
+    """Return the deep-link mothra iframes to manage this project's IC sessions.
+
+    All the list/resume/delete logic already lives in IC's own SPA + REST
+    (``GET/DELETE /sessions``); mothra just needs the URL to embed. Because
+    ``IC_PUBLIC_URL`` is server-side config (it differs between local dev and
+    Docker), the frontend can't build this itself — same reason
+    :func:`ic_start` returns ``ic_url`` rather than the SPA hardcoding it.
+
+    The ``project_id`` scopes IC's otherwise-global session list to this
+    project (see IC's ``GET /sessions?project_id=``); the ownership check here
+    guards against embedding another user's project's sessions.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+    return {
+        "ic_url": f"{IC_PUBLIC_URL}/?manage=1&project_id={project_id}&embed=1",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Batch training set + "queue all" (parent-page-driven, no per-page iframe)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ic/training-presets")
+def ic_training_presets(user=Depends(get_current_user)) -> list[str]:
+    """Proxy IC's built-in training-set preset list to the IC parent page.
+
+    Lets mothra's IC parent page render the same preset checkboxes IC's own
+    create-session screen shows, so a training set can be picked once and
+    applied to every page via :func:`ic_auto_queue`.
+    """
+    try:
+        _, raw = _get(f"{IC_API_URL}/training-presets")
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    try:
+        presets = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return presets if isinstance(presets, list) else []
+
+
+@router.post("/projects/{project_id}/ic/auto-queue")
+async def ic_auto_queue(
+    project_id: int,
+    imageName: Annotated[str, Form()],
+    training_presets: Annotated[str | None, Form()] = None,
+    training_files: Annotated[list[UploadFile] | None, File()] = None,
+    user=Depends(get_current_user),
+):
+    """Classify one project page with a shared training set → GameraXML.
+
+    The server-side half of the "queue all available" batch path. Instead of
+    opening the IC iframe for each page, mothra generates the page's bboxes,
+    creates an IC session seeded with the caller's training set (which runs a
+    classify round at ingest), and completes it — all server-to-server —
+    returning the GameraXML the frontend turns into a ``File`` for the encode
+    queue. Mirrors IC's in-iframe "queue page" (auto-export), just driven from
+    the parent so every page can be queued in one pass.
+
+    ``training_presets`` is a JSON-encoded ``list[str]`` of built-in preset
+    filenames (see :func:`ic_training_presets`); ``training_files`` are
+    optional GameraXML (.xml) uploads. At least one training source should be
+    present, since classify needs a non-empty training pool — the frontend
+    enforces this before calling.
+    """
+    image_id, image_bytes, mime_type = _project_image(
+        project_id, imageName, user["id"]
+    )
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, imageName)
+
+    fields = {"annotations_format": ann_format}
+    if training_presets:
+        fields["training_presets"] = training_presets
+    files = [
+        ("page_image", imageName, mime_type, image_bytes),
+        ("annotations", "annotations.json", "application/json", annotations),
+    ]
+    for tf in training_files or []:
+        files.append(
+            ("training_files", tf.filename or "training.xml", "application/xml", await tf.read())
+        )
+
+    # 1. Create + classify the session in one call (training set → classify).
+    try:
+        status, raw = _post_multipart(f"{IC_API_URL}/sessions", fields=fields, files=files)
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    if status >= 400:
+        raise HTTPException(status_code=502, detail=f"IC /sessions failed ({status}): {raw[:500]!r}")
+    session_id = json.loads(raw).get("id")
+    if not session_id:
+        raise HTTPException(status_code=502, detail="IC /sessions returned no session id")
+
+    # 2. Finalise → GameraXML.
+    try:
+        c_status, c_raw, _headers = _post_empty(
+            f"{IC_API_URL}/sessions/{session_id}/complete?page=true"
+        )
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=f"IC complete failed: {exc.read()[:500]!r}")
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    if c_status >= 400:
+        raise HTTPException(status_code=502, detail=f"IC complete failed ({c_status})")
+
+    stem = imageName.rsplit(".", 1)[0] if "." in imageName else imageName
+    return {
+        "session_id": session_id,
+        "xml_base64": base64.b64encode(c_raw).decode(),
+        "filename": f"{stem}.xml",
     }
