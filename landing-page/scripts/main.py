@@ -57,7 +57,11 @@ if _neon_gh_dir.exists():
     app.mount("/Neon-gh", StaticFiles(directory=str(_neon_gh_dir)), name="neon-gh")
 
 DIST_DIR = Path(__file__).parent.parent / "dist"
-if DIST_DIR.exists():
+# Guard on the actual build artifacts, not just dist/ — a partial dist/ (e.g.
+# holding only the Neon submodule build, with no assets/ or index.html) exists
+# in dev and would otherwise crash StaticFiles() at import. In dev the frontend
+# is served by Vite on :5173, so the backend simply skips this mount.
+if (DIST_DIR / "assets").is_dir() and (DIST_DIR / "index.html").is_file():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)

@@ -24,3 +24,10 @@ IC_PUBLIC_URL = _url("IC_PUBLIC_URL", "ic_public_url")
 TEXT_API_URL = _url("TEXT_API_URL", "text_api_url")
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", _cfg["celery"]["broker_url"])
+
+# Dev-only escape hatch for machines that can't run ultralytics (e.g. no
+# compatible torch build). When set, uploaded YOLO checkpoints are stored
+# without inspection (class mapping must be set by hand) and the predict step
+# is expected to be skipped from the frontend (VITE_SKIP_PREDICT). Leave unset
+# for real deployments — inspection catches bad checkpoints up front.
+SKIP_YOLO = os.environ.get("MOTHRA_SKIP_YOLO", "").strip().lower() in ("1", "true", "yes")
