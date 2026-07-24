@@ -59,6 +59,21 @@ done
 
 die() { echo "${C_ERR}error:${C_RST} $*" >&2; exit 1; }
 
+# Vite requires Node 20.19+/22.12+. Don't trust whatever nvm version got
+# inherited into this shell's PATH (nvm re-uses an already-active version on
+# new shells instead of switching to the `default` alias) — explicitly `nvm
+# use` a version that satisfies Vite here so a stale Node 18 elsewhere can't
+# silently break the web process.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh"
+  nvm use 22 --silent 2>/dev/null || nvm use default --silent 2>/dev/null || true
+fi
+NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 20 ] 2>/dev/null; then
+  die "Node $(node -v 2>/dev/null) is active but Vite needs 20.19+/22.12+ — run 'nvm install 22 && nvm alias default 22' then retry"
+fi
+
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 
 free_port() {

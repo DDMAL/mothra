@@ -101,7 +101,11 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         else:
             staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
             ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
-        glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+        n_input_staves = len(staves)
+        glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, page_w, page_h)
+        if len(staves) > n_input_staves:
+            ev({"type": "log", "message":
+                f" recovered {len(staves) - n_input_staves} stave(s) the detector missed"})
         assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
         ev({"type": "log", "message": f" {assigned} glyphs assigned to stave"})
         ev({"type": "stage_done", "name": "validating"})

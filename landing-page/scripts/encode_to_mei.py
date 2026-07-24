@@ -164,30 +164,49 @@ def image_dimensions(header: bytes) -> Optional[tuple]:
     return None
 
 def assign_glyphs_to_staves(
-        glyphs: list[Glyph], staves: list[StaveBbox]
-) -> dict[int, list[Glyph]]:
-    result: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+        glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int
+) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
+    """Assign each glyph to a stave.
+
+    Detected staves (usually from YOLO stave-class detections) can miss real
+    staff systems entirely — confirmed on a real manuscript page where only 4
+    of 10 real staff-system rows had any stave-class detection at all. Rather
+    than force every glyph onto whichever detected stave is nearest (which
+    corrupts note ordering and pitch for every missed row, since glyphs from
+    multiple distinct physical rows end up interleaved by x-position in one
+    stave's bucket), this reconciles independently-clustered row-groups
+    against the detected staves by Y-range overlap: a row that overlaps a
+    detected stave is assigned to it as before; a row that overlaps nothing
+    is a system the detector missed, and gets a synthesized stave of its own.
+
+    Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
+    (synthesized entries appended at the end). Callers must build zones/
+    <sb>/<clef> from the RETURNED staves list, not the one passed in.
+    """
+    staves = list(staves)
     if not staves:
-        result[-1] = list(glyphs)
-        return result
-    for glyph in glyphs:
-        cy = glyph.cy
-        best_idx = None
-        best_overlap = -1
+        result: dict[int, list[Glyph]] = {-1: list(glyphs)}
+        return result, staves
+
+    result = {i: [] for i in range(len(staves))}
+    row_groups = _cluster_glyphs_into_staves(glyphs, page_w, page_h, id_prefix="row")
+
+    for row_stave, members in row_groups:
+        best_idx, best_overlap = None, 0
         for i, stave in enumerate(staves):
-            lo = stave.uly - STAVE_BUFFER_PX
-            hi = stave.lry + STAVE_BUFFER_PX
-            if lo <= cy <= hi:
-                overlap = min(cy, hi) - max(cy, lo)
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_idx = i
-        if best_idx is None:
-            best_idx = min(range(len(staves)), key=lambda i: abs(staves[i].cy - cy))
-        result[best_idx].append(glyph)
+            lo, hi = stave.uly - STAVE_BUFFER_PX, stave.lry + STAVE_BUFFER_PX
+            overlap = min(row_stave.lry, hi) - max(row_stave.uly, lo)
+            if overlap > best_overlap:
+                best_overlap, best_idx = overlap, i
+        if best_idx is not None:
+            result[best_idx].extend(members)
+        else:
+            new_idx = len(staves)
+            staves.append(row_stave)
+            result[new_idx] = list(members)
     for idx in result:
         result[idx].sort(key=lambda g: g.ulx)
-    return result
+    return result, staves
 
 def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_MULTIPLIER, ) -> list[list[Glyph]]:
     if not glyphs:
@@ -201,17 +220,25 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
             clusters[-1].append(glyph)
     return clusters
 
-def match_syllable_text(cluster: list[Glyph], syl_boxes: list[dict]) -> str:
-    """Match a neume cluster to the syl_boxes entry with the largest x-overlap
-    on the same row (both segmentations read the stave left-to-right).
-    Falls back to "-" when nothing overlaps or no alignment was supplied."""
+def find_best_syllable_match(
+        cluster: list[Glyph], syl_boxes: list[dict], used: set[int]
+) -> Optional[int]:
+    """Match a neume cluster to the syl_boxes entry (by index) with the largest
+    x-overlap on the same row (both segmentations read the stave L-to-R).
+    Entries already claimed by an earlier cluster (via `used`) are skipped —
+    Neon's resize action mutates the one zone all referencing elements share,
+    so two syllables pointing at the same zone would silently move together.
+    Returns None when nothing overlaps, no alignment was supplied, or every
+    candidate on this row is already used."""
     if not syl_boxes or not cluster:
-        return "-"
+        return None
     c_ulx = min(g.ulx for g in cluster)
     c_lrx = max(g.lrx for g in cluster)
     c_cy = sum(g.cy for g in cluster) / len(cluster)
-    best, best_overlap = None, 0
-    for box in syl_boxes:
+    best_idx, best_overlap = None, 0
+    for i, box in enumerate(syl_boxes):
+        if i in used:
+            continue
         b_ulx, b_uly = box["ul"]
         b_lrx, b_lry = box["lr"]
         b_cy = (b_uly + b_lry) / 2
@@ -219,8 +246,20 @@ def match_syllable_text(cluster: list[Glyph], syl_boxes: list[dict]) -> str:
             continue  # different row band
         overlap = min(c_lrx, b_lrx) - max(c_ulx, b_ulx)
         if overlap > best_overlap:
-            best, best_overlap = box, overlap
-    return best["syl"] if best else "-"
+            best_idx, best_overlap = i, overlap
+    return best_idx
+
+def _syl_box_valid(box: dict, image_w: int, image_h: int) -> bool:
+    """A syl_boxes entry is only usable as a zone if it's a well-formed box
+    that actually falls within the page — guards against a stale/mismatched-
+    resolution text_alignment row (see _resolve_hints in tasks_encode.py,
+    which has no dimension cross-check against the image being encoded)."""
+    try:
+        ulx, uly = box["ul"]
+        lrx, lry = box["lr"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    return 0 <= ulx < lrx <= image_w and 0 <= uly < lry <= image_h
 
 
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
@@ -252,6 +291,49 @@ def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveB
     if not lines:
         return []
     return _staves_from_staff_lines(lines, img_w, img_h)
+
+def _cluster_glyphs_into_staves(
+        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto"
+) -> list[tuple[StaveBbox, list[Glyph]]]:
+    """Cluster glyphs into stave-sized row groups by Y-center gap, pairing each
+    synthesized StaveBbox with the exact glyphs that produced it. Shared by
+    estimate_staves_from_glyphs's no-stave-data fallback and by
+    assign_glyphs_to_staves's missed-stave recovery (see there)."""
+    if not glyphs:
+        return []
+    neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
+    if not neume_like:
+        neume_like = glyphs
+
+    avg_h = median(g.nrows for g in neume_like)
+    # Tighter outlier cutoff (x2 instead of x3) reduces bridging by tall glyphs
+    representative = [g for g in neume_like if g.nrows <= avg_h * 2] or neume_like
+
+    sorted_glyphs = sorted(representative, key=lambda g: g.cy)
+    gap_threshold = avg_h * 1.5
+
+    rows: list[list[Glyph]] = [[sorted_glyphs[0]]]
+    for i in range(1, len(sorted_glyphs)):
+        if sorted_glyphs[i].cy - sorted_glyphs[i - 1].cy > gap_threshold:
+            rows.append([sorted_glyphs[i]])
+        else:
+            rows[-1].append(sorted[i])
+
+    pad = max(5, int(avg_h * 0.3))
+    groups: list[tuple[StaveBbox, list[Glyph]]] = []
+    for i, row in enumerate(rows):
+        h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
+        est_uly = max(0, min(g.uly for g in row) - pad)
+        stave = StaveBbox(
+            id=f"{id_prefix}-{i}",
+            ulx=max(0, min(g.ulx for g in row) - pad),
+            uly=max(0, min(g.uly for g in row) - pad),
+            lrx=min(page_w, max(g.lrx for g in row) + pad),
+            lry=min(page_h, max(g.lry for g in row) + pad),
+            line_ys=[est_uly + h * j / 3 for j in range(4)],
+        )
+        groups.append((stave, row))
+    return groups
 
 
 def estimate_staves_from_glyphs(
@@ -285,38 +367,7 @@ def estimate_staves_from_glyphs(
             return staves
 
     # ── Strategy 2: neume Y-gap clustering (fallback) ──────────────────────
-    neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
-    if not neume_like:
-        neume_like = glyphs
-
-    avg_h = median(g.nrows for g in neume_like)
-    # Tighter outlier cutoff (×2 instead of ×3) reduces bridging by tall glyphs.
-    representative = [g for g in neume_like if g.nrows <= avg_h * 2] or neume_like
-
-    sorted_glyphs = sorted(representative, key=lambda g: g.cy)
-    gap_threshold = avg_h * 1.5
-
-    rows: list[list[Glyph]] = [[sorted_glyphs[0]]]
-    for i in range(1, len(sorted_glyphs)):
-        if sorted_glyphs[i].cy - sorted_glyphs[i - 1].cy > gap_threshold:
-            rows.append([sorted_glyphs[i]])
-        else:
-            rows[-1].append(sorted_glyphs[i])
-
-    pad = max(5, int(avg_h * 0.3))
-    staves = []
-    for i, row in enumerate(rows):
-        h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
-        est_uly = max(0, min(g.uly for g in row) - pad)
-        staves.append(StaveBbox(
-            id=f"auto-{i}",
-            ulx=max(0, min(g.ulx for g in row) - pad),
-            uly=max(0, min(g.uly for g in row) - pad),
-            lrx=min(page_w, max(g.lrx for g in row) + pad),
-            lry=min(page_h, max(g.lry for g in row) + pad),
-            line_ys=[est_uly + h * i / 3 for i in range(4)],
-        ))
-    return staves
+    return [stave for stave, _ in _cluster_glyphs_into_staves(glyphs, page_w, page_h)]
 
 
 def _staves_from_staff_lines(
@@ -542,6 +593,37 @@ def build_mei(
             "lrx": str(glyph.lrx),
             "lry": str(glyph.lry),
         })
+    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
+
+    syl_zone_ids: dict[int, str] = {}
+    if syl_boxes:
+        invalid_idx = {
+            i for i, box in enumerate(syl_boxes)
+            if not _syl_box_valid(box, image_w, image_h)
+        }
+        if len(invalid_idx) > len(syl_boxes) / 2:
+            print(
+                f" [text-alignment] {len(invalid_idx)}/{len(syl_boxes)} syl_boxes "
+                f"fall outside the {image_w}x{image_h} page (likely a stale or "
+                "mismatched-resolution text-finding result) — syllable text will "
+                "still be used, but without bounding boxes",
+                file=sys.stderr,
+            )
+        else:
+            for i, box in enumerate(syl_boxes):
+                if i in invalid_idx:
+                    continue
+                ulx, uly = box["ul"]
+                lrx, lry = box["lr"]
+                zone_id = f"zone-syl-{i}"
+                ET.SubElement(surface, _tag("zone"), {
+                    XML_ID: zone_id,
+                    "ulx": str(int(ulx)),
+                    "uly": str(int(uly)),
+                    "lrx": str(int(lrx)),
+                    "lry": str(int(lry)),
+                })
+                syl_zone_ids[i] = zone_id
 
     # body
     body = ET.SubElement(music, _tag("body"))
@@ -578,8 +660,7 @@ def build_mei(
         "facs": "#surface-0001",
     })
 
-    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
-
+    used_syl_boxes: set[int] = set()
     for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
         staff_glyphs = glyphs_by_stave[stave_idx]
         if not staff_glyphs:
@@ -617,8 +698,17 @@ def build_mei(
                 XML_ID: f"syllable-{syllable_id}",
             })
             syl_id = str(uuid.uuid4()).replace("-", "")[:12]
-            syl = ET.SubElement(syllable, _tag("syl"), {XML_ID: f"syl-{syl_id}"})
-            syl.text = match_syllable_text(cluster, syl_boxes)
+            syl_attrs: dict[str, str] = {XML_ID: f"syl-{syl_id}"}
+            match_idx = find_best_syllable_match(cluster, syl_boxes, used_syl_boxes)
+            if match_idx is not None:
+                used_syl_boxes.add(match_idx)
+                syl_text = syl_boxes[match_idx]["syl"]
+                if match_idx in syl_zone_ids:
+                    syl_attrs["facs"] = f"#{syl_zone_ids[match_idx]}"
+            else:
+                syl_text = "-"
+            syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
+            syl.text = syl_text
             for glyph in cluster:
                 neume = ET.SubElement(syllable, _tag("neume"), {
                     XML_ID: f"neume-{glyph.id}",
@@ -715,7 +805,18 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
         zid = zone.get(XML_ID, "")
         if zid:
             zones[zid] = zone.get("type", "")
-    
+
+    surfaces = list(root.iter(_tag("surface")))
+    surface_bounds = None
+    if surfaces:
+        try:
+            surface_bounds = tuple(
+                int(surfaces[0].get(a, 0)) for a in ("ulx", "uly", "lrx", "lry")
+            )
+        except ValueError:
+            pass
+
+
     def check_facs(el, label):
         facs = el.get("facs", "")
         if not facs:
@@ -738,6 +839,11 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
             warnings.append(f"zone {zid}: negative coordinate ({ulx}, {uly}, {lrx}, {lry})")
         if ulx >= lrx or uly >= lry:
             warnings.append(f"zone {zid}: degenerate bbox ({ulx}, {uly})-({lrx}, {lry})")
+        if surface_bounds and (
+            ulx < surface_bounds[0] or uly < surface_bounds[1]
+            or lrx > surface_bounds[2] or lry > surface_bounds[3]
+        ):
+            warnings.append(f"zone {zid}: extends outside surface bounds")
 
     # sb-based: exactly one <staff>, each <sb> must resolve to a type="staff" zone
     staves = list(root.iter(_tag("staff")))
@@ -853,7 +959,7 @@ def main():
         print (f"Scaling facsimile coordinates by {scale:.4g} times ({source})")
     print(f"{len(staves)} staves found")
 
-    glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+    glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, image_w, image_h)
     assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 

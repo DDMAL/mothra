@@ -21,7 +21,7 @@ router = APIRouter()
 def encode():
     glyphs = parse_gamera_xml(MOCK_DATA_DIR / "mock_page.xml")
     staves, image_w, image_h = parse_staves(MOCK_DATA_DIR / "mock_staves.json")
-    glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+    glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, image_w, image_h)
     image_path = MOCK_DATA_DIR / "mock_page.jpg"
     mei_bytes = build_mei(glyphs_by_stave, staves, image_path, image_w, image_h, "mock_page")
     return build_neon_manifest(mei_bytes, str(image_path), "mock_page")

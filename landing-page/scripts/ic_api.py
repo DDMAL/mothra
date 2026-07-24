@@ -29,7 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from typing import Annotated
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -337,8 +337,8 @@ def ic_training_presets(user=Depends(get_current_user)) -> list[str]:
 async def ic_auto_queue(
     project_id: int,
     imageName: Annotated[str, Form()],
-    training_presets: Annotated[str | None, Form()] = None,
-    training_files: Annotated[list[UploadFile] | None, File()] = None,
+    training_presets: Annotated[Optional[str], Form()] = None,
+    training_files: Annotated[Optional[List[UploadFile]], File()] = None,
     user=Depends(get_current_user),
 ):
     """Classify one project page with a shared training set → GameraXML.
