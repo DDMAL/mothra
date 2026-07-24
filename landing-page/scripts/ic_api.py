@@ -40,6 +40,26 @@ from auth_api import get_current_user, db_cursor, require_project_owner
 router = APIRouter()
 
 
+def _music_only_yolo_lines(yolo_txt: str) -> str:
+    """Keep only class_id==1 ('music') lines from a merged text/music/staves
+    YOLO annotation blob before handing candidate glyphs to IC — IC classifies
+    neume shapes into subtypes, and 'text'(0)/'staves'(2) boxes aren't neumes.
+    Confirmed on a real page that unfiltered text-class boxes get classified
+    into neume shapes and end up as spurious <neume> elements in the final
+    MEI (see medieval_models.py's merged 0=text/1=music/2=staves convention)."""
+    kept = []
+    for line in yolo_txt.strip().splitlines():
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            class_id = int(float(parts[0]))
+        except ValueError:
+            continue
+        if class_id == 1:
+            kept.append(line)
+    return "\n".join(kept)
+
 # ---------------------------------------------------------------------------
 # Bounding boxes
 # ---------------------------------------------------------------------------
@@ -60,7 +80,9 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
         )
         row = cur.fetchone()
         if row and row[0].strip():
-            return row[0].encode(), "yolo"
+            music_only = _music_only_yolo_lines(row[0])
+            if music_only:
+                return music_only.encode(), "yolo"
 
     try:
         from PIL import Image  # available in the mothra venv

@@ -317,7 +317,7 @@ def _cluster_glyphs_into_staves(
         if sorted_glyphs[i].cy - sorted_glyphs[i - 1].cy > gap_threshold:
             rows.append([sorted_glyphs[i]])
         else:
-            rows[-1].append(sorted[i])
+            rows[-1].append(sorted_glyphs[i])
 
     pad = max(5, int(avg_h * 0.3))
     groups: list[tuple[StaveBbox, list[Glyph]]] = []
@@ -393,23 +393,29 @@ def _staves_from_staff_lines(
         else:
             clusters[-1].append(sorted_lines[i])
 
-    # Second-pass: split any oversized cluster (likely two staves merged).
-    # A stave normally has ≤5 detected lines; more implies a merge.
-    split_clusters: list[list[Glyph]] = []
-    for cluster in clusters:
-        if len(cluster) <= 5:
-            split_clusters.append(cluster)
-            continue
+    # Second-pass: recursively split any cluster containing an internal gap
+    # notably bigger than the typical intra-stave spacing. A single,
+    # non-recursive split (the old "only clusters >5 lines, split once"
+    # approach) misses staves whose detector emits paired partial detections
+    # (e.g. top-half + bottom-half per stave) — confirmed on a real page
+    # where a 6-line cluster spanning 3 real staves only ever got split once,
+    # leaving 2 of them merged. Recursing until no sub-cluster has an
+    # oversized gap resolves this without needing a fixed line-count gate.
+    def _split_oversized(cluster: list[Glyph]) -> list[list[Glyph]]:
+        if len(cluster) <= 1:
+            return [cluster]
         c_sorted = sorted(cluster, key=lambda g: g.cy)
         c_gaps = [(c_sorted[i].cy - c_sorted[i - 1].cy, i)
                   for i in range(1, len(c_sorted))]
-        # Split at the largest intra-cluster gap if it's notably bigger than typical.
         split_gap, split_idx = max(c_gaps, key=lambda x: x[0])
-        if split_gap > typical_spacing * 1.8:
-            split_clusters.append(c_sorted[:split_idx])
-            split_clusters.append(c_sorted[split_idx:])
-        else:
-            split_clusters.append(cluster)
+        if split_gap <= typical_spacing * 1.8:
+            return [cluster]
+        return (_split_oversized(c_sorted[:split_idx])
+                + _split_oversized(c_sorted[split_idx:]))
+    
+    split_clusters: list[list[Glyph]] = []
+    for cluster in clusters:
+        split_clusters.extend(_split_oversized(cluster))
 
     # Build bboxes: pad above/below so neumes that sit on the staff are included.
     staves = []
