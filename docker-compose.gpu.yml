@@ -1,0 +1,22 @@
+# Local GPU override (opt-in) for hosts with an NVIDIA GPU + nvidia-container-toolkit.
+# Base docker-compose.yml stays CPU-only so it runs on GPU-less machines; the app
+# auto-detects the GPU (torch.cuda.is_available()) and falls back to CPU otherwise.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# Only the worker runs YOLO inference, so only it gets the GPU. (Requires the
+# backend/worker image built with CUDA torch — landing-page/Dockerfile.)
+services:
+  worker:
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # Compose spec alternative to `runtime: nvidia` (Compose v2 / newer daemons):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

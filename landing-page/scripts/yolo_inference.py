@@ -7,6 +7,31 @@ from models_api import get_model_file_path
 
 CATEGORY_TO_SLOT = {"text": 0, "music": 1, "staves": 2}
 
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
+def resolve_device(requested: Optional[str]) -> str:
+    """Pick the effective inference device: use the GPU whenever one exists,
+    otherwise CPU (per the deployment's 'use GPU if present, else CPU' rule).
+
+    An explicit CUDA index (e.g. "cuda:1" / "1") is honored when a GPU is
+    available; anything else (including "auto"/"cpu"/None) resolves to "cuda"
+    when available. With no GPU (CPU nodes, local compose) it always returns
+    "cpu", so CPU deployments keep working unchanged.
+    """
+    if _cuda_available():
+        req = (requested or "").strip().lower()
+        if req.startswith("cuda") or req.isdigit():
+            return requested
+        return "cuda"
+    return "cpu"
+
 def _append_boxes(lines, inference, cls_map, threshold):
     if inference.boxes is None or not len(inference.boxes):
         return
@@ -68,9 +93,12 @@ def resolve_yolo_models(
     from ultralytics import YOLO
 
     tm_threshold = text_music_confidence_threshold if text_music_confidence_threshold is not None else confidence_threshold
-    tm_device = text_music_device or device
     st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else confidence_threshold
-    st_device = stave_device or device
+    # Resolve to the GPU when one is present, else CPU (guards an explicit
+    # cuda request on a CPU-only node from crashing ultralytics/torch).
+    device = resolve_device(device)
+    tm_device = resolve_device(text_music_device or device)
+    st_device = resolve_device(stave_device or device)
 
     if model_preset == "medieval":
         tm_path, st_path = resolve_medieval_model_paths()

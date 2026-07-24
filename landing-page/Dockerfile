@@ -28,14 +28,20 @@ FROM python:3.11-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+# The NVIDIA container runtime reads NVIDIA_DRIVER_CAPABILITIES to decide which
+# driver features to inject; "compute" is REQUIRED for CUDA. Without it you get
+# nvidia-smi but cuInit -> CUDA_ERROR_NO_DEVICE. (Same gotcha as Rodan's GPU image.)
+# Harmless on CPU-only nodes — torch just reports cuda unavailable and runs on CPU.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 WORKDIR /app
 COPY scripts/requirements.txt ./scripts/requirements.txt
-# ultralytics pulls in torch/torchvision transitively; installing the
-# CPU-only build first (this app always runs inference with device="cpu" in
-# these containers — no GPU is passed through) means the requirements.txt
-# install below sees torch already satisfied and skips the much larger
-# CUDA-enabled wheel it'd otherwise resolve from PyPI.
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# ultralytics pulls in torch/torchvision transitively; install the CUDA 12 build
+# first (cu121 ships sm_90/Hopper cubins so no PTX JIT) so the requirements.txt
+# install below sees torch already satisfied. CUDA runtime libs come from this
+# wheel — no CUDA base image needed; the host driver is injected by the k8s
+# `nvidia` RuntimeClass. On CPU-only nodes this same image runs on CPU via the
+# app's auto-device (torch.cuda.is_available() -> False).
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121
 RUN pip install --no-cache-dir -r scripts/requirements.txt
 # Prerequisite: `git lfs pull` before `docker build` — the medieval model
 # checkpoints under scripts/assets/models/medieval/ are Git-LFS pointers

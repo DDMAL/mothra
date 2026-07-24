@@ -1,0 +1,17 @@
+# Non-secret config for backend (and the subset the worker needs).
+# In-cluster service DNS for redis/ic/text-service; app is served at http://mothra.simssa.ca.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mothra-config
+  namespace: mothra
+data:
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  IC_API_URL: "http://ic:8000"                 # server-to-server (cluster DNS)
+  TEXT_API_URL: "http://text-service:8002"     # server-to-server (cluster DNS)
+  # TLS is terminated by the campus front proxy (134.87.11.29), which forces
+  # http→https, so browsers are always on https — use https here to avoid
+  # mixed-content (IC iframe) and CORS-origin mismatches.
+  IC_PUBLIC_URL: "https://mothra-ic.simssa.ca"  # browser-facing IC iframe origin
+  ALLOWED_ORIGINS: "https://mothra.simssa.ca"   # backend CORS origin
+  STORAGE_QUOTA_MB: "500"

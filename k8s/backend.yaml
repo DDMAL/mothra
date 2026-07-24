@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: mothra
+  labels:
+    app: backend
+spec:
+  replicas: 1                    # keep at 1 until a migration Job exists (init_db runs at import)
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: backend
+          image: ghcr.io/ddmal/mothra-backend:sha-6bf1c19
+          imagePullPolicy: IfNotPresent
+          # CMD from the image (uvicorn main:app --host 0.0.0.0 --port 8001)
+          ports:
+            - name: http
+              containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: mothra-config
+            - secretRef:
+                name: mothra-secrets
+          volumeMounts:
+            - name: stored-models
+              mountPath: /app/scripts/stored_models
+          readinessProbe:
+            tcpSocket:
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: stored-models
+          persistentVolumeClaim:
+            claimName: mothra-stored-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: mothra
+  labels:
+    app: backend
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001

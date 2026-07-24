@@ -54,3 +54,9 @@ landing-page/.vite/
 
 # Claude Code local config
 .claude/
+
+.idea
+
+# Kubernetes secrets — real values, never commit. Use the template instead:
+# cp k8s/secret.yaml.example k8s/secret.yaml
+k8s/secret.yaml

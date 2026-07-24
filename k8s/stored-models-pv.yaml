@@ -1,0 +1,25 @@
+# Static NFS PersistentVolume for user-uploaded model files.
+# Shared by backend + worker (both read/write it) → ReadWriteMany.
+# Mounted at /app/scripts/stored_models in both Deployments.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mothra-stored-models-pv
+  labels:
+    app: mothra
+    component: stored-models
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""          # static binding, no dynamic provisioner
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.236.201                # mothra-data storage VM
+    path: /srv/nfs/mothra/stored_models
+  claimRef:
+    namespace: mothra
+    name: mothra-stored-models

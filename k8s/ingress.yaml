@@ -1,0 +1,38 @@
+# Traefik ingress for the Mothra app (HTTP, no TLS). Two hosts:
+#   mothra.simssa.ca    → backend (serves the SPA + /api + /neon + /Neon-gh + /assets)
+#   mothra-ic.simssa.ca → ic      (browser-facing Interactive Classifier iframe origin;
+#                                   IC_PUBLIC_URL in the ConfigMap points here)
+# The backend also reaches ic server-to-server at http://ic:8000 (IC_API_URL).
+#
+# Traefik streams responses (no buffering), so the job-progress SSE
+# (GET /api/jobs/{id}/stream) works without extra config.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mothra
+  namespace: mothra
+  labels:
+    app: mothra
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: mothra.simssa.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8001
+    - host: mothra-ic.simssa.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ic
+                port:
+                  number: 8000

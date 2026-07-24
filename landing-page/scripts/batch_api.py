@@ -56,7 +56,7 @@ class BatchRunBody(BaseModel):
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     model_id: Optional[str] = None
     yolo_confidence_threshold: float = 0.5
-    yolo_device: str = "cpu"
+    yolo_device: str = "auto"   # auto → GPU if present else CPU (resolved in yolo_inference)
     text_music_confidence_threshold: Optional[float] = None
     text_music_device: Optional[str] = None
     stave_confidence_threshold: Optional[float] = None
