@@ -135,6 +135,9 @@ class ComponentFilterResult:
         merged_cluster_labels: List of connected-component labels that were
             merged into the active cluster (when merge_components=True);
             empty list otherwise.
+        companion_labels: List of connected-component labels retained as
+            companions of the active winner/cluster (score above
+            COMPANION_SCORE_FLOOR, non-overlapping x-range).
     """
 
     coords: list[tuple[int, int]] = field(default_factory=list)
@@ -329,7 +332,7 @@ def filter_components(
     for lbl in merged_winner_labels:
         merged_mask |= labels == lbl
     m_ys, m_xs = np.where(merged_mask)
-    merged_coords = list(zip(m_xs.tolist(), m_ys.tolist()))
+    merged_coords = list(zip(m_xs.tolist(), m_ys.tolist(), strict=True))
 
     # --- Companion retention ---
     # Scan "not_top_scoring" losers. Keep any that:
@@ -360,15 +363,21 @@ def filter_components(
     merge_companion_coords: list[tuple[int, int]] = []
     merge_companion_mask = np.zeros_like(labels, dtype=bool)
 
+    y_threshold = MERGE_Y_CENTER_DISTANCE_MULTIPLIER * scale_unit
+    winner_y_center = winner_stats["y"] + winner_stats["h"] / 2.0
+
     for s in survivors[1:]:
         s_label, s_score, _s_sub, s_stats = s
         if s_score < COMPANION_SCORE_FLOOR:
+            continue
+        comp_y_center = s_stats["y"] + s_stats["h"] / 2.0
+        if abs(comp_y_center - winner_y_center) > y_threshold:
             continue
         comp_x = s_stats["x"]
         comp_w = s_stats["w"]
         comp_mask = labels == s_label
         c_ys, c_xs = np.where(comp_mask)
-        comp_pixels = list(zip(c_xs.tolist(), c_ys.tolist()))
+        comp_pixels = list(zip(c_xs.tolist(), c_ys.tolist(), strict=True))
 
         # No-merge companion: non-overlapping with no-merge winner bbox.
         no_overlap_no_merge = (comp_x + comp_w <= no_merge_win_x_start) or (

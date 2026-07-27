@@ -95,7 +95,7 @@ TARGET_CLASS = 0  # single-class model: staffline = 0
 
 
 def remap_label_file(src: Path, dst: Path) -> None:
-    """Copy a YOLO .txt label, remapping SOURCE_CLASS → TARGET_CLASS."""
+    """Copy a YOLO .txt label, keeping only SOURCE_CLASS boxes remapped to TARGET_CLASS."""
     lines: list[str] = []
     with src.open() as fh:
         for raw in fh:
@@ -103,9 +103,9 @@ def remap_label_file(src: Path, dst: Path) -> None:
             if not parts:
                 continue
             cls = int(parts[0])
-            if cls == SOURCE_CLASS:
-                cls = TARGET_CLASS
-            lines.append(" ".join([str(cls)] + parts[1:]))
+            if cls != SOURCE_CLASS:
+                continue  # drop non-staffline annotations
+            lines.append(" ".join([str(TARGET_CLASS), *parts[1:]]))
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text("\n".join(lines) + "\n")
 
@@ -179,10 +179,10 @@ def build_dataset(
 def train(args: argparse.Namespace, yaml_path: Path) -> None:
     try:
         from ultralytics import YOLO
-    except ImportError:
+    except ImportError as exc:
         raise SystemExit(
             "ultralytics is not installed. Run:\n" "  pip install 'ultralytics>=8.4'"
-        )
+        ) from exc
 
     if args.resume:
         model = YOLO(str(args.resume))
