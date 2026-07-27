@@ -1,4 +1,5 @@
 """Sanity check for group_staves on synthetic FitResult sequences."""
+
 import sys
 from pathlib import Path
 
@@ -70,15 +71,16 @@ def test_assign_staves_split():
 
 def test_full_grouping_two_staves_of_four():
     # Two staves of four lines each. Intra-stave 30, inter-stave 120.
-    ys = [100, 130, 160, 190,    # stave 0
-          310, 340, 370, 400]    # stave 1
+    ys = [100, 130, 160, 190, 310, 340, 370, 400]  # stave 0  # stave 1
     fits = [make_fit_at_y(y) for y in ys]
     result = group_staves(fits, scale_unit=10.0)
     stave_ids = [a.stave_id for a in result.assignments]
-    print(f"two staves of four: stave_ids={stave_ids}, "
-          f"mode={result.mode_lines_per_stave}, "
-          f"distribution={result.line_count_distribution}, "
-          f"cut={result.cut_threshold_px:.1f}, flags={result.flags}")
+    print(
+        f"two staves of four: stave_ids={stave_ids}, "
+        f"mode={result.mode_lines_per_stave}, "
+        f"distribution={result.line_count_distribution}, "
+        f"cut={result.cut_threshold_px:.1f}, flags={result.flags}"
+    )
     assert stave_ids == [0, 0, 0, 0, 1, 1, 1, 1]
     assert result.mode_lines_per_stave == 4
     assert result.line_count_distribution == {4: 2}
@@ -91,15 +93,24 @@ def test_grouping_with_missing_line_no_interpolation():
     # The mode-based flagging surfaces this as 'staves_with_unexpected_count'.
     # See known-limitations note in group_staves.py for the followup question
     # of whether the threshold heuristic should be more lenient.
-    ys = [100, 130, 160, 190,    # stave 0: 4 lines
-          310, 340, 400]         # stave 1: 3 lines (one missing in middle)
+    ys = [
+        100,
+        130,
+        160,
+        190,  # stave 0: 4 lines
+        310,
+        340,
+        400,
+    ]  # stave 1: 3 lines (one missing in middle)
     fits = [make_fit_at_y(y) for y in ys]
     result = group_staves(fits, scale_unit=10.0)
     stave_ids = [a.stave_id for a in result.assignments]
-    print(f"missing-line (no interp): stave_ids={stave_ids}, "
-          f"mode={result.mode_lines_per_stave}, "
-          f"distribution={result.line_count_distribution}, "
-          f"flags={result.flags}")
+    print(
+        f"missing-line (no interp): stave_ids={stave_ids}, "
+        f"mode={result.mode_lines_per_stave}, "
+        f"distribution={result.line_count_distribution}, "
+        f"flags={result.flags}"
+    )
     # Stave 0 (4 lines) is intact; the missing-line gap in the second stave
     # exceeds threshold and causes a split. The algorithm flags this via the
     # unexpected-count signal.
@@ -142,9 +153,11 @@ def test_failed_fits_excluded_from_grouping():
     # Insert a failed fit (no y_values).
     fits.insert(2, FitResult(flags=["fit_did_not_converge"]))
     result = group_staves(fits, scale_unit=10.0)
-    print(f"with one failed fit: "
-          f"stave_ids={[a.stave_id for a in result.assignments]}, "
-          f"flags on failed={result.assignments[2].flags}")
+    print(
+        f"with one failed fit: "
+        f"stave_ids={[a.stave_id for a in result.assignments]}, "
+        f"flags on failed={result.assignments[2].flags}"
+    )
     # Failed fit has no stave_id.
     assert result.assignments[2].stave_id is None
     assert "no_y_position_available" in result.assignments[2].flags
@@ -156,8 +169,10 @@ def test_failed_fits_excluded_from_grouping():
 def test_no_fits_available():
     # All fits are failed (no y_values); distinct from an empty list.
     # An empty list → 'no_fits_available'; non-empty all-failed → 'no_fits_with_y_positions'.
-    fits = [FitResult(flags=["fit_did_not_converge"]),
-            FitResult(flags=["no_fit_attempted"])]
+    fits = [
+        FitResult(flags=["fit_did_not_converge"]),
+        FitResult(flags=["no_fit_attempted"]),
+    ]
     result = group_staves(fits, scale_unit=10.0)
     print(f"no usable fits: flags={result.flags}")
     assert "no_fits_with_y_positions" in result.flags
@@ -169,9 +184,7 @@ def test_diagnostic_renders():
     save_path = Path("/tmp/group_staves_diag.png")
     if save_path.exists():
         save_path.unlink()
-    _ = group_staves(fits, scale_unit=10.0,
-                      save_path=save_path,
-                      page_size=(1000, 500))
+    _ = group_staves(fits, scale_unit=10.0, save_path=save_path, page_size=(1000, 500))
     assert save_path.exists()
     print(f"diagnostic saved: {save_path}, size={save_path.stat().st_size} bytes")
 

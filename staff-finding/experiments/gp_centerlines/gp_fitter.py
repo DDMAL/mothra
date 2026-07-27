@@ -29,7 +29,6 @@ import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, WhiteKernel
 
-
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -59,6 +58,7 @@ N_RESTARTS = 3
 # ---------------------------------------------------------------------------
 # Core fitter
 # ---------------------------------------------------------------------------
+
 
 def gp_fit(
     coords: list[tuple[float, float]],
@@ -110,16 +110,13 @@ def gp_fit(
     obs_x = np.array(obs_x).reshape(-1, 1)
     obs_y = np.array(obs_y)
 
-    kernel = (
-        Matern(
-            length_scale=length_scale_init,
-            length_scale_bounds=length_scale_bounds,
-            nu=MATERN_NU,
-        )
-        + WhiteKernel(
-            noise_level=noise_level_init,
-            noise_level_bounds=noise_level_bounds,
-        )
+    kernel = Matern(
+        length_scale=length_scale_init,
+        length_scale_bounds=length_scale_bounds,
+        nu=MATERN_NU,
+    ) + WhiteKernel(
+        noise_level=noise_level_init,
+        noise_level_bounds=noise_level_bounds,
     )
 
     gpr = GaussianProcessRegressor(
@@ -149,8 +146,10 @@ def gp_fit(
         "n_obs_cols": int(len(unique_xs)),
         "n_obs_pixels": int(len(coords)),
         "fitted_length_scale": round(float(fitted_kernel.k1.length_scale), 2),
-        "fitted_noise_level":  round(float(fitted_kernel.k2.noise_level),  2),
-        "log_marginal_likelihood": round(float(gpr.log_marginal_likelihood(gpr.kernel_.theta)), 3),
+        "fitted_noise_level": round(float(fitted_kernel.k2.noise_level), 2),
+        "log_marginal_likelihood": round(
+            float(gpr.log_marginal_likelihood(gpr.kernel_.theta)), 3
+        ),
         # Shape metrics: how much does the fitted curve move across the crop?
         # y_range_px: total vertical excursion; high values flag lines tracking warp or noise.
         # mean_step_px: average per-column y-movement; high values flag oscillating fits.

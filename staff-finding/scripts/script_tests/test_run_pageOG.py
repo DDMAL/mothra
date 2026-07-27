@@ -1,4 +1,5 @@
 """Sanity check for the parts of run_page.py that don't need the BGR model."""
+
 import sys
 import tempfile
 from pathlib import Path
@@ -10,9 +11,13 @@ sys.path.insert(0, "/home/claude")
 # We do this by importing from the module file directly, bypassing the
 # sys.path injection at module top.
 import importlib.util
-spec = importlib.util.spec_from_file_location("run_page_partial", "/home/claude/run_page.py")
+
+spec = importlib.util.spec_from_file_location(
+    "run_page_partial", "/home/claude/run_page.py"
+)
 # Stub out imports the test environment doesn't have.
 import types
+
 fake_inference = types.ModuleType("inference_simple")
 fake_inference.load_model = lambda *a, **kw: None
 fake_inference.sliding_window_inference = lambda *a, **kw: None
@@ -82,14 +87,18 @@ def test_crop_with_padding_clamping():
     # Box near top-left corner; padding should clamp.
     box = (5, 5, 50, 50)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (0, 0, 60, 60)
     assert crop.shape == (60, 60, 3)
 
     # Box near bottom-right; padding should clamp.
     box = (180, 90, 199, 99)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (170, 80, 200, 100)
     assert crop.shape == (20, 30, 3)
 

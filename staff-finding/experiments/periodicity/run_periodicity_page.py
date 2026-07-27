@@ -64,10 +64,10 @@ from periodicity_detector import (
     TEETH_WEIGHT,
 )
 
-
 # ---------------------------------------------------------------------------
 # Page driver
 # ---------------------------------------------------------------------------
+
 
 def run_periodicity_page(
     page_path: Path,
@@ -105,8 +105,10 @@ def run_periodicity_page(
     fit_results: list[ExperimentFitResult] = []
     boxes: list[tuple[int, int, int, int]] = []
 
-    print(f"Tracing {len(stafflines)} stafflines (n_teeth={n_teeth}, "
-          f"teeth_weight={teeth_weight})...")
+    print(
+        f"Tracing {len(stafflines)} stafflines (n_teeth={n_teeth}, "
+        f"teeth_weight={teeth_weight})..."
+    )
 
     for idx, det in enumerate(stafflines):
         ulx, uly, lrx, lry = det.to_pixel_box(w, h)
@@ -123,7 +125,7 @@ def run_periodicity_page(
         crop_margin = int(round(4.0 * scale_unit))
         crop_y_lo = max(0, int(np.floor(y_hint)) - crop_margin)
         crop_y_hi = min(h - 1, int(np.ceil(y_hint)) + crop_margin)
-        period_crop = gray[crop_y_lo:crop_y_hi + 1, ulx:lrx + 1]
+        period_crop = gray[crop_y_lo : crop_y_hi + 1, ulx : lrx + 1]
 
         h_est, autocorr_conf = estimate_period(period_crop, scale_unit)
 
@@ -139,14 +141,16 @@ def run_periodicity_page(
         # band, or if confidence is below MIN_AUTOCORR_CONF, fall back to h.
         MIN_AUTOCORR_CONF = 0.3
         H_RATIO_LO, H_RATIO_HI = 0.7, 1.5
-        if (autocorr_conf < MIN_AUTOCORR_CONF
-                or h_est < H_RATIO_LO * scale_unit
-                or h_est > H_RATIO_HI * scale_unit):
+        if (
+            autocorr_conf < MIN_AUTOCORR_CONF
+            or h_est < H_RATIO_LO * scale_unit
+            or h_est > H_RATIO_HI * scale_unit
+        ):
             h_est = scale_unit
 
         # Optionally extend the trace to the full page width.
         x_start = 0 if extend_to_page else ulx
-        x_end   = w - 1 if extend_to_page else lrx
+        x_end = w - 1 if extend_to_page else lrx
 
         xs, ys = periodicity_trace(
             gray=gray,
@@ -180,8 +184,10 @@ def run_periodicity_page(
         fit_results.append(fit)
         boxes.append((ulx, uly, lrx, lry))
 
-        print(f"  [{idx + 1:3d}/{len(stafflines)}] y={y_hint:.0f}  "
-              f"h_est={h_est:.1f}px  conf={autocorr_conf:.2f}")
+        print(
+            f"  [{idx + 1:3d}/{len(stafflines)}] y={y_hint:.0f}  "
+            f"h_est={h_est:.1f}px  conf={autocorr_conf:.2f}"
+        )
 
     run_grouping_and_save(
         page_name=page_name,
@@ -198,40 +204,53 @@ def run_periodicity_page(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Staffline detection via periodicity-comb DP tracing."
     )
-    parser.add_argument("--page",  type=Path, required=True)
-    parser.add_argument("--yolo",  type=Path, required=True)
+    parser.add_argument("--page", type=Path, required=True)
+    parser.add_argument("--yolo", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--staffline-class", type=int, default=0)
     parser.add_argument(
-        "--band-half-multiplier", type=float, default=BAND_HALF_MULTIPLIER,
+        "--band-half-multiplier",
+        type=float,
+        default=BAND_HALF_MULTIPLIER,
         help="Search band = ± multiplier × h  (default %(default)s)",
     )
     parser.add_argument(
-        "--max-step-px", type=int, default=MAX_STEP_PX,
+        "--max-step-px",
+        type=int,
+        default=MAX_STEP_PX,
         help="Max y-shift per column (default %(default)s)",
     )
     parser.add_argument(
-        "--blur-sigma-multiplier", type=float, default=BLUR_SIGMA_MULTIPLIER,
+        "--blur-sigma-multiplier",
+        type=float,
+        default=BLUR_SIGMA_MULTIPLIER,
         help="Gaussian pre-blur sigma = multiplier × h (default %(default)s)",
     )
     parser.add_argument(
-        "--n-teeth", type=int, default=N_TEETH,
+        "--n-teeth",
+        type=int,
+        default=N_TEETH,
         help="Comb teeth count (odd; 1 = plain DP) (default %(default)s)",
     )
     parser.add_argument(
-        "--teeth-weight", type=float, default=TEETH_WEIGHT,
+        "--teeth-weight",
+        type=float,
+        default=TEETH_WEIGHT,
         help="Weight per off-centre tooth (0 = plain DP) (default %(default)s)",
     )
     parser.add_argument(
-        "--no-extend", action="store_true",
+        "--no-extend",
+        action="store_true",
         help="Trace only within the YOLO box x-range (default: extend to full page)",
     )
     parser.add_argument(
-        "--valley-threshold", action="store_true",
+        "--valley-threshold",
+        action="store_true",
         help="Use valley-finding gap detection in stave grouping (default: off)",
     )
     args = parser.parse_args()

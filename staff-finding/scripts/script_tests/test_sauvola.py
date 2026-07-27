@@ -1,4 +1,5 @@
 """Sanity check for Sauvola binarization in the component filter."""
+
 import sys
 from pathlib import Path
 
@@ -8,18 +9,26 @@ sys.path.insert(0, "/home/claude")
 from component_filter import filter_components
 
 
-def make_faint_line_crop(width=400, height=80, line_y=40, thickness=4,
-                        line_intensity=170, background_noise=False):
+def make_faint_line_crop(
+    width=400,
+    height=80,
+    line_y=40,
+    thickness=4,
+    line_intensity=170,
+    background_noise=False,
+):
     """Light gray line on near-white background. Otsu can fail on such low
     contrast; Sauvola should handle it.
     """
     crop = np.full((height, width, 3), 250, dtype=np.uint8)
     if background_noise:
         # Add gentle noise across the background.
-        noise = np.random.default_rng(0).integers(-10, 11, size=crop.shape, dtype=np.int16)
+        noise = np.random.default_rng(0).integers(
+            -10, 11, size=crop.shape, dtype=np.int16
+        )
         crop = np.clip(crop.astype(np.int16) + noise, 0, 255).astype(np.uint8)
     half = thickness // 2
-    crop[line_y - half:line_y + half + 1, :] = line_intensity
+    crop[line_y - half : line_y + half + 1, :] = line_intensity
     return crop
 
 
@@ -31,10 +40,12 @@ def test_sauvola_recovers_faint_line():
         if p.exists():
             p.unlink()
 
-    res_otsu = filter_components(crop, scale_unit=4.0, save_path=save_otsu,
-                                 binarization="otsu")
-    res_sauvola = filter_components(crop, scale_unit=4.0, save_path=save_sauvola,
-                                    binarization="sauvola")
+    res_otsu = filter_components(
+        crop, scale_unit=4.0, save_path=save_otsu, binarization="otsu"
+    )
+    res_sauvola = filter_components(
+        crop, scale_unit=4.0, save_path=save_sauvola, binarization="sauvola"
+    )
 
     n_otsu = len(res_otsu.coords)
     n_sauvola = len(res_sauvola.coords)
@@ -68,13 +79,17 @@ def test_default_is_sauvola():
     """Confirm the default binarization method is now Sauvola (post-promotion)."""
     crop = make_faint_line_crop(line_intensity=200)
     res_default = filter_components(crop, scale_unit=4.0)
-    res_sauvola_explicit = filter_components(crop, scale_unit=4.0,
-                                             binarization="sauvola")
+    res_sauvola_explicit = filter_components(
+        crop, scale_unit=4.0, binarization="sauvola"
+    )
     # Same input + same method = identical kept-pixel counts.
-    assert len(res_default.coords) == len(res_sauvola_explicit.coords), \
-        "default should match explicit sauvola"
-    print(f"default binarization is Sauvola: "
-          f"{len(res_default.coords)} kept pixels both ways")
+    assert len(res_default.coords) == len(
+        res_sauvola_explicit.coords
+    ), "default should match explicit sauvola"
+    print(
+        f"default binarization is Sauvola: "
+        f"{len(res_default.coords)} kept pixels both ways"
+    )
 
 
 if __name__ == "__main__":

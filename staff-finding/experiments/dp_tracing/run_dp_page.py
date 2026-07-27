@@ -34,10 +34,10 @@ from shared_utils import (
 )
 from dp_tracer import dp_trace, BAND_HALF_MULTIPLIER, MAX_STEP_PX, BLUR_SIGMA_MULTIPLIER
 
-
 # ---------------------------------------------------------------------------
 # Page driver
 # ---------------------------------------------------------------------------
+
 
 def run_dp_page(
     page_path: Path,
@@ -80,7 +80,7 @@ def run_dp_page(
         # Optionally extend the trace to the full page width so we recover the
         # staffline even where the YOLO box was clipped or narrow.
         x_start = 0 if extend_to_page else ulx
-        x_end   = w - 1 if extend_to_page else lrx
+        x_end = w - 1 if extend_to_page else lrx
 
         xs, ys = dp_trace(
             gray=gray,
@@ -124,24 +124,38 @@ def run_dp_page(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Staffline detection via DP shortest-path tracing."
     )
-    parser.add_argument("--page",  type=Path, required=True)
-    parser.add_argument("--yolo",  type=Path, required=True)
+    parser.add_argument("--page", type=Path, required=True)
+    parser.add_argument("--yolo", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--staffline-class", type=int, default=0)
-    parser.add_argument("--band-half-multiplier", type=float,
-                        default=BAND_HALF_MULTIPLIER,
-                        help="Search band = ± multiplier × h  (default %(default)s)")
-    parser.add_argument("--max-step-px", type=int, default=MAX_STEP_PX,
-                        help="Max y-shift per column (default %(default)s)")
-    parser.add_argument("--blur-sigma-multiplier", type=float,
-                        default=BLUR_SIGMA_MULTIPLIER,
-                        help="Gaussian pre-blur sigma = multiplier × h (default %(default)s)")
-    parser.add_argument("--no-extend", action="store_true",
-                        help="Trace only within the YOLO box x-range (default: extend to full page)")
+    parser.add_argument(
+        "--band-half-multiplier",
+        type=float,
+        default=BAND_HALF_MULTIPLIER,
+        help="Search band = ± multiplier × h  (default %(default)s)",
+    )
+    parser.add_argument(
+        "--max-step-px",
+        type=int,
+        default=MAX_STEP_PX,
+        help="Max y-shift per column (default %(default)s)",
+    )
+    parser.add_argument(
+        "--blur-sigma-multiplier",
+        type=float,
+        default=BLUR_SIGMA_MULTIPLIER,
+        help="Gaussian pre-blur sigma = multiplier × h (default %(default)s)",
+    )
+    parser.add_argument(
+        "--no-extend",
+        action="store_true",
+        help="Trace only within the YOLO box x-range (default: extend to full page)",
+    )
     args = parser.parse_args()
 
     run_dp_page(

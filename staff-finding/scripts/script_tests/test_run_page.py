@@ -5,6 +5,7 @@ After the refactor:
   - run_page.py owns crop_with_padding, compute_page_scale_unit
   - bgr_adapter.py owns the BGR helpers (not tested here; needs the model)
 """
+
 import sys
 import tempfile
 import types
@@ -85,14 +86,18 @@ def test_crop_with_padding_clamping():
     # Box near top-left corner; padding should clamp.
     box = (5, 5, 50, 50)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (0, 0, 60, 60)
     assert crop.shape == (60, 60, 3)
 
     # Box near bottom-right; padding should clamp.
     box = (180, 90, 199, 99)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (170, 80, 200, 100)
     assert crop.shape == (20, 30, 3)
 

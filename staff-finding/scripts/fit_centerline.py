@@ -19,7 +19,6 @@ from scipy.optimize import least_squares
 
 from component_filter import ComponentFilterResult
 
-
 # ---------------------------------------------------------------------------
 # Tunable constants
 # ---------------------------------------------------------------------------
@@ -76,6 +75,7 @@ LINE_FOLLOW_POLY_DEGREE = 3
 # Output type
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FitResult:
     """Output of the centerline fit.
@@ -109,6 +109,7 @@ class FitResult:
         flags: Notable conditions, e.g. 'no_fit_attempted', 'fit_did_not_converge',
             'line_following_applied:deg3'.
     """
+
     x_start: int = 0
     x_end: int = 0
     y_values: list[float] = field(default_factory=list)
@@ -125,6 +126,7 @@ class FitResult:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def fit_centerline(
     filter_result: ComponentFilterResult,
@@ -213,8 +215,11 @@ def fit_centerline(
     trace_ys_out: np.ndarray = np.array([], dtype=np.float64)
 
     if float(abs_residuals.mean()) > REFIT_TRIGGER_MULTIPLIER * scale_unit:
-        seed_y = (float(crop.shape[0]) / 2.0) if crop is not None \
-                  else float((ys.min() + ys.max()) / 2.0)
+        seed_y = (
+            (float(crop.shape[0]) / 2.0)
+            if crop is not None
+            else float((ys.min() + ys.max()) / 2.0)
+        )
         trace_xs_arr, trace_ys_arr = _trace_line(
             xs, ys, x_start, x_end, scale_unit, seed_y
         )
@@ -222,10 +227,14 @@ def fit_centerline(
             try:
                 # Use cubic when we have enough points; otherwise quadratic.
                 # Rule of thumb: need at least 2*(degree+1) points for a stable fit.
-                refit_degree = (LINE_FOLLOW_POLY_DEGREE
-                                if len(trace_xs_arr) >= 2 * (LINE_FOLLOW_POLY_DEGREE + 1)
-                                else POLY_DEGREE)
-                refined_coeffs = np.polyfit(trace_xs_arr, trace_ys_arr, deg=refit_degree)
+                refit_degree = (
+                    LINE_FOLLOW_POLY_DEGREE
+                    if len(trace_xs_arr) >= 2 * (LINE_FOLLOW_POLY_DEGREE + 1)
+                    else POLY_DEGREE
+                )
+                refined_coeffs = np.polyfit(
+                    trace_xs_arr, trace_ys_arr, deg=refit_degree
+                )
                 refined_residuals = np.abs(
                     np.polyval(refined_coeffs, trace_xs_arr) - trace_ys_arr
                 )
@@ -233,7 +242,9 @@ def fit_centerline(
                     fitted_coeffs = refined_coeffs
                     # Report residuals over the trace points (the set we optimised for).
                     abs_residuals = refined_residuals
-                    line_follow_flags.append(f"line_following_applied:deg{refit_degree}")
+                    line_follow_flags.append(
+                        f"line_following_applied:deg{refit_degree}"
+                    )
                     trace_xs_out = trace_xs_arr
                     trace_ys_out = trace_ys_arr
                 else:
@@ -257,12 +268,14 @@ def fit_centerline(
         residual_max=float(abs_residuals.max()),
         n_pixels_used=len(filter_result.coords),
         n_pixels_total=len(filter_result.coords),
-        flags=([] if ls_result.success else ["fit_did_not_converge"]) + line_follow_flags,
+        flags=([] if ls_result.success else ["fit_did_not_converge"])
+        + line_follow_flags,
     )
 
     if save_path is not None and crop is not None:
-        _save_fit_diagnostic(crop, result, save_path,
-                             trace_xs=trace_xs_out, trace_ys=trace_ys_out)
+        _save_fit_diagnostic(
+            crop, result, save_path, trace_xs=trace_xs_out, trace_ys=trace_ys_out
+        )
 
     return result
 
@@ -270,6 +283,7 @@ def fit_centerline(
 # ---------------------------------------------------------------------------
 # Line-following helper
 # ---------------------------------------------------------------------------
+
 
 def _trace_line(
     xs: np.ndarray,
@@ -324,6 +338,7 @@ def _trace_line(
 # Diagnostic visualization
 # ---------------------------------------------------------------------------
 
+
 def _save_fit_diagnostic(
     crop: np.ndarray,
     fit_result: FitResult,
@@ -354,20 +369,28 @@ def _save_fit_diagnostic(
         xs = np.arange(fit_result.x_start, fit_result.x_end + 1)
         ys = np.asarray(fit_result.y_values)
         # Bright magenta-ish line; high contrast against most parchment/ink.
-        ax.plot(xs, ys, color=(1.0, 0.2, 0.7), linewidth=1.5,
-                label="Fitted centerline")
+        ax.plot(xs, ys, color=(1.0, 0.2, 0.7), linewidth=1.5, label="Fitted centerline")
         # Endpoint markers.
-        ax.plot([fit_result.x_start, fit_result.x_end],
-                [ys[0], ys[-1]],
-                marker="o", linestyle="none", color=(1.0, 0.2, 0.7),
-                markersize=6)
+        ax.plot(
+            [fit_result.x_start, fit_result.x_end],
+            [ys[0], ys[-1]],
+            marker="o",
+            linestyle="none",
+            color=(1.0, 0.2, 0.7),
+            markersize=6,
+        )
         has_legend = True
 
         # Line-following trace points — cyan scatter.
         if trace_xs is not None and len(trace_xs) > 0:
-            ax.scatter(trace_xs, trace_ys,
-                       color=(0.2, 0.8, 1.0), s=25, zorder=5,
-                       label="Trace points (line-following)")
+            ax.scatter(
+                trace_xs,
+                trace_ys,
+                color=(0.2, 0.8, 1.0),
+                s=25,
+                zorder=5,
+                label="Trace points (line-following)",
+            )
 
         title = (
             f"Fitted centerline | "

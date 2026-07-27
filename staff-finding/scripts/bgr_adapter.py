@@ -16,7 +16,6 @@ from typing import Optional
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Location of the external inference script
 # ---------------------------------------------------------------------------
@@ -35,7 +34,6 @@ from inference_simple import (  # noqa: E402  (sys.path insertion above)
     separate_layers,
 )
 
-
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -48,6 +46,7 @@ DEFAULT_BGR_CONFIDENCE = 0.5
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def load_bgr_model(checkpoint_path: str, device: str):
     """Load the BGR model from a checkpoint. Thin wrapper for naming clarity."""
@@ -81,7 +80,8 @@ def run_bgr_inference(
         RGB ink layer (same dtype and spatial size as image_rgb).
     """
     probability_map = sliding_window_inference(
-        model, image_rgb,
+        model,
+        image_rgb,
         window_size=window_size,
         stride=stride,
         device=device,

@@ -34,15 +34,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
 
-N_FREQS       = 8     # number of sinusoidal frequency bands in positional encoding
-HIDDEN        = 32    # MLP hidden layer width
-LR            = 1e-3  # Adam learning rate
-N_STEPS       = 150   # gradient steps per staffline
+N_FREQS = 8  # number of sinusoidal frequency bands in positional encoding
+HIDDEN = 32  # MLP hidden layer width
+LR = 1e-3  # Adam learning rate
+N_STEPS = 150  # gradient steps per staffline
 LAMBDA_SMOOTH = 0.01  # weight on finite-difference smoothness regulariser
 BAND_HALF_MULTIPLIER = 1.5  # clamp band = ± multiplier × scale_unit around y_hint
 
@@ -50,6 +49,7 @@ BAND_HALF_MULTIPLIER = 1.5  # clamp band = ± multiplier × scale_unit around y_
 # ---------------------------------------------------------------------------
 # MLP
 # ---------------------------------------------------------------------------
+
 
 class StafflineMLP(nn.Module):
     """Tiny MLP that maps a normalised x coordinate to a predicted y (pixels).
@@ -83,10 +83,14 @@ class StafflineMLP(nn.Module):
         Returns:
             Tensor of shape (N, 2·n_freqs).
         """
-        freqs = 2.0 ** torch.arange(self.n_freqs, dtype=x_norm.dtype, device=x_norm.device)
+        freqs = 2.0 ** torch.arange(
+            self.n_freqs, dtype=x_norm.dtype, device=x_norm.device
+        )
         # x_norm: (N,) → (N, 1); freqs: (n_freqs,) → (1, n_freqs) → broadcast (N, n_freqs)
         angles = torch.pi * x_norm.unsqueeze(1) * freqs.unsqueeze(0)
-        return torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)  # (N, 2·n_freqs)
+        return torch.cat(
+            [torch.sin(angles), torch.cos(angles)], dim=1
+        )  # (N, 2·n_freqs)
 
     def forward(self, x_norm: torch.Tensor) -> torch.Tensor:
         """Predict y values for a batch of x coordinates.
@@ -97,16 +101,17 @@ class StafflineMLP(nn.Module):
         Returns:
             y_pred: shape (N,), page-absolute y values.
         """
-        enc = self._encode(x_norm)                   # (N, 2·n_freqs)
-        h = F.relu(self.fc1(enc))                    # (N, hidden)
-        h = F.relu(self.fc2(h))                      # (N, hidden)
-        y = self.fc3(h).squeeze(-1)                  # (N,)
+        enc = self._encode(x_norm)  # (N, 2·n_freqs)
+        h = F.relu(self.fc1(enc))  # (N, hidden)
+        h = F.relu(self.fc2(h))  # (N, hidden)
+        y = self.fc3(h).squeeze(-1)  # (N,)
         return y
 
 
 # ---------------------------------------------------------------------------
 # Warm-start helper
 # ---------------------------------------------------------------------------
+
 
 def _warm_start(mlp: StafflineMLP, y_hint: float) -> None:
     """Initialise the MLP to predict a flat horizontal line at y_hint.
@@ -124,6 +129,7 @@ def _warm_start(mlp: StafflineMLP, y_hint: float) -> None:
 # ---------------------------------------------------------------------------
 # Public fitter
 # ---------------------------------------------------------------------------
+
 
 def implicit_neural_fit(
     gray: np.ndarray,
@@ -172,9 +178,9 @@ def implicit_neural_fit(
     H, W = gray.shape
 
     # Build the page tensor once.  Shape: (1, 1, H, W), float32 in [0, 1].
-    gray_tensor = torch.from_numpy(
-        gray.astype(np.float32) / 255.0
-    ).unsqueeze(0).unsqueeze(0)  # (1, 1, H, W), no grad
+    gray_tensor = (
+        torch.from_numpy(gray.astype(np.float32) / 255.0).unsqueeze(0).unsqueeze(0)
+    )  # (1, 1, H, W), no grad
 
     # Column indices for this staffline (page-absolute integers).
     xs_abs = torch.arange(x_start, x_end + 1, dtype=torch.float32)  # (N,)
@@ -197,8 +203,8 @@ def implicit_neural_fit(
 
     optimiser = torch.optim.Adam(mlp.parameters(), lr=lr)
 
-    final_loss       = 0.0
-    final_data_loss  = 0.0
+    final_loss = 0.0
+    final_data_loss = 0.0
     final_smooth_loss = 0.0
 
     for _ in range(n_steps):
@@ -216,7 +222,7 @@ def implicit_neural_fit(
         # grid_sample with input (1,1,H,W) and grid (1,N,1,2) samples N points.
         # grid[..., 0] = x (width), grid[..., 1] = y (height).
         grid = torch.stack([grid_x, y_grid], dim=-1)  # (N, 2)
-        grid = grid.unsqueeze(0).unsqueeze(2)          # (1, N, 1, 2)
+        grid = grid.unsqueeze(0).unsqueeze(2)  # (1, N, 1, 2)
 
         sampled = F.grid_sample(
             gray_tensor,
@@ -230,14 +236,20 @@ def implicit_neural_fit(
         data_loss = sampled.mean()  # low = dark = ink = good
 
         # Finite-difference second derivative (shape N-2).
-        smooth_loss = (y_pred_clamped[:-2] - 2 * y_pred_clamped[1:-1] + y_pred_clamped[2:]).abs().mean() if N > 2 else torch.tensor(0.0)
+        smooth_loss = (
+            (y_pred_clamped[:-2] - 2 * y_pred_clamped[1:-1] + y_pred_clamped[2:])
+            .abs()
+            .mean()
+            if N > 2
+            else torch.tensor(0.0)
+        )
 
         loss = data_loss + lambda_smooth * smooth_loss
         loss.backward()
         optimiser.step()
 
-        final_loss        = float(loss.detach())
-        final_data_loss   = float(data_loss.detach())
+        final_loss = float(loss.detach())
+        final_data_loss = float(data_loss.detach())
         final_smooth_loss = float(smooth_loss.detach())
 
     # Final prediction pass — no grad, use clamped values.
@@ -248,13 +260,13 @@ def implicit_neural_fit(
     y_values = y_final.tolist()
 
     meta = {
-        "n_steps":           n_steps,
-        "final_loss":        round(final_loss, 5),
-        "final_data_loss":   round(final_data_loss, 5),
+        "n_steps": n_steps,
+        "final_loss": round(final_loss, 5),
+        "final_data_loss": round(final_data_loss, 5),
         "final_smooth_loss": round(final_smooth_loss, 5),
-        "n_freqs":           n_freqs,
-        "hidden":            hidden,
-        "lambda_smooth":     lambda_smooth,
+        "n_freqs": n_freqs,
+        "hidden": hidden,
+        "lambda_smooth": lambda_smooth,
     }
 
     return y_values, meta

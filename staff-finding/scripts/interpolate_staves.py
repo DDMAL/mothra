@@ -60,6 +60,7 @@ INTERPOLATION_GAP_MULTIPLIER: float = 1.8
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class InterpolatedLine:
     """A synthesised staffline filling a presumed gap in a stave.
@@ -80,6 +81,7 @@ class InterpolatedLine:
             spatial anchors.  Both entries are the same fit for edge lines
             synthesised via trigger B (only one neighbour available).
     """
+
     stave_id: int
     within_stave_index: int
     x_start: int
@@ -91,6 +93,7 @@ class InterpolatedLine:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _y_at_center(fit: FitResult) -> Optional[float]:
     """Page-absolute y at the horizontal centre of a fit's x-range."""
@@ -115,6 +118,7 @@ def _interpolate_between(
 
     Returns page-absolute y-values (y_page_offset already included).
     """
+
     def y_at_x(fit: FitResult, x: int) -> float:
         idx = x - fit.x_start
         idx = max(0, min(idx, len(fit.y_values) - 1))
@@ -157,6 +161,7 @@ def _compute_interpolation_max_gap(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def interpolate_missing_lines(
     fits: list[FitResult],
@@ -227,12 +232,14 @@ def interpolate_missing_lines(
             prev = sorted_sids[rank - 1]
             upper_bound[sid] = (stave_y_maxs[prev] + stave_y_mins[sid]) / 2.0
         else:
-            upper_bound[sid] = stave_y_mins[sid]   # top stave: no upward extrapolation
+            upper_bound[sid] = stave_y_mins[sid]  # top stave: no upward extrapolation
         if rank < len(sorted_sids) - 1:
             nxt = sorted_sids[rank + 1]
             lower_bound[sid] = (stave_y_maxs[sid] + stave_y_mins[nxt]) / 2.0
         else:
-            lower_bound[sid] = stave_y_maxs[sid]   # bottom stave: no downward extrapolation
+            lower_bound[sid] = stave_y_maxs[
+                sid
+            ]  # bottom stave: no downward extrapolation
 
     result: list[InterpolatedLine] = []
 
@@ -242,9 +249,7 @@ def interpolate_missing_lines(
         if rhythm_anomalies.get(stave_id, {}).get("status", "normal") != "normal":
             continue
 
-        fit_pairs_sorted = sorted(
-            fit_pairs, key=lambda p: _y_at_center(p[1]) or 0.0
-        )
+        fit_pairs_sorted = sorted(fit_pairs, key=lambda p: _y_at_center(p[1]) or 0.0)
         centers = [_y_at_center(f) for _, f in fit_pairs_sorted]
         centers = [c for c in centers if c is not None]
         if not centers:
@@ -275,18 +280,21 @@ def interpolate_missing_lines(
                     continue
                 n_missing = max(1, round(gap / h_est) - 1)
                 x_start = min(above_f.x_start, below_f.x_start)
-                x_end   = max(above_f.x_end,   below_f.x_end)
+                x_end = max(above_f.x_end, below_f.x_end)
                 for i in range(1, n_missing + 1):
                     y_target = y_above + i * gap / (n_missing + 1)
-                    stave_lines.append(InterpolatedLine(
-                        stave_id=stave_id,
-                        within_stave_index=0,  # placeholder; re-indexed later
-                        x_start=x_start,
-                        x_end=x_end,
-                        y_values=_interpolate_between(
-                            above_f, below_f, x_start, x_end, y_target),
-                        neighbor_fit_indices=(above_fi, below_fi),
-                    ))
+                    stave_lines.append(
+                        InterpolatedLine(
+                            stave_id=stave_id,
+                            within_stave_index=0,  # placeholder; re-indexed later
+                            x_start=x_start,
+                            x_end=x_end,
+                            y_values=_interpolate_between(
+                                above_f, below_f, x_start, x_end, y_target
+                            ),
+                            neighbor_fit_indices=(above_fi, below_fi),
+                        )
+                    )
 
         # --- Trigger B: edge extrapolation (territory-bounded) ---
         # Only fires when the stave is mostly complete (≥ mode_n // 2 detected),
@@ -307,28 +315,34 @@ def interpolate_missing_lines(
                     continue  # outside this stave's territory
 
                 above_pairs = [
-                    (fi, f) for fi, f in fit_pairs_sorted
+                    (fi, f)
+                    for fi, f in fit_pairs_sorted
                     if (_y_at_center(f) or 0.0) < y_target
                 ]
                 below_pairs = [
-                    (fi, f) for fi, f in fit_pairs_sorted
+                    (fi, f)
+                    for fi, f in fit_pairs_sorted
                     if (_y_at_center(f) or 0.0) >= y_target
                 ]
 
                 if above_pairs and below_pairs:
                     continue  # inside detected range; trigger A handles this
 
-                ref_fi, ref_f = (above_pairs[-1] if above_pairs else below_pairs[0])
+                ref_fi, ref_f = above_pairs[-1] if above_pairs else below_pairs[0]
                 ref_center = _y_at_center(ref_f) or y_target
                 offset = y_target - ref_center
-                stave_lines.append(InterpolatedLine(
-                    stave_id=stave_id,
-                    within_stave_index=k,  # grid slot; overwritten by re-index
-                    x_start=ref_f.x_start,
-                    x_end=ref_f.x_end,
-                    y_values=[ref_f.y_page_offset + y + offset for y in ref_f.y_values],
-                    neighbor_fit_indices=(ref_fi, ref_fi),
-                ))
+                stave_lines.append(
+                    InterpolatedLine(
+                        stave_id=stave_id,
+                        within_stave_index=k,  # grid slot; overwritten by re-index
+                        x_start=ref_f.x_start,
+                        x_end=ref_f.x_end,
+                        y_values=[
+                            ref_f.y_page_offset + y + offset for y in ref_f.y_values
+                        ],
+                        neighbor_fit_indices=(ref_fi, ref_fi),
+                    )
+                )
 
         result.extend(stave_lines)
 

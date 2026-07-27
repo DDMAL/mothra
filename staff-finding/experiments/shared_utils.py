@@ -19,12 +19,16 @@ import numpy as np
 _SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(_SCRIPTS_DIR))
 from yolo_io import YoloDetection, filter_to_class, parse_yolo_txt  # noqa: E402
-from group_staves import group_staves, _save_grouping_diagnostic, InterpolatedLine  # noqa: E402
-
+from group_staves import (
+    group_staves,
+    _save_grouping_diagnostic,
+    InterpolatedLine,
+)  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Minimal FitResult for experiment runners
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ExperimentFitResult:
@@ -34,6 +38,7 @@ class ExperimentFitResult:
     x_start/x_end and y_values are crop-local; page-absolute values are obtained
     by adding x_page_offset and y_page_offset respectively.
     """
+
     x_start: int = 0
     x_end: int = 0
     y_values: list[float] = field(default_factory=list)
@@ -47,6 +52,7 @@ class ExperimentFitResult:
 # ---------------------------------------------------------------------------
 # Helpers shared across runners
 # ---------------------------------------------------------------------------
+
 
 def load_page_gray(page_path: Path) -> tuple[np.ndarray, np.ndarray, int, int]:
     """Load page image.  Returns (bgr, gray, width, height)."""
@@ -102,13 +108,15 @@ def write_jsomr(
             "bounding_box": {"ulx": ulx, "uly": uly, "lrx": lrx, "lry": lry},
             "centerline": {
                 "x_start": fit.x_start,
-                "x_end":   fit.x_end,
+                "x_end": fit.x_end,
                 "y_values": [round(float(y), 1) for y in fit.y_values],
             },
             "fit": {
                 "method": fit.method,
-                **{k: (round(v, 3) if isinstance(v, float) else v)
-                   for k, v in fit.meta.items()},
+                **{
+                    k: (round(v, 3) if isinstance(v, float) else v)
+                    for k, v in fit.meta.items()
+                },
             },
             "quality": {
                 "confidence": None,
@@ -117,10 +125,22 @@ def write_jsomr(
             "scale_unit": scale_unit,
             "column_id": None,
             "stave_id": asg.stave_id if asg else None,
-            "lines_detected": stave_detected.get(asg.stave_id, 0) if asg and asg.stave_id is not None else None,
-            "lines_interpolated": stave_interpolated.get(asg.stave_id, 0) if asg and asg.stave_id is not None else None,
+            "lines_detected": (
+                stave_detected.get(asg.stave_id, 0)
+                if asg and asg.stave_id is not None
+                else None
+            ),
+            "lines_interpolated": (
+                stave_interpolated.get(asg.stave_id, 0)
+                if asg and asg.stave_id is not None
+                else None
+            ),
             "lines_expected": grouping_result.mode_lines_per_stave,
-            "rhythm_status": grouping_result.rhythm_anomalies.get(asg.stave_id, {}).get("status") if asg and asg.stave_id is not None else None,
+            "rhythm_status": (
+                grouping_result.rhythm_anomalies.get(asg.stave_id, {}).get("status")
+                if asg and asg.stave_id is not None
+                else None
+            ),
             "within_stave_index": asg.within_stave_index if asg else None,
         }
         records.append(record)
@@ -133,7 +153,7 @@ def write_jsomr(
             "bounding_box": None,
             "centerline": {
                 "x_start": interp.x_start,
-                "x_end":   interp.x_end,
+                "x_end": interp.x_end,
                 "y_values": [round(float(y), 1) for y in interp.y_values],
             },
             "fit": {
@@ -150,17 +170,25 @@ def write_jsomr(
             "lines_detected": stave_detected.get(interp.stave_id, 0),
             "lines_interpolated": stave_interpolated.get(interp.stave_id, 0),
             "lines_expected": grouping_result.mode_lines_per_stave,
-            "rhythm_status": grouping_result.rhythm_anomalies.get(interp.stave_id, {}).get("status"),
+            "rhythm_status": grouping_result.rhythm_anomalies.get(
+                interp.stave_id, {}
+            ).get("status"),
             "within_stave_index": interp.within_stave_index,
         }
         records.append(record)
 
     # Sort by stave then by position within stave so each stave's lines are
     # contiguous in the file.  Unassigned lines (stave_id=None) go at the end.
-    records.sort(key=lambda r: (
-        r["stave_id"] if r["stave_id"] is not None else float("inf"),
-        r["within_stave_index"] if r["within_stave_index"] is not None else float("inf"),
-    ))
+    records.sort(
+        key=lambda r: (
+            r["stave_id"] if r["stave_id"] is not None else float("inf"),
+            (
+                r["within_stave_index"]
+                if r["within_stave_index"] is not None
+                else float("inf")
+            ),
+        )
+    )
 
     with save_path.open("w") as f:
         json.dump(records, f, indent=2)

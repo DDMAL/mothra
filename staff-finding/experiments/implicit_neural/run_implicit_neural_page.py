@@ -64,10 +64,10 @@ from implicit_neural_fitter import (
     BAND_HALF_MULTIPLIER,
 )
 
-
 # ---------------------------------------------------------------------------
 # Page driver
 # ---------------------------------------------------------------------------
+
 
 def run_implicit_neural_page(
     page_path: Path,
@@ -108,11 +108,11 @@ def run_implicit_neural_page(
     if channel == "gray":
         gray = gray_standard
     elif channel == "green":
-        gray = page_bgr[:, :, 1]   # OpenCV stores as BGR; index 1 = green
+        gray = page_bgr[:, :, 1]  # OpenCV stores as BGR; index 1 = green
     elif channel == "blue":
-        gray = page_bgr[:, :, 0]   # index 0 = blue
+        gray = page_bgr[:, :, 0]  # index 0 = blue
     elif channel == "red":
-        gray = page_bgr[:, :, 2]   # index 2 = red
+        gray = page_bgr[:, :, 2]  # index 2 = red
     else:
         raise ValueError(f"Unknown channel '{channel}'; choose gray/green/blue/red.")
 
@@ -133,7 +133,9 @@ def run_implicit_neural_page(
     fit_results: list[ExperimentFitResult] = []
     boxes: list[tuple[int, int, int, int]] = []
 
-    print(f"Fitting {len(stafflines)} stafflines (n_steps={n_steps}, hidden={hidden}, n_freqs={n_freqs})...")
+    print(
+        f"Fitting {len(stafflines)} stafflines (n_steps={n_steps}, hidden={hidden}, n_freqs={n_freqs})..."
+    )
     for idx, det in enumerate(stafflines):
         ulx, uly, lrx, lry = det.to_pixel_box(w, h)
         y_hint = (uly + lry) / 2.0
@@ -142,7 +144,7 @@ def run_implicit_neural_page(
         # overfit to image texture when given a very long span with no ink,
         # so per-box is safer than extending to the full page width.
         x_start = 0 if extend_to_page else ulx
-        x_end   = w - 1 if extend_to_page else lrx
+        x_end = w - 1 if extend_to_page else lrx
 
         y_values, meta = implicit_neural_fit(
             gray=gray,
@@ -191,36 +193,73 @@ def run_implicit_neural_page(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Staffline detection via implicit neural representation (MLP test-time optimisation)."
     )
-    parser.add_argument("--page",   type=Path, required=True,
-                        help="Path to page image (jpg/png).")
-    parser.add_argument("--yolo",   type=Path, required=True,
-                        help="Path to YOLO detections .txt file.")
-    parser.add_argument("--output", type=Path, required=True,
-                        help="Output directory root.")
-    parser.add_argument("--staffline-class", type=int, default=0,
-                        help="YOLO class index for stafflines (default %(default)s).")
-    parser.add_argument("--n-freqs", type=int, default=N_FREQS,
-                        help="Positional encoding frequency bands (default %(default)s).")
-    parser.add_argument("--hidden", type=int, default=HIDDEN,
-                        help="MLP hidden layer width (default %(default)s).")
-    parser.add_argument("--lr", type=float, default=LR,
-                        help="Adam learning rate (default %(default)s).")
-    parser.add_argument("--n-steps", type=int, default=N_STEPS,
-                        help="Gradient steps per staffline (default %(default)s).")
-    parser.add_argument("--lambda-smooth", type=float, default=LAMBDA_SMOOTH,
-                        help="Smoothness regulariser weight (default %(default)s).")
-    parser.add_argument("--band-half-multiplier", type=float, default=BAND_HALF_MULTIPLIER,
-                        help="Clamp band = ± multiplier × scale_unit (default %(default)s).")
-    parser.add_argument("--extend-to-page", action="store_true",
-                        help="Trace full page width instead of per-box x-range.")
-    parser.add_argument("--valley-threshold", action="store_true",
-                        help="Use valley-finding gap detection for stave grouping.")
     parser.add_argument(
-        "--channel", choices=["gray", "green", "blue", "red"], default="gray",
+        "--page", type=Path, required=True, help="Path to page image (jpg/png)."
+    )
+    parser.add_argument(
+        "--yolo", type=Path, required=True, help="Path to YOLO detections .txt file."
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output directory root."
+    )
+    parser.add_argument(
+        "--staffline-class",
+        type=int,
+        default=0,
+        help="YOLO class index for stafflines (default %(default)s).",
+    )
+    parser.add_argument(
+        "--n-freqs",
+        type=int,
+        default=N_FREQS,
+        help="Positional encoding frequency bands (default %(default)s).",
+    )
+    parser.add_argument(
+        "--hidden",
+        type=int,
+        default=HIDDEN,
+        help="MLP hidden layer width (default %(default)s).",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=LR, help="Adam learning rate (default %(default)s)."
+    )
+    parser.add_argument(
+        "--n-steps",
+        type=int,
+        default=N_STEPS,
+        help="Gradient steps per staffline (default %(default)s).",
+    )
+    parser.add_argument(
+        "--lambda-smooth",
+        type=float,
+        default=LAMBDA_SMOOTH,
+        help="Smoothness regulariser weight (default %(default)s).",
+    )
+    parser.add_argument(
+        "--band-half-multiplier",
+        type=float,
+        default=BAND_HALF_MULTIPLIER,
+        help="Clamp band = ± multiplier × scale_unit (default %(default)s).",
+    )
+    parser.add_argument(
+        "--extend-to-page",
+        action="store_true",
+        help="Trace full page width instead of per-box x-range.",
+    )
+    parser.add_argument(
+        "--valley-threshold",
+        action="store_true",
+        help="Use valley-finding gap detection for stave grouping.",
+    )
+    parser.add_argument(
+        "--channel",
+        choices=["gray", "green", "blue", "red"],
+        default="gray",
         help=(
             "Image channel used for the brightness loss.  "
             "'gray' (default): standard luminance grayscale.  "

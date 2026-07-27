@@ -34,12 +34,18 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from eval_page import CSV_FIELDS, evaluate, _print_summary
 
-
 # ---------------------------------------------------------------------------
 # Manifest loading
 # ---------------------------------------------------------------------------
 
-REQUIRED_MANIFEST_COLS = {"page_name", "image", "gt_txt", "gt_source", "pred_json", "variant"}
+REQUIRED_MANIFEST_COLS = {
+    "page_name",
+    "image",
+    "gt_txt",
+    "gt_source",
+    "pred_json",
+    "variant",
+}
 
 
 def load_manifest(manifest_path: Path) -> list[dict]:
@@ -61,6 +67,7 @@ def load_manifest(manifest_path: Path) -> list[dict]:
 # Summary table
 # ---------------------------------------------------------------------------
 
+
 def _print_aggregate_summary(results: list[dict]) -> None:
     if not results:
         return
@@ -80,8 +87,10 @@ def _print_aggregate_summary(results: list[dict]) -> None:
             if not vals:
                 continue
             a = np.array(vals)
-            print(f"    {m:<20s}  {a.mean():.4f} ± {a.std():.4f}"
-                  f"  [min {a.min():.4f}  max {a.max():.4f}]")
+            print(
+                f"    {m:<20s}  {a.mean():.4f} ± {a.std():.4f}"
+                f"  [min {a.min():.4f}  max {a.max():.4f}]"
+            )
 
     print("\n" + "=" * 70 + "\n")
 
@@ -90,18 +99,34 @@ def _print_aggregate_summary(results: list[dict]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Batch staffline evaluation from a manifest CSV."
     )
-    parser.add_argument("--manifest", required=True, type=Path,
-                        help="CSV manifest file (see module docstring for columns).")
-    parser.add_argument("--output", required=True, type=Path,
-                        help="Output CSV path — results are written here (overwritten each run).")
-    parser.add_argument("--staffline-class", type=int, default=0,
-                        help="YOLO class id for stafflines (overrides manifest column if set).")
-    parser.add_argument("--summarize", action="store_true",
-                        help="Print an aggregate summary table after processing.")
+    parser.add_argument(
+        "--manifest",
+        required=True,
+        type=Path,
+        help="CSV manifest file (see module docstring for columns).",
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        type=Path,
+        help="Output CSV path — results are written here (overwritten each run).",
+    )
+    parser.add_argument(
+        "--staffline-class",
+        type=int,
+        default=0,
+        help="YOLO class id for stafflines (overrides manifest column if set).",
+    )
+    parser.add_argument(
+        "--summarize",
+        action="store_true",
+        help="Print an aggregate summary table after processing.",
+    )
     args = parser.parse_args()
 
     manifest_rows = load_manifest(args.manifest)
@@ -112,13 +137,15 @@ def main() -> None:
     n_err = 0
 
     for i, row in enumerate(manifest_rows, start=1):
-        page      = row["page_name"].strip()
-        image     = Path(row["image"].strip())
-        gt_txt    = Path(row["gt_txt"].strip())
+        page = row["page_name"].strip()
+        image = Path(row["image"].strip())
+        gt_txt = Path(row["gt_txt"].strip())
         gt_source = row["gt_source"].strip()
         pred_json = Path(row["pred_json"].strip())
-        variant   = row["variant"].strip()
-        staffline_class = int(row.get("staffline_class", args.staffline_class) or args.staffline_class)
+        variant = row["variant"].strip()
+        staffline_class = int(
+            row.get("staffline_class", args.staffline_class) or args.staffline_class
+        )
 
         print(f"\n[{i}/{len(manifest_rows)}] {page}  |  {variant}")
 

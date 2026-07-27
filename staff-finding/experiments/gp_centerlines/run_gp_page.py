@@ -76,8 +76,16 @@ DEFAULT_CROP_PADDING = 2
 DEFAULT_BINARIZATION = "sauvola"
 
 
-def _crop(image: np.ndarray, ulx: int, uly: int, lrx: int, lry: int,
-          padding: int, w: int, h: int) -> tuple[np.ndarray, tuple]:
+def _crop(
+    image: np.ndarray,
+    ulx: int,
+    uly: int,
+    lrx: int,
+    lry: int,
+    padding: int,
+    w: int,
+    h: int,
+) -> tuple[np.ndarray, tuple]:
     ulx_p = max(0, ulx - padding)
     uly_p = max(0, uly - padding)
     lrx_p = min(w, lrx + padding)
@@ -140,18 +148,20 @@ def run_gp_page(
         )
 
         if not filter_result.coords:
-            fit_results.append(ExperimentFitResult(
-                flags=["no_kept_pixels"],
-                x_page_offset=float(ulx_a),
-                y_page_offset=float(uly_a),
-            ))
+            fit_results.append(
+                ExperimentFitResult(
+                    flags=["no_kept_pixels"],
+                    x_page_offset=float(ulx_a),
+                    y_page_offset=float(uly_a),
+                )
+            )
             boxes.append(actual_box)
             continue
 
         coords = filter_result.coords
         xs_arr = np.array([c[0] for c in coords])
         x_start = int(xs_arr.min())
-        x_end   = int(xs_arr.max())
+        x_end = int(xs_arr.max())
 
         y_pred, y_std, meta = gp_fit(
             coords=coords,
@@ -195,22 +205,34 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Staffline detection via Gaussian Process centerline fitting."
     )
-    parser.add_argument("--page",  type=Path, required=True)
-    parser.add_argument("--yolo",  type=Path, required=True)
+    parser.add_argument("--page", type=Path, required=True)
+    parser.add_argument("--yolo", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--staffline-class", type=int, default=0)
     parser.add_argument("--crop-padding", type=int, default=DEFAULT_CROP_PADDING)
-    parser.add_argument("--binarization", default=DEFAULT_BINARIZATION,
-                        choices=["sauvola", "otsu"])
-    parser.add_argument("--length-scale-init", type=float, default=LENGTH_SCALE_INIT,
-                        help="Initial GP length scale in pixels (default %(default)s)")
-    parser.add_argument("--n-restarts", type=int, default=N_RESTARTS,
-                        help="Kernel hyperparameter optimisation restarts (default %(default)s)")
-    parser.add_argument("--no-valley-threshold", action="store_true",
-                        help="Use the default median-based grouping threshold instead of "
-                             "valley-finding.  Useful for comparing grouping methods; see "
-                             "module docstring for a full explanation of why valley-finding "
-                             "is the default here.")
+    parser.add_argument(
+        "--binarization", default=DEFAULT_BINARIZATION, choices=["sauvola", "otsu"]
+    )
+    parser.add_argument(
+        "--length-scale-init",
+        type=float,
+        default=LENGTH_SCALE_INIT,
+        help="Initial GP length scale in pixels (default %(default)s)",
+    )
+    parser.add_argument(
+        "--n-restarts",
+        type=int,
+        default=N_RESTARTS,
+        help="Kernel hyperparameter optimisation restarts (default %(default)s)",
+    )
+    parser.add_argument(
+        "--no-valley-threshold",
+        action="store_true",
+        help="Use the default median-based grouping threshold instead of "
+        "valley-finding.  Useful for comparing grouping methods; see "
+        "module docstring for a full explanation of why valley-finding "
+        "is the default here.",
+    )
     args = parser.parse_args()
 
     run_gp_page(

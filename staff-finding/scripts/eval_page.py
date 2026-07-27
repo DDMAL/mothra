@@ -34,18 +34,18 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from yolo_io import filter_to_class, parse_yolo_txt
 
-
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
 STAFFLINE_CLASS_DEFAULT = 0
-MATCH_THRESHOLD_MULTIPLIER = 0.5   # fraction of scale_unit → max y-distance for a match
+MATCH_THRESHOLD_MULTIPLIER = 0.5  # fraction of scale_unit → max y-distance for a match
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _image_dims(image_path: Path) -> tuple[int, int]:
     """Return (width, height) by reading the image header."""
@@ -58,7 +58,10 @@ def _image_dims(image_path: Path) -> tuple[int, int]:
 
 def _pred_page_y(item: dict) -> np.ndarray:
     """Page-absolute y-values for a JSOMR staffline item."""
-    return np.array(item["centerline"]["y_values"], dtype=float) + item["bounding_box"]["uly"]
+    return (
+        np.array(item["centerline"]["y_values"], dtype=float)
+        + item["bounding_box"]["uly"]
+    )
 
 
 def _pred_page_x(item: dict) -> np.ndarray:
@@ -90,6 +93,7 @@ def _y_mae(gt_cy: float, pred_item: dict, gt_ulx: int, gt_lrx: int) -> float | N
 # Core evaluation
 # ---------------------------------------------------------------------------
 
+
 def evaluate(
     gt_path: Path,
     pred_path: Path,
@@ -110,10 +114,15 @@ def evaluate(
     gt_boxes = []
     for d in gt_detections:
         ulx, uly, lrx, lry = d.to_pixel_box(image_width, image_height)
-        gt_boxes.append({
-            "ulx": ulx, "uly": uly, "lrx": lrx, "lry": lry,
-            "cy": (uly + lry) / 2.0,
-        })
+        gt_boxes.append(
+            {
+                "ulx": ulx,
+                "uly": uly,
+                "lrx": lrx,
+                "lry": lry,
+                "cy": (uly + lry) / 2.0,
+            }
+        )
 
     # --- Predictions ---
     with pred_path.open() as f:
@@ -149,39 +158,43 @@ def evaluate(
             continue
         matched_gt.add(gi)
         matched_pred.add(pi)
-        mae = _y_mae(gt_boxes[gi]["cy"], pred_items[pi],
-                     gt_boxes[gi]["ulx"], gt_boxes[gi]["lrx"])
+        mae = _y_mae(
+            gt_boxes[gi]["cy"], pred_items[pi], gt_boxes[gi]["ulx"], gt_boxes[gi]["lrx"]
+        )
         if mae is not None:
             mae_values.append(mae)
 
-    n_gt   = len(gt_boxes)
+    n_gt = len(gt_boxes)
     n_pred = len(pred_items)
     n_matched = len(matched_gt)
 
     precision = n_matched / n_pred if n_pred > 0 else 0.0
-    recall    = n_matched / n_gt   if n_gt   > 0 else 0.0
-    f1 = (2 * precision * recall / (precision + recall)
-          if (precision + recall) > 0 else 0.0)
-    split_ratio  = n_pred / n_gt if n_gt > 0 else float("nan")
-    mean_y_mae   = float(np.mean(mae_values)) if mae_values else float("nan")
+    recall = n_matched / n_gt if n_gt > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
+    split_ratio = n_pred / n_gt if n_gt > 0 else float("nan")
+    mean_y_mae = float(np.mean(mae_values)) if mae_values else float("nan")
 
     return {
-        "page":               page_name or gt_path.stem,
-        "variant":            variant,
-        "gt_source":          gt_source,
-        "timestamp":          datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "n_gt":               n_gt,
-        "n_pred":             n_pred,
-        "n_matched":          n_matched,
-        "n_unmatched_pred":   n_pred - n_matched,
-        "n_unmatched_gt":     n_gt   - n_matched,
-        "precision":          round(precision,    4),
-        "recall":             round(recall,       4),
-        "f1":                 round(f1,           4),
-        "split_ratio":        round(split_ratio,  4),
-        "mean_y_mae_px":      round(mean_y_mae,   2),
-        "match_threshold_px": round(threshold,    2),
-        "scale_unit_px":      round(scale_unit,   1),
+        "page": page_name or gt_path.stem,
+        "variant": variant,
+        "gt_source": gt_source,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "n_gt": n_gt,
+        "n_pred": n_pred,
+        "n_matched": n_matched,
+        "n_unmatched_pred": n_pred - n_matched,
+        "n_unmatched_gt": n_gt - n_matched,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "split_ratio": round(split_ratio, 4),
+        "mean_y_mae_px": round(mean_y_mae, 2),
+        "match_threshold_px": round(threshold, 2),
+        "scale_unit_px": round(scale_unit, 1),
     }
 
 
@@ -190,10 +203,22 @@ def evaluate(
 # ---------------------------------------------------------------------------
 
 CSV_FIELDS = [
-    "page", "variant", "gt_source", "timestamp",
-    "n_gt", "n_pred", "n_matched", "n_unmatched_pred", "n_unmatched_gt",
-    "precision", "recall", "f1", "split_ratio",
-    "mean_y_mae_px", "match_threshold_px", "scale_unit_px",
+    "page",
+    "variant",
+    "gt_source",
+    "timestamp",
+    "n_gt",
+    "n_pred",
+    "n_matched",
+    "n_unmatched_pred",
+    "n_unmatched_gt",
+    "precision",
+    "recall",
+    "f1",
+    "split_ratio",
+    "mean_y_mae_px",
+    "match_threshold_px",
+    "scale_unit_px",
 ]
 
 
@@ -202,36 +227,66 @@ def _print_summary(metrics: dict) -> None:
     print(f"  Variant:     {metrics['variant']}")
     print(f"  GT source:   {metrics['gt_source']}")
     print(f"  GT lines:    {metrics['n_gt']}")
-    print(f"  Pred lines:  {metrics['n_pred']}  (split ratio {metrics['split_ratio']:.3f})")
+    print(
+        f"  Pred lines:  {metrics['n_pred']}  (split ratio {metrics['split_ratio']:.3f})"
+    )
     print(f"  Matched:     {metrics['n_matched']}")
     print(f"  Precision:   {metrics['precision']:.4f}")
     print(f"  Recall:      {metrics['recall']:.4f}")
     print(f"  F1:          {metrics['f1']:.4f}")
     print(f"  Mean y-MAE:  {metrics['mean_y_mae_px']:.2f} px")
-    print(f"  Threshold:   {metrics['match_threshold_px']:.1f} px  "
-          f"(= 0.5 × {metrics['scale_unit_px']:.1f} px scale unit)\n")
+    print(
+        f"  Threshold:   {metrics['match_threshold_px']:.1f} px  "
+        f"(= 0.5 × {metrics['scale_unit_px']:.1f} px scale unit)\n"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Evaluate staffline detection: JSOMR predictions vs. YOLO GT."
     )
-    parser.add_argument("--gt",      required=True, type=Path,
-                        help="Ground-truth YOLO .txt file.")
-    parser.add_argument("--pred",    required=True, type=Path,
-                        help="Pipeline JSOMR *_stafflines.json output.")
-    parser.add_argument("--image",   required=True, type=Path,
-                        help="Page image (used to convert YOLO normalised coords).")
-    parser.add_argument("--staffline-class", type=int, default=STAFFLINE_CLASS_DEFAULT,
-                        help=f"YOLO class id for stafflines (default {STAFFLINE_CLASS_DEFAULT}).")
-    parser.add_argument("--gt-source", default="unknown",
-                        help="Label for the GT file — annotator name, 'corrected', etc.")
-    parser.add_argument("--variant",   default="unknown",
-                        help="Pipeline variant label, e.g. 'sauvola_no_bgr'.")
-    parser.add_argument("--page-name", default=None,
-                        help="Override page identifier in output (defaults to GT filename stem).")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Append one CSV row to this file (created with header if new).")
+    parser.add_argument(
+        "--gt", required=True, type=Path, help="Ground-truth YOLO .txt file."
+    )
+    parser.add_argument(
+        "--pred",
+        required=True,
+        type=Path,
+        help="Pipeline JSOMR *_stafflines.json output.",
+    )
+    parser.add_argument(
+        "--image",
+        required=True,
+        type=Path,
+        help="Page image (used to convert YOLO normalised coords).",
+    )
+    parser.add_argument(
+        "--staffline-class",
+        type=int,
+        default=STAFFLINE_CLASS_DEFAULT,
+        help=f"YOLO class id for stafflines (default {STAFFLINE_CLASS_DEFAULT}).",
+    )
+    parser.add_argument(
+        "--gt-source",
+        default="unknown",
+        help="Label for the GT file — annotator name, 'corrected', etc.",
+    )
+    parser.add_argument(
+        "--variant",
+        default="unknown",
+        help="Pipeline variant label, e.g. 'sauvola_no_bgr'.",
+    )
+    parser.add_argument(
+        "--page-name",
+        default=None,
+        help="Override page identifier in output (defaults to GT filename stem).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Append one CSV row to this file (created with header if new).",
+    )
     args = parser.parse_args()
 
     metrics = evaluate(

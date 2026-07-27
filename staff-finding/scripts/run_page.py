@@ -51,7 +51,6 @@ from bgr_adapter import (
     DEFAULT_BGR_CONFIDENCE,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -63,6 +62,7 @@ DEFAULT_CROP_PADDING_PX = 2  # small margin around YOLO box; see driver plan
 # ---------------------------------------------------------------------------
 # Cropping
 # ---------------------------------------------------------------------------
+
 
 def crop_with_padding(
     image: np.ndarray,
@@ -87,6 +87,7 @@ def crop_with_padding(
 # Scale unit derivation
 # ---------------------------------------------------------------------------
 
+
 def compute_page_scale_unit(
     detections: list[YoloDetection],
     image_width: int,
@@ -110,6 +111,7 @@ def compute_page_scale_unit(
 # ---------------------------------------------------------------------------
 # Main driver
 # ---------------------------------------------------------------------------
+
 
 def process_page(
     page_path: Path,
@@ -173,7 +175,8 @@ def process_page(
         bgr_model = load_bgr_model(str(bgr_model_path), device)
         print("Running BGR inference (this can take a minute on CPU)...")
         page_for_crops = run_bgr_inference(
-            bgr_model, page_rgb,
+            bgr_model,
+            page_rgb,
             window_size=bgr_window_size,
             stride=bgr_stride,
             confidence=bgr_confidence,
@@ -181,7 +184,9 @@ def process_page(
         )
         # Save the BGR-processed page for inspection.
         processed_save_path = page_output_dir / f"{page_name}_bgr.png"
-        cv2.imwrite(str(processed_save_path), cv2.cvtColor(page_for_crops, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(
+            str(processed_save_path), cv2.cvtColor(page_for_crops, cv2.COLOR_RGB2BGR)
+        )
         print(f"  Saved BGR-processed page to {processed_save_path}")
     else:
         print("BGR disabled (--no-bgr): cropping directly from original page.")
@@ -189,7 +194,7 @@ def process_page(
 
     # --- Per-box processing ---
     summary_rows = []
-    fit_results = [] #collected for stage 2 grouping after the per-box loop!
+    fit_results = []  # collected for stage 2 grouping after the per-box loop!
     print(f"Processing {len(stafflines)} staffline boxes...")
     for idx, detection in enumerate(stafflines):
         box = detection.to_pixel_box(w, h)
@@ -218,30 +223,32 @@ def process_page(
         )
         # Record the crop's page-absolute origin so downstream grouping and
         # visualization can convert crop-local coords to page-absolute.
-        fit_result.x_page_offset = float(actual_box[0])   # ulx
-        fit_result.y_page_offset = float(actual_box[1])   # uly
+        fit_result.x_page_offset = float(actual_box[0])  # ulx
+        fit_result.y_page_offset = float(actual_box[1])  # uly
         fit_results.append(fit_result)
-        summary_rows.append({
-            "box_index": idx,
-            "ulx": actual_box[0],
-            "uly": actual_box[1],
-            "lrx": actual_box[2],
-            "lry": actual_box[3],
-            "n_kept_pixels": len(result.coords),
-            "flags": ";".join(result.flags),
-            "n_discarded": len(result.discarded),
-            "top_score": _top_score_of(result),
-            "diagnostic_path": str(diag_path.relative_to(output_dir)),
-            "fit_x_start": fit_result.x_start,
-            "fit_x_end": fit_result.x_end,
-            "fit_residual_mean": round(fit_result.residual_mean, 3),
-            "fit_residual_max": round(fit_result.residual_max, 3),
-            "fit_flags": ";".join(fit_result.flags),
-            "fit_diagnostic_path": str(fit_diag_path.relative_to(output_dir)),
-            "stave_id": None,  # to be filled in by stage 2
-            "within_stave_index": None,  # to be filled in by stage 2
-            "grouping_flags": None,  # to be filled in by stage 2
-        })
+        summary_rows.append(
+            {
+                "box_index": idx,
+                "ulx": actual_box[0],
+                "uly": actual_box[1],
+                "lrx": actual_box[2],
+                "lry": actual_box[3],
+                "n_kept_pixels": len(result.coords),
+                "flags": ";".join(result.flags),
+                "n_discarded": len(result.discarded),
+                "top_score": _top_score_of(result),
+                "diagnostic_path": str(diag_path.relative_to(output_dir)),
+                "fit_x_start": fit_result.x_start,
+                "fit_x_end": fit_result.x_end,
+                "fit_residual_mean": round(fit_result.residual_mean, 3),
+                "fit_residual_max": round(fit_result.residual_max, 3),
+                "fit_flags": ";".join(fit_result.flags),
+                "fit_diagnostic_path": str(fit_diag_path.relative_to(output_dir)),
+                "stave_id": None,  # to be filled in by stage 2
+                "within_stave_index": None,  # to be filled in by stage 2
+                "grouping_flags": None,  # to be filled in by stage 2
+            }
+        )
     # --- Stage 2: stave grouping ---
     grouping_diag_path = page_output_dir / f"{page_name}_stave_grouping.png"
     grouping_result = group_staves(
@@ -251,17 +258,23 @@ def process_page(
         page_size=(w, h),
         page_image=bgr_loaded,  # Pass the full page image (BGR format for cv2) for visualization
     )
-    print(f"  Stave grouping: mode={grouping_result.mode_lines_per_stave} "
-          f"lines/stave, distribution={grouping_result.line_count_distribution}, "
-          f"flags={grouping_result.flags}")
-    
+    print(
+        f"  Stave grouping: mode={grouping_result.mode_lines_per_stave} "
+        f"lines/stave, distribution={grouping_result.line_count_distribution}, "
+        f"flags={grouping_result.flags}"
+    )
+
     # Print detailed stave assignments with evidence
     if grouping_result.assignments:
-        print(f"  Cut threshold: {grouping_result.cut_threshold_px:.1f} px "
-              f"(gaps >= this → inter-stave boundary)")
+        print(
+            f"  Cut threshold: {grouping_result.cut_threshold_px:.1f} px "
+            f"(gaps >= this → inter-stave boundary)"
+        )
         if grouping_result.gap_distribution:
-            print(f"  Gaps between consecutive fits: {[f'{g:.0f}' for g in grouping_result.gap_distribution]}")
-        
+            print(
+                f"  Gaps between consecutive fits: {[f'{g:.0f}' for g in grouping_result.gap_distribution]}"
+            )
+
         print("  Stave assignments:")
         by_stave = {}
         for asg in grouping_result.assignments:
@@ -269,19 +282,26 @@ def process_page(
                 if asg.stave_id not in by_stave:
                     by_stave[asg.stave_id] = []
                 by_stave[asg.stave_id].append(asg)
-        
+
         # Print grouped staves with y-positions
         for stave_id in sorted(by_stave.keys()):
-            assignments_in_stave = sorted(by_stave[stave_id], key=lambda a: a.within_stave_index)
+            assignments_in_stave = sorted(
+                by_stave[stave_id], key=lambda a: a.within_stave_index
+            )
             fit_indices = [str(a.fit_index) for a in assignments_in_stave]
-            y_positions = [f"{a.y_at_center:.0f}px" if a.y_at_center is not None else "?" for a in assignments_in_stave]
+            y_positions = [
+                f"{a.y_at_center:.0f}px" if a.y_at_center is not None else "?"
+                for a in assignments_in_stave
+            ]
             print(f"    Stave {stave_id}: fits [{', '.join(fit_indices)}]")
             print(f"               y-positions: [{', '.join(y_positions)}]")
-        
+
         # Print unassigned fits if any
         unassigned = [a for a in grouping_result.assignments if a.stave_id is None]
         if unassigned:
-            print(f"    Unassigned: fits [{', '.join(str(a.fit_index) for a in unassigned)}]")
+            print(
+                f"    Unassigned: fits [{', '.join(str(a.fit_index) for a in unassigned)}]"
+            )
             for a in unassigned:
                 flags_str = f" ({', '.join(a.flags)})" if a.flags else ""
                 print(f"               fit {a.fit_index}{flags_str}")
@@ -302,35 +322,49 @@ def process_page(
         f.write(f"Mode lines per stave: {grouping_result.mode_lines_per_stave}\n")
         f.write(f"Line count distribution: {grouping_result.line_count_distribution}\n")
         f.write(f"Cut threshold (px): {grouping_result.cut_threshold_px:.1f}\n")
-        f.write(f"Flags: {', '.join(grouping_result.flags) if grouping_result.flags else 'none'}\n\n")
-        
+        f.write(
+            f"Flags: {', '.join(grouping_result.flags) if grouping_result.flags else 'none'}\n\n"
+        )
+
         f.write("GAPS BETWEEN CONSECUTIVE FITS:\n")
         f.write("-" * 60 + "\n")
         if grouping_result.gap_distribution:
             for i, gap in enumerate(grouping_result.gap_distribution):
-                marker = ">>> INTER-STAVE <<<" if gap >= grouping_result.cut_threshold_px else ""
+                marker = (
+                    ">>> INTER-STAVE <<<"
+                    if gap >= grouping_result.cut_threshold_px
+                    else ""
+                )
                 f.write(f"  Gap {i}: {gap:.1f} px  {marker}\n")
         else:
             f.write("  (No gaps; 0 or 1 fit)\n")
-        
+
         f.write("\nSTAVE ASSIGNMENTS:\n")
         f.write("-" * 60 + "\n")
-        
+
         by_stave = {}
         for asg in grouping_result.assignments:
             if asg.stave_id is not None:
                 if asg.stave_id not in by_stave:
                     by_stave[asg.stave_id] = []
                 by_stave[asg.stave_id].append(asg)
-        
+
         for stave_id in sorted(by_stave.keys()):
-            assignments_in_stave = sorted(by_stave[stave_id], key=lambda a: a.within_stave_index)
+            assignments_in_stave = sorted(
+                by_stave[stave_id], key=lambda a: a.within_stave_index
+            )
             f.write(f"\nStave {stave_id}:\n")
             for asg in assignments_in_stave:
-                y_str = f"{asg.y_at_center:.1f}" if asg.y_at_center is not None else "unknown"
+                y_str = (
+                    f"{asg.y_at_center:.1f}"
+                    if asg.y_at_center is not None
+                    else "unknown"
+                )
                 flags_str = f" [{', '.join(asg.flags)}]" if asg.flags else ""
-                f.write(f"  Fit {asg.fit_index}: line {asg.within_stave_index}, y={y_str}px{flags_str}\n")
-        
+                f.write(
+                    f"  Fit {asg.fit_index}: line {asg.within_stave_index}, y={y_str}px{flags_str}\n"
+                )
+
         unassigned = [a for a in grouping_result.assignments if a.stave_id is None]
         if unassigned:
             f.write(f"\nUnassigned fits:\n")
@@ -356,13 +390,25 @@ def process_page(
     # --- Write summary CSV ---
     summary_path = page_output_dir / "summary.csv"
     fieldnames = [
-        "box_index", "ulx", "uly", "lrx", "lry",
-        "n_kept_pixels", "flags", "n_discarded", "top_score",
+        "box_index",
+        "ulx",
+        "uly",
+        "lrx",
+        "lry",
+        "n_kept_pixels",
+        "flags",
+        "n_discarded",
+        "top_score",
         "diagnostic_path",
-        "fit_x_start", "fit_x_end",
-        "fit_residual_mean", "fit_residual_max",
-        "fit_flags", "fit_diagnostic_path",
-        "stave_id", "within_stave_index", "grouping_flags"
+        "fit_x_start",
+        "fit_x_end",
+        "fit_residual_mean",
+        "fit_residual_max",
+        "fit_flags",
+        "fit_diagnostic_path",
+        "stave_id",
+        "within_stave_index",
+        "grouping_flags",
     ]
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -463,33 +509,60 @@ def _top_score_of(result) -> Optional[float]:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run Stage 1 component filter on every staffline detection of a page."
     )
     parser.add_argument("--page", type=Path, required=True, help="Page image path")
     parser.add_argument("--yolo", type=Path, required=True, help="YOLO .txt path")
-    parser.add_argument("--bgr-model", type=Path, required=False,
-                        help="BGR model checkpoint (required unless --no-bgr is set)")
-    parser.add_argument("--output", type=Path, required=True, help="Output directory root")
-    parser.add_argument("--staffline-class", type=int, default=DEFAULT_STAFFLINE_CLASS,
-                        help=f"YOLO class id for stafflines (default: {DEFAULT_STAFFLINE_CLASS})")
-    parser.add_argument("--crop-padding", type=int, default=DEFAULT_CROP_PADDING_PX,
-                        help=f"Pixels of padding around YOLO box (default: {DEFAULT_CROP_PADDING_PX})")
-    parser.add_argument("--device", type=str,
-                        default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device for BGR inference (cuda/cpu)")
+    parser.add_argument(
+        "--bgr-model",
+        type=Path,
+        required=False,
+        help="BGR model checkpoint (required unless --no-bgr is set)",
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output directory root"
+    )
+    parser.add_argument(
+        "--staffline-class",
+        type=int,
+        default=DEFAULT_STAFFLINE_CLASS,
+        help=f"YOLO class id for stafflines (default: {DEFAULT_STAFFLINE_CLASS})",
+    )
+    parser.add_argument(
+        "--crop-padding",
+        type=int,
+        default=DEFAULT_CROP_PADDING_PX,
+        help=f"Pixels of padding around YOLO box (default: {DEFAULT_CROP_PADDING_PX})",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device for BGR inference (cuda/cpu)",
+    )
     parser.add_argument("--bgr-window-size", type=int, default=DEFAULT_BGR_WINDOW_SIZE)
     parser.add_argument("--bgr-stride", type=int, default=DEFAULT_BGR_STRIDE)
     parser.add_argument("--bgr-confidence", type=float, default=DEFAULT_BGR_CONFIDENCE)
-    parser.add_argument("--no-bgr", action="store_true",
-                        help="Skip BGR preprocessing entirely; crop directly from original page.")
-    parser.add_argument("--no-merge", action="store_true",
-                        help="Disable component merging; fit to the single highest-scoring "
-                             "connected component instead of the merged cluster.")
-    parser.add_argument("--otsu", action="store_true",
-                        help="Use Otsu global thresholding instead of the default Sauvola. "
-                             "Retained for comparison; Sauvola is preferred on most manuscripts.")
+    parser.add_argument(
+        "--no-bgr",
+        action="store_true",
+        help="Skip BGR preprocessing entirely; crop directly from original page.",
+    )
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="Disable component merging; fit to the single highest-scoring "
+        "connected component instead of the merged cluster.",
+    )
+    parser.add_argument(
+        "--otsu",
+        action="store_true",
+        help="Use Otsu global thresholding instead of the default Sauvola. "
+        "Retained for comparison; Sauvola is preferred on most manuscripts.",
+    )
     args = parser.parse_args()
 
     use_bgr = not args.no_bgr

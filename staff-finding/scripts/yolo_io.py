@@ -16,13 +16,16 @@ from pathlib import Path
 @dataclass
 class YoloDetection:
     """One detection parsed from a YOLO-format .txt line."""
+
     class_id: int
     x_center_norm: float
     y_center_norm: float
     width_norm: float
     height_norm: float
 
-    def to_pixel_box(self, image_width: int, image_height: int) -> tuple[int, int, int, int]:
+    def to_pixel_box(
+        self, image_width: int, image_height: int
+    ) -> tuple[int, int, int, int]:
         """Convert normalized coords to pixel (ulx, uly, lrx, lry)."""
         cx = self.x_center_norm * image_width
         cy = self.y_center_norm * image_height
@@ -52,15 +55,19 @@ def parse_yolo_txt(yolo_path: Path) -> list[YoloDetection]:
                 print(f"  Skipping malformed line {line_num} in {yolo_path}: {line!r}")
                 continue
             try:
-                detections.append(YoloDetection(
-                    class_id=int(parts[0]),
-                    x_center_norm=float(parts[1]),
-                    y_center_norm=float(parts[2]),
-                    width_norm=float(parts[3]),
-                    height_norm=float(parts[4]),
-                ))
+                detections.append(
+                    YoloDetection(
+                        class_id=int(parts[0]),
+                        x_center_norm=float(parts[1]),
+                        y_center_norm=float(parts[2]),
+                        width_norm=float(parts[3]),
+                        height_norm=float(parts[4]),
+                    )
+                )
             except ValueError:
-                print(f"  Skipping unparseable line {line_num} in {yolo_path}: {line!r}")
+                print(
+                    f"  Skipping unparseable line {line_num} in {yolo_path}: {line!r}"
+                )
     return detections
 
 

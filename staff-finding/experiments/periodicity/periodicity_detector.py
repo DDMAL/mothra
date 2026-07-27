@@ -30,7 +30,6 @@ All inputs and outputs are in page-absolute pixel coordinates.
 import numpy as np
 from scipy.ndimage import minimum_filter1d, gaussian_filter1d
 
-
 # ---------------------------------------------------------------------------
 # Tunable defaults
 # ---------------------------------------------------------------------------
@@ -60,6 +59,7 @@ TEETH_WEIGHT = 0.4
 # ---------------------------------------------------------------------------
 # Period estimation
 # ---------------------------------------------------------------------------
+
 
 def estimate_period(
     gray_crop: np.ndarray,
@@ -110,7 +110,7 @@ def estimate_period(
     full_corr = np.correlate(signal, signal, mode="full")
     N = len(signal)
     # Positive-lag half (lag 0 at index 0 after slicing mid-point).
-    acorr = full_corr[N - 1:]           # acorr[0] = zero-lag (maximum)
+    acorr = full_corr[N - 1 :]  # acorr[0] = zero-lag (maximum)
     acorr = acorr / (acorr[0] + 1e-12)  # normalise so zero-lag = 1
 
     # Define the lag search window: [lag_lo, lag_hi].
@@ -120,7 +120,7 @@ def estimate_period(
     if lag_lo >= lag_hi:
         return fallback
 
-    search = acorr[lag_lo:lag_hi + 1]
+    search = acorr[lag_lo : lag_hi + 1]
     peak_idx = int(np.argmax(search))
     peak_lag = lag_lo + peak_idx
     confidence = float(np.clip(search[peak_idx], 0.0, 1.0))
@@ -131,6 +131,7 @@ def estimate_period(
 # ---------------------------------------------------------------------------
 # Core comb-filter DP
 # ---------------------------------------------------------------------------
+
 
 def periodicity_trace(
     gray: np.ndarray,
@@ -180,8 +181,8 @@ def periodicity_trace(
 
     # Clamp column range to image bounds.
     x_start = max(0, x_start)
-    x_end   = min(page_w - 1, x_end)
-    n_cols  = x_end - x_start + 1
+    x_end = min(page_w - 1, x_end)
+    n_cols = x_end - x_start + 1
 
     # Search band (clamped to image).
     band_half = band_half_multiplier * scale_unit
@@ -216,7 +217,7 @@ def periodicity_trace(
 
     # Centre slice: band rows only, columns x_start..x_end.
     # shape: (n_band, n_cols)
-    band_dark = dark[y_lo:y_hi + 1, x_start:x_end + 1]
+    band_dark = dark[y_lo : y_hi + 1, x_start : x_end + 1]
 
     comb_cost = band_dark.copy()
 
@@ -235,7 +236,7 @@ def periodicity_trace(
         # Upper tooth page row: y_lo + r - offset_px.
         # Valid when 0 <= y_lo + r - offset_px <= page_h - 1
         #       i.e. offset_px <= r + y_lo  and  r + y_lo - offset_px <= page_h - 1
-        r_up_lo = max(0, offset_px - y_lo)          # first band row with valid upper tooth
+        r_up_lo = max(0, offset_px - y_lo)  # first band row with valid upper tooth
         r_up_hi = min(n_band - 1, page_h - 1 - y_lo + offset_px - 1)
 
         if r_up_lo <= r_up_hi and r_up_lo < n_band:
@@ -245,7 +246,7 @@ def periodicity_trace(
             )
             band_rows_up = slice(r_up_lo, r_up_hi + 1)
             comb_cost[band_rows_up, :] += (
-                teeth_weight * dark[tooth_up_rows, x_start:x_end + 1]
+                teeth_weight * dark[tooth_up_rows, x_start : x_end + 1]
             )
 
         # Lower tooth: y_lo+r + offset_px
@@ -259,7 +260,7 @@ def periodicity_trace(
             )
             band_rows_dn = slice(r_dn_lo, r_dn_hi + 1)
             comb_cost[band_rows_dn, :] += (
-                teeth_weight * dark[tooth_dn_rows, x_start:x_end + 1]
+                teeth_weight * dark[tooth_dn_rows, x_start : x_end + 1]
             )
 
     # Normalise comb_cost to [0, 1] then invert so low cost = good (dark).
@@ -303,6 +304,6 @@ def periodicity_trace(
     path_indices.reverse()
 
     xs = np.arange(x_start, x_end + 1)
-    ys = (np.array(path_indices, dtype=float) + y_lo)
+    ys = np.array(path_indices, dtype=float) + y_lo
 
     return xs, ys

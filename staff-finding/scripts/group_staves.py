@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 
 from fit_centerline import FitResult
+
 # InterpolatedLine lives in interpolate_staves; re-exported here so existing
 # callers (shared_utils, tests) can continue importing it from group_staves.
 from interpolate_staves import (  # noqa: F401
@@ -30,7 +31,6 @@ from interpolate_staves import (  # noqa: F401
     INTERPOLATION_GAP_MULTIPLIER,
     interpolate_missing_lines,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tunable constants
@@ -59,6 +59,7 @@ MIN_GAP_MULTIPLIER = 0.5
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StaveAssignment:
     """One entry per input FitResult, in the same order as the input list.
@@ -75,6 +76,7 @@ class StaveAssignment:
         flags: Per-fit grouping flags, e.g. 'no_y_position_available',
             'ambiguous_assignment'.
     """
+
     fit_index: int
     stave_id: Optional[int] = None
     y_at_center: Optional[float] = None
@@ -102,6 +104,7 @@ class StaveGroupingResult:
         flags: Page-level grouping flags, e.g. 'no_fits_available',
             'mode_count_below_typical', 'staves_with_unexpected_count'.
     """
+
     assignments: list[StaveAssignment] = field(default_factory=list)
     mode_lines_per_stave: Optional[int] = None
     line_count_distribution: dict[int, int] = field(default_factory=dict)
@@ -117,6 +120,7 @@ class StaveGroupingResult:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def group_staves(
     fits: list[FitResult],
@@ -285,7 +289,8 @@ def group_staves(
 
         # Flag unexpected-count staves by ID so QA knows which ones to inspect.
         unexpected_ids = [
-            str(sid) for sid, cnt in stave_line_counts.items()
+            str(sid)
+            for sid, cnt in stave_line_counts.items()
             if abs(cnt - result.mode_lines_per_stave) > 1
         ]
         if unexpected_ids:
@@ -349,9 +354,7 @@ def group_staves(
     # --- Stage 8: Generate diagnostic image (if requested) ---
     # Design doc §6.6: Diagnostic preserves all grouping evidence for QA.
     if save_path is not None:
-        _save_grouping_diagnostic(
-            fits, result, page_size, page_image, save_path
-        )
+        _save_grouping_diagnostic(fits, result, page_size, page_image, save_path)
 
     return result
 
@@ -359,6 +362,7 @@ def group_staves(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _reindex_stave_lines(
     assignments: list[StaveAssignment],
@@ -429,7 +433,6 @@ def _compute_gap_distribution(y_positions: list[float]) -> list[float]:
     sorted_y = sorted(y_positions)
     gaps = [sorted_y[i + 1] - sorted_y[i] for i in range(len(sorted_y) - 1)]
     return gaps
-
 
 
 def _determine_cut_threshold(gaps: list[float], scale_unit: float) -> float:
@@ -579,7 +582,7 @@ def _check_stave_rhythm(
 
         if len(intra_gap_vals) >= 2:
             mean_g = float(np.mean(intra_gap_vals))
-            std_g  = float(np.std(intra_gap_vals))
+            std_g = float(np.std(intra_gap_vals))
             gap_cv = std_g / mean_g if mean_g > 0 else float("inf")
         elif len(intra_gap_vals) == 1:
             gap_cv = 0.0
@@ -599,16 +602,16 @@ def _check_stave_rhythm(
         # in the shaded region, making the anomaly visually obvious even when
         # a stave has zero intra-stave gaps.
         chart_start = max(0, start - 1)
-        chart_end   = min(len(gaps) - 1, end)
+        chart_end = min(len(gaps) - 1, end)
 
         result[stave_id] = {
-            "status":               status,
-            "lines_observed":       intra_count + 1,
-            "lines_expected":       mode_n,
+            "status": status,
+            "lines_observed": intra_count + 1,
+            "lines_expected": mode_n,
             "intra_count_observed": intra_count,
             "intra_count_expected": expected_intra,
-            "gap_cv":               round(gap_cv, 3) if gap_cv is not None else None,
-            "gap_index_range":      [chart_start, chart_end],
+            "gap_cv": round(gap_cv, 3) if gap_cv is not None else None,
+            "gap_index_range": [chart_start, chart_end],
         }
 
     return result
@@ -671,9 +674,7 @@ def _save_grouping_diagnostic(
     # --- Determine canvas size ---
     if page_image is not None:
         canvas_h, canvas_w = page_image.shape[:2]
-        canvas = cv2.cvtColor(page_image, cv2.COLOR_BGR2RGB).astype(
-            np.float32
-        ) / 255.0
+        canvas = cv2.cvtColor(page_image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     else:
         if page_size is None:
             page_size = (1000, 1000)  # Fallback.
@@ -682,9 +683,9 @@ def _save_grouping_diagnostic(
 
     # --- Generate colors for staves ---
     # Key colors by actual stave_id so the legend always matches the lines.
-    assigned_ids = sorted({
-        a.stave_id for a in result.assignments if a.stave_id is not None
-    })
+    assigned_ids = sorted(
+        {a.stave_id for a in result.assignments if a.stave_id is not None}
+    )
     if not assigned_ids:
         assigned_ids = list(range(5))  # fallback for empty result
 
@@ -755,7 +756,7 @@ def _save_grouping_diagnostic(
         i = 0
         while i < len(xs) - 1:
             j = min(i + DASH, len(xs) - 1)
-            seg = np.column_stack([xs[i:j+1], ys[i:j+1]])
+            seg = np.column_stack([xs[i : j + 1], ys[i : j + 1]])
             cv2.polylines(canvas_uint8, [seg], False, color_bgr, thickness=2)
             i += DASH + GAP
 
@@ -774,24 +775,36 @@ def _save_grouping_diagnostic(
             continue
         stave_fits.setdefault(assignment.stave_id, []).append(fit)
 
-    BOX_PAD = 12   # px of breathing room around each stave's extent
+    BOX_PAD = 12  # px of breathing room around each stave's extent
     for stave_id, stave_fit_list in stave_fits.items():
-        left_x  = int(min(f.x_page_offset + f.x_start          for f in stave_fit_list)) - BOX_PAD
-        right_x = int(max(f.x_page_offset + f.x_end            for f in stave_fit_list)) + BOX_PAD
-        top_y   = int(min(f.y_page_offset + min(f.y_values)     for f in stave_fit_list)) - BOX_PAD
-        bot_y   = int(max(f.y_page_offset + max(f.y_values)     for f in stave_fit_list)) + BOX_PAD
+        left_x = int(min(f.x_page_offset + f.x_start for f in stave_fit_list)) - BOX_PAD
+        right_x = int(max(f.x_page_offset + f.x_end for f in stave_fit_list)) + BOX_PAD
+        top_y = (
+            int(min(f.y_page_offset + min(f.y_values) for f in stave_fit_list))
+            - BOX_PAD
+        )
+        bot_y = (
+            int(max(f.y_page_offset + max(f.y_values) for f in stave_fit_list))
+            + BOX_PAD
+        )
         # Clamp to canvas.
-        left_x  = max(0, left_x)
+        left_x = max(0, left_x)
         right_x = min(canvas_w - 1, right_x)
-        top_y   = max(0, top_y)
-        bot_y   = min(canvas_h - 1, bot_y)
-        cv2.rectangle(canvas_uint8, (left_x, top_y), (right_x, bot_y),
-                      (220, 30, 30), thickness=3)
-        cv2.putText(canvas_uint8, f"S{stave_id}",
-                    (left_x + 6, top_y + 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.8,
-                    color=(220, 30, 30), thickness=2,
-                    lineType=cv2.LINE_AA)
+        top_y = max(0, top_y)
+        bot_y = min(canvas_h - 1, bot_y)
+        cv2.rectangle(
+            canvas_uint8, (left_x, top_y), (right_x, bot_y), (220, 30, 30), thickness=3
+        )
+        cv2.putText(
+            canvas_uint8,
+            f"S{stave_id}",
+            (left_x + 6, top_y + 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=0.8,
+            color=(220, 30, 30),
+            thickness=2,
+            lineType=cv2.LINE_AA,
+        )
 
     # --- Create a figure with subplots ---
     fig, axes = plt.subplots(
@@ -827,8 +840,7 @@ def _save_grouping_diagnostic(
                 for k in range(gi0, min(gi1 + 1, n_gaps)):
                     bar_colors[k] = fill
 
-        axes[1].bar(range(n_gaps), result.gap_distribution,
-                    color=bar_colors, zorder=2)
+        axes[1].bar(range(n_gaps), result.gap_distribution, color=bar_colors, zorder=2)
 
         # Shade the noise zone below min_threshold (gaps too small to be real
         # staffline spacing — excluded from periodicity calculations).
@@ -886,21 +898,30 @@ def _save_grouping_diagnostic(
                     continue
                 gi0, gi1 = ra["gap_index_range"]
                 mid_x = (gi0 + gi1) / 2.0
-                label_color = "tomato" if ra["status"] == "under_populated" else "mediumpurple"
+                label_color = (
+                    "tomato" if ra["status"] == "under_populated" else "mediumpurple"
+                )
                 symbol = "▼" if ra["status"] == "under_populated" else "▲"
                 axes[1].text(
-                    mid_x, y_max * 1.04,
+                    mid_x,
+                    y_max * 1.04,
                     f"S{sid}{symbol}",
-                    ha="center", va="bottom",
-                    fontsize=7, color=label_color, fontweight="bold",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color=label_color,
+                    fontweight="bold",
                     clip_on=False,
                 )
                 # Small note showing observed vs expected
                 axes[1].text(
-                    mid_x, y_max * 1.01,
+                    mid_x,
+                    y_max * 1.01,
                     f"{ra['lines_observed']}/{ra['lines_expected']}",
-                    ha="center", va="bottom",
-                    fontsize=6, color=label_color,
+                    ha="center",
+                    va="bottom",
+                    fontsize=6,
+                    color=label_color,
                     clip_on=False,
                 )
 
@@ -922,9 +943,7 @@ def _save_grouping_diagnostic(
         for sid in assigned_ids
     ]
     fig.legend(
-        handles=legend_elements, loc="upper center", ncol=5, bbox_to_anchor=(
-            0.5, -0.02
-        )
+        handles=legend_elements, loc="upper center", ncol=5, bbox_to_anchor=(0.5, -0.02)
     )
 
     # --- Save full-resolution stave overlay ---

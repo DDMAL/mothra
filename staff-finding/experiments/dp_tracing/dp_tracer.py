@@ -19,7 +19,6 @@ All inputs and outputs are in page-absolute pixel coordinates.
 import numpy as np
 from scipy.ndimage import minimum_filter1d, gaussian_filter1d
 
-
 # ---------------------------------------------------------------------------
 # Tunable defaults
 # ---------------------------------------------------------------------------
@@ -43,6 +42,7 @@ BLUR_SIGMA_MULTIPLIER = 0.2
 # ---------------------------------------------------------------------------
 # Core DP
 # ---------------------------------------------------------------------------
+
 
 def dp_trace(
     gray: np.ndarray,
@@ -74,8 +74,8 @@ def dp_trace(
 
     # Clamp column range to image bounds.
     x_start = max(0, x_start)
-    x_end   = min(page_w - 1, x_end)
-    n_cols  = x_end - x_start + 1
+    x_end = min(page_w - 1, x_end)
+    n_cols = x_end - x_start + 1
 
     # Search band (clamped to image).
     band_half = band_half_multiplier * scale_unit
@@ -97,7 +97,7 @@ def dp_trace(
 
     # Data cost: [0=dark/ink, 1=bright/parchment]
     # shape: (n_band, n_cols)
-    band_img = smoothed[y_min:y_max + 1, x_start:x_end + 1] / 255.0
+    band_img = smoothed[y_min : y_max + 1, x_start : x_end + 1] / 255.0
 
     # DP forward pass.
     # dp[y_idx] = minimum cumulative cost to reach y_idx at the current column.

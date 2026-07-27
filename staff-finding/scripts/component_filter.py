@@ -15,7 +15,6 @@ from typing import Optional
 import cv2
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Tunable constants (see ADR-001 §9)
 # ---------------------------------------------------------------------------
@@ -104,6 +103,7 @@ SAUVOLA_MIN_WINDOW = 5
 # Output type
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ComponentFilterResult:
     """
@@ -136,13 +136,16 @@ class ComponentFilterResult:
             merged into the active cluster (when merge_components=True);
             empty list otherwise.
     """
+
     coords: list[tuple[int, int]] = field(default_factory=list)
     mask: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=bool))
     score_breakdown: dict = field(default_factory=dict)
     discarded: list[dict] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     no_merge_coords: list[tuple[int, int]] = field(default_factory=list)
-    no_merge_mask: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=bool))
+    no_merge_mask: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 0), dtype=bool)
+    )
     merged_cluster_labels: list[int] = field(default_factory=list)
     companion_labels: list[int] = field(default_factory=list)
 
@@ -150,6 +153,7 @@ class ComponentFilterResult:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def filter_components(
     crop: np.ndarray,
@@ -227,7 +231,10 @@ def filter_components(
 
         # Score survivors.
         score, sub_scores = _score_component(
-            x=x, y=y, w=w, h=h,
+            x=x,
+            y=y,
+            w=w,
+            h=h,
             box_width=box_width,
             box_height=box_height,
         )
@@ -242,10 +249,15 @@ def filter_components(
             flags=["no_components_survived"],
         )
         if save_path is not None:
-            _save_diagnostic(crop, binary, labels, kept_label=None,
-                             discarded_labels=[d["label"] for d in discarded],
-                             save_path=save_path,
-                             binarization_method=binarization)
+            _save_diagnostic(
+                crop,
+                binary,
+                labels,
+                kept_label=None,
+                discarded_labels=[d["label"] for d in discarded],
+                save_path=save_path,
+                binarization_method=binarization,
+            )
         return result
 
     # --- Rank and pick the no-merge winner ---
@@ -274,15 +286,17 @@ def filter_components(
 
     # Non-winning survivors also go into 'discarded' with their scores.
     for s in survivors[1:]:
-        discarded.append({
-            **s[3],
-            "reason": "not_top_scoring",
-            "score": s[1],
-            "sub_scores": s[2],
-        })
+        discarded.append(
+            {
+                **s[3],
+                "reason": "not_top_scoring",
+                "score": s[1],
+                "sub_scores": s[2],
+            }
+        )
 
     # --- Build the no-merge mask and coord list ---
-    no_merge_mask = (labels == winner_label)
+    no_merge_mask = labels == winner_label
     ys, xs = np.where(no_merge_mask)
     no_merge_coords = list(zip(xs.tolist(), ys.tolist()))
 
@@ -291,7 +305,10 @@ def filter_components(
     merged_scored = []
     for cluster in merge_clusters:
         m_score, m_sub_scores, m_stats = _score_merged_cluster(
-            cluster, stats, box_width, box_height,
+            cluster,
+            stats,
+            box_width,
+            box_height,
         )
         merged_scored.append((cluster, m_score, m_sub_scores, m_stats))
     merged_scored.sort(key=lambda m: m[1], reverse=True)
@@ -310,7 +327,7 @@ def filter_components(
     # Build the merged-winner mask and coord list.
     merged_mask = np.zeros_like(labels, dtype=bool)
     for lbl in merged_winner_labels:
-        merged_mask |= (labels == lbl)
+        merged_mask |= labels == lbl
     m_ys, m_xs = np.where(merged_mask)
     merged_coords = list(zip(m_xs.tolist(), m_ys.tolist()))
 
@@ -323,15 +340,15 @@ def filter_components(
     # so the downstream fit sees the full staffline extent.
 
     no_merge_win_x_start = winner_stats["x"]
-    no_merge_win_x_end   = winner_stats["x"] + winner_stats["w"]
+    no_merge_win_x_end = winner_stats["x"] + winner_stats["w"]
 
     if merged_scored:
         m_stats_top = merged_scored[0][3]  # (cluster, score, sub_scores, stats)
         merge_win_x_start = m_stats_top["x"]
-        merge_win_x_end   = m_stats_top["x"] + m_stats_top["w"]
+        merge_win_x_end = m_stats_top["x"] + m_stats_top["w"]
     else:
         merge_win_x_start = no_merge_win_x_start
-        merge_win_x_end   = no_merge_win_x_end
+        merge_win_x_end = no_merge_win_x_end
 
     merged_winner_set = set(int(lbl) for lbl in merged_winner_labels)
 
@@ -349,13 +366,14 @@ def filter_components(
             continue
         comp_x = s_stats["x"]
         comp_w = s_stats["w"]
-        comp_mask = (labels == s_label)
+        comp_mask = labels == s_label
         c_ys, c_xs = np.where(comp_mask)
         comp_pixels = list(zip(c_xs.tolist(), c_ys.tolist()))
 
         # No-merge companion: non-overlapping with no-merge winner bbox.
-        no_overlap_no_merge = (comp_x + comp_w <= no_merge_win_x_start) or \
-                              (comp_x >= no_merge_win_x_end)
+        no_overlap_no_merge = (comp_x + comp_w <= no_merge_win_x_start) or (
+            comp_x >= no_merge_win_x_end
+        )
         if no_overlap_no_merge:
             no_merge_companion_labels.append(int(s_label))
             no_merge_companion_mask |= comp_mask
@@ -364,8 +382,9 @@ def filter_components(
         # Merge companion: must not already be in merged winner; non-overlapping
         # with merged winner's combined bbox.
         if int(s_label) not in merged_winner_set:
-            no_overlap_merge = (comp_x + comp_w <= merge_win_x_start) or \
-                               (comp_x >= merge_win_x_end)
+            no_overlap_merge = (comp_x + comp_w <= merge_win_x_start) or (
+                comp_x >= merge_win_x_end
+            )
             if no_overlap_merge:
                 merge_companion_labels.append(int(s_label))
                 merge_companion_mask |= comp_mask
@@ -391,7 +410,9 @@ def filter_components(
         flags=active_flags,
         no_merge_coords=no_merge_coords,
         no_merge_mask=no_merge_mask,
-        merged_cluster_labels=[int(lbl) for lbl in merged_winner_labels] if merge_components else [],
+        merged_cluster_labels=(
+            [int(lbl) for lbl in merged_winner_labels] if merge_components else []
+        ),
         companion_labels=active_companion_labels,
     )
 
@@ -415,6 +436,7 @@ def filter_components(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _binarize(
     crop: np.ndarray,
@@ -443,9 +465,7 @@ def _binarize(
 
     if method == "otsu":
         # THRESH_BINARY_INV: ink (dark) becomes foreground (255), parchment 0.
-        _, binary = cv2.threshold(
-            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-        )
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         return binary
 
     if method == "sauvola":
@@ -465,13 +485,18 @@ def _binarize(
         binary = ((gray < thresh_map).astype(np.uint8)) * 255
         return binary
 
-    raise ValueError(f"Unknown binarization method: {method!r}. "
-                     "Expected 'otsu' or 'sauvola'.")
+    raise ValueError(
+        f"Unknown binarization method: {method!r}. " "Expected 'otsu' or 'sauvola'."
+    )
 
 
 def _score_component(
-    x: int, y: int, w: int, h: int,
-    box_width: int, box_height: int,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    box_width: int,
+    box_height: int,
 ) -> tuple[float, dict]:
     """Score a component on horizontal extent and vertical-center proximity.
 
@@ -535,12 +560,14 @@ def _compute_merge_groups(
         y = stats_dict["y"]
         w = stats_dict["w"]
         h = stats_dict["h"]
-        items.append({
-            "label": stats_dict["label"],
-            "x_start": x,
-            "x_end": x + w,
-            "y_center": y + h / 2.0,
-        })
+        items.append(
+            {
+                "label": stats_dict["label"],
+                "x_start": x,
+                "x_end": x + w,
+                "y_center": y + h / 2.0,
+            }
+        )
 
     # Union-find for clustering. Index by position in items.
     n = len(items)
@@ -619,8 +646,12 @@ def _score_merged_cluster(
     merged_area = int(sum(areas))
 
     score, sub_scores = _score_component(
-        x=merged_x, y=merged_y, w=merged_w, h=merged_h,
-        box_width=box_width, box_height=box_height,
+        x=merged_x,
+        y=merged_y,
+        w=merged_w,
+        h=merged_h,
+        box_width=box_width,
+        box_height=box_height,
     )
     merged_stats = {
         "labels": [int(lbl) for lbl in cluster_labels],
@@ -631,7 +662,6 @@ def _score_merged_cluster(
         "area": merged_area,
     }
     return score, sub_scores, merged_stats
-
 
 
 def _save_diagnostic(
@@ -673,7 +703,8 @@ def _save_diagnostic(
     panel_height_in = 3.0
     figure_width_in = 16.0
     fig, axes = plt.subplots(
-        n_panels, 1,
+        n_panels,
+        1,
         figsize=(figure_width_in, panel_height_in * n_panels),
     )
 
@@ -696,7 +727,7 @@ def _save_diagnostic(
     color_img[labels > 0] = [128, 128, 128]  # gray for any survivors-not-evaluated
     for d_label in discarded_labels:
         color_img[labels == d_label] = [200, 60, 60]  # red for discarded
-    for comp_label in (companion_labels or []):
+    for comp_label in companion_labels or []:
         color_img[labels == comp_label] = [0, 200, 200]  # cyan for companions
     if kept_label is not None:
         color_img[labels == kept_label] = [60, 180, 75]  # green for kept
@@ -707,11 +738,13 @@ def _save_diagnostic(
 
     # Panel 4: kept + companion mask (no merge)
     if kept_label is not None:
-        kept_mask = (labels == kept_label)
-        for comp_label in (companion_labels or []):
+        kept_mask = labels == kept_label
+        for comp_label in companion_labels or []:
             kept_mask = kept_mask | (labels == comp_label)
         axes[3].imshow(kept_mask, cmap="gray")
-        title_suffix = f" + {len(companion_labels or [])} companion(s)" if companion_labels else ""
+        title_suffix = (
+            f" + {len(companion_labels or [])} companion(s)" if companion_labels else ""
+        )
         axes[3].set_title(f"No-merge: kept mask{title_suffix}")
     else:
         axes[3].imshow(np.zeros_like(binary), cmap="gray")
@@ -724,15 +757,15 @@ def _save_diagnostic(
         merge_color_img = np.zeros((*labels.shape, 3), dtype=np.uint8)
         winner_set = set(merged_winner_labels or [])
         palette = [
-            [80, 130, 200],   # blue
-            [200, 160, 60],   # orange
+            [80, 130, 200],  # blue
+            [200, 160, 60],  # orange
             [160, 100, 200],  # purple
-            [60, 160, 160],   # teal
-            [200, 200, 80],   # yellow
+            [60, 160, 160],  # teal
+            [200, 200, 80],  # yellow
             [180, 100, 130],  # magenta
         ]
         non_winner_idx = 0
-        for cluster in (merge_clusters or []):
+        for cluster in merge_clusters or []:
             if set(cluster) == winner_set and winner_set:
                 color = [60, 180, 75]  # green
             else:
@@ -741,7 +774,7 @@ def _save_diagnostic(
             for lbl in cluster:
                 merge_color_img[labels == lbl] = color
         # Overlay companions in cyan on top of cluster colors.
-        for comp_label in (companion_labels or []):
+        for comp_label in companion_labels or []:
             merge_color_img[labels == comp_label] = [0, 200, 200]
         axes[4].imshow(merge_color_img)
         axes[4].set_title("With-merge: clusters (green=winner, cyan=companions)")
@@ -750,7 +783,7 @@ def _save_diagnostic(
         # Panel 6: merged-winner mask alone
         merged_winner_mask = np.zeros_like(labels, dtype=bool)
         for lbl in winner_set:
-            merged_winner_mask |= (labels == lbl)
+            merged_winner_mask |= labels == lbl
         axes[5].imshow(merged_winner_mask, cmap="gray")
         axes[5].set_title("With-merge: would-be kept mask")
         axes[5].axis("off")
