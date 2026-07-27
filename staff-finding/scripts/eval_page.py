@@ -38,7 +38,7 @@ from yolo_io import filter_to_class, parse_yolo_txt
 # Config
 # ---------------------------------------------------------------------------
 
-STAFFLINE_CLASS_DEFAULT = 0
+STAFFLINE_CLASS_DEFAULT = 2  # YOLO class id for "staves" (see run_inference.py CLASS_NAMES)
 MATCH_THRESHOLD_MULTIPLIER = 0.5  # fraction of scale_unit → max y-distance for a match
 
 
@@ -57,7 +57,14 @@ def _image_dims(image_path: Path) -> tuple[int, int]:
 
 
 def _pred_page_y(item: dict) -> np.ndarray:
-    """Page-absolute y-values for a JSOMR staffline item."""
+    """Page-absolute y-values for a JSOMR staffline item.
+
+    Prefers the `centerline_page` block (already page-absolute) when present;
+    falls back to `centerline` + `bounding_box` for legacy crop-local records.
+    """
+    centerline_page = item.get("centerline_page")
+    if centerline_page is not None:
+        return np.array(centerline_page["y_values"], dtype=float)
     return (
         np.array(item["centerline"]["y_values"], dtype=float)
         + item["bounding_box"]["uly"]
@@ -66,6 +73,11 @@ def _pred_page_y(item: dict) -> np.ndarray:
 
 def _pred_page_x(item: dict) -> np.ndarray:
     """Page-absolute x positions corresponding to each y_value."""
+    centerline_page = item.get("centerline_page")
+    if centerline_page is not None:
+        x_start = centerline_page["x_start"]
+        n = len(centerline_page["y_values"])
+        return np.arange(x_start, x_start + n)
     x_start = item["centerline"]["x_start"]
     n = len(item["centerline"]["y_values"])
     return np.arange(x_start, x_start + n) + item["bounding_box"]["ulx"]

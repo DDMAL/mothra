@@ -98,7 +98,7 @@ def write_jsomr(
         stave_interpolated[il.stave_id] = stave_interpolated.get(il.stave_id, 0) + 1
 
     records = []
-    for idx, (fit, box) in enumerate(zip(fit_results, boxes)):
+    for idx, (fit, box) in enumerate(zip(fit_results, boxes, strict=True)):
         ulx, uly, lrx, lry = box
         asg = asg_by_fit.get(idx)
 
@@ -107,9 +107,11 @@ def write_jsomr(
             "source": "detected",
             "bounding_box": {"ulx": ulx, "uly": uly, "lrx": lrx, "lry": lry},
             "centerline": {
-                "x_start": fit.x_start,
-                "x_end": fit.x_end,
-                "y_values": [round(float(y), 1) for y in fit.y_values],
+                "x_start": int(fit.x_start + fit.x_page_offset),
+                "x_end": int(fit.x_end + fit.x_page_offset),
+                "y_values": [
+                    round(float(y) + fit.y_page_offset, 1) for y in fit.y_values
+                ],
             },
             "fit": {
                 "method": fit.method,

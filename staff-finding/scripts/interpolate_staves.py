@@ -112,16 +112,19 @@ def _interpolate_between(
 ) -> list[float]:
     """Synthesise y-values for a missing line between two detected neighbours.
 
-    At each x, reads the y-value from the line above and below (clamping to
-    their endpoints if x falls outside their range), then linearly interpolates
-    to y_target based on its fractional position between the two neighbours.
+    At each x (page-absolute), reads the y-value from the line above and below
+    (clamping to their endpoints if x falls outside their range), then linearly
+    interpolates to y_target based on its fractional position between the two
+    neighbours.
 
     Returns page-absolute y-values (y_page_offset already included).
     """
 
     def y_at_x(fit: FitResult, x: int) -> float:
-        idx = x - fit.x_start
-        idx = max(0, min(idx, len(fit.y_values) - 1))
+        # x is page-absolute; fit.x_start is crop-local, so undo the fit's own
+        # x_page_offset before indexing into its crop-local y_values.
+        idx = x - (fit.x_start + fit.x_page_offset)
+        idx = max(0, min(int(round(idx)), len(fit.y_values) - 1))
         return fit.y_page_offset + fit.y_values[idx]
 
     ys: list[float] = []
@@ -250,8 +253,11 @@ def interpolate_missing_lines(
             continue
 
         fit_pairs_sorted = sorted(fit_pairs, key=lambda p: _y_at_center(p[1]) or 0.0)
-        centers = [_y_at_center(f) for _, f in fit_pairs_sorted]
-        centers = [c for c in centers if c is not None]
+        paired = [
+            (c, p) for p in fit_pairs_sorted if (c := _y_at_center(p[1])) is not None
+        ]
+        centers = [c for c, _ in paired]
+        fit_pairs_sorted = [p for _, p in paired]
         if not centers:
             continue
 
@@ -279,8 +285,18 @@ def interpolate_missing_lines(
                 if gap < cut_threshold or gap > max_threshold:
                     continue
                 n_missing = max(1, round(gap / h_est) - 1)
-                x_start = min(above_f.x_start, below_f.x_start)
-                x_end = max(above_f.x_end, below_f.x_end)
+                x_start = int(
+                    min(
+                        above_f.x_start + above_f.x_page_offset,
+                        below_f.x_start + below_f.x_page_offset,
+                    )
+                )
+                x_end = int(
+                    max(
+                        above_f.x_end + above_f.x_page_offset,
+                        below_f.x_end + below_f.x_page_offset,
+                    )
+                )
                 for i in range(1, n_missing + 1):
                     y_target = y_above + i * gap / (n_missing + 1)
                     stave_lines.append(
@@ -335,8 +351,8 @@ def interpolate_missing_lines(
                     InterpolatedLine(
                         stave_id=stave_id,
                         within_stave_index=k,  # grid slot; overwritten by re-index
-                        x_start=ref_f.x_start,
-                        x_end=ref_f.x_end,
+                        x_start=int(ref_f.x_start + ref_f.x_page_offset),
+                        x_end=int(ref_f.x_end + ref_f.x_page_offset),
                         y_values=[
                             ref_f.y_page_offset + y + offset for y in ref_f.y_values
                         ],
