@@ -13,11 +13,19 @@ staff-finding/scripts/__pycache__/
 staff-finding/models/
 staff-finding/e2e_tests
 .claude/
+zzzz/
+staff-finding/addtl-gt/
 
 # Downloaded pretrained weights
 yolov8*.pt
 !models/**/*.pt
 *.pt
+
+# images
+*.png
+*.jpg
+*.jpeg
+*.zip
 
 # Training logs
 training_output.log
