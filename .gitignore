@@ -11,15 +11,14 @@ staff-finding/page_tests
 staff-finding/grouping_tests
 staff-finding/scripts/__pycache__/
 staff-finding/models/
-staff-finding/e2e_tests
 .claude/
 zzzz/
 staff-finding/addtl-gt/
 
 # Downloaded pretrained weights
 yolov8*.pt
-!models/**/*.pt
 *.pt
+!models/**/*.pt
 
 # images
 *.png
@@ -63,9 +62,6 @@ landing-page/public/neon/
 # Vite build output
 landing-page/dist/
 landing-page/.vite/
-
-# Claude Code local config
-.claude/
 
 .idea
 
