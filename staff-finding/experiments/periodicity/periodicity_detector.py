@@ -225,19 +225,13 @@ def periodicity_trace(
     for k in range(1, n_extra + 1):
         offset_px = int(round(k * h_est))
 
-        # Upper tooth: y_lo+r - offset_px
-        y_up_lo = y_lo - offset_px
-        y_up_hi = y_hi - offset_px
-        y_up_lo_c = max(0, y_up_lo)
-        y_up_hi_c = min(page_h - 1, y_up_hi)
-
         # Which band rows have a valid upper tooth?
         # Band row r maps to page row y_lo + r.
         # Upper tooth page row: y_lo + r - offset_px.
         # Valid when 0 <= y_lo + r - offset_px <= page_h - 1
         #       i.e. offset_px <= r + y_lo  and  r + y_lo - offset_px <= page_h - 1
         r_up_lo = max(0, offset_px - y_lo)  # first band row with valid upper tooth
-        r_up_hi = min(n_band - 1, page_h - 1 - y_lo + offset_px - 1)
+        r_up_hi = min(n_band - 1, page_h - 1 - y_lo + offset_px)
 
         if r_up_lo <= r_up_hi and r_up_lo < n_band:
             tooth_up_rows = slice(

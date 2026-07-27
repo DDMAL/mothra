@@ -726,9 +726,9 @@ def _save_grouping_diagnostic(
 
         color_rgba = stave_colors[assignment.stave_id]
         color_rgb = color_rgba[:3]
-        color_bgr = tuple(int(c * 255) for c in reversed(color_rgb))
+        color_rgb_255 = tuple(int(c * 255) for c in color_rgb)
 
-        cv2.polylines(canvas_uint8, [points], False, color_bgr, thickness=2)
+        cv2.polylines(canvas_uint8, [points], False, color_rgb_255, thickness=2)
 
     # --- Overlay interpolated lines (dashed, same stave color but lighter) ---
     for interp in result.interpolated_lines:
@@ -749,7 +749,7 @@ def _save_grouping_diagnostic(
         color_rgb = color_rgba[:3]
         # Lighten the color by blending toward white (0.55 original + 0.45 white)
         light_rgb = tuple(min(1.0, c * 0.55 + 0.45) for c in color_rgb)
-        color_bgr = tuple(int(c * 255) for c in reversed(light_rgb))
+        color_rgb_255 = tuple(int(c * 255) for c in light_rgb)
 
         # Draw as a dashed line: alternate 10-pixel drawn / 6-pixel gap segments.
         DASH, GAP = 10, 6
@@ -757,7 +757,7 @@ def _save_grouping_diagnostic(
         while i < len(xs) - 1:
             j = min(i + DASH, len(xs) - 1)
             seg = np.column_stack([xs[i : j + 1], ys[i : j + 1]])
-            cv2.polylines(canvas_uint8, [seg], False, color_bgr, thickness=2)
+            cv2.polylines(canvas_uint8, [seg], False, color_rgb_255, thickness=2)
             i += DASH + GAP
 
     # --- Draw stave bounding boxes (red rectangles) ---

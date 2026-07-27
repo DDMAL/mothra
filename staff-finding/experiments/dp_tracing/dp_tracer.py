@@ -72,9 +72,14 @@ def dp_trace(
     """
     page_h, page_w = gray.shape[:2]
 
-    # Clamp column range to image bounds.
-    x_start = max(0, x_start)
-    x_end = min(page_w - 1, x_end)
+    # Clamp column range to image bounds (both endpoints), and reject an
+    # inverted/fully out-of-bounds range rather than let n_cols go negative.
+    x_start = max(0, min(x_start, page_w - 1))
+    x_end = max(0, min(x_end, page_w - 1))
+    if x_end < x_start:
+        xs = np.array([x_start])
+        ys = np.array([y_hint])
+        return xs, ys
     n_cols = x_end - x_start + 1
 
     # Search band (clamped to image).
