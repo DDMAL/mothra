@@ -70,7 +70,7 @@ All unit tests pass:
 Following ADR-001 principles:
 - **Permissive filtering**: Keeps valid groupings even with imperfect inputs
 - **Preserved evidence**: Returns gap_distribution, cut_threshold, and flags for inspection
-- **Downstrem robustness**: Robust fitting handles local asymmetries; grouping doesn't need to
+- **Downstream robustness**: Robust fitting handles local asymmetries; grouping doesn't need to
 
 ### Edge Cases Handled
 

@@ -100,7 +100,7 @@ of the next line) should probably be excluded from pitch assignment.
 
 ## Suggested architecture
 
-```
+```text
 Staff-finding output (JSOMR)
         ↓
 Pitch grid builder
@@ -147,7 +147,7 @@ can download from the source page), as well as a set of corrected
 - **`models/text_music_detector_fulldata.pt`** — already separates text from
   music regions; may accelerate note-head localisation by restricting the search
   area. As a note, give this a padding zone of about 5-10 pixels, initially: some
-  scribes can get very slanty/shunted over at they go, and don't align
+  scribes can get very slanty/shunted over as they go, and don't align
   precisely over the syllable they are connected to.
 
 ---

@@ -128,18 +128,19 @@ shifted the gap distribution.
 
 ### Path forward
 
-**Interpolation pass** (design doc §6.3, currently stubbed in `group_staves.py`):
-After grouping, use the known stave structure (N lines per stave, expected spacing
-≈ scale_unit) to detect and fill in missing lines by interpolation from their
-neighbours.  This would:
+**Interpolation pass** (design doc §6.3, implemented in `interpolate_staves.py`
+but off by default — `group_staves.py` only calls it when
+`interpolate_missing=True`): after grouping, uses the known stave structure
+(N lines per stave, expected spacing ≈ scale_unit) to detect and fill in
+missing lines by interpolation from their neighbours. This would:
 
 1. Reconstruct dropped lines at expected positions within a stave.
 2. Correct the stave 5/6 split by recognising that the apparent two-group
    structure is one stave with a missing line at the boundary.
 
 This fix is method-agnostic — it applies equally to GP, DP, periodicity, and
-implicit neural outputs — so it is earmarked for implementation after all five
-experiment runners are complete.
+implicit neural outputs — so enabling it by default is the next step now that
+all five experiment runners are in place.
 
 ### v2 run — green channel (2026-06-01)
 

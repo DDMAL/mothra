@@ -334,7 +334,7 @@ python staff-finding/scripts/eval_batch.py \
 
 **Manifest format** (`eval_manifest.csv`):
 
-```
+```csv
 page_name,image,gt_txt,gt_source,pred_json,variant
 GentAnt1475_0017_AC_rightcrop,staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg,path/to/gt.txt,corrected_kyrie,path/to/stafflines.json,sauvola_no_bgr
 ```

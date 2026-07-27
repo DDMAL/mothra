@@ -19,9 +19,9 @@ The two-stage pipeline is **complete and passing tests**:
 **Stage 2 — per-page** (Stave grouping → Interpolation)
 - `scripts/group_staves.py` — fully implemented, all three former stubs
   resolved.  See `IMPLEMENTATION_AUDIT.md` for what changed.
-- `scripts/interpolate_staves.py` — the **placeholder is in place but
-  interpolation is not yet called** by default.  This is the main thing left
-  to implement (see below).
+- `scripts/interpolate_staves.py` — **implemented** (in-stave gap fill,
+  territory-bounded edge extrapolation, and a rhythm gate), but **off by
+  default** — `group_staves.py` only calls it when `interpolate_missing=True`.
 
 **Evaluation framework** — complete
 - `scripts/eval_page.py` — single page, GT vs. predicted, outputs one CSV row
@@ -31,7 +31,7 @@ The two-stage pipeline is **complete and passing tests**:
 - All five experiment runners emit the same JSOMR JSON, so they can be
   compared head-to-head via the eval scripts.
 
-**Experiment runners** — all five implemented
+**Experiment runners** — four of five implemented
 - `dp_tracing/` — DP minimum-cost path through raw grayscale (no binarization)
 - `gp_centerlines/` — reuses component filter; replaces poly fit with a GP
 - `implicit_neural/` — per-page per-line MLP trained by gradient descent on
@@ -46,15 +46,15 @@ and `staff-finding/e2e_tests/29may/Gent15_17_left/run_page`.
 
 ## What to work on next
 
-### 1. Interpolation pass (highest priority)
+### 1. Enable interpolation by default (highest priority)
 
-After grouping, use the known stave structure (N lines per stave, expected
-spacing ≈ `scale_unit`) to detect and fill missing lines.  The stub lives in
-`scripts/interpolate_staves.py`; the design is in `dox/` §6.3.  This fix is
-method-agnostic — it will improve every experiment runner.
-
-Trigger: a stave with fewer lines than the modal count, where a missing line
-can be placed at a predicted position from its neighbours.
+`scripts/interpolate_staves.py` now implements both triggers (in-stave gap
+fill, and territory-bounded edge extrapolation) plus a rhythm gate that skips
+staves whose gap pattern deviates from the page periodicity. It's called from
+`group_staves.py` when `interpolate_missing=True`, but is not yet on by
+default anywhere in the pipeline. Turning it on (and validating results across
+the corpus) is the main thing left to do here — this fix is method-agnostic,
+so it will improve every experiment runner once enabled.
 
 This would also fix the "stave 5/6 split" seen in the implicit neural run
 (see `experiments/implicit_neural/NOTES.md`) — the apparent two-group
@@ -113,7 +113,7 @@ python scripts/eval_batch.py --manifest manifest.csv --output results.csv
 | Implicit neural drops lines near decorative initials / rubrics | `experiments/implicit_neural/NOTES.md` | Root cause: competing dark mass; fix = interpolation pass (see §1 above) |
 | GP centerlines need `--valley-threshold` flag | `experiments/gp_centerlines/run_gp_page.py` | Intra-stave gap clusters near scale_unit; median-ratio threshold fails |
 | Periodicity autocorrelation per-YOLO-box can lock on wrong frequency | `experiments/periodicity/NOTES.md` | Range gate [0.7h, 1.5h] mitigates; per-page crop is more reliable |
-| Interpolation stub is a no-op | `scripts/interpolate_staves.py` | Not yet wired up; `group_staves.py` flags missing lines but does not fill them |
+| Interpolation is implemented but off by default | `scripts/interpolate_staves.py` | `group_staves.py` only fills missing lines when called with `interpolate_missing=True` |
 | Binarization on low-contrast faint ink | ADR-002 | Sauvola is in place; DeepOtsu is the planned escalation path if needed |
 
 ---
@@ -139,7 +139,7 @@ grouping/interpolation logic, please add a corresponding test case.
 |------|-----------|
 | `scripts/run_page.py` | End-to-end driver (Stage 1 + 2) |
 | `scripts/group_staves.py` | Stave grouping (Stage 2, fully implemented) |
-| `scripts/interpolate_staves.py` | Interpolation stub — the main TODO |
+| `scripts/interpolate_staves.py` | Interpolation (implemented, off by default) — enabling it is the main TODO |
 | `scripts/eval_page.py` | Evaluation (single page) |
 | `scripts/eval_batch.py` | Evaluation (batch) |
 | `experiments/*/NOTES.md` | Per-method run results and known issues |

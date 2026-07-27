@@ -87,11 +87,20 @@ python staff-finding/experiments/gp_centerlines/run_gp_page.py \
 ---
 
 ### 3. Implicit Neural Representation (`implicit_neural/`)
-**Status: planned — see NOTES.md**
+**Status: implemented — see NOTES.md**
 
 Fits a tiny MLP per staffline by gradient descent directly on the page image.
 No training phase, no binarization — the MLP *is* the curve, refined at
 test time to land on dark pixels.
+
+**Run:**
+```bash
+python staff-finding/experiments/implicit_neural/run_implicit_neural_page.py \
+    --page  staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg \
+    --yolo  staff-finding/image-sets/gent/right/inference/corrected/GentAnt1475_0017_AC_rightcrop.txt \
+    --staffline-class 0 \
+    --output staff-finding/e2e_tests/29may/Gent15_17_right/run_page/implicit_neural
+```
 
 ---
 
@@ -105,12 +114,21 @@ stafflines.  Requires a training loop and labelled data.
 ---
 
 ### 5. Periodicity Self-Supervision (`periodicity/`)
-**Status: planned — see NOTES.md**
+**Status: implemented — see NOTES.md**
 
 Detects stafflines by exploiting their periodic vertical structure via
 autocorrelation — no annotations required.  Phase tracking across columns
 recovers the staffline curves.  Potential foundation for a self-supervised
 pre-training approach.
+
+**Run:**
+```bash
+python staff-finding/experiments/periodicity/run_periodicity_page.py \
+    --page  staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg \
+    --yolo  staff-finding/image-sets/gent/right/inference/corrected/GentAnt1475_0017_AC_rightcrop.txt \
+    --staffline-class 0 \
+    --output staff-finding/e2e_tests/29may/Gent15_17_right/run_page/periodicity
+```
 
 ---
 
