@@ -85,13 +85,17 @@ def gp_fit(
 
     Returns:
         (y_pred, y_std, meta):
-            y_pred  — predicted y for each integer x in [x_query_start, x_query_end]
-            y_std   — posterior standard deviation at each predicted x
-            meta    — dict with fitted kernel params and observation count
+            y_pred  — predicted y for each integer x in [x_query_start, x_query_end],
+                      or [] if the fit failed (see meta["error"])
+            y_std   — posterior standard deviation at each predicted x, or []
+                      if the fit failed
+            meta    — dict with fitted kernel params and observation count, or
+                      {"error": ...} on failure. Callers must treat a non-empty
+                      meta["error"] as a failed fit and exclude it from grouping
+                      rather than consuming y_pred/y_std as real predictions.
     """
     if not coords:
-        n = x_query_end - x_query_start + 1
-        return [0.0] * n, [float("inf")] * n, {"error": "no_coords"}
+        return [], [], {"error": "no_coords"}
 
     arr = np.asarray(coords, dtype=np.float64)
     xs_raw = arr[:, 0]
@@ -127,13 +131,8 @@ def gp_fit(
 
     try:
         gpr.fit(obs_x, obs_y)
-    except Exception as exc:
-        n = x_query_end - x_query_start + 1
-        return (
-            list(np.full(n, float(np.mean(obs_y)))),
-            list(np.full(n, float("inf"))),
-            {"error": str(exc)},
-        )
+    except Exception as exc:  # noqa: BLE001 - GP fit failure must not fabricate a fit
+        return [], [], {"error": str(exc)}
 
     x_pred = np.arange(x_query_start, x_query_end + 1, dtype=float).reshape(-1, 1)
     y_pred, y_std = gpr.predict(x_pred, return_std=True)

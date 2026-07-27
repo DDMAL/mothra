@@ -171,6 +171,20 @@ def run_gp_page(
             n_restarts=n_restarts,
         )
 
+        if meta.get("error"):
+            # GP fit failed — do not fabricate a centerline; exclude from grouping.
+            fit_results.append(
+                ExperimentFitResult(
+                    x_page_offset=float(ulx_a),
+                    y_page_offset=float(uly_a),
+                    method="gp_matern25",
+                    meta=meta,
+                    flags=[f"gp_fit_failed:{meta['error']}"],
+                )
+            )
+            boxes.append(actual_box)
+            continue
+
         fit = ExperimentFitResult(
             x_start=x_start,
             x_end=x_end,
