@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Stub out imports the test sandbox doesn't have, before importing the
 # modules that try to reach for them.

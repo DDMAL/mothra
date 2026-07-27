@@ -6,14 +6,15 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/home/claude")
 # Import only the pieces that don't trigger the inference_simple import.
 # We do this by importing from the module file directly, bypassing the
 # sys.path injection at module top.
 import importlib.util
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_SCRIPTS_DIR))  # so run_pageOG.py's sibling imports resolve
 spec = importlib.util.spec_from_file_location(
-    "run_page_partial", "/home/claude/run_page.py"
+    "run_page_partial", str(_SCRIPTS_DIR / "run_pageOG.py")
 )
 # Stub out imports the test environment doesn't have.
 import types

@@ -1,9 +1,11 @@
 """Sanity check for component_filter.py with synthetic inputs."""
 
 import sys
+from pathlib import Path
+
 import numpy as np
 
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from component_filter import filter_components
 
 
