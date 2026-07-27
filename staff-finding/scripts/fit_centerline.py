@@ -220,7 +220,7 @@ def fit_centerline(
             if crop is not None
             else float((ys.min() + ys.max()) / 2.0)
         )
-        trace_xs_arr, trace_ys_arr = _trace_line(
+        trace_xs_arr, trace_ys_arr, in_band_mask = _trace_line(
             xs, ys, x_start, x_end, scale_unit, seed_y
         )
         if len(trace_xs_arr) >= LINE_FOLLOW_MIN_TRACE_POINTS:
@@ -235,13 +235,24 @@ def fit_centerline(
                 refined_coeffs = np.polyfit(
                     trace_xs_arr, trace_ys_arr, deg=refit_degree
                 )
-                refined_residuals = np.abs(
-                    np.polyval(refined_coeffs, trace_xs_arr) - trace_ys_arr
+                # Score both the original and refined fits on the same in-band
+                # pixel set the trace was drawn from — comparing the refit's
+                # window medians against the original fit's full-pixel
+                # residuals understates the original's error structurally.
+                in_band_xs = xs[in_band_mask]
+                in_band_ys = ys[in_band_mask]
+                original_in_band_residuals = np.abs(
+                    np.polyval(fitted_coeffs, in_band_xs) - in_band_ys
                 )
-                if refined_residuals.mean() < abs_residuals.mean():
+                refined_in_band_residuals = np.abs(
+                    np.polyval(refined_coeffs, in_band_xs) - in_band_ys
+                )
+                if refined_in_band_residuals.mean() < original_in_band_residuals.mean():
                     fitted_coeffs = refined_coeffs
-                    # Report residuals over the trace points (the set we optimised for).
-                    abs_residuals = refined_residuals
+                    # Report residuals over the in-band pixels (the set the
+                    # refit was scored against) so residual_mean/residual_max
+                    # stay comparable across boxes with and without refinement.
+                    abs_residuals = refined_in_band_residuals
                     line_follow_flags.append(
                         f"line_following_applied:deg{refit_degree}"
                     )
@@ -292,7 +303,7 @@ def _trace_line(
     x_end: int,
     scale_unit: float,
     seed_y: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Walk left-to-right collecting one median y per sliding window.
 
     Keeps only pixels within LINE_FOLLOW_BAND_MULTIPLIER * h of the current
@@ -309,14 +320,18 @@ def _trace_line(
         seed_y: Starting y estimate (box vertical center recommended).
 
     Returns:
-        (trace_xs, trace_ys): Representative x/y pairs, one per window that
-        contained at least 2 in-band pixels. Both arrays are empty if no
-        windows qualified.
+        (trace_xs, trace_ys, in_band_mask): trace_xs/trace_ys are
+        representative x/y pairs, one per window that contained at least 2
+        in-band pixels (empty if no windows qualified). in_band_mask is a
+        boolean mask over xs/ys marking every raw pixel that fell in-band in
+        at least one window — the same population the trace was drawn from,
+        for scoring the refit on a like-for-like pixel set.
     """
     band_half = LINE_FOLLOW_BAND_MULTIPLIER * scale_unit
     window_width = max(5, int(scale_unit / LINE_FOLLOW_WINDOW_DIVISOR))
     trace_xs: list[float] = []
     trace_ys: list[float] = []
+    in_band_mask = np.zeros(len(xs), dtype=bool)
     current_y = seed_y
 
     for win_start in range(x_start, x_end + 1, window_width):
@@ -328,10 +343,15 @@ def _trace_line(
             trace_xs.append((win_start + win_end) / 2.0)
             trace_ys.append(window_y)
             current_y = window_y
+            in_band_mask |= in_band
         # If no pixels land in the band this window, current_y holds —
         # the band stays centred where we last found the line.
 
-    return np.array(trace_xs, dtype=np.float64), np.array(trace_ys, dtype=np.float64)
+    return (
+        np.array(trace_xs, dtype=np.float64),
+        np.array(trace_ys, dtype=np.float64),
+        in_band_mask,
+    )
 
 
 # ---------------------------------------------------------------------------
