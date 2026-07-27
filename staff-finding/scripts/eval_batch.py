@@ -15,7 +15,7 @@ Manifest CSV columns (order does not matter, extra columns are ignored):
     variant      — pipeline variant label, e.g. 'sauvola_no_bgr'
 
 Optional manifest columns:
-    staffline_class   — YOLO class id for stafflines (default 0)
+    staffline_class   — YOLO class id for stafflines (default 2, "staves")
 
 Usage:
     python eval_batch.py --manifest eval_manifest.csv --output eval_results.csv
@@ -83,7 +83,13 @@ def _print_aggregate_summary(results: list[dict]) -> None:
         rows = [r for r in results if r["variant"] == variant]
         print(f"\n  Variant: {variant}  ({len(rows)} page(s))")
         for m in metrics_to_agg:
-            vals = [float(r[m]) for r in rows if r[m] not in ("", "nan")]
+            vals = [
+                v
+                for v in (
+                    float(r[m]) for r in rows if r[m] not in ("", None, "nan")
+                )
+                if not np.isnan(v)
+            ]
             if not vals:
                 continue
             a = np.array(vals)
@@ -119,7 +125,7 @@ def main() -> None:
     parser.add_argument(
         "--staffline-class",
         type=int,
-        default=0,
+        default=None,
         help="YOLO class id for stafflines (overrides manifest column if set).",
     )
     parser.add_argument(
@@ -143,9 +149,10 @@ def main() -> None:
         gt_source = row["gt_source"].strip()
         pred_json = Path(row["pred_json"].strip())
         variant = row["variant"].strip()
-        staffline_class = int(
-            row.get("staffline_class", args.staffline_class) or args.staffline_class
-        )
+        if args.staffline_class is not None:
+            staffline_class = args.staffline_class
+        else:
+            staffline_class = int(row.get("staffline_class", 2) or 2)
 
         print(f"\n[{i}/{len(manifest_rows)}] {page}  |  {variant}")
 
