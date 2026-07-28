@@ -144,9 +144,13 @@ export default function CantusSourcePanel({
                                 ⚠ folio "{folio}" is already used by {conflict.name}
                             </p>
                         )}
-                        {folio && (
+                        {folio ? (
                             <p className="text-white/50 text-xs">
                             the next image you upload in the images tab will be tagged as folio "{folio}"
+                            </p>
+                        ) : (
+                            <p className="text-white/50 text-xs">
+                            select a folio above before uploading
                             </p>
                         )}
                     </>
