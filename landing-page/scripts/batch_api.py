@@ -13,6 +13,8 @@ per-image IC/encoding flow, since batch IC doesn't exist yet.
 """
 import io
 import json
+import re
+import sys
 import urllib.error
 import urllib.request
 import uuid as _uuid
@@ -25,6 +27,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
+from job_store import create_job
+from tasks_text_batch import run_text_batch_task
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
@@ -82,118 +86,14 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
         pairs = [(iid, folio) for iid, folio in zip(body.image_ids, body.folios) if iid not in already_aligned]
         image_ids = [p[0] for p in pairs]
         folios = [p[1] for p in pairs]
-        images = [_project_image_by_id(cur, project_id, iid) for iid in image_ids]
     skipped_count = len(body.image_ids) - len(image_ids)
 
-    def generate():
-        def event(obj):
-            return f"data: {json.dumps(obj)}\n\n"
-        con = get_db_conn()
-        cur = con.cursor()
-        try:
-            if skipped_count:
-                yield event({"type": "log", "message": f"skipping {skipped_count} image(s) that already have text alignments"})
-            if not image_ids:
-                yield event({"type": "log", "message": "nothing to do — all selected images already have text alignments"})
-                yield event({"type": "done"})
-                return
-            yield event({"type": "stage", "name": "checking"})
-            try:
-                yolo_models, load_logs = resolve_yolo_models(
-                    cur, project_id, body.model_preset, body.model_id,
-                    body.yolo_confidence_threshold, body.yolo_device,
-                    body.text_music_confidence_threshold, body.text_music_device,
-                    body.stave_confidence_threshold, body.stave_device,
-                )
-            except (RuntimeError, ValueError) as e:
-                yield event({"type": "error", "message": str(e)}); return
-            for msg in load_logs:
-                yield event({"type": "log", "message": msg})
+    job_id = _uuid.uuid4().hex[:8]
+    task_body = {**body.model_dump(), "image_ids": image_ids, "folios": folios, "skipped_count": skipped_count}
+    create_job(job_id, "text_batch", project_id, params={"project_id": project_id, "body": task_body})
+    run_text_batch_task.apply_async(kwargs={"job_id": job_id, "project_id": project_id, "body": task_body}, task_id=job_id)
+    return {"job_id": job_id}
 
-            # layer separation - run YOLO per folio, write annotations, and
-            # derive music_boxes/mask before handing off to text-service:
-            # the exact sequence /predict already does per single image.
-            music_boxes_by_index = []
-            mask_json_by_index = []
-            for i, (image_id, (name, data, mime)) in enumerate(zip(image_ids, images)):
-                pil_img = Image.open(io.BytesIO(data)).convert("RGB")
-                img_arr = np.array(pil_img)
-                yolo_txt = yolo_models.infer(img_arr)
-                write_annotation(
-                    cur, con, project_id, image_id, name, yolo_txt,
-                    yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
-                )
-                music_boxes_by_index.append(_music_boxes_for_image(project_id, name, data))
-                mask_json_by_index.append(
-                    _mask_json_for_image(project_id, name, data) if body.masking_enabled else None
-                )
-                n_detections = len(yolo_txt.splitlines()) if yolo_txt else 0
-                yield event({"type": "log", "message": f"{name}: layer separation done ({n_detections} detection(s))"})
-            yield event({"type": "stage_done", "name": "checking"})
-
-            yield event({"type": "stage", "name": "validating"})
-            yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(folios)} folio(s) (Cantus-aligned mode, source {body.source_id})..."})
-            if body.segmentation_model:
-                yield event({"type": "log", "message": f"using custom segmentation model: {body.segmentation_model}"})
-            if body.column_count:
-                yield event({"type": "log", "message": f"column count forced to {body.column_count}"})
-            yield event({"type": "stage_done", "name": "validating"})
-
-            yield event({"type": "stage", "name": "processing"})
-            fields = {
-                "folios": json.dumps(folios),
-                "source_id": str(body.source_id),
-                "device": body.device,
-                "column_bimodal_threshold": str(body.column_bimodal_threshold),
-                "masking_enabled": "true" if body.masking_enabled else "false",
-                "mask_padding": str(body.mask_padding),
-                "music_boxes": json.dumps(music_boxes_by_index),
-                "mask_json_list": json.dumps(mask_json_by_index),
-            }
-            if body.segmentation_model:
-                fields["segmentation_model"] = body.segmentation_model
-            if body.recognition_model:
-                fields["recognition_model"] = body.recognition_model
-            if body.column_count is not None:
-                fields["column_count"] = str(body.column_count)
-            files = [("images", name, mime, data) for name, data, mime in images]
-
-            for line in _stream_multipart(f"{TEXT_API_URL}/batch-run", fields=fields, files=files, timeout=1800):
-                if not line.startswith("data: "):
-                    continue
-                ev = json.loads(line[len("data: "):])
-                if ev.get("type") == "folio_result":
-                    idx = ev["image_index"]
-                    image_id = image_ids[idx]
-                    image_name = images[idx][0]
-                    alignment = ev["text_alignment"]
-                    aid = _uuid.uuid4().hex
-                    cur.execute(
-                        "INSERT INTO text_alignments"
-                        " (id, project_id, image_id, image_name, alignment_json,"
-                        " median_line_spacing, syllable_count, log_text)"
-                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (aid, project_id, image_id, image_name, json.dumps(alignment),
-                         alignment.get("median_line_spacing", 0.0),
-                         len(alignment.get("syl_boxes", [])), ""),
-                    )
-                    con.commit()
-                    yield event({"type": "log", "message": f"{image_name}: {len(alignment.get('syl_boxes', []))} syllable(s) aligned"})
-                    continue
-                yield event(ev)
-        except urllib.error.URLError as exc:
-            yield event({"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"})
-        except Exception as e:
-            yield event({"type": "error", "message": str(e)})
-        finally:
-            cur.close(); release_db_conn(con)
-
-    
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 @router.get("/projects/{project_id}/text-batch/{batch_id}/download")
 def download_text_batch(project_id: int, batch_id: str, user=Depends(get_current_user)):
@@ -262,4 +162,74 @@ def export_source_annotations(project_id: int, source_id: str, user=Depends(get_
     return Response(
         content=buf.getvalue(), media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="source-{source_id}-export.zip"'},
+    )
+
+def _get_cantus_siglum(source_id: str) -> Optional[str]:
+    try:
+        with urllib.request.urlopen(f"{TEXT_API_URL}/cantus-source/{source_id}", timeout=15) as resp:
+            return json.loads(resp.read().decode()).get("siglum")
+    except Exception as e:
+        # Falls back to the "source-{id}" filename prefix either way (see
+        # caller) — logged so a text-service outage/timeout here doesn't look
+        # identical to "this Cantus source just has no siglum".
+        print(f"[warn] could not fetch siglum for cantus source {source_id}: {e}", file=sys.stderr)
+        return None
+    
+def _sanitize_stem(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", s.strip()) if s else ""
+
+def _cantus_bundle_readme(source_id: str, siglum: str, filenames: list[str]) -> str:
+    files_list = "\n".join(f"  - {f}" for f in filenames)
+    return (
+        "This bundle contains corrected MEI files ready for Cantus Ultimus indexing.\n\n"
+        f"To publish:\n"
+        f"  1. Place these files under production_mei_files/{source_id}/ (DDMAL/production_mei_files repo)\n"
+        f"  2. Commit and push to that repo's main branch\n"
+        f"  3. Pull the updated submodule into the running Cantus Ultimus deployment\n"
+        f"  4. Inside the Cantus Ultimus container, run:\n"
+        f"     python manage.py index_manuscript_mei {source_id} --mei-dir production_mei_files/{source_id}\n"
+        f"     (confirm {source_id} is the correct manuscript_id — it may differ from the CantusDB source ID)\n\n"
+        f"Files in this bundle ({len(filenames)}):\n{files_list}\n"
+    )
+
+@router.get("/projects/{project_id}/sources/{source_id}/cantus-bundle")
+def cantus_bundle(project_id: int, source_id: str, user=Depends(get_current_user)):
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute("""
+            SELECT m.name, m.xml_content, pi.folio
+            FROM mei_files m
+            JOIN project_images pi ON pi.project_id = m.project_id AND pi.name = m.image_name
+            WHERE m.project_id=%s AND pi.source_id=%s AND m.corrected=1
+              AND m.xml_content IS NOT NULL
+              AND m.created_at = (
+                  SELECT MAX(m2.created_at) FROM mei_files m2
+                  WHERE m2.project_id = m.project_id AND m2.image_name = m.image_name
+              )
+        """, (project_id, source_id))
+        rows = cur.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail=(
+                "no corrected MEI files found for this Cantus source yet — "
+                "correct at least one MEI file in Neon before sending to Cantus Ultimus"
+            ))
+
+        siglum = _get_cantus_siglum(source_id) or f"source-{source_id}"
+        buf = io.BytesIO()
+        used_stems, filenames = set(), []
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, xml_content, folio in rows:
+                stem = _sanitize_stem(folio) or _sanitize_stem(name) or "unknown"
+                unique_stem, n = stem, 2
+                while unique_stem in used_stems:
+                    unique_stem = f"{stem}-{n}"; n += 1
+                used_stems.add(unique_stem)
+                mei_filename = f"{siglum}_{unique_stem}.mei"
+                zf.writestr(mei_filename, xml_content)
+                filenames.append(mei_filename)
+            zf.writestr("README.txt", _cantus_bundle_readme(source_id, siglum, filenames))
+
+    return Response(
+        content=buf.getvalue(), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="cantus-bundle-{source_id}.zip"'},
     )

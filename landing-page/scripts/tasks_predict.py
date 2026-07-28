@@ -2,7 +2,7 @@ import io
 from pathlib import Path
 
 from celery_app import celery_app
-from job_store import publish_event
+from job_store import publish_event, check_cancelled, JobCancelled
 from auth_api import get_db_conn, release_db_conn, _log_activity
 from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
@@ -73,13 +73,20 @@ def run_predict_task(job_id, project_id, body):
             if not r:
                 continue
             cur.execute("SELECT 1 FROM annotations WHERE project_id=%s AND image_id=%s", (project_id, iid))
-            if cur.fetchone():
+            has_annotation = cur.fetchone() is not None
+            cur.execute("SELECT 1 FROM text_alignments WHERE project_id=%s AND image_id=%s", (project_id, iid))
+            has_text_alignment = cur.fetchone() is not None
+            # annotation and text-finding are independent steps — an image that
+            # already has one but not the other (e.g. a job that died between the
+            # two, or a race from concurrent duplicate jobs) must still run
+            # whichever step is missing, not be skipped wholesale.
+            if has_annotation and has_text_alignment:
                 skipped.append(r[0])
                 continue
-            images.append((iid, r[0], r[1], r[2] or "image/png", r[3]))
+            images.append((iid, r[0], r[1], r[2] or "image/png", r[3], has_annotation, has_text_alignment))
         publish({"type": "log", "message": f"{len(images)} image(s) ready"})
         if skipped:
-            publish({"type": "log", "message": f"skipping {len(skipped)} already-annotated image(s): {', '.join(skipped)}"})
+            publish({"type": "log", "message": f"skipping {len(skipped)} already fully-processed image(s): {', '.join(skipped)}"})
         publish({"type": "stage_done", "name": "validating"})
 
         _log_activity(cur, project_id, "predict_run", f"{yolo_models.model_label} on {len(images)} image(s)")
@@ -87,23 +94,31 @@ def run_predict_task(job_id, project_id, body):
 
         publish({"type": "stage", "name": "processing"})
         results = []
-        for image_id, image_name, image_data, mime_type, image_folio in images:
-            publish({"type": "log", "message": f"Processing {image_name}..."})
-            pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-            img_arr = np.array(pil_img)
-            yolo_txt = yolo_models.infer(img_arr)
-            ann_id = write_annotation(
-                cur, con, project_id, image_id, image_name, yolo_txt,
-                yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
-            )
-            n_detections = len(yolo_txt.splitlines()) if yolo_txt else 0
-            publish({"type": "log", "message": f"{image_name}: {n_detections} detection(s)"})
-            results.append({
-                "id": ann_id, "imageName": image_name,
-                "imageSrc": f"/api/images/{image_id}",
-                "txtName": f"annotation-{ann_id}.txt",
-                "jsonName": "", "detectionCount": n_detections,
-            })
+        for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment in images:
+            check_cancelled(job_id)
+            if has_annotation:
+                publish({"type": "log", "message": f"{image_name}: already annotated — skipping YOLO"})
+            else:
+                publish({"type": "log", "message": f"Processing {image_name}..."})
+                pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
+                img_arr = np.array(pil_img)
+                yolo_txt = yolo_models.infer(img_arr)
+                ann_id = write_annotation(
+                    cur, con, project_id, image_id, image_name, yolo_txt,
+                    yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
+                )
+                n_detections = len(yolo_txt.splitlines()) if yolo_txt else 0
+                publish({"type": "log", "message": f"{image_name}: {n_detections} detection(s)"})
+                results.append({
+                    "id": ann_id, "imageName": image_name,
+                    "imageSrc": f"/api/images/{image_id}",
+                    "txtName": f"annotation-{ann_id}.txt",
+                    "jsonName": "", "detectionCount": n_detections,
+                })
+
+            if has_text_alignment:
+                publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
+                continue
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
             for text_ev in stream_text_finding(
@@ -127,6 +142,9 @@ def run_predict_task(job_id, project_id, body):
         publish({"type": "stage_done", "name": "processing"})
         publish({"type": "result", "annotations": results})
         publish({"type": "done"})
+    except JobCancelled:
+        con.rollback()
+        return
     except Exception as e:
         con.rollback()
         publish({"type": "error", "message": str(e)})

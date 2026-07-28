@@ -26,6 +26,14 @@ export default function ToastContainer() {
                     className={`animate-fade-in pointer-events-auto flex items-center gap-3 text-sm px-5 py-2.5 rounded-2xl shadow-2xl ${VARIANT_STYLES[t.variant]}`}
                 >
                     <span>{t.message}</span>
+                    {t.action && (
+                        <button
+                            onClick={() => { t.action!.onClick(); dismissToast(t.id); }}
+                            className="underline text-white/90 hover:text-white text-sm"
+                        >
+                            {t.action.label}
+                        </button>
+                    )}
                     <button
                         onClick={() => dismissToast(t.id)}
                         className="text-white/60 hover:text-white cursor-pointer text-base leading-none"

@@ -24,6 +24,7 @@ from text_api import router as text_router
 from cantus_api import router as cantus_router
 from batch_api import router as batch_router
 from jobs_api import router as jobs_router
+from job_store import cleanup_stale_sessions, cleanup_stale_uplaods
 
 app = FastAPI()
 app.add_middleware(
@@ -48,6 +49,9 @@ app.include_router(jobs_router, prefix="/api")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+cleanup_stale_uplaods()
+cleanup_stale_sessions()
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():

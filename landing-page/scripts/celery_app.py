@@ -7,7 +7,7 @@ from config import CELERY_BROKER_URL
 celery_app = Celery(
     "mothra",
     broker=CELERY_BROKER_URL,
-    include=["tasks_predict", "tasks_encode"]
+    include=["tasks_predict", "tasks_encode", "tasks_text_batch"]
 )
 
 celery_app.conf.update(

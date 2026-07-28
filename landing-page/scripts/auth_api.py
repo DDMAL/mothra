@@ -45,6 +45,7 @@ SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -429,6 +430,104 @@ def _migrate_db():
         cur.close()
         release_db_conn(con)
 
+    # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN params JSONB")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN retry_of TEXT REFERENCES jobs(job_id)")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE jobs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # mei_files: needed so the cantus-bundle export (section 8) can pick the
+    # latest revision per image_name, mirroring how annotations/text_alignments
+    # already do `ORDER BY created_at DESC LIMIT 1`.
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE mei_files ADD COLUMN created_at TIMESTAMPTZ")
+        # mei_files is append-only (add_mei always INSERTs a new row; existing
+        # rows are only ever UPDATEd in place afterwards), so a manuscript
+        # corrected/re-encoded more than once before this migration already has
+        # several rows sharing one image_name. Backfilling them all with a flat
+        # NOW() would tie every legacy revision together, and the cantus-bundle
+        # export's `created_at = MAX(created_at)` lookup would then match ALL
+        # of them instead of just the true latest one — silently bundling a
+        # stale/uncorrected MEI alongside (or instead of) the real latest
+        # revision. ctid approximates insertion order for this append-only
+        # table, so use it to hand legacy rows distinct, order-preserving
+        # timestamps before defaulting new inserts to NOW().
+        cur.execute("""
+            WITH ordered AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY ctid) AS rn FROM mei_files
+            )
+            UPDATE mei_files m
+            SET created_at = TIMESTAMPTZ 'epoch' + (ordered.rn * INTERVAL '1 second')
+            FROM ordered
+            WHERE m.id = ordered.id
+        """)
+        cur.execute("ALTER TABLE mei_files ALTER COLUMN created_at SET DEFAULT NOW()")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # backend and worker both run this migration independently at import
+    # (see k8s/README.md's "Known follow-ups"), and CI/CD redeploys both on
+    # every push to main — so unlike the ALTER TABLE blocks above, these
+    # CREATE TABLE/INDEX IF NOT EXISTS statements need their own duplicate-
+    # object guard too, or two pods racing on a not-yet-existing table/index
+    # can crash one of them with an uncaught duplicate-relation error.
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_uploads_created_at ON job_uploads (created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_sessions_created_at ON job_sessions (created_at)")
+        con.commit()
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # refresh_tokens
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                revoked_at TIMESTAMPTZ
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)")
+        con.commit()
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+
     # startup cleanup of neon manifests to prevent excess accumulation
     import time as _time
     _now = _time.time()
@@ -449,6 +548,20 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_token(user_id: int) -> str:
     exp = datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+def create_refresh_token(user_id: int) -> str:
+    raw = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
+            (user_id, _hash_token(raw), expires_at),
+        )
+        con.commit()
+    return raw
 
 def _make_edit_token(project_id: int, mei_id: str) -> str:
     payload = {
@@ -518,6 +631,7 @@ def register(request: Request, body: RegisterBody):
             raise HTTPException(status_code=409, detail="username or email already taken")
     return {
         "token": create_token(user_id),
+        "refresh_token": create_refresh_token(user_id),
         "user": {"id": user_id, "username": body.username, "email": body.email, "firstName": body.first_name}
     }
 
@@ -534,13 +648,43 @@ def login(request: Request, body: LoginBody):
         raise HTTPException(status_code=401, detail="invalid credentials")
     return {
         "token": create_token(row[0]),
+        "refresh_token": create_refresh_token(row[0]),
         "user": {"id": row[0], "username": row[1], "email": row[2], "firstName": row[3]}
     }
 
 @router.post("/auth/refresh")
-def refresh_token(user=Depends(get_current_user)):
-    return {"access_token": create_token(user["id"]), "token_type": "bearer"}
+def refresh_token(x_refresh_token: str = Header(None, alias="X-Refresh-Token")):
+    if not x_refresh_token:
+        raise HTTPException(status_code=401, detail="missing refresh token")
+    token_hash = _hash_token(x_refresh_token)
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT id, user_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash=%s",
+            (token_hash,),
+        )
+        row = cur.fetchone()
+        if not row or row[3] is not None or row[2] < datetime.utcnow():
+            raise HTTPException(status_code=401, detail="invalid or expired refresh token")
+        cur.execute("UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=%s", (row[0],))
+        con.commit()
+    user_id = row[1]
+    return {
+        "access_token": create_token(user_id),
+        "refresh_token": create_refresh_token(user_id),  # rotation: old is now revoked, above
+        "token_type": "bearer",
+    }
 
 @router.get("/me")
 def me(user=Depends(get_current_user)):
     return user
+
+@router.post("/auth/logout")
+def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=Depends(get_current_user)):
+    if x_refresh_token:
+        with db_cursor() as (con, cur):
+            cur.execute(
+                "UPDATE refresh_tokens SET revoked_at=NOW() WHERE token_hash=%s AND user_id=%s AND revoked_at IS NULL",
+                (_hash_token(x_refresh_token), user["id"]),
+            )
+            con.commit()
+    return {"ok": True}

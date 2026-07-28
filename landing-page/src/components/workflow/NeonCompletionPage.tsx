@@ -8,6 +8,8 @@ interface Props {
     project: Project;
     originalMeiFiles: MeiFile[];
     onSendToCantus: () => void;
+    sendingBundle?: boolean;
+    sendBundleError?: string | null;
     onBackToProject: () => void;
 }
 
@@ -15,6 +17,8 @@ export default function NeonCompletionPage({
     project,
     originalMeiFiles,
     onSendToCantus,
+    sendingBundle = false,
+    sendBundleError = null,
     onBackToProject,
 }: Props) {
     const [showCompare, setShowCompare] = useState(false);
@@ -52,7 +56,9 @@ export default function NeonCompletionPage({
         <>
         <CompletionPage
             description="corrected mei files can now be sent to cantus ultimus and viewed on the project page."
-            continueLabel={loadingCompare ? "loading…" : "send to cantus ultimus"}
+            continueLabel={sendingBundle ? "preparing bundle..." : loadingCompare ? "loading…" : "send to cantus ultimus"}
+            continueDisabled={sendingBundle}
+            errorText={sendBundleError}
             onContinue={onSendToCantus}
             onBackToProject={onBackToProject}
             onCompare={originalMeiFiles.length > 0 ? handleCompare : undefined}

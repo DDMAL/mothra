@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from celery_app import celery_app
-from job_store import publish_event, fetch_upload, drop_upload, session_put
+from job_store import publish_event, fetch_upload, drop_upload, session_put, check_cancelled, JobCancelled
 from auth_api import get_db_conn, release_db_conn
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
@@ -101,7 +101,11 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         else:
             staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
             ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
-        glyphs_by_stave = assign_glyphs_to_staves(glyphs, staves)
+        n_input_staves = len(staves)
+        glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, page_w, page_h)
+        if len(staves) > n_input_staves:
+            ev({"type": "log", "message":
+                f" recovered {len(staves) - n_input_staves} stave(s) the detector missed"})
         assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
         ev({"type": "log", "message": f" {assigned} glyphs assigned to stave"})
         ev({"type": "stage_done", "name": "validating"})
@@ -142,15 +146,15 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     xml_bytes = fetch_upload(xml_upload_id)
     image_bytes = fetch_upload(image_upload_id) if image_upload_id else None
     try:
-        _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename, 
+        _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                     project_id, image_name, clef_shape, clef_line, include_name_fields=False)
         publish({"type": "done"})
-    except Exception as e:
-        publish({"type": "error", "message": str(e)})
-    finally:
         drop_upload(xml_upload_id)
         if image_upload_id:
             drop_upload(image_upload_id)
+    except Exception as e:
+        publish({"type": "error", "message": str(e)})
+        # leave the upload rows in place so a retry can still fetch them
 
 @celery_app.task(name="encode.batch")
 def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
@@ -159,6 +163,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
     
     succeeded, failed = [], []
     for i, item in enumerate(items):
+        check_cancelled(job_id)
         publish({"type": "item_start", "item": i, "total": len(items),
                  "name": item["image_filename"] or item["xml_filename"]})
         xml_bytes = fetch_upload(item["xml_upload_id"])
@@ -172,11 +177,22 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})
             publish({"type": "item_done", "item": i, "session_id": session_id})
+            drop_upload(item["xml_upload_id"])
+            drop_upload(item["image_upload_id"])
+        except JobCancelled:
+            return
         except Exception as e:
             failed.append({"item": i, "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
             publish({"type": "item_error", "item": i,
                      "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
-        finally:
-            drop_upload(item["xml_upload_id"])
-            drop_upload(item["image_upload_id"])
+    if failed and not succeeded:
+        # Every item failed, so none of them had its staged upload dropped —
+        # the whole batch can safely be replayed as-is. Surface this as a real
+        # job failure (jobs.status='failed' via publish_event) instead of
+        # "done" with an empty succeeded list, so POST /jobs/{id}/retry
+        # actually applies. A *partial* failure deliberately stays "done":
+        # succeeded items already had their uploads dropped, so retrying the
+        # whole item list would spuriously fail them again on a re-run.
+        publish({"type": "error", "message": f"all {len(items)} item(s) failed", "failed": failed})
+        return
     publish({"type": "done", "total": len(items), "succeeded": succeeded, "failed": failed})
