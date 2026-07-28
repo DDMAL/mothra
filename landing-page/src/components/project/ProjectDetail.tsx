@@ -104,6 +104,11 @@ export default function ProjectDetail({
     if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) return [];
     return folios.slice(startIdx, endIdx + 1);
   }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
+  const nextStep = useMemo(
+    () => minNextStep(usedNames.images, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked),
+    [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
+  );
+  const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -511,6 +516,7 @@ export default function ProjectDetail({
               onBatchStartFolioChange={setBatchStartFolio}
               onBatchEndFolioChange={setBatchEndFolio}
               batchFolioSequence={batchFolioSequence}
+              locked={sourceLocked}
             />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
@@ -624,9 +630,6 @@ export default function ProjectDetail({
             <p className="text-red-200 text-xs text-center">{sendBundleError}</p>
           )}
           {meiSection.selectedIds.size === 0 && (() => {
-            const annotations = project.annotations ?? [];
-            const meiFiles = project.meiFiles ?? [];
-            const nextStep = minNextStep(usedNames.images, annotations, meiFiles, stepsUnlocked);
             const continueLabel =
               usedNames.images.length === 0 || nextStep === 0 ? "begin" :
               nextStep === 1 ? "continue: ic" :
