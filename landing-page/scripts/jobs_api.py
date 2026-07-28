@@ -62,6 +62,18 @@ async def stream_job(job_id: str):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str, user=Depends(get_current_user)):
+    with db_cursor() as (con, cur):
+        cur.execute("SELECT project_id, status FROM jobs WHERE job_id=%s", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="job not found")
+        project_id, status = row
+        if project_id is not None:
+            require_project_owner(cur, project_id, user["id"])
+    return {"job_id": job_id, "status": status}
+
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):

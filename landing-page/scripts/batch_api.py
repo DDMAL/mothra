@@ -14,6 +14,7 @@ per-image IC/encoding flow, since batch IC doesn't exist yet.
 import io
 import json
 import re
+import sys
 import urllib.error
 import urllib.request
 import uuid as _uuid
@@ -167,7 +168,11 @@ def _get_cantus_siglum(source_id: str) -> Optional[str]:
     try:
         with urllib.request.urlopen(f"{TEXT_API_URL}/cantus-source/{source_id}", timeout=15) as resp:
             return json.loads(resp.read().decode()).get("siglum")
-    except Exception:
+    except Exception as e:
+        # Falls back to the "source-{id}" filename prefix either way (see
+        # caller) — logged so a text-service outage/timeout here doesn't look
+        # identical to "this Cantus source just has no siglum".
+        print(f"[warn] could not fetch siglum for cantus source {source_id}: {e}", file=sys.stderr)
         return None
     
 def _sanitize_stem(s: str) -> str:

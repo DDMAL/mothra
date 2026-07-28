@@ -146,7 +146,7 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     xml_bytes = fetch_upload(xml_upload_id)
     image_bytes = fetch_upload(image_upload_id) if image_upload_id else None
     try:
-        _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename, 
+        _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                     project_id, image_name, clef_shape, clef_line, include_name_fields=False)
         publish({"type": "done"})
         drop_upload(xml_upload_id)
@@ -155,10 +155,6 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     except Exception as e:
         publish({"type": "error", "message": str(e)})
         # leave the upload rows in place so a retry can still fetch them
-    finally:
-        drop_upload(xml_upload_id)
-        if image_upload_id:
-            drop_upload(image_upload_id)
 
 @celery_app.task(name="encode.batch")
 def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
@@ -189,4 +185,14 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             failed.append({"item": i, "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
             publish({"type": "item_error", "item": i,
                      "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
+    if failed and not succeeded:
+        # Every item failed, so none of them had its staged upload dropped —
+        # the whole batch can safely be replayed as-is. Surface this as a real
+        # job failure (jobs.status='failed' via publish_event) instead of
+        # "done" with an empty succeeded list, so POST /jobs/{id}/retry
+        # actually applies. A *partial* failure deliberately stays "done":
+        # succeeded items already had their uploads dropped, so retrying the
+        # whole item list would spuriously fail them again on a re-run.
+        publish({"type": "error", "message": f"all {len(items)} item(s) failed", "failed": failed})
+        return
     publish({"type": "done", "total": len(items), "succeeded": succeeded, "failed": failed})

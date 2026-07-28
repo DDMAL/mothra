@@ -440,7 +440,7 @@ def _migrate_db():
     finally:
         cur.close(); release_db_conn(con)
 
-        con = get_db_conn(); cur = con.cursor()
+    con = get_db_conn(); cur = con.cursor()
     try:
         cur.execute("ALTER TABLE jobs ADD COLUMN retry_of TEXT REFERENCES jobs(job_id)")
         con.commit()
