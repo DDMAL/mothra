@@ -190,27 +190,73 @@ predict job locally, not just by inspection. `--pool=threads` runs tasks in
 threads within one process instead, avoiding the fork entirely; concurrency is
 still real since PyTorch/numpy release the GIL during actual tensor ops.
 
-### Deployment (Docker)
+### Deployment (Kubernetes, CI/CD via GitHub Actions)
 
-A `docker-compose.yml` at the repo root builds and runs `redis`, `ic`
-(reuses the existing `ic/Dockerfile`), `text-service` (new `text-service/Dockerfile`,
-build context is the repo root since it needs the sibling `mothra-text/`
-submodule), and `backend`/`worker` (both from the same new `landing-page/Dockerfile`,
-`worker` just overrides the `command:`). Before building:
-`git submodule update --init --recursive` (submodules aren't checked out by a
-plain clone) and `git lfs pull` (the medieval model `.pt` files are LFS
-pointers until then) — this requires `git-lfs` to be installed and
-registered once per machine (`brew install git-lfs && git lfs install`)
-*before* pulling; otherwise `git lfs pull` silently no-ops and the `.pt`
-files stay as tiny pointer text, which only surfaces later as a prediction
-failure, not a clear error at pull time. `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level
-`.env` (gitignored, separate from `landing-page/scripts/.env`) that Compose
-auto-loads. This is now the only deployment path — the old `render.yaml`
-Render Blueprint (single-service, no worker, no Redis) has been retired; it
-predated the job queue and would never have processed predict/encode jobs
-correctly. If a Render service was ever created from it, that needs to be
-deleted/disconnected on Render's side too — removing the file doesn't
-un-hook an existing deploy.
+**Merging to `main` deploys automatically.** `.github/workflows/build-images.yml`
+(job name `ci-cd`) runs on every push to `main`/`develop`/`k8s-deployment` (also
+`workflow_dispatch`):
+1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
+   and `text-service` (`text-service/Dockerfile`, build context is the repo root
+   since it needs the sibling `mothra-text/` submodule) and pushes each to
+   `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, tagged `latest`, by short SHA
+   (`sha-<short>`), and by branch. `worker` reuses the `mothra-backend` image, so
+   it isn't built separately. Checkout pulls submodules recursively and Git LFS
+   (the bundled medieval `.pt` weights — without `lfs: true` they'd check out as
+   pointer stubs and inference would fail at runtime).
+2. **deploy** (needs `build`) — using the `KUBECONFIG` repo secret, pins
+   `k8s/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml` to this commit's
+   `sha-<short>` tag, applies those plus `k8s/configmap.yaml`/`ingress.yaml`, then
+   `kubectl rollout status` on `backend`/`worker`/`ic`/`text-service` (redis and
+   postgres are excluded from CD — see below).
+
+The cluster runs the `mothra` namespace, manifests live in `k8s/` (see
+`k8s/README.md`). **Postgres is not part of this repo's deploy** — it's a
+separate deployment in the `postgres` namespace, reached cross-namespace at
+`mothra-postgres.postgres.svc.cluster.local:5432` via `DATABASE_URL` — so a
+Mothra deploy never touches the database deployment. Ingress is Traefik:
+`mothra.simssa.ca` → backend, `mothra-ic.simssa.ca` → ic, with a `Middleware` in
+`ingress.yaml` adding a `frame-ancestors` CSP on the IC host so the campus
+proxy's blanket `X-Frame-Options: SAMEORIGIN` doesn't block the IC iframe.
+`stored_models` (locally-uploaded custom YOLO checkpoints, written by
+`models_api.py`) is **not baked into the image** — it's a static NFS
+PersistentVolume (RWX, `k8s/stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
+`backend` and `worker` so uploads persist across rollouts and are visible to
+whichever service reads them.
+
+**Manual apply** (redis/postgres/secrets excluded from CD; apply by hand when needed):
+```
+kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
+kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
+kubectl apply -f k8s/redis.yaml
+kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
+kubectl apply -f k8s/ingress.yaml
+```
+
+**Known follow-ups** (from `k8s/README.md`): no real `/healthz` yet, so probes
+are TCP/exec only; `init_db()`/`_migrate_db()` run at import, so keep
+`backend`/`worker` at **1 replica** until a one-shot migration Job replaces
+that; `text-service`'s `/batch-download/{id}` uses local disk keyed by
+`batch_id`, so it needs shared storage (or a single replica) if batch
+downloads are used at scale.
+
+The old `render.yaml` Render Blueprint (single-service, no worker, no Redis)
+is retired — it predated the job queue and would never have processed
+predict/encode jobs correctly. If a Render service was ever created from it,
+that needs to be deleted/disconnected on Render's side too — removing the
+file doesn't un-hook an existing deploy.
+
+### Local/manual container runs (`docker-compose.yml`)
+
+A `docker-compose.yml` at the repo root mirrors the same stack (redis + ic +
+text-service + backend + Celery worker) for local testing without a cluster —
+the k8s manifests were modeled on it, not the other way around. `worker` reuses
+the `backend` image, just overrides the `command:`. Before building:
+`git submodule update --init --recursive` and `git lfs pull` (see above — same
+LFS caveat applies locally: `git-lfs` must be installed and registered,
+`brew install git-lfs && git lfs install`, *before* pulling, or the `.pt` files
+silently stay as pointer text). `DATABASE_URL`/`MOTHRA_SECRET` come from a
+root-level `.env` (gitignored, separate from `landing-page/scripts/.env`) that
+Compose auto-loads.
 
 **Requires the `docker-buildx` plugin (BuildKit).** Without it, `docker
 compose build` prints `Docker Compose requires buildx plugin to be
@@ -224,12 +270,10 @@ Desktop, which bundles buildx already) and confirm with `docker buildx
 version` before assuming a slow/huge build is a real problem rather than a
 missing plugin.
 
-`scripts/stored_models` (locally-uploaded custom YOLO models, written by
-`models_api.py`) is **not baked into the image** — `landing-page/.dockerignore`
-excludes it, and `docker-compose.yml` mounts a named volume
-(`stored_models:/app/scripts/stored_models`) on both `backend` and `worker`
-so uploads persist across container restarts and are visible to whichever
-service needs to read them.
+For local Compose runs, `scripts/stored_models` is likewise excluded from the
+image (`landing-page/.dockerignore`) and instead backed by a named volume
+(`stored_models:/app/scripts/stored_models`) mounted on both `backend` and
+`worker`.
 
 **Resource requirements: at least 8GB RAM, 4 CPUs for the Docker host/VM.**
 Confirmed by actually running a real predict job through the containers —
@@ -243,7 +287,8 @@ service unexpectedly exit with code 137 mid-job, check available memory
 before debugging application code.
 
 `text-service`'s recognition model (Tridis, via `htrmopo`) is baked into
-the image at build time, matching local dev's one-time manual
+the image at build time (both Compose and the CI-built image share the same
+`text-service/Dockerfile`), matching local dev's one-time manual
 `htrmopo get 10.5281/zenodo.10788590` step — without it, text-finding
 silently runs in stub mode (segmentation/YOLO still work, OCR returns no
 syllables, with a `"STUB — no recognition model installed"` log line as the
@@ -267,7 +312,8 @@ Python ever raises. Fixed by lowering that default to 120s (real single-image
 text-finding calls complete in well under a minute; `batch_api.py`'s
 multi-file batch call already passes its own explicit, much larger timeout
 and is unaffected). 120s is still slower than ideal for this failure mode —
-restarting dependents together after any redeploy remains the safer habit.
+restarting dependents together after any redeploy (Compose or `kubectl
+rollout restart`) remains the safer habit.
 
 ---
 

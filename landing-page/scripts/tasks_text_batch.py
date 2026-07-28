@@ -94,7 +94,7 @@ def run_text_batch_task(job_id, project_id, body):
         if body.get("column_count") is not None:
             fields["column_count"] = str(body["column_count"])
 
-        for line in _stream_multipart(f"{TEXT_API_URL}/batch-run",
+        for line in _stream_multipart(f"{TEXT_API_URL}/batch-run", fields=fields,
                                       files=[("images", n, m, d) for n, d, m in images], timeout=1800):
             check_cancelled(job_id)
             if not line.startswith("data: "):
