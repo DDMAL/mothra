@@ -90,6 +90,11 @@ export default function ImageTab({
     done: number;
     total: number;
   } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -234,6 +239,8 @@ export default function ImageTab({
     try {
       setConverting(true);
       let seq = 0;
+      setUploadProgress(imageFiles.length > 0 ? { done: 0, total: imageFiles.length } : null);
+      let imagesDone = 0;
       const imageEntries = await Promise.all(
         imageFiles.map(async (f) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
@@ -243,6 +250,8 @@ export default function ImageTab({
           // single-image uploads (CantusSourcePanel reloads project.cantusSourceId
           // on mount regardless of which sub-tab is active).
           const result = await onUploadImage(f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined);
+          imagesDone++;
+          setUploadProgress({ done: imagesDone, total: imageFiles.length });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -276,6 +285,8 @@ export default function ImageTab({
         pdfImages.push(...pages);
       }
 
+      setUploadProgress(pdfImages.length > 0 ? { done: 0, total: pdfImages.length } : null);
+      let pdfUploadsDone = 0;
       const pdfEntries = await Promise.all(
         pdfImages.map(async ({ name, src: blobUrl }) => {
           const blob = await fetch(blobUrl).then((r) => r.blob());
@@ -283,6 +294,8 @@ export default function ImageTab({
           const file = new File([blob], name, { type: "image/png " });
           const pdfFolio = folioAt(seq++);
           const result = await onUploadImage(file, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined);
+          pdfUploadsDone++;
+          setUploadProgress({ done: pdfUploadsDone, total: pdfImages.length });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -312,6 +325,7 @@ export default function ImageTab({
     } finally {
       setConverting(false);
       setPdfProgress(null);
+      setUploadProgress(null);
     }
   };
 
@@ -689,6 +703,21 @@ export default function ImageTab({
                       className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
                       style={{
                         width: `${(pdfProgress.done / pdfProgress.total) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : uploadProgress ? (
+                <>
+                  <p className="text-sm text-[#1D3335] text-center">
+                    uploading images... {uploadProgress.done} /{" "}
+                    {uploadProgress.total}
+                  </p>
+                  <div className="w-full bg-white/30 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
+                      style={{
+                        width: `${(uploadProgress.done / uploadProgress.total) * 100}%`,
                       }}
                     />
                   </div>
