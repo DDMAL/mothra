@@ -463,34 +463,69 @@ def _migrate_db():
     # already do `ORDER BY created_at DESC LIMIT 1`.
     con = get_db_conn(); cur = con.cursor()
     try:
-        cur.execute("ALTER TABLE mei_files ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
+        cur.execute("ALTER TABLE mei_files ADD COLUMN created_at TIMESTAMPTZ")
+        # mei_files is append-only (add_mei always INSERTs a new row; existing
+        # rows are only ever UPDATEd in place afterwards), so a manuscript
+        # corrected/re-encoded more than once before this migration already has
+        # several rows sharing one image_name. Backfilling them all with a flat
+        # NOW() would tie every legacy revision together, and the cantus-bundle
+        # export's `created_at = MAX(created_at)` lookup would then match ALL
+        # of them instead of just the true latest one — silently bundling a
+        # stale/uncorrected MEI alongside (or instead of) the real latest
+        # revision. ctid approximates insertion order for this append-only
+        # table, so use it to hand legacy rows distinct, order-preserving
+        # timestamps before defaulting new inserts to NOW().
+        cur.execute("""
+            WITH ordered AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY ctid) AS rn FROM mei_files
+            )
+            UPDATE mei_files m
+            SET created_at = TIMESTAMPTZ 'epoch' + (ordered.rn * INTERVAL '1 second')
+            FROM ordered
+            WHERE m.id = ordered.id
+        """)
+        cur.execute("ALTER TABLE mei_files ALTER COLUMN created_at SET DEFAULT NOW()")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
     finally:
         cur.close(); release_db_conn(con)
 
+    # backend and worker both run this migration independently at import
+    # (see k8s/README.md's "Known follow-ups"), and CI/CD redeploys both on
+    # every push to main — so unlike the ALTER TABLE blocks above, these
+    # CREATE TABLE/INDEX IF NOT EXISTS statements need their own duplicate-
+    # object guard too, or two pods racing on a not-yet-existing table/index
+    # can crash one of them with an uncaught duplicate-relation error.
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_uploads_created_at ON job_uploads (created_at)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_sessions_created_at ON job_sessions (created_at)")
-    con.commit()
-    cur.close(); release_db_conn(con)
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_uploads_created_at ON job_uploads (created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_job_sessions_created_at ON job_sessions (created_at)")
+        con.commit()
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
 
     # refresh_tokens
     con = get_db_conn(); cur = con.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS refresh_tokens (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            token_hash TEXT NOT NULL UNIQUE,
-            expires_at TIMESTAMPTZ NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            revoked_at TIMESTAMPTZ
-        )
-    """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)")
-    con.commit()
-    cur.close(); release_db_conn(con)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                revoked_at TIMESTAMPTZ
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)")
+        con.commit()
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
 
 
     # startup cleanup of neon manifests to prevent excess accumulation
