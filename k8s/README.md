@@ -6,8 +6,14 @@ Celery worker. **Postgres lives in its own repo** (deployed to the `postgres`
 namespace); the app reaches it cross-namespace at
 `mothra-postgres.postgres.svc.cluster.local:5432` via `DATABASE_URL`.
 
-- **Ingress:** Traefik — `mothra.simssa.ca` → backend, `mothra-ic.simssa.ca` → ic.
-  TLS is terminated by the campus proxy; the app is served over https.
+- **Ingress:** Traefik — `mothra.simssa.ca` → backend, `mothra-ic.simssa.ca` → ic
+  (one Ingress object each, see below). TLS is terminated by the campus proxy;
+  the app is served over https.
+- **IC iframe:** the campus proxy injects a blanket `X-Frame-Options: SAMEORIGIN`,
+  which blocks the cross-host IC iframe. A Traefik `Middleware` in `ingress.yaml`
+  adds `Content-Security-Policy: frame-ancestors https://mothra.simssa.ca` to the
+  IC host, which browsers enforce *instead of* XFO. Needs Traefik's CRDs — check
+  the API group with `kubectl get crd | grep middlewares`.
 - **Storage:** static NFS PersistentVolume (RWX) for `stored_models`, shared by
   backend + worker.
 - **Images:** `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, CPU-only, pulled with
@@ -25,7 +31,7 @@ k8s/
   text-service.yaml      # Deployment + Service :8002
   backend.yaml           # Deployment + Service :8001
   worker.yaml            # Deployment (celery worker; no Service)
-  ingress.yaml           # Traefik ingress (both hosts)
+  ingress.yaml           # Traefik: ic-frame-ancestors Middleware + one Ingress per host
 ```
 
 ## First-time setup
@@ -60,6 +66,11 @@ kubectl -n mothra logs deploy/backend | head        # tables created; Celery con
 kubectl -n mothra logs deploy/worker  | head        # "celery ... ready" (threads pool)
 curl -k https://mothra.simssa.ca/                   # SPA HTML
 # smoke test: POST /api/register → authed GET /api/projects (200)
+
+# IC iframe not frame-blocked — expect the frame-ancestors CSP. The proxy's
+# X-Frame-Options: SAMEORIGIN stays in the response; CSP takes precedence.
+curl -sSI https://mothra-ic.simssa.ca/ | grep -iE 'content-security|frame-options'
+kubectl -n mothra describe ingress mothra-ic | grep -i middlewares   # annotation present
 ```
 
 ## Known follow-ups
