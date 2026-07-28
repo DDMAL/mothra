@@ -227,6 +227,7 @@ export default function AppRouter({
               selectedProject.usedImageNames,
               selectedProject.annotations ?? [],
               selectedProject.meiFiles ?? [],
+              selectedProject.stepsUnlocked,
             );
             if (step >= 4) handleSendToCantus();
             else if (step >= 3) setView("neon-editor");
@@ -529,12 +530,12 @@ export default function AppRouter({
           images={selectedProject.images
             .filter((img) => {
               if (!selectedProject.usedImageNames.includes(img.name)) return false;
-              const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+              const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
               return p === null || p.nextStep <= 1;
             })
             .sort((a, b) => {
-              const pa = getImageProgress(a.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
-              const pb = getImageProgress(b.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? []);
+              const pa = getImageProgress(a.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
+              const pb = getImageProgress(b.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
               return (pa?.nextStep ?? 0) - (pb?.nextStep ?? 0);
             })
           }
@@ -635,6 +636,7 @@ export default function AppRouter({
           img.name,
           selectedProject.annotations ?? [],
           selectedProject.meiFiles ?? [],
+          selectedProject.stepsUnlocked,
         );
         return p === null || p.nextStep <= 1;
       }) ?? [];

@@ -325,6 +325,10 @@ export default function ImageTab({
       setUploadError("select a start/end folio range above before uploading");
       return;
     }
+    if (imageSubTab === "grid" && cantusSourceId && !activeFolio) {
+      setUploadError("select a folio above before uploading");
+      return;
+    }
       const all = Array.from(files);
       const imageFiles = all.filter((f) => f.type.startsWith("image/"));
       const pdfFiles = all.filter((f) => f.type === "application/pdf");
@@ -454,7 +458,7 @@ export default function ImageTab({
               ) : null
             }
             getItemBadge={(name) =>
-              getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [])?.badge ?? null
+              getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], project.stepsUnlocked)?.badge ?? null
             }
           />
         )}

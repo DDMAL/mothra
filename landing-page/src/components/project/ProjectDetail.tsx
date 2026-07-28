@@ -626,7 +626,7 @@ export default function ProjectDetail({
           {meiSection.selectedIds.size === 0 && (() => {
             const annotations = project.annotations ?? [];
             const meiFiles = project.meiFiles ?? [];
-            const nextStep = minNextStep(usedNames.images, annotations, meiFiles);
+            const nextStep = minNextStep(usedNames.images, annotations, meiFiles, stepsUnlocked);
             const continueLabel =
               usedNames.images.length === 0 || nextStep === 0 ? "begin" :
               nextStep === 1 ? "continue: ic" :
@@ -711,7 +711,7 @@ export default function ProjectDetail({
             )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => {
-              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? []) !== null;
+              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked) !== null;
               return (
                 <div key={name} className="flex items-center justify-between">
                   <span className="truncate flex-1 mr-2">{name}</span>
