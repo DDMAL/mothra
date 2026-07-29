@@ -43,6 +43,8 @@ interface ProjectDetailProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
+    originalWidth?: number,
+    originalHeight?: number,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
@@ -491,21 +493,38 @@ export default function ProjectDetail({
                 </>
               )}
               {activeTab === "mei files" && meiSection.selectedIds.size > 0 && (
-                <button
-                  onClick={async () => {
-                    const ids = [...meiSection.selectedIds];
-                    const deleted = new Set(ids);
-                    meiSection.clearSelection();
-                    await Promise.all(ids.map((id) => onDeleteMei(id)));
-                    onUpdateProject({
-                      ...project,
-                      meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
-                    });
-                  }}
-                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
+                <>
+                  <button
+                    onClick={() =>
+                      project.meiFiles
+                        .filter((f) => meiSection.selectedIds.has(f.id))
+                        .forEach((f) =>
+                          downloadBlob(
+                            new Blob([f.xmlContent ?? ""], { type: "application/xml" }),
+                            f.name,
+                          ),
+                        )
+                    }
+                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    download {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = [...meiSection.selectedIds];
+                      const deleted = new Set(ids);
+                      meiSection.clearSelection();
+                      await Promise.all(ids.map((id) => onDeleteMei(id)));
+                      onUpdateProject({
+                        ...project,
+                        meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
+                      });
+                    }}
+                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
+                </>
               )}
           </div>
 

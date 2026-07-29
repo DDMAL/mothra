@@ -762,6 +762,13 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
                     el.set(attr, str(round(int(val) * factor)))
                 except (ValueError, TypeError):
                     pass
+        for attr in ("width", "height"):
+            val = el.get(attr)
+            if val is not None and val.endswith("px"):
+                try:
+                    el.set(attr, f"{round(int(val[:-2]) * factor)}px")
+                except (ValueError, TypeError):
+                    pass
     ET.register_namespace("", MEI_NS)
     ET.indent(root, space=" ")
     xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -774,7 +781,18 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
     xml_str = xml_declaration + xml_model_pi + ET.tostring(root, encoding="unicode")
     return xml_str.encode("utf-8")
 
-
+def get_encoded_dimensions(mei_bytes: bytes) -> tuple[int, int] | None:
+    """Read the page width/height (px) this MEI's facsimile was encoded against,
+    from its <surface> element's lrx/lry (surface's ulx/uly are always 0)."""
+    root = ET.fromstring(mei_bytes)
+    surface = root.find(f".//{_tag('surface')}")
+    if surface is None:
+        return None
+    try:
+        return int(surface.get("lrx")), int(surface.get("lry"))
+    except (TypeError, ValueError):
+        return None
+    
 REQUIRED_MEI_VERSION = "5.0.0-dev"
 
 def validate_mei(xml_bytes: bytes) -> list[str]:

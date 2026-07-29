@@ -40,6 +40,8 @@ interface ImageTabProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
+    originalWidth?: number,
+    originalHeight?: number,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
@@ -218,6 +220,12 @@ export default function ImageTab({
   } | null>(null);
   const [resizing, setResizing] = useState(false);
 
+  interface PendingUpload {
+    file: File;
+    originalWidth?: number;
+    originalHeight?: number;
+  }
+
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
     const parsed = imageFiles.map((f, i) => {
       const positionalFolio = folioAt(i);
@@ -254,26 +262,29 @@ export default function ImageTab({
   };
 
   const finishUpload = async(
-    imageFiles: File[],
-    pdfPageFiles: File[],
+    imageUploads: PendingUpload[],
+    pdfUploads: PendingUpload[],
     folioOverride?: Map<string, string>,
   ) => {
     try {
       setConverting(true);
       let seq = 0;
-      const total = imageFiles.length + pdfPageFiles.length;
+      const total = imageUploads.length + pdfUploads.length;
       setUploadProgress(total > 0 ? { done: 0, total } : null);
       let done = 0;
 
       const imageEntries = await Promise.all(
-        imageFiles.map(async (f) => {
+        imageUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
           // for an earlier batch/folio pick silently leaks onto unrelated
           // single-image uploads (CantusSourcePanel reloads project.cantusSourceId
           // on mount regardless of which sub-tab is active).
-          const result = await onUploadImage(f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined);
+          const result = await onUploadImage(
+            f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined,
+            originalWidth, originalHeight,
+          );
           done++;
           setUploadProgress({ done, total });
           if (imageSubTab === "batch") {
@@ -291,9 +302,12 @@ export default function ImageTab({
       );
 
       const pdfEntries = await Promise.all(
-        pdfPageFiles.map(async (f) => {
+        pdfUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
           const pdfFolio = folioAt(seq++);
-          const result = await onUploadImage(f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined);
+          const result = await onUploadImage(
+            f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
+            originalWidth, originalHeight,
+          );
           done++;
           setUploadProgress({ done, total });
           if (imageSubTab === "batch") {
@@ -377,8 +391,12 @@ export default function ImageTab({
         return;
       }
 
-      await finishUpload(imageFiles, pdfPageFiles, folioOverride);
-      
+      await finishUpload(
+        imageFiles.map((file) => ({ file })),
+        pdfPageFiles.map((file) => ({ file })),
+        folioOverride,
+      );
+
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "upload failed");
       setConverting(false);
@@ -399,7 +417,11 @@ export default function ImageTab({
 
     if (action === "asis") {
       setPendingSizeWarning(null);
-      await finishUpload(imageFiles, pdfPageFiles, folioOverride);
+      await finishUpload(
+        imageFiles.map((file) => ({ file })),
+        pdfPageFiles.map((file) => ({ file })),
+        folioOverride,
+      );
       return;
     }
 
@@ -407,13 +429,22 @@ export default function ImageTab({
     setConverting(true);
     setResizing(true);
     const oversizedSet = new Set(oversized);
-    const [resizedImageFiles, resizedPdfPageFiles] = await Promise.all([
-      Promise.all(imageFiles.map((f) => (oversizedSet.has(f) ? resizeImageFile(f, TARGET_RESIZE_BYTES) : f))),
-      Promise.all(pdfPageFiles.map((f) => (oversizedSet.has(f) ? resizeImageFile(f, TARGET_RESIZE_BYTES) : f))),
+    const toPendingUpload = async (f: File): Promise<PendingUpload> => {
+      if (!oversizedSet.has(f)) return { file: f };
+      const resized = await resizeImageFile(f, TARGET_RESIZE_BYTES);
+      return {
+        file: resized.file,
+        originalWidth: resized.originalWidth,
+        originalHeight: resized.originalHeight,
+      };
+    };
+    const [imageUploads, pdfUploads] = await Promise.all([
+      Promise.all(imageFiles.map(toPendingUpload)),
+      Promise.all(pdfPageFiles.map(toPendingUpload)),
     ]);
     setResizing(false);
     setPendingSizeWarning(null);
-    await finishUpload(resizedImageFiles, resizedPdfPageFiles, folioOverride);
+    await finishUpload(imageUploads, pdfUploads, folioOverride);
   }
 
   const handleFiles = async (files: FileList | File[]) => {

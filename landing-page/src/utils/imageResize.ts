@@ -8,14 +8,24 @@ export function getOversizedFiles(
     return files.filter((f) => f.size > thresholdBytes);
 }
 
+export interface ResizedImage {
+    file: File;
+    originalWidth: number;
+    originalHeight: number;
+}
+
 // Downscales/re-encodes an image file as JPEG until it's under targetBytes
 // (or a bounded number of attempts is exhausted - some pathological images
 // may not compress below the target, so this is best-effort, not guaranteed).
+// Also reports the pre-resize pixel dimensions, needed so the backend can
+// later rescale this image's MEI zone coordinates back to this original size.
 export async function resizeImageFile(
     file: File,
     targetBytes: number = TARGET_RESIZE_BYTES,
-): Promise<File> {
+): Promise<ResizedImage> {
     const bitmap = await createImageBitmap(file);
+    const originalWidth = bitmap.width;
+    const originalHeight = bitmap.height;
     // area scales roughly with byte size for a given quality, so this gives a
     // reasonable starting point; the loop below corrects if it's still too big
     let scale = Math.min(1, Math.sqrt(targetBytes / file.size));
@@ -42,5 +52,9 @@ export async function resizeImageFile(
     bitmap.close();
 
     const newName = file.name.replace(/\.[^./\\]+$/, "") + ".jpg";
-  return new File([blob!], newName, { type: "image/jpeg" });
+    return {
+        file: new File([blob!], newName, { type: "image/jpeg" }),
+        originalWidth,
+        originalHeight,
+    };
 }
