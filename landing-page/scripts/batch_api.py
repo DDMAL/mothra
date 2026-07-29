@@ -88,10 +88,13 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
         folios = [p[1] for p in pairs]
     skipped_count = len(body.image_ids) - len(image_ids)
 
-    job_id = _uuid.uuid4().hex[:8]
+    new_id = _uuid.uuid4().hex[:8]
     task_body = {**body.model_dump(), "image_ids": image_ids, "folios": folios, "skipped_count": skipped_count}
-    create_job(job_id, "text_batch", project_id, params={"project_id": project_id, "body": task_body})
-    run_text_batch_task.apply_async(kwargs={"job_id": job_id, "project_id": project_id, "body": task_body}, task_id=job_id)
+    job_id, is_new = create_job(new_id, "text_batch", project_id,
+                                 params={"project_id": project_id, "body": task_body},
+                                 dedupe_seconds=5)
+    if is_new:
+        run_text_batch_task.apply_async(kwargs={"job_id": job_id, "project_id": project_id, "body": task_body}, task_id=job_id)
     return {"job_id": job_id}
 
 

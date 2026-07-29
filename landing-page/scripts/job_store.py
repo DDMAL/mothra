@@ -9,10 +9,36 @@ def new_job_id() -> str:
 
 def create_job(job_id: str, kind: str, project_id: Optional[int], *,
                params: Optional[dict]= None, retry_of: Optional[str] = None,
-               attempt: int = 1) -> None:
+               attempt: int = 1, dedupe_seconds: int = 0) -> tuple[str, bool]:
+    """Creates a new job row. If `dedupe_seconds` > 0 and a pending/running
+    job of the same kind+project_id was already created within that window,
+    returns that EXISTING job's id instead of inserting a new row - guards
+    against a client sending the same kickoff request twice in quick
+    succession (e.g. React StrictMode double-invoking a kickoff effect in
+    dev), which would otherwise enqueue two independent Celery tasks doing
+    the same real work (confirmed: two `predict`/`text_batch` jobs, each
+    writing its own annotations row for the same image). Not applied by
+    default (dedupe_seconds=0) since encode_upload/encode_batch stage raw
+    upload bytes under a fresh id before calling this - deduping those would
+    just orphan that staged data rather than avoid real duplicate work.
+    Returns (job_id_to_use, is_new) - callers should only enqueue their
+    Celery task when is_new is True.
+    """
     con = get_db_conn()
     try:
         cur = con.cursor()
+        if dedupe_seconds > 0 and project_id is not None:
+            cur.execute(
+                "SELECT job_id FROM jobs WHERE kind=%s AND project_id=%s"
+                " AND status IN ('pending','running')"
+                " AND created_at > now() - %s::interval"
+                " ORDER BY created_at DESC LIMIT 1",
+                (kind, project_id, f"{dedupe_seconds} seconds"),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.close()
+                return row[0], False
         cur.execute(
             "INSERT INTO jobs (job_id, kind, project_id, status, params, retry_of, attempt)"
             " VALUES (%s,%s,%s,'pending',%s,%s,%s)",
@@ -21,6 +47,7 @@ def create_job(job_id: str, kind: str, project_id: Optional[int], *,
         )
         con.commit()
         cur.close()
+        return job_id, True
     finally:
         release_db_conn(con)
     

@@ -238,6 +238,13 @@ def stream_text_finding(
                     con.commit()
                 ev = {**ev, "alignment_id": aid}
             yield ev
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="ignore")
+        try:
+            detail = json.loads(detail).get("detail", detail)
+        except json.JSONDecodeError:
+            pass
+        yield {"type": "error", "message": f"text-service rejected the request (HTTP {exc.code}): {detail}"}
     except urllib.error.URLError as exc:
         yield {"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"}
 

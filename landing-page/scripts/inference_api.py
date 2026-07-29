@@ -42,10 +42,13 @@ async def run_predict(
         raise HTTPException(status_code=400, detail="printed text detection is not available yet!")
     if body.model_preset == "custom" and not body.model_id: 
         raise HTTPException(status_code=400, detail="model_id is required when model_preset is 'custom'")
-    job_id = _uuid.uuid4().hex[:8]
-    kwargs = {"job_id": job_id, "project_id": project_id, "body": body.model_dump()}
-    create_job(job_id, "predict", project_id, params={k: v for k, v in kwargs.items() if k != "job_id"})
-    run_predict_task.apply_async(kwargs=kwargs, task_id=job_id)
+    new_id = _uuid.uuid4().hex[:8]
+    kwargs = {"job_id": new_id, "project_id": project_id, "body": body.model_dump()}
+    job_id, is_new = create_job(new_id, "predict", project_id,
+                                 params={k: v for k, v in kwargs.items() if k != "job_id"},
+                                 dedupe_seconds=5)
+    if is_new:
+        run_predict_task.apply_async(kwargs=kwargs, task_id=job_id)
     return {"job_id": job_id}
 
 @router.delete("/projects/{project_id}/annotations/{annotation_id}")

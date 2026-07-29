@@ -323,8 +323,8 @@ async def run_text_batch(
     folio_list = json.loads(folios)
     if len(folio_list) != len(images):
         raise HTTPException(status_code=400, detail="folios count must match images count")
-    if len(folio_list) < 2:
-        raise HTTPException(status_code=400, detail="batch requires at least 2 folios -  use /run for a single image")
+    if len(folio_list) < 1:
+        raise HTTPException(status_code=400, detail="batch requires at least 1 folio")
     
     # Parallel per-folio arrays, JSON-encoded the same way `folios` already
     # is — mirrors /run's single music_boxes/mask_json fields, pluralized.

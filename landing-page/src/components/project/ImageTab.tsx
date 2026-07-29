@@ -42,6 +42,7 @@ interface ImageTabProps {
   cantusFolios?: string[];
   cantusSourceId?: string;
   cantusSourceName?: string;
+  ocrOnlyMode?: boolean;
   imageSubTab: "grid" | "batch";
   onImageSubTabChange: (tab: "grid" | "batch") => void;
   batchImages: { id: string; name: string }[];
@@ -65,6 +66,7 @@ export default function ImageTab({
   cantusFolios = [],
   cantusSourceId,
   cantusSourceName,
+  ocrOnlyMode,
   imageSubTab,
   onImageSubTabChange,
   batchImages,
@@ -90,6 +92,11 @@ export default function ImageTab({
     done: number;
     total: number;
   } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +113,12 @@ export default function ImageTab({
     [project.images],
   );
 
+  useEffect(() => {
+    if (ocrOnlyMode && imageSubTab === "batch") {
+      onImageSubTabChange("grid");
+    }
+  }, [ocrOnlyMode, imageSubTab, onImageSubTabChange]);
+  
   useEffect(() => {
     if (quickLookTab !== "info" || !quickLookId) return;
     setQuickLookMeta(null);
@@ -234,6 +247,8 @@ export default function ImageTab({
     try {
       setConverting(true);
       let seq = 0;
+      setUploadProgress(imageFiles.length > 0 ? { done: 0, total: imageFiles.length } : null);
+      let imagesDone = 0;
       const imageEntries = await Promise.all(
         imageFiles.map(async (f) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
@@ -243,6 +258,8 @@ export default function ImageTab({
           // single-image uploads (CantusSourcePanel reloads project.cantusSourceId
           // on mount regardless of which sub-tab is active).
           const result = await onUploadImage(f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined);
+          imagesDone++;
+          setUploadProgress({ done: imagesDone, total: imageFiles.length });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -276,6 +293,8 @@ export default function ImageTab({
         pdfImages.push(...pages);
       }
 
+      setUploadProgress(pdfImages.length > 0 ? { done: 0, total: pdfImages.length } : null);
+      let pdfUploadsDone = 0;
       const pdfEntries = await Promise.all(
         pdfImages.map(async ({ name, src: blobUrl }) => {
           const blob = await fetch(blobUrl).then((r) => r.blob());
@@ -283,6 +302,8 @@ export default function ImageTab({
           const file = new File([blob], name, { type: "image/png " });
           const pdfFolio = folioAt(seq++);
           const result = await onUploadImage(file, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined);
+          pdfUploadsDone++;
+          setUploadProgress({ done: pdfUploadsDone, total: pdfImages.length });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -312,6 +333,7 @@ export default function ImageTab({
     } finally {
       setConverting(false);
       setPdfProgress(null);
+      setUploadProgress(null);
     }
   };
 
@@ -325,7 +347,7 @@ export default function ImageTab({
       setUploadError("select a start/end folio range above before uploading");
       return;
     }
-    if (imageSubTab === "grid" && cantusSourceId && !activeFolio) {
+    if (imageSubTab === "grid" && !ocrOnlyMode && cantusSourceId && !activeFolio) {
       setUploadError("select a folio above before uploading");
       return;
     }
@@ -411,7 +433,9 @@ export default function ImageTab({
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
         <div className="flex gap-2 mb-4" onClick={(e) => e.stopPropagation()}>
-          {(["grid", "batch"] as const).map((t) => (
+          {(["grid", "batch"] as const)
+            .filter((t) => t === "grid" || !ocrOnlyMode)
+            .map((t) => (
             <button
               key={t}
               onClick={() => onImageSubTabChange(t)}
@@ -689,6 +713,21 @@ export default function ImageTab({
                       className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
                       style={{
                         width: `${(pdfProgress.done / pdfProgress.total) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : uploadProgress ? (
+                <>
+                  <p className="text-sm text-[#1D3335] text-center">
+                    uploading images... {uploadProgress.done} /{" "}
+                    {uploadProgress.total}
+                  </p>
+                  <div className="w-full bg-white/30 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
+                      style={{
+                        width: `${(uploadProgress.done / uploadProgress.total) * 100}%`,
                       }}
                     />
                   </div>

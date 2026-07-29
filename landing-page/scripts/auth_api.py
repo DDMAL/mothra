@@ -63,152 +63,164 @@ def db_cursor():
 def init_db():
     con = get_db_conn()
     cur = con.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            first_name TEXT,
-            last_name TEXT,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS projects (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            name TEXT NOT NULL,
-            steps_unlocked INTEGER DEFAULT 0,
-            used_image_names TEXT DEFAULT '[]',
-            used_model_names TEXT DEFAULT '[]',
-            deleted_at TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS project_images (
-            id TEXT PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id),
-            name TEXT NOT NULL,
-            mime_type TEXT,
-            data BYTEA NOT NULL,
-            folio TEXT,
-            source_id TEXT,
-            source_name TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS project_models (
-            id TEXT PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id),
-            name TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS mei_files (
-            id TEXT PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id),
-            name TEXT NOT NULL,
-            xml_content TEXT,
-            corrected INTEGER DEFAULT 0,
-            image_name TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS activity_log (
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
-                project_id INTEGER NOT NULL REFERENCES projects(id),
-                action_type TEXT NOT NULL,
-                detail TEXT DEFAULT '',
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                password_hash TEXT NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS project_logs (
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
                 id SERIAL PRIMARY KEY,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                log_type TEXT NOT NULL,
-                content TEXT NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                name TEXT NOT NULL,
+                steps_unlocked INTEGER DEFAULT 0,
+                used_image_names TEXT DEFAULT '[]',
+                used_model_names TEXT DEFAULT '[]',
+                deleted_at TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS project_images (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                name TEXT NOT NULL,
+                mime_type TEXT,
+                data BYTEA NOT NULL,
+                folio TEXT,
+                source_id TEXT,
+                source_name TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS project_models (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                name TEXT NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS mei_files (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                name TEXT NOT NULL,
+                xml_content TEXT,
+                corrected INTEGER DEFAULT 0,
+                image_name TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS activity_log (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL REFERENCES projects(id),
+                    action_type TEXT NOT NULL,
+                    detail TEXT DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS project_logs (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    log_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS annotations (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                image_id TEXT,
+                image_name TEXT NOT NULL,
+                yolo_txt TEXT NOT NULL,
+                model_id TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS annotations (
-            id TEXT PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id),
-            image_id TEXT,
-            image_name TEXT NOT NULL,
-            yolo_txt TEXT NOT NULL,
-            model_id TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS text_alignments (
-            id TEXT PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id),
-            image_id TEXT,
-            image_name TEXT NOT NULL,
-            alignment_json TEXT NOT NULL,
-            median_line_spacing REAL DEFAULT 0,
-            syllable_count INTEGER DEFAULT 0,
-            log_text TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS text_alignments (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                image_id TEXT,
+                image_name TEXT NOT NULL,
+                alignment_json TEXT NOT NULL,
+                median_line_spacing REAL DEFAULT 0,
+                syllable_count INTEGER DEFAULT 0,
+                log_text TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
 
-    # job queue
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            job_id TEXT PRIMARY KEY,
-            kind TEXT NOT NULL,
-            project_id INTEGER,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS job_events (
-            id SERIAL PRIMARY KEY,
-            job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
-            payload JSONB NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS job_uploads (
-            upload_id TEXT PRIMARY KEY,
-            data BYTEA NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS job_sessions (
-            session_id TEXT PRIMARY KEY,
-            mei_bytes BYTEA NOT NULL,
-            stem TEXT NOT NULL,
-            manifest JSONB,
-            created_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
+        # job queue
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                project_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS job_events (
+                id SERIAL PRIMARY KEY,
+                job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+                payload JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS job_uploads (
+                upload_id TEXT PRIMARY KEY,
+                data BYTEA NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS job_sessions (
+                session_id TEXT PRIMARY KEY,
+                mei_bytes BYTEA NOT NULL,
+                stem TEXT NOT NULL,
+                manifest JSONB,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
 
-    # performance: db indexes
-    for _idx in [
-        "CREATE INDEX IF NOT EXISTS idx_project_images_pid ON project_images(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_project_models_pid ON project_models(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_mei_files_pid      ON mei_files(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_annotations_pid    ON annotations(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)",
-        "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, id)",
-        "CREATE INDEX IF NOT EXISTS idx_jobs_status        ON jobs(status)",
-    ]:
-        cur.execute(_idx)
-    con.commit()
-    cur.close()
-    release_db_conn(con)
+        # performance: db indexes
+        for _idx in [
+            "CREATE INDEX IF NOT EXISTS idx_project_images_pid ON project_images(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_project_models_pid ON project_models(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_mei_files_pid      ON mei_files(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_annotations_pid    ON annotations(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status        ON jobs(status)",
+        ]:
+            cur.execute(_idx)
+        con.commit()
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject, psycopg2.errors.UniqueViolation):
+        # backend and worker both run init_db() independently at import, and
+        # CI/CD redeploys both on every push to main - two processes racing
+        # on CREATE TABLE/INDEX IF NOT EXISTS against a not-yet-existing
+        # schema can raise a UniqueViolation on the pg_type catalog rather
+        # than the expected DuplicateTable, since the "IF NOT EXISTS"
+        # existence check isn't atomic across concurrent sessions. Harmless
+        # to roll back and move on: the winner just created the identical
+        # schema this loser was about to create anyway.
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
 
 init_db()
 
@@ -502,7 +514,7 @@ def _migrate_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_job_uploads_created_at ON job_uploads (created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_job_sessions_created_at ON job_sessions (created_at)")
         con.commit()
-    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject, psycopg2.errors.UniqueViolation):
         con.rollback()
     finally:
         cur.close(); release_db_conn(con)
@@ -522,7 +534,7 @@ def _migrate_db():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)")
         con.commit()
-    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject):
+    except (psycopg2.errors.DuplicateTable, psycopg2.errors.DuplicateObject, psycopg2.errors.UniqueViolation):
         con.rollback()
     finally:
         cur.close(); release_db_conn(con)
