@@ -58,7 +58,7 @@ async def encode_upload(
         "clef_shape": clef_shape,
         "clef_line": clef_line,
     }
-    create_job(job_id, "encode_upload", project_id, params=kwargs)
+    create_job(job_id, "encode_upload", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates
     run_encode_upload_task.apply_async(kwargs={"job_id": job_id, **kwargs}, task_id=job_id)
     return JSONResponse({"job_id": job_id})
 
@@ -132,6 +132,6 @@ async def encode_batch(
         "clef_shape": clef_shape,
         "clef_line": clef_line,
     }
-    create_job(job_id, "encode_batch", project_id, params=kwargs)
+    create_job(job_id, "encode_batch", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates
     run_encode_batch_task.apply_async(kwargs={"job_id": job_id, **kwargs}, task_id=job_id)
     return JSONResponse({"job_id": job_id})
