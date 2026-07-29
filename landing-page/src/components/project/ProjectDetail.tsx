@@ -96,6 +96,12 @@ export default function ProjectDetail({
   const [batchEndFolio, setBatchEndFolio] = useState("");
   const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
 
+  useEffect(() => {
+    setBatchStartFolio("");
+    setBatchEndFolio("");
+    setBatchImages([]);
+  }, [project.id]);
+  
   const batchFolioSequence = useMemo(() => {
     const folios = loadedCantusSource?.folios ?? [];
     if (!batchStartFolio || !batchEndFolio) return [];
