@@ -9,11 +9,13 @@ export interface FolioReviewRow {
     status: FolioReviewStatus;
 }
 
-/** [numeric folio, recto(0)/verso(1)] — mirrors mothra-text/steps/nw_chant_allocator.py's _folio_sort_key. */
+/** [numeric folio, recto(0)/verso(1)] — mirrors mothra-text/steps/nw_chant_allocator.py's _folio_sort_key.
+ * The recto/verso letter is optional: some CantusDB sources record a bare folio
+ * number with no side marker at all (e.g. "096" rather than "096r"/"096v"). */
 export function folioSortKey(folio: string): [number, number] {
-    const m = /^0*(\d+)([rv])/i.exec(folio.trim());
+    const m = /^0*(\d+)([rv])?/i.exec(folio.trim());
     if (!m) return [Number.MAX_SAFE_INTEGER, 0]; // unparsable - sort last, not first
-    return [Number(m[1]), m[2].toLowerCase() === "r" ? 0 : 1];
+    return [Number(m[1]), m[2]?.toLowerCase() === "v" ? 1 : 0];
 }
 
 export function compareFolios(a?: string, b?: string): number {
