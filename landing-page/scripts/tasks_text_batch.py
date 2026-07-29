@@ -121,6 +121,13 @@ def run_text_batch_task(job_id, project_id, body):
     except JobCancelled:
         con.rollback()
         return
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="ignore")
+        try:
+            detail = json.loads(detail).get("detail", detail)
+        except json.JSONDecodeError:
+            pass
+        publish({"type": "error", "message": f"text-service rejected the request (HTTP {exc.code}): {detail}"})
     except urllib.error.URLError as exc:
         publish({"type": "error", "message": f"text-service at {TEXT_API_URL} is unreachable: {exc}"})
     except Exception as e:
