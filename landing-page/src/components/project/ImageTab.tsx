@@ -42,6 +42,7 @@ interface ImageTabProps {
   cantusFolios?: string[];
   cantusSourceId?: string;
   cantusSourceName?: string;
+  ocrOnlyMode?: boolean;
   imageSubTab: "grid" | "batch";
   onImageSubTabChange: (tab: "grid" | "batch") => void;
   batchImages: { id: string; name: string }[];
@@ -65,6 +66,7 @@ export default function ImageTab({
   cantusFolios = [],
   cantusSourceId,
   cantusSourceName,
+  ocrOnlyMode,
   imageSubTab,
   onImageSubTabChange,
   batchImages,
@@ -111,6 +113,12 @@ export default function ImageTab({
     [project.images],
   );
 
+  useEffect(() => {
+    if (ocrOnlyMode && imageSubTab === "batch") {
+      onImageSubTabChange("grid");
+    }
+  }, [ocrOnlyMode, imageSubTab, onImageSubTabChange]);
+  
   useEffect(() => {
     if (quickLookTab !== "info" || !quickLookId) return;
     setQuickLookMeta(null);
@@ -339,7 +347,7 @@ export default function ImageTab({
       setUploadError("select a start/end folio range above before uploading");
       return;
     }
-    if (imageSubTab === "grid" && cantusSourceId && !activeFolio) {
+    if (imageSubTab === "grid" && !ocrOnlyMode && cantusSourceId && !activeFolio) {
       setUploadError("select a folio above before uploading");
       return;
     }
@@ -425,7 +433,9 @@ export default function ImageTab({
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
         <div className="flex gap-2 mb-4" onClick={(e) => e.stopPropagation()}>
-          {(["grid", "batch"] as const).map((t) => (
+          {(["grid", "batch"] as const)
+            .filter((t) => t === "grid" || !ocrOnlyMode)
+            .map((t) => (
             <button
               key={t}
               onClick={() => onImageSubTabChange(t)}

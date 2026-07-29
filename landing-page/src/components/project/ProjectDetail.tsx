@@ -557,6 +557,7 @@ export default function ProjectDetail({
                 cantusFolios={loadedCantusSource?.folios ?? []}
                 cantusSourceId={loadedCantusSource?.sourceId}
                 cantusSourceName={loadedCantusSource?.name}
+                ocrOnlyMode={textFindingSettings.ocrOnlyMode}
                 imageSubTab={imageSubTab}
                 onImageSubTabChange={setImageSubTab}
                 batchImages={batchImages}
