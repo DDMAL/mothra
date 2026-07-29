@@ -58,9 +58,24 @@ export default function CantusSourcePanel({
     };
 
     useEffect(() => {
-        if (project.cantusSourceId && !sourceId) {
+        // project switched — clear all per-project Cantus/OCR state, then
+        // load the newly-selected project's own saved source (if any). Keyed on
+        // project.id (not project.cantusSourceId) so this fires on every switch,
+        // including between two projects that happen to share a source id or
+        // both have none.
+        setLoadedSource(null);
+        setError(null);
+        setConflict(null);
+        setExportError(null);
+        onSourceLoaded?.(null);
+        patch({ ocrOnlyMode: false });
+
+        if (project.cantusSourceId) {
             setSourceIdInput(project.cantusSourceId);
             loadSource(project.cantusSourceId);
+        } else {
+            setSourceIdInput("");
+            patch({ sourceId: "", folio: ""});
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [project.cantusSourceId]);

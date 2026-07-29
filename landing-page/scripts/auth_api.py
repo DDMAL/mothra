@@ -442,6 +442,28 @@ def _migrate_db():
         cur.close()
         release_db_conn(con)
 
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN original_width INTEGER")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE project_images ADD COLUMN original_height INTEGER")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
     # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
     con = get_db_conn(); cur = con.cursor()
     try:
