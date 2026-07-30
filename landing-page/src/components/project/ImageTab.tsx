@@ -592,6 +592,13 @@ export default function ImageTab({
             getItemBadge={(name) =>
               getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], project.stepsUnlocked)?.badge ?? null
             }
+            onUse={(img) => {
+              if (!usedNames.images.includes(img.name)) {
+                onUsedNamesChange({
+                  ...usedNames, images: [...usedNames.images, img.name],
+                });
+              }
+            }}
           />
         )}
       </div>
@@ -740,10 +747,9 @@ export default function ImageTab({
                     <span className="text-white truncate">{img.name}</span>
                   </div>
                   {img.folio && (
-                    <div className="flex justify-between gap-4">
-                      <span>folio</span>
-                      <span className="text-white">{img.folio}</span>
-                    </div>
+                    <span className="absolute top-1 right-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                      {img.folio}
+                    </span>
                   )}
                   <div className="flex justify-between gap-4">
                     <span>type</span>

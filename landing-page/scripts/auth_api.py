@@ -555,8 +555,11 @@ def _migrate_db():
     import time as _time
     _now = _time.time()
     for _f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
-        if _now - _f.stat().st_mtime > 86400:
-            _f.unlink(missing_ok=True)
+        try:
+            if _now - _f.stat().st_mtime > 86400:
+                _f.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:

@@ -1,4 +1,3 @@
-import { useState, useRef, useCallback, useEffect } from "react";
 import type { MeiFile } from "../../types";
 import { downloadBlob } from "../../utils/download";
 
@@ -8,14 +7,12 @@ interface Props {
 }
 
 export default function MeiViewerModal({ file, onClose }: Props) {
-
     const handleExport = () => {
         downloadBlob(
             new Blob([file.xmlContent ?? ""], { type: "application/xml" }),
             file.name,
         );
     }
-
 
     return (
         <>
