@@ -102,17 +102,23 @@ def write_jsomr(
         ulx, uly, lrx, lry = box
         asg = asg_by_fit.get(idx)
 
+        # x_start/x_end/y_values here are already page-absolute (offsets are
+        # baked in above), unlike run_page.py's crop-local "centerline" +
+        # separate "centerline_page" split. Populate centerline_page too, with
+        # the same values, so eval_page.py's centerline_page-preferring
+        # lookup (which assumes centerline is crop-local when this block is
+        # absent) doesn't double-add bounding_box's uly/ulx on top.
+        centerline_page_absolute = {
+            "x_start": int(fit.x_start + fit.x_page_offset),
+            "x_end": int(fit.x_end + fit.x_page_offset),
+            "y_values": [round(float(y) + fit.y_page_offset, 1) for y in fit.y_values],
+        }
         record = {
             "id": f"{page_name}_line{idx:04d}",
             "source": "detected",
             "bounding_box": {"ulx": ulx, "uly": uly, "lrx": lrx, "lry": lry},
-            "centerline": {
-                "x_start": int(fit.x_start + fit.x_page_offset),
-                "x_end": int(fit.x_end + fit.x_page_offset),
-                "y_values": [
-                    round(float(y) + fit.y_page_offset, 1) for y in fit.y_values
-                ],
-            },
+            "centerline": centerline_page_absolute,
+            "centerline_page": centerline_page_absolute,
             "fit": {
                 "method": fit.method,
                 **{
@@ -149,15 +155,19 @@ def write_jsomr(
 
     # Append synthesized lines produced by the interpolation pass.
     for interp in grouping_result.interpolated_lines:
+        # Also page-absolute already (interpolation operates on the same
+        # page-absolute fits as above) — see centerline_page note above.
+        centerline_page_absolute = {
+            "x_start": interp.x_start,
+            "x_end": interp.x_end,
+            "y_values": [round(float(y), 1) for y in interp.y_values],
+        }
         record = {
             "id": f"{page_name}_interp_s{interp.stave_id:02d}_l{interp.within_stave_index}",
             "source": "interpolated",
             "bounding_box": None,
-            "centerline": {
-                "x_start": interp.x_start,
-                "x_end": interp.x_end,
-                "y_values": [round(float(y), 1) for y in interp.y_values],
-            },
+            "centerline": centerline_page_absolute,
+            "centerline_page": centerline_page_absolute,
             "fit": {
                 "method": "interpolated",
                 "neighbor_fit_indices": list(interp.neighbor_fit_indices),
