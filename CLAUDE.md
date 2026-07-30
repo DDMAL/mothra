@@ -369,6 +369,18 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 
 ---
 
+## Testing
+
+`.github/workflows/tests.yml` runs on every push, to any branch — the
+staff-finding algorithmic suite (`staff-finding/scripts/test_group_staves.py`
++ `script_tests/`, as several separate `pytest` invocations rather than one
+combined run — see the workflow's own comments for why) and
+`landing-page/scripts/tests/`. It is not yet configured as a required status
+check in the repo's branch protection settings for `main` — that is a
+separate, repo-admin-level step, done in GitHub's own UI, not this file.
+
+---
+
 ## Things that don't exist yet (planned)
 
 - JWT refresh — 72h expiry with no `POST /api/auth/refresh`; sessions drop mid-workflow

@@ -1,0 +1,64 @@
+name: tests
+
+# Runs the staff-finding algorithmic test suite and the new landing-page
+# staffline_adapter tests on every push, to any branch. A push-triggered
+# check still attaches to that commit's SHA, so it shows up on any pull
+# request built from those commits, same as a pull_request-triggered one
+# would -- the difference is this also runs on plain pushes with no open PR.
+# To actually make it block merging (not just report), add this job as a
+# required status check under the repo's branch protection settings for
+# main -- that is a separate, repo-settings-level step this workflow file
+# cannot configure on its own.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Pillow: only thing staffline_adapter.py's own import chain
+      # (encode_to_mei.py) needs beyond stdlib + the staff-finding package.
+      - name: Install dependencies
+        run: pip install -e "./staff-finding[diagnostics]" pytest Pillow
+
+      - name: staff-finding -- scripts/test_group_staves.py
+        working-directory: staff-finding
+        run: python -m pytest scripts/test_group_staves.py
+
+      # test_run_page.py and test_run_pageOG.py each replace
+      # sys.modules["torch"]/["ultralytics"]/["inference_simple"] with fake
+      # stubs at module level, with no teardown. Collecting them in the same
+      # pytest session as other script_tests files leaves those fakes in
+      # place for whatever runs afterward -- confirmed to make
+      # component_filter.filter_components() silently return empty results
+      # for later tests (e.g. test_fit_centerline.py) that never touch
+      # torch/ultralytics themselves. Running them in their own step
+      # sidesteps this without needing to fix the underlying stubbing
+      # approach in those two files.
+      - name: staff-finding -- script_tests (excluding test_run_page/OG)
+        working-directory: staff-finding
+        run: >
+          python -m pytest scripts/script_tests/
+          --ignore=scripts/script_tests/test_run_page.py
+          --ignore=scripts/script_tests/test_run_pageOG.py
+
+      - name: staff-finding -- test_run_page.py (isolated, see note above)
+        working-directory: staff-finding
+        run: python -m pytest scripts/script_tests/test_run_page.py
+
+      - name: staff-finding -- test_run_pageOG.py (isolated, see note above)
+        working-directory: staff-finding
+        run: python -m pytest scripts/script_tests/test_run_pageOG.py
+
+      - name: landing-page -- staffline_adapter tests
+        run: python -m pytest landing-page/scripts/tests/test_staffline_adapter.py
