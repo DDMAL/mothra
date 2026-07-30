@@ -602,14 +602,21 @@ def _compute_merge_groups(
             if abs(a["y_center"] - b["y_center"]) > y_threshold:
                 continue
 
-            # X-gap check. Compute the gap between their x-ranges; if they
-            # overlap, gap is negative (treat as 0).
+            # X-gap check. Compute the gap between their x-ranges. A merge is
+            # only valid when the ranges are genuinely disjoint (gap >= 0):
+            # fragments of the same interrupted line never overlap in x,
+            # whereas two parallel, distinct stafflines close in y typically
+            # DO overlap in x (gap < 0, since right.x_start < left.x_end).
+            # Excluding negative gaps is what stops two simultaneously-
+            # present, distinct lines from being unioned just because they
+            # sit close together vertically. Mirrors the x-disjointness
+            # already required for companion retention below.
             if a["x_start"] <= b["x_start"]:
                 left, right = a, b
             else:
                 left, right = b, a
             gap = right["x_start"] - left["x_end"]
-            if gap > x_gap_threshold:
+            if gap < 0 or gap > x_gap_threshold:
                 continue
 
             union(i, j)
