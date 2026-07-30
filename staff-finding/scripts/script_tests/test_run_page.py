@@ -24,6 +24,22 @@ fake_inference.post_process_ink = lambda *a, **kw: None
 fake_inference.separate_layers = lambda *a, **kw: (None, None)
 sys.modules["inference_simple"] = fake_inference
 
+# bgr_adapter.py itself also needs stubbing, not just inference_simple: it
+# does its own os.path.isfile() check across a few hardcoded developer-machine
+# paths and raises ModuleNotFoundError directly if none exist, before ever
+# reaching its own "from inference_simple import ..." line -- so the
+# inference_simple stub above never even gets consulted on a machine (e.g. a
+# CI runner) that doesn't have one of those exact paths. Stubbing bgr_adapter
+# itself sidesteps that check entirely, the same way the inference_simple
+# stub sidesteps the module it fakes.
+fake_bgr_adapter = types.ModuleType("bgr_adapter")
+fake_bgr_adapter.load_bgr_model = lambda *a, **kw: None
+fake_bgr_adapter.run_bgr_inference = lambda *a, **kw: None
+fake_bgr_adapter.DEFAULT_BGR_WINDOW_SIZE = 512
+fake_bgr_adapter.DEFAULT_BGR_STRIDE = 256
+fake_bgr_adapter.DEFAULT_BGR_CONFIDENCE = 0.5
+sys.modules["bgr_adapter"] = fake_bgr_adapter
+
 fake_torch = types.ModuleType("torch")
 fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
 sys.modules["torch"] = fake_torch
