@@ -41,11 +41,48 @@ MAX_FIT_ITERATIONS = 100
 # doc §5.4 — sufficient for square notation; revisit for thinner scripts.
 Y_SAMPLE_DECIMALS = 1
 
-# Line-following: triggered when the initial Huber fit's mean residual exceeds
-# this multiple of h. At 1.0 * h the fit is already off by a full line
-# thickness on average — a strong signal that the box contains more than one
-# staffline.
-REFIT_TRIGGER_MULTIPLIER = 1.0
+# Line-following: triggered when the initial Huber fit's mean residual
+# exceeds this trigger distance, in pixels.
+#
+# Originally a pure multiple of h (1.0 * h), on the assumption that h
+# ("scale unit" -- the page-level median YOLO staffline-box height) is a
+# reasonable proxy for the box's own line thickness, so "off by a full line
+# thickness" would reliably signal multi-line contamination. In practice h
+# tracks detector box padding, not ink thickness or inter-line spacing: on
+# the page that exposed the x-overlap merge bug (see component_filter.py's
+# _compute_merge_groups), h measured 71px while the real inter-line spacing
+# within a clean stave measured only 44-53px. A two-line "compromise" fit's
+# residual is bounded by roughly half the (merged) spacing, so the worst
+# observed merge-corrupted residual_mean on that page (24.5px) never
+# approached 1.0 * h (71px) -- the trigger fired on 0 of 29 contaminated
+# lines (20 severe, residual_mean 19.5-24.5px; 9 milder, 4.0-12.2px), all
+# silently flag-free, out of 82 lines total.
+#
+# Recalibrated as max(floor, ratio * h). The ratio term still lets the
+# trigger grow for larger manuscript/scan scale; the absolute floor
+# dominates whenever h is small or simply not the right reference quantity,
+# so a clean line's own residual (bounded by ink-thickness spread, not by h)
+# doesn't trip it. Against the same real page (h=71): clean fits topped out
+# at 2.66px; every contaminated fit (mild or severe) was >= 4.0px. floor=3.0
+# sits in that gap; ratio=0.04 (0.04*71=2.84) stays below the floor at this
+# validated scale and only starts to dominate for h > 75, so it's mostly
+# headroom for larger scans we haven't profiled yet, not load-bearing here.
+#
+# False positives here are cheap: if line-following triggers on an already-
+# clean fit, the refit is compared against the original in-band residual
+# and discarded via 'line_following_no_improvement' unless it's actually
+# better (see the comparison below) -- so it's fine to bias toward firing
+# more often rather than less, given the failure mode being guarded against
+# was previously silent (empty flags) on every affected line.
+#
+# Revisit if a manuscript corpus with a different box-padding-to-spacing
+# ratio shows the floor or ratio miscalibrated (cross-checked against a
+# second page in this corpus at h=36: clean-fit residuals still cleared the
+# floor by 2x+, but the mid-range of that page's distribution is more
+# continuous than this page's clean/contaminated gap, so the exact numbers
+# may need a wider empirical base before being treated as final).
+REFIT_TRIGGER_MULTIPLIER = 0.04
+REFIT_TRIGGER_ABS_FLOOR_PX = 3.0
 
 # Half-width of the sliding band that follows the current estimated y (pixels,
 # expressed as a multiple of h). 1.5 * h gives one full line thickness of
@@ -214,7 +251,10 @@ def fit_centerline(
     trace_xs_out: np.ndarray = np.array([], dtype=np.float64)
     trace_ys_out: np.ndarray = np.array([], dtype=np.float64)
 
-    if float(abs_residuals.mean()) > REFIT_TRIGGER_MULTIPLIER * scale_unit:
+    refit_trigger_px = max(
+        REFIT_TRIGGER_ABS_FLOOR_PX, REFIT_TRIGGER_MULTIPLIER * scale_unit
+    )
+    if float(abs_residuals.mean()) > refit_trigger_px:
         seed_y = (
             (float(crop.shape[0]) / 2.0)
             if crop is not None
