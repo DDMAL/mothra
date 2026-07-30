@@ -155,6 +155,25 @@ def init_db():
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
+    # Accumulate-forever (never overwritten), unlike annotations' delete-then-
+    # insert -- so a future re-run (e.g. once interpolate_missing is validated
+    # and flipped on) stays comparable against history without a schema change.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS staffline_detections (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id),
+            image_id TEXT,
+            image_name TEXT NOT NULL,
+            annotation_id TEXT,
+            jsomr_json JSONB NOT NULL,
+            scale_unit REAL,
+            stave_count INTEGER,
+            mode_lines_per_stave INTEGER,
+            settings_json JSONB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'succeeded',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
 
     # job queue
     cur.execute("""
@@ -201,6 +220,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_activity_log_pid   ON activity_log(project_id)",
         "CREATE INDEX IF NOT EXISTS idx_projects_user_id   ON projects(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_staffline_detections_lookup"
+        " ON staffline_detections(project_id, image_name, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, id)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_status        ON jobs(status)",
     ]:

@@ -7,6 +7,7 @@ from auth_api import get_db_conn, release_db_conn, _log_activity
 from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
+from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
 
 
 @celery_app.task(name="predict.run")
@@ -104,6 +105,15 @@ def run_predict_task(job_id, project_id, body):
                 "txtName": f"annotation-{ann_id}.txt",
                 "jsonName": "", "detectionCount": n_detections,
             })
+
+            if has_class(yolo_txt, STAFFLINE_CLASS_ID):
+                for sf_ev in run_staffline_detection(
+                    cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
+                ):
+                    if sf_ev.get("type") == "error":
+                        publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
+                    else:
+                        publish(sf_ev)
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
             for text_ev in stream_text_finding(
