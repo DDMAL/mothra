@@ -18,6 +18,13 @@
 #                        this varies by GT source in this repo; verify with
 #                        `awk '{print $1}' <gt-dir>/<any-file>.txt | sort -u`)
 #   --python PATH        skip env auto-resolution, use this interpreter directly
+#   --fallback-redetect  after grouping (--method main only), re-probe
+#                        under-populated staves for detections the primary
+#                        pass may have missed. Off by default. Re-uses
+#                        --weights for the re-probe. See run_page.py
+#                        --fallback-conf/--fallback-iou for the (not yet
+#                        forwarded here) tunables, currently left at
+#                        run_page.py's own defaults.
 #   -h, --help           this help
 #
 # Note: same-named images in different subdirectories of the input dir will
@@ -34,7 +41,7 @@ else
   C_OK=''; C_ERR=''; C_DIM=''; C_RST=''
 fi
 
-usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 die() { echo "${C_ERR}error:${C_RST} $*" >&2; exit 1; }
 
 # --- defaults ----------------------------------------------------------------
@@ -45,6 +52,7 @@ DEVICE=""
 GT_DIR=""
 GT_CLASS="2"
 PYTHON_OVERRIDE=""
+FALLBACK_REDETECT=""
 
 # --- manual long-form flag parsing (not getopts — need long flags) ---------
 POSITIONAL=()
@@ -57,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --gt-dir)   GT_DIR="$2"; shift 2 ;;
     --gt-class) GT_CLASS="$2"; shift 2 ;;
     --python)   PYTHON_OVERRIDE="$2"; shift 2 ;;
+    --fallback-redetect) FALLBACK_REDETECT="1"; shift ;;
     -h|--help)  usage ;;
     --) shift; break ;;
     -*) die "unknown flag: $1 (try -h)" ;;
@@ -121,8 +130,10 @@ export MPLBACKEND=Agg  # defensive: no backend is configured anywhere in the
 dispatch() {  # $1=method $2=page $3=yolo_txt $4=out_dir
   case "$1" in
     main)
+      FALLBACK_ARGS=()
+      [ -n "$FALLBACK_REDETECT" ] && FALLBACK_ARGS=(--fallback-redetect --fallback-weights "$WEIGHTS")
       "$PYTHON" "$ROOT/scripts/run_page.py" \
-        --page "$2" --yolo "$3" --output "$4" --staffline-class 0 --no-bgr ;;
+        --page "$2" --yolo "$3" --output "$4" --staffline-class 0 --no-bgr "${FALLBACK_ARGS[@]}" ;;
     gp_centerlines)
       "$PYTHON" "$ROOT/experiments/gp_centerlines/run_gp_page.py" \
         --page "$2" --yolo "$3" --output "$4" --staffline-class 0 ;;

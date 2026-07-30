@@ -139,6 +139,55 @@ def _interpolate_between(
     return ys
 
 
+def compute_stave_territories(
+    stave_fits: dict[int, list[tuple[int, FitResult]]],
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Compute each stave's territory bounds: the y-range it "owns".
+
+    Each stave owns the y-range bounded by the midpoint to the stave above
+    and the midpoint to the stave below. Top stave: upper bound clamped to
+    its own topmost detected line (no upward extrapolation). Bottom stave:
+    lower bound clamped to its own bottommost line. This is the safety net
+    that keeps synthesised (interpolate_staves.py) or fallback-redetected
+    (fallback_redetect.py) lines from ever landing in inter-stave space.
+
+    Args:
+        stave_fits: stave_id -> [(fit_index, FitResult), ...], as built by
+            interpolate_missing_lines from a StaveGroupingResult's
+            assignments (only staves with at least one fit that has a valid
+            y-position will appear in the returned dicts).
+
+    Returns:
+        (upper_bound, lower_bound), both stave_id -> page-absolute y.
+    """
+    stave_y_mins: dict[int, float] = {}
+    stave_y_maxs: dict[int, float] = {}
+    for sid, fp in stave_fits.items():
+        ys = [_y_at_center(f) for _, f in fp if _y_at_center(f) is not None]
+        if ys:
+            stave_y_mins[sid] = min(ys)
+            stave_y_maxs[sid] = max(ys)
+
+    sorted_sids = sorted(stave_y_mins, key=lambda s: stave_y_mins[s])
+    upper_bound: dict[int, float] = {}
+    lower_bound: dict[int, float] = {}
+    for rank, sid in enumerate(sorted_sids):
+        if rank > 0:
+            prev = sorted_sids[rank - 1]
+            upper_bound[sid] = (stave_y_maxs[prev] + stave_y_mins[sid]) / 2.0
+        else:
+            upper_bound[sid] = stave_y_mins[sid]  # top stave: no upward extrapolation
+        if rank < len(sorted_sids) - 1:
+            nxt = sorted_sids[rank + 1]
+            lower_bound[sid] = (stave_y_maxs[sid] + stave_y_mins[nxt]) / 2.0
+        else:
+            lower_bound[sid] = stave_y_maxs[
+                sid
+            ]  # bottom stave: no downward extrapolation
+
+    return upper_bound, lower_bound
+
+
 def _compute_interpolation_max_gap(
     all_gaps: list[float],
     cut_threshold: float,
@@ -215,34 +264,7 @@ def interpolate_missing_lines(
         )
 
     # --- Territory boundaries ---
-    # Each stave owns the y-range bounded by the midpoint to the stave above
-    # and the midpoint to the stave below.  Top stave: upper bound clamped to
-    # its own topmost detected line (no upward extrapolation).  Bottom stave:
-    # lower bound clamped to its own bottommost line.
-    stave_y_mins: dict[int, float] = {}
-    stave_y_maxs: dict[int, float] = {}
-    for sid, fp in stave_fits.items():
-        ys = [_y_at_center(f) for _, f in fp if _y_at_center(f) is not None]
-        if ys:
-            stave_y_mins[sid] = min(ys)
-            stave_y_maxs[sid] = max(ys)
-
-    sorted_sids = sorted(stave_y_mins, key=lambda s: stave_y_mins[s])
-    upper_bound: dict[int, float] = {}
-    lower_bound: dict[int, float] = {}
-    for rank, sid in enumerate(sorted_sids):
-        if rank > 0:
-            prev = sorted_sids[rank - 1]
-            upper_bound[sid] = (stave_y_maxs[prev] + stave_y_mins[sid]) / 2.0
-        else:
-            upper_bound[sid] = stave_y_mins[sid]  # top stave: no upward extrapolation
-        if rank < len(sorted_sids) - 1:
-            nxt = sorted_sids[rank + 1]
-            lower_bound[sid] = (stave_y_maxs[sid] + stave_y_mins[nxt]) / 2.0
-        else:
-            lower_bound[sid] = stave_y_maxs[
-                sid
-            ]  # bottom stave: no downward extrapolation
+    upper_bound, lower_bound = compute_stave_territories(stave_fits)
 
     result: list[InterpolatedLine] = []
 

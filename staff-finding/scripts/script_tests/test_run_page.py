@@ -28,6 +28,17 @@ fake_torch = types.ModuleType("torch")
 fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
 sys.modules["torch"] = fake_torch
 
+fake_ultralytics = types.ModuleType("ultralytics")
+
+
+class _FakeYOLO:
+    def __init__(self, *a, **kw):
+        pass
+
+
+fake_ultralytics.YOLO = _FakeYOLO
+sys.modules["ultralytics"] = fake_ultralytics
+
 import yolo_io
 import run_page
 
