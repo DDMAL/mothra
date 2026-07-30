@@ -5,6 +5,22 @@ what's done, what's in progress, what to run, and where the sharp edges are.
 
 ---
 
+## Production wiring (new)
+
+This module is no longer CLI-only: `../pyproject.toml` packages the six core
+algorithmic modules (everything except `run_page.py`/`bgr_adapter.py`/CLI
+drivers) as a local pip distribution, and
+`landing-page/scripts/staffline_stage.py` imports them directly to run
+staffline detection as part of the real `/predict` job — see the repo root
+`CLAUDE.md`'s **Staffline detection** section for the full wiring (storage in
+a new `staffline_detections` table, the MEI-encoding consumer in
+`tasks_encode.py`, and exactly what's deferred: ink-separation/BGR,
+`interpolate_staves`, `fallback_redetect`). Everything below in this note
+still describes the standalone CLI/experiment side of this work, which is
+unaffected and keeps working exactly as before.
+
+---
+
 ## Where we are
 
 The two-stage pipeline is **complete and passing tests**:

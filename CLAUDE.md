@@ -4,8 +4,9 @@
 
 YOLO-based Optical Music Recognition (OMR) for medieval manuscripts, developed at DDMAL (McGill). It challenges the existing Rodan pipeline by replacing multi-stage pixel-level analysis with end-to-end YOLO object detection.
 
-Two distinct parts live in this repo:
+Distinct parts live in this repo:
 - **`landing-page/`** — The primary active web application (React + FastAPI)
+- **`staff-finding/`** — Staffline detection (component filtering, centerline fitting, stave grouping); packaged as a local pip distribution and consumed by `landing-page/`'s predict pipeline — see **Staffline detection** below
 - **`configs/`, `data/`, `OLD-annotator/`** — ML pipeline experiments and legacy tooling (less active)
 
 ---
@@ -37,6 +38,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |
+| `staffline_detections` | per-image JSOMR staffline detections (`jsomr_json`), written by the predict job — accumulate-forever, unlike `annotations`' delete-then-insert; see **Staffline detection** below |
 | `jobs` | one row per predict/encode-upload/encode-batch job; `status` ∈ `pending/running/succeeded/failed` — see **Job queue** below |
 | `job_events` | ordered progress-event log per job (`job_id`, `payload JSONB`) — what `GET /api/jobs/{id}/stream` polls |
 | `job_uploads` | raw XML/image bytes staged for a Celery task to pick up, keyed by a short-lived `upload_id` |
@@ -151,6 +153,46 @@ predict job locally, not just by inspection. `--pool=threads` runs tasks in
 threads within one process instead, avoiding the fork entirely; concurrency is
 still real since PyTorch/numpy release the GIL during actual tensor ops.
 
+### Staffline detection
+
+`tasks_predict.py`'s per-image loop runs a staffline-detection stage right
+after YOLO produces stave-class ("staves", merged slot 2) boxes for that
+image: connected-component filtering → Huber-robust centerline fit →
+duplicate/fragment reconciliation → stave grouping, via
+`landing-page/scripts/staffline_stage.py`. This wraps the `staff-finding/`
+module — a separate, actively-developed staffline-detection codebase in this
+repo (see `staff-finding/dox/STATUS.md` for its own design notes and ADRs) —
+packaged as a local pip distribution (`staff-finding/pyproject.toml`,
+installed via `pip install -e staff-finding/`; only the six algorithmic
+modules are packaged, not its CLI drivers).
+
+Results are stored per-image in `staffline_detections` (schema above) as a
+JSOMR-shaped JSON array — one record per detected line, with its bounding
+box, fitted centerline, and stave assignment. `tasks_encode.py`'s
+`_resolve_hints()` now resolves stave positions through a 3-tier fallback:
+`staffline_detections` (via `staffline_adapter.py`'s `staves_from_jsomr()`,
+richer per-line curve fits) → `annotations.yolo_txt` (`parse_yolo_stave_hints()`,
+the older geometry-only heuristic) → glyph-position clustering
+(`estimate_staves_from_glyphs()`). Any project/image without a
+`staffline_detections` row (predates this feature, or detection failed/found
+nothing) falls through unchanged to the pre-existing behavior.
+
+Deliberately deferred for now (each is a caller-controlled parameter or a
+swappable stage, not a hardcoded limitation, so enabling any of them later
+needs no re-plumbing):
+- **Ink-separation ("BGR")** — `staff-finding/scripts/bgr_adapter.py` wraps an
+  external, unvendored `muscrat/layer_sep` repo reachable only via hardcoded
+  paths on specific developer machines (no tests, no Docker/LFS story yet).
+  Staffline detection runs directly on raw page crops instead; Sauvola
+  binarization (`component_filter.py`'s tuned default) is the interim
+  mitigation for faint ink.
+- **`interpolate_staves.py`** (gap-fill/edge-extrapolation for missing lines)
+  stays off (`interpolate_missing=False`) per `staff-finding/dox/STATUS.md`'s
+  "not yet validated across the corpus" caveat.
+- **`fallback_redetect.py`** (re-probing under-populated staves with a second
+  YOLO pass) isn't wired up — it needs an already-loaded stave-detector model
+  instance, which custom (non-medieval-preset) models don't have one of.
+
 ### Deployment (Docker)
 
 A `docker-compose.yml` at the repo root builds and runs `redis`, `ic`
@@ -172,6 +214,19 @@ predated the job queue and would never have processed predict/encode jobs
 correctly. If a Render service was ever created from it, that needs to be
 deleted/disconnected on Render's side too — removing the file doesn't
 un-hook an existing deploy.
+
+`staff-finding/` (a sibling directory of `landing-page/`, holding the
+staffline-detection module `staffline_stage.py` imports — see **Staffline
+detection** above) sits outside `landing-page/`'s own Docker build context.
+`docker-compose.yml`'s `backend`/`worker` services and
+`.github/workflows/build-images.yml`'s backend image build both pass it in as
+a named BuildKit "additional build context" (`staff_finding`), which
+`landing-page/Dockerfile` then `COPY --from=staff_finding`s into the image
+before `pip install -e`-ing it (`staff-finding/.dockerignore` keeps its large
+test-fixture/experiment directories out of what actually gets sent to the
+Docker daemon). Skipping this wiring wouldn't error at build time — it would
+silently ship a backend/worker image where staffline detection always fails
+at runtime with `ModuleNotFoundError`.
 
 **Requires the `docker-buildx` plugin (BuildKit).** Without it, `docker
 compose build` prints `Docker Compose requires buildx plugin to be
@@ -251,6 +306,8 @@ restarting dependents together after any redeploy remains the safer habit.
 | `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events, staged uploads, encode session/manifest storage |
 | `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` — polls `job_events`, re-emits SSE frames |
 | `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` | Celery tasks: the actual YOLO inference / MEI-building work, run out-of-request |
+| `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
+| `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
 | `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`) shared by the predict task and `batch_api.py` |
 | `landing-page/scripts/encode_api.py` | `POST /api/encode-upload` / `/encode-batch` — kickoff endpoints, enqueue Celery tasks |
 | `landing-page/scripts/encode_to_mei.py` | Core encoding logic: parse XML, estimate staves, build MEI, validate |
@@ -325,6 +382,7 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 - **Batch encoding** — `POST /api/encode-batch` (`batch_api.py`/`tasks_encode.py`) handles multiple XML+image pairs in one job
 - **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
 - **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections
+- **Staffline detection** — `POST /api/predict` runs connected-component filtering, centerline fitting, and stave grouping on stave-class YOLO boxes (`staffline_stage.py`, wrapping the `staff-finding/` package); results are `tasks_encode.py`'s preferred stave source ahead of `parse_yolo_stave_hints()` — see **Staffline detection** above
 - **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines; fake `setTimeout` timers are gone
 - **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
 - **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs
