@@ -1,0 +1,4 @@
+FALLBACK MISSED-DETECTION RE-PROBE REPORT
+============================================================
+fallback_conf=0.15, fallback_iou=0.7
+No under-populated staves found; nothing to probe.

@@ -1,0 +1,8 @@
+FALLBACK MISSED-DETECTION RE-PROBE REPORT
+============================================================
+fallback_conf=0.15, fallback_iou=0.7
+
+Stave 0:
+  territory: y=[19.1, 87.5], x=[0.0, 907.0]
+  h_est=13.3px, lines_observed=1, mode_n=4, max_new_lines=3
+  candidates found=0, accepted=0, cap_exceeded=False
