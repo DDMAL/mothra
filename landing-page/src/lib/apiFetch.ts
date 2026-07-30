@@ -1,4 +1,4 @@
-import { authHeaders, setToken } from "../hooks/useAuth";
+import { authHeaders, clearToken, clearRefreshToken, getRefreshToken, setRefreshToken, setToken } from "../hooks/useAuth";
 import { toast } from "./toast";
 
 // replaces raw fetch() for all /api/* calls
@@ -18,22 +18,26 @@ export async function apiFetch(
     });
 
     if (resp.status !== 401) return resp;
-
-    // attempt a silent refresh
-    const refresh = await fetch("/api/auth/refresh", { headers: authHeaders() });
-    if (!refresh.ok) {
+    const rt = getRefreshToken();
+    if (!rt) {
+        clearToken(); clearRefreshToken();
         toast.info("Your session has expired. Please log in again.");
         onUnauthenticated?.();
         return resp;
     }
-    const {access_token } = await refresh.json();
-    setToken(access_token);
 
-    // retry original request once w/ new token
-    return fetch(input, {
-        ...init,
-        headers: { Authorization: `Bearer ${access_token}`, ...(init?.headers ?? {}) },
-    });
+    // attempt a silent refresh
+    const refresh = await fetch("/api/auth/refresh", { method: "POST", headers: { "X-Refresh-Token": rt } });
+    if (!refresh.ok) {
+        clearToken(); clearRefreshToken();
+        toast.info("Your session has expired. Please log in again.");
+        onUnauthenticated?.();
+        return resp;
+    }
+    const { access_token, refresh_token } = await refresh.json();
+    setToken(access_token);
+    setRefreshToken(refresh_token);
+    return fetch(input, { ...init, headers: { Authorization: `Bearer ${access_token}`, ...(init?.headers ?? {}) } });
 }
 
 // convenience wrapper for callers that just want "success or throw" —
@@ -57,9 +61,11 @@ export async function apiFetchJobStream(
     kickoffUrl: string,
     kickoffInit: RequestInit,
     signal: AbortSignal,
+    onJobId?: (jobId: string) => void,
 ): Promise<Response> {
     const kickoff = await apiFetch(kickoffUrl, { ...kickoffInit, signal });
     if (!kickoff.ok) return kickoff;
     const { job_id } = await kickoff.json();
+    onJobId?.(job_id);
     return apiFetch(`/api/jobs/${job_id}/stream`, { signal });
 }

@@ -9,6 +9,7 @@ import { useAssetSection, ITEMS_PER_PAGE } from "../../hooks/useAssetSection";
 import { AuthImage } from "../shared/AuthImage";
 import { apiFetch, apiFetchOrThrow } from "../../lib/apiFetch";
 import Modal from "../shared/Modal";
+import LargeImageWarningModal from "./LargeImageWarningModal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
 import RenameModal from "./RenameModal";
@@ -16,6 +17,11 @@ import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
 import EditFolioModal from "./EditFolioModel";
 import BatchTab from "./BatchTab";
+import {
+  getOversizedFiles,
+  resizeImageFile,
+  TARGET_RESIZE_BYTES,
+} from "../../utils/imageResize";
 
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -34,6 +40,8 @@ interface ImageTabProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
+    originalWidth?: number,
+    originalHeight?: number,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
@@ -42,6 +50,7 @@ interface ImageTabProps {
   cantusFolios?: string[];
   cantusSourceId?: string;
   cantusSourceName?: string;
+  ocrOnlyMode?: boolean;
   imageSubTab: "grid" | "batch";
   onImageSubTabChange: (tab: "grid" | "batch") => void;
   batchImages: { id: string; name: string }[];
@@ -65,6 +74,7 @@ export default function ImageTab({
   cantusFolios = [],
   cantusSourceId,
   cantusSourceName,
+  ocrOnlyMode,
   imageSubTab,
   onImageSubTabChange,
   batchImages,
@@ -90,6 +100,11 @@ export default function ImageTab({
     done: number;
     total: number;
   } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +121,12 @@ export default function ImageTab({
     [project.images],
   );
 
+  useEffect(() => {
+    if (ocrOnlyMode && imageSubTab === "batch") {
+      onImageSubTabChange("grid");
+    }
+  }, [ocrOnlyMode, imageSubTab, onImageSubTabChange]);
+  
   useEffect(() => {
     if (quickLookTab !== "info" || !quickLookId) return;
     setQuickLookMeta(null);
@@ -191,6 +212,20 @@ export default function ImageTab({
     rows: FolioReviewRow[];
   } | null>(null);
 
+  const [pendingSizeWarning, setPendingSizeWarning] = useState<{
+    imageFiles: File[];
+    pdfPageFiles: File[];
+    oversized: File[];
+    folioOverride?: Map<string, string>;
+  } | null>(null);
+  const [resizing, setResizing] = useState(false);
+
+  interface PendingUpload {
+    file: File;
+    originalWidth?: number;
+    originalHeight?: number;
+  }
+
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
     const parsed = imageFiles.map((f, i) => {
       const positionalFolio = folioAt(i);
@@ -226,23 +261,32 @@ export default function ImageTab({
     });
   };
 
-  const runBatchUpload = async (
-    imageFiles: File[],
-    pdfFiles: File[],
+  const finishUpload = async(
+    imageUploads: PendingUpload[],
+    pdfUploads: PendingUpload[],
     folioOverride?: Map<string, string>,
   ) => {
     try {
       setConverting(true);
       let seq = 0;
+      const total = imageUploads.length + pdfUploads.length;
+      setUploadProgress(total > 0 ? { done: 0, total } : null);
+      let done = 0;
+
       const imageEntries = await Promise.all(
-        imageFiles.map(async (f) => {
+        imageUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
           // for an earlier batch/folio pick silently leaks onto unrelated
           // single-image uploads (CantusSourcePanel reloads project.cantusSourceId
           // on mount regardless of which sub-tab is active).
-          const result = await onUploadImage(f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined);
+          const result = await onUploadImage(
+            f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined,
+            originalWidth, originalHeight,
+          );
+          done++;
+          setUploadProgress({ done, total });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -257,32 +301,15 @@ export default function ImageTab({
         }),
       );
 
-      const pdfDocs = await Promise.all(
-        pdfFiles.map(
-          async (f) =>
-            pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise,
-        ),
-      );
-      const total = pdfDocs.reduce((s, d) => s + d.numPages, 0);
-      setPdfProgress({ done: 0, total });
-
-      let done = 0;
-      const pdfImages: { name: string; src: string }[] = [];
-      for (let i =0; i < pdfFiles.length; i++) {
-        const pages = await pdfToImages(pdfFiles[i], () => {
-          done++;
-          setPdfProgress({ done, total });
-        });
-        pdfImages.push(...pages);
-      }
-
       const pdfEntries = await Promise.all(
-        pdfImages.map(async ({ name, src: blobUrl }) => {
-          const blob = await fetch(blobUrl).then((r) => r.blob());
-          URL.revokeObjectURL(blobUrl);
-          const file = new File([blob], name, { type: "image/png " });
+        pdfUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
           const pdfFolio = folioAt(seq++);
-          const result = await onUploadImage(file, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined);
+          const result = await onUploadImage(
+            f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
+            originalWidth, originalHeight,
+          );
+          done++;
+          setUploadProgress({ done, total });
           if (imageSubTab === "batch") {
             onBatchImageUploaded({ id: result.id, name: result.name });
           }
@@ -304,16 +331,121 @@ export default function ImageTab({
       if (imageSubTab === "grid" && activeFolio && (imageEntries.length > 0 || pdfEntries.length > 0)) {
         onFolioConsumed?.();
       }
-      setConverting(false);
       section.setUploadModal(false);
       section.setDragging(false);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "upload failed");
     } finally {
       setConverting(false);
+      setUploadProgress(null);
+    }
+  };
+
+  const runBatchUpload = async (
+    imageFiles: File[],
+    pdfFiles: File[],
+    folioOverride?: Map<string, string>,
+  ) => {
+    try {
+      setConverting(true);
+
+      // rasterize PDFs to page files first - real byte sizes for the
+      // oversized-image check below aren't known until after rendering
+      let pdfPageFiles: File[] = [];
+      if (pdfFiles.length > 0) {
+        const pdfDocs = await Promise.all(
+          pdfFiles.map(
+            async (f) => 
+              pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise,
+          ),
+        );
+        const total = pdfDocs.reduce((s, d) => s + d.numPages, 0);
+        setPdfProgress({ done: 0, total });
+
+        let done = 0;
+        const pages: { name: string; src: string }[] = [];
+        for (let i = 0; i < pdfFiles.length; i++) {
+          const p = await pdfToImages(pdfFiles[i], () => {
+            done++;
+            setPdfProgress({ done, total });
+          });
+          pages.push(...p);
+        }
+        setPdfProgress(null);
+
+        pdfPageFiles = await Promise.all(
+          pages.map(async ({ name, src }) => {
+            const blob = await fetch(src).then((r) => r.blob());
+            URL.revokeObjectURL(src);
+            return new File([blob], name, { type: "image/png" });
+          }),
+        );
+      }
+
+      const combined = [...imageFiles, ...pdfPageFiles];
+      const oversized = getOversizedFiles(combined);
+      if (oversized.length > 0) {
+        setConverting(false);
+        section.setUploadModal(false);
+        setPendingSizeWarning({ imageFiles, pdfPageFiles, oversized, folioOverride });
+        return;
+      }
+
+      await finishUpload(
+        imageFiles.map((file) => ({ file })),
+        pdfPageFiles.map((file) => ({ file })),
+        folioOverride,
+      );
+
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "upload failed");
+      setConverting(false);
       setPdfProgress(null);
     }
   };
+
+  const resolveSizeWarning = async (action: "resize" | "asis" | "cancel") => {
+    if (!pendingSizeWarning) return;
+    const { imageFiles, pdfPageFiles, oversized, folioOverride } = pendingSizeWarning;
+
+    if (action === "cancel") {
+      setPendingSizeWarning(null);
+      return;
+    }
+
+    section.setUploadModal(true);
+
+    if (action === "asis") {
+      setPendingSizeWarning(null);
+      await finishUpload(
+        imageFiles.map((file) => ({ file })),
+        pdfPageFiles.map((file) => ({ file })),
+        folioOverride,
+      );
+      return;
+    }
+
+    // resize
+    setConverting(true);
+    setResizing(true);
+    const oversizedSet = new Set(oversized);
+    const toPendingUpload = async (f: File): Promise<PendingUpload> => {
+      if (!oversizedSet.has(f)) return { file: f };
+      const resized = await resizeImageFile(f, TARGET_RESIZE_BYTES);
+      return {
+        file: resized.file,
+        originalWidth: resized.originalWidth,
+        originalHeight: resized.originalHeight,
+      };
+    };
+    const [imageUploads, pdfUploads] = await Promise.all([
+      Promise.all(imageFiles.map(toPendingUpload)),
+      Promise.all(pdfPageFiles.map(toPendingUpload)),
+    ]);
+    setResizing(false);
+    setPendingSizeWarning(null);
+    await finishUpload(imageUploads, pdfUploads, folioOverride);
+  }
 
   const handleFiles = async (files: FileList | File[]) => {
     setUploadError(null);
@@ -321,8 +453,16 @@ export default function ImageTab({
       setUploadError("resolve the pending folio review before uploading more files");
       return;
     }
+    if (pendingSizeWarning) {
+      setUploadError("resolve the large image warning before uploading more files");
+      return;
+    }
     if (imageSubTab === "batch" && batchFolioSequence.length === 0) {
       setUploadError("select a start/end folio range above before uploading");
+      return;
+    }
+    if (imageSubTab === "grid" && !ocrOnlyMode && cantusSourceId && !activeFolio) {
+      setUploadError("select a folio above before uploading");
       return;
     }
       const all = Array.from(files);
@@ -407,7 +547,9 @@ export default function ImageTab({
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
         <div className="flex gap-2 mb-4" onClick={(e) => e.stopPropagation()}>
-          {(["grid", "batch"] as const).map((t) => (
+          {(["grid", "batch"] as const)
+            .filter((t) => t === "grid" || !ocrOnlyMode)
+            .map((t) => (
             <button
               key={t}
               onClick={() => onImageSubTabChange(t)}
@@ -454,7 +596,7 @@ export default function ImageTab({
               ) : null
             }
             getItemBadge={(name) =>
-              getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [])?.badge ?? null
+              getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], project.stepsUnlocked)?.badge ?? null
             }
           />
         )}
@@ -547,6 +689,15 @@ export default function ImageTab({
           onUseDetected={() => confirmBatchReview(true)}
           onUsePositional={() => confirmBatchReview(false)}
           onCancel={() => setPendingBatchReview(null)}
+        />
+      )}
+      {pendingSizeWarning && (
+        <LargeImageWarningModal
+          oversizedFiles={pendingSizeWarning.oversized}
+          resizing={resizing}
+          onResize={() => resolveSizeWarning("resize")}
+          onUploadAsIs={() => resolveSizeWarning("asis")}
+          onCancel={() => resolveSizeWarning("cancel")}
         />
       )}
       {quickLookId &&
@@ -674,7 +825,9 @@ export default function ImageTab({
           <h2 className="text-xl text-[#1D3335] text-center">upload image</h2>
           {converting ? (
             <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#1D3335]/30 bg-white/40 py-12">
-              {pdfProgress ? (
+              {resizing ? (
+                 <p className="text-sm text-[#1D3335] text-center">resizing images...</p>
+              ) : pdfProgress ? (
                 <>
                   <p className="text-sm text-[#1D3335] text-center">
                     converting PDF pages... {pdfProgress.done} /{" "}
@@ -685,6 +838,21 @@ export default function ImageTab({
                       className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
                       style={{
                         width: `${(pdfProgress.done / pdfProgress.total) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : uploadProgress ? (
+                <>
+                  <p className="text-sm text-[#1D3335] text-center">
+                    uploading images... {uploadProgress.done} /{" "}
+                    {uploadProgress.total}
+                  </p>
+                  <div className="w-full bg-white/30 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-full bg-[#1E6B70] rounded-full transition-all duration-100"
+                      style={{
+                        width: `${(uploadProgress.done / uploadProgress.total) * 100}%`,
                       }}
                     />
                   </div>

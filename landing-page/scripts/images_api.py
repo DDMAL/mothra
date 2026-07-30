@@ -20,6 +20,8 @@ async def upload_image(
     folio: Optional[str] = Form(None),
     source_id: Optional[str] = Form(None),
     source_name: Optional[str] = Form(None),
+    original_width: Optional[int] = Form(None),
+    original_height: Optional[int] = Form(None),
     user=Depends(get_current_user),
 ):
     with db_cursor() as (con, cur):
@@ -54,17 +56,18 @@ async def upload_image(
         mime_type = file.content_type or "image/png"
         if existing:
             cur.execute(
-                "UPDATE project_images SET mime_type=%s, data=%s, folio=%s, source_id=%s, source_name=%s"
-                " WHERE id=%s",
+                "UPDATE project_images SET mime_type=%s, data=%s, folio=%s, source_id=%s, source_name=%s,"
+                " original_width=%s, original_height=%s WHERE id=%s",
                 (mime_type, psycopg2.Binary(image_bytes), folio or None, source_id or None,
-                 source_name or None, image_id)
+                 source_name or None, original_width, original_height, image_id)
             )
         else:
             cur.execute(
-                "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name,"
+                " original_width, original_height)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes),
-                 folio or None, source_id or None, source_name or None)
+                 folio or None, source_id or None, source_name or None, original_width, original_height)
             )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()

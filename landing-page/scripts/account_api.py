@@ -46,6 +46,7 @@ def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
                     (hash_password(body.new_password), user["id"]))
+        cur.execute("UPDATE refresh_tokens SET revoked_at=NOW() WHERE user_id=%s AND revoked_at IS NULL", (user["id"],))
         con.commit()
     return {"ok": True}
 

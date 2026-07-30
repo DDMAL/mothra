@@ -4,6 +4,8 @@
 
 A research project exploring whether YOLO object detection can outperform our traditional OMR pipeline (Rodan) for medieval musical manuscript analysis, with a custom web-based annotation tool for rapid dataset creation.
 
+The website exists here: https://mothra.simssa.ca/.
+
 ---
 
 ## Project Overview

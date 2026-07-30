@@ -7,16 +7,47 @@ from auth_api import get_db_conn, release_db_conn
 def new_job_id() -> str:
     return uuid.uuid4().hex[:8]
 
-def create_job(job_id: str, kind: str, project_id: Optional[int]) -> None:
+def create_job(job_id: str, kind: str, project_id: Optional[int], *,
+               params: Optional[dict]= None, retry_of: Optional[str] = None,
+               attempt: int = 1, dedupe_seconds: int = 0) -> tuple[str, bool]:
+    """Creates a new job row. If `dedupe_seconds` > 0 and a pending/running
+    job of the same kind+project_id was already created within that window,
+    returns that EXISTING job's id instead of inserting a new row - guards
+    against a client sending the same kickoff request twice in quick
+    succession (e.g. React StrictMode double-invoking a kickoff effect in
+    dev), which would otherwise enqueue two independent Celery tasks doing
+    the same real work (confirmed: two `predict`/`text_batch` jobs, each
+    writing its own annotations row for the same image). Not applied by
+    default (dedupe_seconds=0) since encode_upload/encode_batch stage raw
+    upload bytes under a fresh id before calling this - deduping those would
+    just orphan that staged data rather than avoid real duplicate work.
+    Returns (job_id_to_use, is_new) - callers should only enqueue their
+    Celery task when is_new is True.
+    """
     con = get_db_conn()
     try:
         cur = con.cursor()
+        if dedupe_seconds > 0 and project_id is not None:
+            cur.execute(
+                "SELECT job_id FROM jobs WHERE kind=%s AND project_id=%s"
+                " AND status IN ('pending','running')"
+                " AND created_at > now() - %s::interval"
+                " ORDER BY created_at DESC LIMIT 1",
+                (kind, project_id, f"{dedupe_seconds} seconds"),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.close()
+                return row[0], False
         cur.execute(
-            "INSERT INTO jobs (job_id, kind, project_id, status) VALUES (%s, %s, %s, 'pending')",
-            (job_id, kind, project_id),
+            "INSERT INTO jobs (job_id, kind, project_id, status, params, retry_of, attempt)"
+            " VALUES (%s,%s,%s,'pending',%s,%s,%s)",
+            (job_id, kind, project_id, json.dumps(params) if params is not None else None,
+             retry_of, attempt),
         )
         con.commit()
         cur.close()
+        return job_id, True
     finally:
         release_db_conn(con)
     
@@ -33,6 +64,8 @@ def publish_event(job_id: str, event: dict) -> None:
             cur.execute("UPDATE jobs SET status='succeeded', updated_at=now() WHERE job_id=%s", (job_id,))
         elif event_type == "error":
             cur.execute("UPDATE jobs SET status='failed', updated_at=now() WHERE job_id=%s", (job_id,))
+        elif event_type == "cancelled":
+            cur.execute("UPDATE jobs SET status='cancelled', updated_at=now() WHERE job_id=%s", (job_id,))
         else:
             cur.execute(
                 "UPDATE jobs SET status='running', updated_at=now() WHERE job_id=%s AND status='pending'",
@@ -142,5 +175,50 @@ def manifest_get(session_id: str) -> Optional[dict]:
         if not row or row[0] is None:
             return None
         return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    finally:
+        release_db_conn(con)
+
+class JobCancelled(Exception):
+    pass
+
+def check_cancelled(job_id: str) -> None:
+    if get_job_status(job_id) == "cancelled":
+        raise JobCancelled()
+
+def cleanup_stale_uplaods(max_age_days: int = 1) -> int:
+    """job_uploads is ephemeral staging — a row is created right before enqueuing
+    a Celery task and normally dropped within seconds once the task fetches it.
+    A row surviving a day means the enqueue or task crashed before consuming it.
+    1 day is dead-letter headroom, not a working retention window."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM job_uploads WHERE created_at < NOW() - make_interval(days => %s)",
+            (max_age_days,),
+        )
+        deleted = cur.rowcount
+        con.commit()
+        cur.close()
+        return deleted
+    finally:
+        release_db_conn(con)
+
+def cleanup_stale_sessions(max_age_days: int = 14) -> int:
+    """job_sessions holds encode-job OUTPUT (mei_bytes/manifest) served on-demand
+    by GET /mei/{id} and GET /manifest/{id} — a user may not download for days.
+    14 days balances bounding BYTEA storage against not silently breaking a
+    slow-to-return user's download link."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM job_sessions WHERE created_at < NOW() - make_interval(days => %s)",
+            (max_age_days,),
+        )
+        deleted = cur.rowcount
+        con.commit()
+        cur.close()
+        return deleted
     finally:
         release_db_conn(con)

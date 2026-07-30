@@ -35,12 +35,16 @@ interface ProjectDetailProps {
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
+  sendingBundle?: boolean;
+  sendBundleError?: string | null;
   onRenameProject: (newName: string) => void;
   onUploadImage: (
     file: File,
     folio?: string,
     sourceId?: string,
     sourceName?: string,
+    originalWidth?: number,
+    originalHeight?: number,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
@@ -64,6 +68,8 @@ export default function ProjectDetail({
   stepsUnlocked,
   onStepClick,
   onSendToCantus,
+  sendingBundle = false,
+  sendBundleError = null,
   onRenameProject,
   onUploadImage,
   onUploadModel,
@@ -92,6 +98,12 @@ export default function ProjectDetail({
   const [batchEndFolio, setBatchEndFolio] = useState("");
   const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
 
+  useEffect(() => {
+    setBatchStartFolio("");
+    setBatchEndFolio("");
+    setBatchImages([]);
+  }, [project.id]);
+  
   const batchFolioSequence = useMemo(() => {
     const folios = loadedCantusSource?.folios ?? [];
     if (!batchStartFolio || !batchEndFolio) return [];
@@ -100,6 +112,11 @@ export default function ProjectDetail({
     if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) return [];
     return folios.slice(startIdx, endIdx + 1);
   }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
+  const nextStep = useMemo(
+    () => minNextStep(usedNames.images, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked),
+    [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
+  );
+  const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -476,21 +493,38 @@ export default function ProjectDetail({
                 </>
               )}
               {activeTab === "mei files" && meiSection.selectedIds.size > 0 && (
-                <button
-                  onClick={async () => {
-                    const ids = [...meiSection.selectedIds];
-                    const deleted = new Set(ids);
-                    meiSection.clearSelection();
-                    await Promise.all(ids.map((id) => onDeleteMei(id)));
-                    onUpdateProject({
-                      ...project,
-                      meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
-                    });
-                  }}
-                  className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
-                >
-                  delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
-                </button>
+                <>
+                  <button
+                    onClick={() =>
+                      project.meiFiles
+                        .filter((f) => meiSection.selectedIds.has(f.id))
+                        .forEach((f) =>
+                          downloadBlob(
+                            new Blob([f.xmlContent ?? ""], { type: "application/xml" }),
+                            f.name,
+                          ),
+                        )
+                    }
+                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    download {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = [...meiSection.selectedIds];
+                      const deleted = new Set(ids);
+                      meiSection.clearSelection();
+                      await Promise.all(ids.map((id) => onDeleteMei(id)));
+                      onUpdateProject({
+                        ...project,
+                        meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
+                      });
+                    }}
+                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                  >
+                    delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
+                </>
               )}
           </div>
 
@@ -507,6 +541,7 @@ export default function ProjectDetail({
               onBatchStartFolioChange={setBatchStartFolio}
               onBatchEndFolioChange={setBatchEndFolio}
               batchFolioSequence={batchFolioSequence}
+              locked={sourceLocked}
             />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
@@ -547,6 +582,7 @@ export default function ProjectDetail({
                 cantusFolios={loadedCantusSource?.folios ?? []}
                 cantusSourceId={loadedCantusSource?.sourceId}
                 cantusSourceName={loadedCantusSource?.name}
+                ocrOnlyMode={textFindingSettings.ocrOnlyMode}
                 imageSubTab={imageSubTab}
                 onImageSubTabChange={setImageSubTab}
                 batchImages={batchImages}
@@ -610,14 +646,16 @@ export default function ProjectDetail({
                 meiSection.clearSelection();
                 onSendToCantus();
               }}
-              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+              disabled={sendingBundle}
+              className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-default"
             >
-              send to cantus ultimus &rarr;
+              {sendingBundle ? "preparing bundle..." : (<>send to cantus ultimus &rarr;</>)}
             </button>
-          ) : (() => {
-            const annotations = project.annotations ?? [];
-            const meiFiles = project.meiFiles ?? [];
-            const nextStep = minNextStep(usedNames.images, annotations, meiFiles);
+          ) : null}
+          {sendBundleError && (
+            <p className="text-red-200 text-xs text-center">{sendBundleError}</p>
+          )}
+          {meiSection.selectedIds.size === 0 && (() => {
             const continueLabel =
               usedNames.images.length === 0 || nextStep === 0 ? "begin" :
               nextStep === 1 ? "continue: ic" :
@@ -702,7 +740,7 @@ export default function ProjectDetail({
             )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => {
-              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? []) !== null;
+              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked) !== null;
               return (
                 <div key={name} className="flex items-center justify-between">
                   <span className="truncate flex-1 mr-2">{name}</span>

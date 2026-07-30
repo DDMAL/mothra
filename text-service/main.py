@@ -5,6 +5,7 @@ Mirrors the SSE event contract used by inference_api.py's /predict and
 encode_api.py's /encode-upload: stage -> stage_done -> log -> result -> done.
 """
 import json
+import re
 import logging
 import queue
 import shutil
@@ -165,7 +166,10 @@ def get_cantus_source(source_id: int):
         {(r.get("folio") or "").strip() for r in rows if (r.get("folio") or "").strip()},
         key=_folio_sort_key,
     )
-    data = {"sourceId": str(source_id), "name": name, "folios": folios}
+    m = re.search(r"\(([^)]+)\)$", institution) if institution else None
+    institution_code = m.group(1) if m else institution
+    siglum = f"{institution_code} {shelfmark}".strip() if institution_code and shelfmark else None
+    data = {"sourceId": str(source_id), "name": name, "folios": folios, "siglum": siglum}
     _cantus_cache_put(source_id, data)
     return data
 
@@ -319,8 +323,8 @@ async def run_text_batch(
     folio_list = json.loads(folios)
     if len(folio_list) != len(images):
         raise HTTPException(status_code=400, detail="folios count must match images count")
-    if len(folio_list) < 2:
-        raise HTTPException(status_code=400, detail="batch requires at least 2 folios -  use /run for a single image")
+    if len(folio_list) < 1:
+        raise HTTPException(status_code=400, detail="batch requires at least 1 folio")
     
     # Parallel per-folio arrays, JSON-encoded the same way `folios` already
     # is — mirrors /run's single music_boxes/mask_json fields, pluralized.

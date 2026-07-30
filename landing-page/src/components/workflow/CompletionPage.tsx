@@ -6,6 +6,8 @@ interface CompletionPageProps {
   onBackToProject: () => void;
   description?: string;
   continueLabel?: string;
+  continueDisabled?: boolean;
+  errorText?: string | null;
   logsFileName?: string;
   logContent?: string;
   onDownloadMei?: () => void;
@@ -24,6 +26,8 @@ export default function CompletionPage({
   onBackToProject,
   description = "images have successfully been normalized and initially annotated. you can now view annotations on the project page!",
   continueLabel = "continue to IC",
+  continueDisabled = false,
+  errorText,
   logsFileName,
   logContent,
   onDownloadMei,
@@ -58,7 +62,8 @@ export default function CompletionPage({
           ) : (
             <button
               onClick={onContinue}
-              className="px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+              disabled={continueDisabled}
+              className="px-10 py-4 bg-white text-[#1D3335] font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer disabled:opacity-50 disabled:cursor-default"
             >
               {continueLabel}
             </button>
@@ -85,6 +90,9 @@ export default function CompletionPage({
           >
             compare before &amp; after →
           </button>
+        )}
+        {errorText && (
+          <p className="text-red-100 text-sm">{errorText}</p>
         )}
       </div>
       {logsFileName && (

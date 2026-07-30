@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "../../lib/apiFetch";
+import { registerActiveJobs, markJobSettled } from "../../lib/activeJobs";
 
 interface Stage {
   text: boolean;
@@ -12,14 +14,18 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
-  streamRequest?: (signal: AbortSignal) => Promise<Response>;
+  streamRequest?: (signal: AbortSignal, onJobId?: (id: string) => void) => Promise<Response>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onResult?: (data: any) => void;
   onLogsReady?: (logs: string[]) => void
   onBatchDone?: (summary: { succeeded: unknown[]; failed: unknown[]; }) => void;
+  projectId?: number | null;
+  jobKind?: string;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
+const STAGE_IDX: Record<string, number> = { checking: 0, validating: 1, processing: 2 };
+const STAGE_PROGRESS: Record<string, number> = { checking: 33, validating: 66, processing: 100 };
 
 export default function ProcessingPage({
   onBack,
@@ -32,6 +38,8 @@ export default function ProcessingPage({
   onResult,
   onLogsReady,
   onBatchDone,
+  projectId, 
+  jobKind,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -45,6 +53,7 @@ export default function ProcessingPage({
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const jobIdRef = useRef<string | null>(null);
   const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
   const [timeDisplay, setTimeDisplay] = useState<string>("estimating...")
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -54,6 +63,7 @@ export default function ProcessingPage({
 
   const [streamError, setStreamError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [retryingJob, setRetryingJob] = useState(false);
 
   const [itemProgress, setItemProgress] = useState<{ index: number; total: number; name?: string } | null>(null);
 
@@ -156,6 +166,77 @@ export default function ProcessingPage({
     };
   }, []);
 
+  // extracted so a server-tracked job retry (handleRetryJob below) can feed a
+  // freshly-opened job stream through the exact same parsing/progress logic
+  // without re-running the kickoff effect below
+  const consumeStream = useCallback(async (resp: Response) => {
+    const collectedLogs: string[] = [];
+    if (!resp.ok || !resp.body) {
+      const msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
+      setStreamError(msg);
+      setRevealedLogs((prev) => [...prev, `error: ${msg}`]);
+      return;
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.type === "item_start") {
+          setItemProgress({ index: ev.item, total: ev.total, name: ev.name });
+          setStages([{ text: false, check: false }, { text: false, check: false }, { text: false, check: false }]);
+        }
+        if (ev.type === "stage") {
+          const idx = STAGE_IDX[ev.name];
+          if (idx !== undefined)
+            setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, text: true } : s)));
+        }
+        if (ev.type === "stage_done") {
+          const idx = STAGE_IDX[ev.name];
+          if (idx !== undefined) {
+            setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, check: true } : s)));
+            const stagePct = STAGE_PROGRESS[ev.name] ?? 0;
+            const ip = itemProgressRef.current;
+            setProgress(ip ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100) : stagePct);
+          }
+        }
+        if (ev.type === "log") {
+          const ip = itemProgressRef.current;
+          const prefix = typeof ev.item === "number" ? `[${ev.item + 1}/${ip?.total ?? "?"}] ` : "";
+          const line = `${prefix}${ev.message}`;
+          collectedLogs.push(line);
+          setRevealedLogs((prev) => [...prev, line]);
+        }
+        if (ev.type === "result" && onResult) onResult(ev);
+        if (ev.type === "error") {
+          setStreamError(ev.message);
+          setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
+        }
+        if (ev.type === "done" && !completedRef.current) {
+          completedRef.current = true;
+          if (jobIdRef.current) markJobSettled(jobIdRef.current);
+          onLogsReady?.(collectedLogs);
+          if (ev.succeeded || ev.failed) {
+            onBatchDone?.({ succeeded: ev.succeeded ?? [], failed: ev.failed ?? [] });
+          }
+          setTimeout(onComplete, completionDelayMs);
+        }
+      }
+    }
+  }, [onResult, onLogsReady, onBatchDone, onComplete, completionDelayMs]);
+
+  const consumeStreamRef = useRef(consumeStream);
+  useEffect(() => {
+    consumeStreamRef.current = consumeStream;
+  }, [consumeStream]);
+
   useEffect(() => {
     if (!streamRequest) return;
     setStreamError(null);
@@ -169,71 +250,13 @@ export default function ProcessingPage({
     const abort = new AbortController();
     streamAbortRef.current = abort;
 
-    const STAGE_IDX: Record<string, number> = { checking: 0, validating: 1, processing: 2 };
-    const STAGE_PROGRESS: Record<string, number> = { checking: 33, validating: 66, processing: 100 };
-
     async function run() {
-      const collectedLogs: string[] = [];
       try {
-        const resp = await streamRequest!(abort.signal);
-        if (!resp.ok || !resp.body) {
-          const msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
-          setStreamError(msg);
-          setRevealedLogs(prev => [...prev, `error: ${msg}`]);
-          return;
-        }
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() ?? "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const ev = JSON.parse(line.slice(6));
-            if (ev.type === "item_start") {
-              setItemProgress({ index: ev.item, total: ev.total, name: ev.name });
-              setStages([{ text: false, check: false }, { text: false, check: false }, { text: false, check: false }]);
-            }
-            if (ev.type === "stage") {
-              const idx = STAGE_IDX[ev.name];
-              if (idx !== undefined)
-                setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, text: true } : s)));
-            }
-            if (ev.type === "stage_done") {
-              const idx = STAGE_IDX[ev.name];
-              if (idx !== undefined) {
-                setStages((prev) => prev.map((s, i) => (i === idx ? { ...s, check: true } : s)));
-                const stagePct = STAGE_PROGRESS[ev.name] ?? 0;
-                const ip = itemProgressRef.current;
-                setProgress(ip ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100) : stagePct);
-              }
-            }
-            if (ev.type === "log") {
-              const ip = itemProgressRef.current;
-              const prefix = typeof ev.item === "number" ? `[${ev.item + 1}/${ip?.total ?? "?"}] ` : "";
-              const line = `${prefix}${ev.message}`;
-              collectedLogs.push(line);
-              setRevealedLogs((prev) => [...prev, line]);
-            }
-            if (ev.type === "result" && onResult) onResult(ev);
-            if (ev.type === "error") {
-              setStreamError(ev.message);
-              setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);
-            }
-            if (ev.type === "done" && !completedRef.current) {
-              completedRef.current = true;
-              onLogsReady?.(collectedLogs);
-              if (ev.succeeded || ev.failed) {
-                onBatchDone?.({ succeeded: ev.succeeded ?? [], failed: ev.failed ?? [] });
-              }
-              setTimeout(onComplete, completionDelayMs);
-            }
-          } 
-        }
+        const resp = await streamRequest!(abort.signal, (id) => { 
+          jobIdRef.current = id;
+          registerActiveJobs(id, projectId ?? null, jobKind ?? "unknown");
+        });
+        await consumeStreamRef.current(resp);
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           const msg = (e as Error).message;
@@ -244,7 +267,42 @@ export default function ProcessingPage({
     }
     run();
     return () => abort.abort();
+    // intentionally excludes `streamRequest`/`consumeStream` (see consumeStreamRef
+    // above) — this must only re-run on an explicit retry, not on every re-render
+    // that happens to hand ProcessingPage new inline callback props (e.g. from
+    // useActiveJobWatcher's store updates), or it kicks off a duplicate backend job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryKey]);
+
+  // server-tracked retry: re-runs the failed job's stored params via the
+  // backend (jobs_api.py's POST /jobs/{id}/retry) instead of restarting the
+  // whole kickoff client-side — distinct from the "restart" button below,
+  // which re-collects params from scratch and re-invokes streamRequest.
+  const handleRetryJob = useCallback(async () => {
+    if (!jobIdRef.current) return;
+    setRetryingJob(true);
+    setStreamError(null);
+    try {
+      const r = await apiFetch(`/api/jobs/${jobIdRef.current}/retry`, { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error((d as { detail?: string }).detail || `retry failed (${r.status})`);
+      }
+      const { job_id: newId } = await r.json();
+      jobIdRef.current = newId;
+      completedRef.current = false;
+      setProgress(0);
+      setStages([{ text: false, check: false }, { text: false, check: false }, { text: false, check: false }]);
+      const abort = new AbortController();
+      streamAbortRef.current = abort;
+      const stream = await apiFetch(`/api/jobs/${newId}/stream`, { signal: abort.signal });
+      await consumeStream(stream);
+    } catch (e) {
+      setStreamError((e as Error).message);
+    } finally {
+      setRetryingJob(false);
+    }
+  }, [consumeStream]);
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
@@ -302,7 +360,12 @@ export default function ProcessingPage({
             <div className="flex items-center gap-3 text-sm text-white">
               <span> are you sure? </span>
               <button
-                onClick={() => { streamAbortRef.current?.abort(); onBack(); }}
+                onClick={async () => { 
+                  streamAbortRef.current?.abort(); 
+                  if (jobIdRef.current) {
+                    apiFetch(`/api/jobs/${jobIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
+                  }
+                  onBack(); }}
                 className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
               >
                 yes
@@ -324,12 +387,23 @@ export default function ProcessingPage({
         {streamError && !done && (
           <div className="mt-4 flex flex-col items-start gap-2">
             <p className="text-red-200 text-sm font-mono">{streamError}</p>
-            <button
-              onClick={() => setRetryKey(k => k + 1)}
-              className="px-4 py-2 bg-white text-[#4AADAA] rounded-xl font-semibold text-sm hover:opacity-90 cursor-pointer"
-            >
-              retry
-            </button>
+            <div className="flex gap-2">
+              {jobIdRef.current && (
+                <button
+                  onClick={handleRetryJob}
+                  disabled={retryingJob}
+                  className="px-4 py-2 bg-white text-[#4AADAA] rounded-xl font-semibold text-sm hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {retryingJob ? "retrying..." : "retry job"}
+                </button>
+              )}
+              <button
+                onClick={() => setRetryKey(k => k + 1)}
+                className="px-4 py-2 border border-white text-white rounded-xl font-semibold text-sm hover:opacity-90 cursor-pointer"
+              >
+                restart
+              </button>
+            </div>
           </div>
         )}
 
