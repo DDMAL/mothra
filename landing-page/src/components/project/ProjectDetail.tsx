@@ -43,8 +43,7 @@ interface ProjectDetailProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
-    originalWidth?: number,
-    originalHeight?: number,
+    originalFile?: File,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;

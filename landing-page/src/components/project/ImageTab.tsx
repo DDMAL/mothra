@@ -40,8 +40,7 @@ interface ImageTabProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
-    originalWidth?: number,
-    originalHeight?: number,
+    originalFile?: File,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
@@ -222,8 +221,7 @@ export default function ImageTab({
 
   interface PendingUpload {
     file: File;
-    originalWidth?: number;
-    originalHeight?: number;
+    originalFile?: File;
   }
 
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
@@ -274,7 +272,7 @@ export default function ImageTab({
       let done = 0;
 
       const imageEntries = await Promise.all(
-        imageUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+        imageUploads.map(async ({ file: f, originalFile }) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
@@ -283,7 +281,7 @@ export default function ImageTab({
           // on mount regardless of which sub-tab is active).
           const result = await onUploadImage(
             f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
@@ -302,11 +300,11 @@ export default function ImageTab({
       );
 
       const pdfEntries = await Promise.all(
-        pdfUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+        pdfUploads.map(async ({ file: f, originalFile }) => {
           const pdfFolio = folioAt(seq++);
           const result = await onUploadImage(
             f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
@@ -431,12 +429,8 @@ export default function ImageTab({
     const oversizedSet = new Set(oversized);
     const toPendingUpload = async (f: File): Promise<PendingUpload> => {
       if (!oversizedSet.has(f)) return { file: f };
-      const resized = await resizeImageFile(f, TARGET_RESIZE_BYTES);
-      return {
-        file: resized.file,
-        originalWidth: resized.originalWidth,
-        originalHeight: resized.originalHeight,
-      };
+      const resizedFile = await resizeImageFile(f, TARGET_RESIZE_BYTES);
+      return { file: resizedFile, originalFile: f };
     };
     const [imageUploads, pdfUploads] = await Promise.all([
       Promise.all(imageFiles.map(toPendingUpload)),
