@@ -1122,6 +1122,7 @@ def _save_grouping_diagnostic(
 
     If page_image is None, creates a blank canvas of page_size.
     """
+    import matplotlib
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
 
@@ -1143,7 +1144,7 @@ def _save_grouping_diagnostic(
     if not assigned_ids:
         assigned_ids = list(range(5))  # fallback for empty result
 
-    cmap = plt.cm.get_cmap("tab10")
+    cmap = matplotlib.colormaps["tab10"]
     stave_colors = {sid: cmap(i % 10) for i, sid in enumerate(assigned_ids)}
 
     # --- Overlay centerlines colored by stave ---
