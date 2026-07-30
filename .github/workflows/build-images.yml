@@ -26,10 +26,13 @@ jobs:
       matrix:
         include:
           # backend: multi-stage Node(SPA + Neon submodule) -> Python/torch.
-          # Needs the LFS-tracked medieval .pt weights baked in.
+          # Needs the LFS-tracked medieval .pt weights baked in, plus the
+          # sibling staff-finding/ dir (outside this context) via the
+          # build-contexts input below, for staffline_stage.py's package.
           - name: backend
             context: ./landing-page
             file: ./landing-page/Dockerfile
+            build-contexts: staff_finding=./staff-finding
           # ic: built from the ic submodule (has its own Dockerfile).
           - name: ic
             context: ./ic
@@ -88,6 +91,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
+          build-contexts: ${{ matrix.build-contexts }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
