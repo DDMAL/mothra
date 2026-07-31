@@ -33,7 +33,7 @@ Public API
     Returns ``(accepted: list[FallbackCandidate], cap_exceeded: bool)``.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -71,6 +71,15 @@ MIN_RELATIVE_WIDTH_RATIO = 0.4
 # much more likely to be genuine noise than one that clears both.
 STAGE1_SCORE_FLOOR = 0.3
 
+# A candidate within this fraction of h_est of an already-detected line's
+# own center is almost certainly re-detecting that same line, not a missing
+# one -- rejected before ranking/capping so it can never consume a
+# max_new_lines slot that a genuinely new line needed. group_staves.py's own
+# _reconcile_duplicate_fits would eventually collapse such a duplicate too,
+# but only after it has already displaced a real candidate at the cap; this
+# rejects it earlier, before that displacement can happen.
+DUPLICATE_EXISTING_LINE_TOLERANCE_RATIO = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -103,6 +112,11 @@ class ProbeRegion:
         mode_n: Page-level expected lines per stave.
         max_new_lines: Cap on how many fallback-redetected lines this stave
             may accept (mode_n - lines_observed).
+        existing_centers: Page-absolute y-centers of this stave's own
+            already-detected lines, carried through so
+            validate_and_select_candidates can reject a candidate that is
+            really just a re-detection of one of these, before it ever
+            competes for a max_new_lines slot.
     """
 
     stave_id: int
@@ -114,6 +128,7 @@ class ProbeRegion:
     lines_observed: int
     mode_n: int
     max_new_lines: int
+    existing_centers: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -200,6 +215,17 @@ def _fit_width(fit: FitResult) -> float:
     return rng[1] - rng[0]
 
 
+def _duplicates_existing_line(fit: FitResult, region: ProbeRegion) -> bool:
+    """True if fit's center falls within DUPLICATE_EXISTING_LINE_TOLERANCE_
+    RATIO * h_est of one of the stave's own already-detected lines -- almost
+    certainly a re-detection of that line, not a missing one."""
+    y = y_at_fit_center(fit)
+    if y is None or not region.existing_centers:
+        return False
+    tolerance = DUPLICATE_EXISTING_LINE_TOLERANCE_RATIO * region.h_est
+    return any(abs(y - c) < tolerance for c in region.existing_centers)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -276,6 +302,7 @@ def identify_probe_regions(
                 lines_observed=lines_observed,
                 mode_n=mode_n,
                 max_new_lines=max_new_lines,
+                existing_centers=centers,
             )
         )
 
@@ -315,6 +342,12 @@ def validate_and_select_candidates(
         -- redundant with the crop itself in practice, but cheap to also
         check explicitly here since a caller could in principle hand in
         candidates from a looser crop;
+      - not a re-detection of one of the stave's own already-detected lines
+        (_duplicates_existing_line) -- rejected before ranking so a
+        duplicate can never consume a max_new_lines slot and displace a
+        genuinely missing line; group_staves._reconcile_duplicate_fits
+        would eventually collapse such a duplicate too, but only after
+        that displacement could already have happened;
       - relative-width plausible (is_plausible_width) against sibling_widths;
       - Stage-1 score clears STAGE1_SCORE_FLOOR.
 
@@ -332,6 +365,7 @@ def validate_and_select_candidates(
         c
         for c in candidates
         if _fit_within_territory(c.fit, region)
+        and not _duplicates_existing_line(c.fit, region)
         and is_plausible_width(_fit_width(c.fit), sibling_widths)
         and c.stage1_score >= STAGE1_SCORE_FLOOR
     ]

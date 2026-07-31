@@ -155,6 +155,32 @@ def test_narrow_fragment_candidate_rejected_by_relative_width_filter():
     assert is_plausible_width(850.0, sibling_widths)
 
 
+def test_duplicate_of_existing_line_rejected_before_cap():
+    # Stave has 2 existing lines (y=100, y=140); a duplicate re-detection of
+    # the y=100 line (off by 3px, well within 0.5*h_est=10px) has the
+    # highest confidence of the three candidates. Without rejecting it
+    # before ranking, it would win the single max_new_lines=1 slot and the
+    # genuinely missing line at y=120 would never be recovered.
+    region = ProbeRegion(
+        stave_id=0, y_start=80.0, y_end=180.0, x_start=0.0, x_end=1000.0,
+        h_est=20.0, lines_observed=2, mode_n=3, max_new_lines=1,
+        existing_centers=[100.0, 140.0],
+    )
+    duplicate = FallbackCandidate(
+        fit=make_fit_at_y(103.0, x_start=0, x_end=900), yolo_confidence=0.95, stage1_score=0.9,
+    )
+    genuinely_new = FallbackCandidate(
+        fit=make_fit_at_y(120.0, x_start=0, x_end=900), yolo_confidence=0.5, stage1_score=0.6,
+    )
+    accepted, cap_exceeded = validate_and_select_candidates(
+        region, [duplicate, genuinely_new], sibling_widths=[900.0]
+    )
+    print(f"dedup test: accepted_ys={[c.fit.y_values[0] for c in accepted]}, cap_exceeded={cap_exceeded}")
+    assert len(accepted) == 1
+    assert accepted[0] is genuinely_new, "the duplicate must not win the slot despite its higher confidence"
+    assert cap_exceeded is False, "the duplicate was rejected outright, not just capped"
+
+
 def test_cap_exceeded_flag_when_more_candidates_than_allowed():
     region = ProbeRegion(
         stave_id=0, y_start=0.0, y_end=1000.0, x_start=0.0, x_end=1000.0,
@@ -178,5 +204,6 @@ if __name__ == "__main__":
     test_no_probes_when_every_stave_hits_mode()
     test_over_populated_stave_gets_no_probe_only_under_populated_does()
     test_narrow_fragment_candidate_rejected_by_relative_width_filter()
+    test_duplicate_of_existing_line_rejected_before_cap()
     test_cap_exceeded_flag_when_more_candidates_than_allowed()
     print("\nAll fallback_redetect sanity checks passed.")
