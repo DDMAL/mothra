@@ -1,5 +1,6 @@
 import type { MeiFile } from "../../types";
 import { downloadBlob } from "../../utils/download";
+import TruncatedName from "../shared/TruncatedName";
 
 interface Props {
     file: MeiFile;
@@ -20,9 +21,10 @@ export default function MeiViewerModal({ file, onClose }: Props) {
             <div className="fixed z-50 top-[4.5rem] bottom-4 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-5xl bg-[#C8E6E3] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
                 {/* header */}
                 <div className="flex items-center gap-4 px-6 py-3 border-b border-[#1D3335]/20 shrink-0">
-                <p className="font-mono text-sm text-[#1D3335] font-semibold truncate flex-1">
-                    {file.name}
-                </p>
+                <TruncatedName
+                    name={file.name}
+                    className="font-mono text-sm text-[#1D3335] font-semibold flex-1 min-w-0"
+                />
                 <button
                     onClick={handleExport}
                     className="px-4 py-1.5 bg-white text-[#1D3335] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"

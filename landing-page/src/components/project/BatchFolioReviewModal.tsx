@@ -1,4 +1,5 @@
 import Modal from "../shared/Modal";
+import TruncatedName from "../shared/TruncatedName";
 import type { FolioReviewRow, FolioReviewStatus } from "../../utils/folio";
 
 interface BatchFolioReviewModalProps {
@@ -51,7 +52,7 @@ export default function BatchFolioReviewModal({
             key={row.fileName}
             className="grid grid-cols-4 gap-2 px-3 py-2 text-xs text-[#1D3335] font-mono items-center"
           >
-            <span className="truncate" title={row.fileName}>{row.fileName}</span>
+            <TruncatedName name={row.fileName} className="min-w-0" />
             <span>{row.positionalFolio ?? "—"}</span>
             <span>{row.detectedFolio ?? "—"}</span>
             <span className={STATUS_COLOR[row.status]}>{STATUS_LABEL[row.status]}</span>

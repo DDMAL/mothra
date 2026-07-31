@@ -16,6 +16,7 @@ import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
+import TruncatedName from "../shared/TruncatedName";
 
 const STEPS = [
   "annotate",
@@ -713,7 +714,7 @@ export default function ProjectDetail({
             <span className="text-white/80">selected:</span>
             {usedNames.models.map((name) => (
               <div key={name} className="flex items-center justify-between">
-                <span className="truncate flex-1 mr-2">{name}</span>
+                <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                 {stepsUnlocked === 0 && (
                   <button
                     onClick={() =>
@@ -734,7 +735,7 @@ export default function ProjectDetail({
                 <hr className="border-white/40 my-1" />
                 {usedNames.annotations.map((name) => (
                   <div key={name} className="flex items-center justify-between">
-                    <span className="truncate flex-1 mr-2">{name}</span>
+                    <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                     {stepsUnlocked < 2 && (
                       <button
                         onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
@@ -750,7 +751,7 @@ export default function ProjectDetail({
               const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked) !== null;
               return (
                 <div key={name} className="flex items-center justify-between">
-                  <span className="truncate flex-1 mr-2">{name}</span>
+                  <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                   {!hasProgress && (
                     <button
                       onClick={() =>

@@ -1,4 +1,5 @@
 import Modal from "../shared/Modal";
+import TruncatedName from "../shared/TruncatedName";
 
 interface LargeImageWarningModalProps {
     oversizedFiles: File[];
@@ -46,9 +47,7 @@ export default function LargeImageWarningModal({
                 key={`${f.name}-${i}`}
                 className="grid grid-cols-2 gap-2 px-3 py-2 text-xs text-[#1D3335] font-mono items-center"
             >
-                <span className="truncate" title={f.name}>
-                {f.name}
-                </span>
+                <TruncatedName name={f.name} className="min-w-0" />
                 <span>{formatBytes(f.size)}</span>
             </div>
             ))}

@@ -12,6 +12,7 @@ import Modal from "../shared/Modal";
 import LargeImageWarningModal from "./LargeImageWarningModal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
+import TruncatedName from "../shared/TruncatedName";
 import RenameModal from "./RenameModal";
 import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
@@ -744,7 +745,7 @@ export default function ImageTab({
                 <div className="flex flex-col gap-2 text-sm text-white/70 font-mono">
                   <div className="flex justify-between gap-4">
                     <span>name</span>
-                    <span className="text-white truncate">{img.name}</span>
+                    <TruncatedName name={img.name} className="text-white" />
                   </div>
                   {img.folio && (
                     <span className="absolute top-1 right-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">

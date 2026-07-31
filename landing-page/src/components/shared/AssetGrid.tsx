@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Fragment } from "react";
 import type React from "react";
 import Paginator from "./Paginator";
+import TruncatedName from "./TruncatedName";
 
 interface AssetItem {
   id: string;
@@ -91,9 +92,10 @@ export default function AssetGrid<T extends AssetItem>({
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-1">
-                  <span className={`text-sm text-white truncate ${used ? "opacity-40" : ""}`}>
-                    {item.name}
-                  </span>
+                  <TruncatedName
+                    name={item.name}
+                    className={`text-sm text-white ${used ? "opacity-40" : ""}`}
+                  />
                   {!used && (
                     <button
                       onClick={(e) => {
