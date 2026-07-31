@@ -5,6 +5,11 @@ import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings"
 import { findFolioConflict, compareFolios } from "../../utils/folio";
 import { downloadBlob } from "../../utils/download";
 
+// Persists across CantusSourcePanel unmount/remount (e.g. navigating to the
+// processing/IC view and back) so a slow or failed background revalidation
+// never has to hide a source that was already loaded once this session.
+const sourceCache = new Map<string, CantusSource>();
+
 interface CantusSourcePanelProps {
     textFindingSettings: ReturnType<typeof useTextFindingSettings>;
     project: Project,
@@ -16,13 +21,12 @@ interface CantusSourcePanelProps {
     onBatchStartFolioChange: (folio: string) => void;
     onBatchEndFolioChange: (folio: string) => void;
     batchFolioSequence: string[];
-    locked: boolean;
 }
 
 export default function CantusSourcePanel({
     textFindingSettings, project, onUpdateSourceId, onSourceLoaded,
     imageSubTab, batchStartFolio, batchEndFolio, onBatchStartFolioChange, onBatchEndFolioChange,
-    batchFolioSequence, locked,
+    batchFolioSequence,
 }: CantusSourcePanelProps) {
     const { ocrOnlyMode, sourceId, folio, patch } = textFindingSettings;
     const [sourceIdInput, setSourceIdInput] = useState(sourceId);
@@ -32,15 +36,27 @@ export default function CantusSourcePanel({
     const [conflict, setConflict] = useState<ProjectImage | null>(null);
     const [exportError, setExportError] = useState<string | null>(null);
 
-    const loadSource = async (id: string) => {
+    const loadSource = async (id: string, opts: { preserveFolio?: boolean } = {}) => {
+        const cached = sourceCache.get(id);
+        if (cached) {
+            setLoadedSource(cached);
+            onSourceLoaded?.(cached);
+            patch(opts.preserveFolio ? {
+                sourceId: cached.sourceId
+            } : { sourceId: cached.sourceId, folio: "" });
+            onUpdateSourceId(cached.sourceId);
+            setError(null);
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const raw: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
             const data: CantusSource = {...raw, folios: [...raw.folios].sort(compareFolios) };
+            sourceCache.set(id, data);
             setLoadedSource(data);
             onSourceLoaded?.(data);
-            patch({ sourceId: data.sourceId, folio: ""});
+            patch(opts.preserveFolio ? { sourceId: data.sourceId } : { sourceId: data.sourceId, folio: "" });
             onUpdateSourceId(data.sourceId);
         } catch (e) {
             setLoadedSource(null);
@@ -72,7 +88,7 @@ export default function CantusSourcePanel({
 
         if (project.cantusSourceId) {
             setSourceIdInput(project.cantusSourceId);
-            loadSource(project.cantusSourceId);
+            loadSource(project.cantusSourceId, { preserveFolio: true });
         } else {
             setSourceIdInput("");
             patch({ sourceId: "", folio: ""});
@@ -100,23 +116,17 @@ export default function CantusSourcePanel({
                 value={sourceIdInput}
                 onChange={(e) => setSourceIdInput(e.target.value)}
                 placeholder="CantusDB source ID"
-                disabled={locked}
                 className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-40"
                 />
                 <button
                 onClick={handleLoad}
-                disabled={loading || !sourceIdInput.trim() || locked || sourceIdInput.trim() === loadedSource?.sourceId}
+                disabled={loading || !sourceIdInput.trim() || sourceIdInput.trim() === loadedSource?.sourceId}
                 className="px-3 py-1 border border-white/40 text-white text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                 {loading ? "loading..." : "load"}
                 </button>
             </div>
-            {locked ? (
-                <p className="text-white/50 text-xs w-fit">
-                    source is locked - this project has already moved past the upload step
-                </p>
-            ) : (
-                <a
+            <a
                 href="https://cantusdatabase.org/sources/"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -124,7 +134,6 @@ export default function CantusSourcePanel({
             >
                 don't know your source ID?
             </a>
-            )}
             {error && <p className="text-red-200 text-xs">{error}</p>}
             {loadedSource && (
                 <div className="flex flex-col gap-2">
