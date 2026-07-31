@@ -91,6 +91,39 @@ this is a punch list, not a plan.
 
 ## Resolved since this was written
 
+- **Rebase-onto-main evaluated, decided against**: checked what rebasing
+  `kyrie/staff-finding` onto `main` would take. `origin/main` hasn't moved
+  since the 2026-07-30 merge (`15061d1`) — this branch already fully
+  contains it (`git merge-base --is-ancestor origin/main kyrie/staff-finding`
+  is true) — so a rebase would only replay this branch's own 54 commits
+  against the merge commit's absence, re-hitting the same `auth_api.py`/
+  `CLAUDE.md` conflicts already resolved once, and force-pushing over PR
+  #53's live review thread for no content gain. Decided: no rebase, no
+  force-push; `main` gets a clean single commit via squash-merge when PR #53
+  lands instead (repo already has `allow_squash_merge: true`).
+- **`CLAUDE.md`'s Deployment section repaired**: the 2026-07-30 merge kept
+  only this branch's own `### Deployment (Docker)` section and silently
+  dropped both of `main`'s — `### Deployment (Kubernetes, CI/CD via GitHub
+  Actions)` (the real production path — auto-deploy to a k8s cluster on
+  push to `main`) and `### Local/manual container runs`, which explicitly
+  scopes `docker-compose.yml` as local-only ("the k8s manifests were
+  modeled on it, not the other way around"). This branch's text had claimed
+  Compose "is now the only deployment path," which was wrong — the actual
+  `k8s/` manifests and CI/CD deploy job were untouched throughout (confirmed
+  byte-identical to `main`), only the docs were stale. Restored both
+  sections, folding this branch's genuinely new local-testing content
+  (staff-finding's Docker build-context wiring, the buildx/OOM/Tridis/
+  redeploy-together notes) into the restored `Local/manual` section. Also
+  fixed a second, smaller staleness bug found in the same paragraph: it
+  still said `pip install -e` for staff-finding's install, which an earlier
+  commit this same session had already changed to non-editable.
+  Also refreshed three `## Key files` table rows (`job_store.py`,
+  `jobs_api.py`, `tasks_predict.py`/`tasks_encode.py`) that had fallen
+  behind `main`'s versions — missing mentions of job cancel/retry and
+  `tasks_text_batch.py` — table only; the full prose elsewhere in the file
+  already covered this correctly. And added the `staffline_detections` row
+  to the Database schema table itself — a previous session summary had
+  claimed this row already existed; it didn't, this is the actual fix.
 - **CI job added**: `.github/workflows/tests.yml` runs the staff-finding
   suite and the new `landing-page/scripts/tests/` on every push.
 - **`main` merged in and briefly broke `auth_api.py`**: a large merge from

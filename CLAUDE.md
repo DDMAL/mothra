@@ -45,6 +45,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |
+| `staffline_detections` | per-image JSOMR staffline detections (`jsomr_json`), written by the predict job — accumulate-forever, unlike `annotations`'s delete-then-insert; see **Staffline detection** below |
 | `jobs` | one row per predict/encode-upload/encode-batch/text-batch job; `status` ∈ `pending/running/succeeded/failed/cancelled`; `params JSONB` stores the exact kickoff kwargs (needed for retry), `retry_of`/`attempt` track retry lineage — see **Job queue** below |
 | `job_events` | ordered progress-event log per job (`job_id`, `payload JSONB`) — what `GET /api/jobs/{id}/stream` polls |
 | `job_uploads` | raw XML/image bytes staged for a Celery task to pick up, keyed by a short-lived `upload_id` |
@@ -231,27 +232,73 @@ needs no re-plumbing):
   YOLO pass) isn't wired up — it needs an already-loaded stave-detector model
   instance, which custom (non-medieval-preset) models don't have one of.
 
-### Deployment (Docker)
+### Deployment (Kubernetes, CI/CD via GitHub Actions)
 
-A `docker-compose.yml` at the repo root builds and runs `redis`, `ic`
-(reuses the existing `ic/Dockerfile`), `text-service` (new `text-service/Dockerfile`,
-build context is the repo root since it needs the sibling `mothra-text/`
-submodule), and `backend`/`worker` (both from the same new `landing-page/Dockerfile`,
-`worker` just overrides the `command:`). Before building:
-`git submodule update --init --recursive` (submodules aren't checked out by a
-plain clone) and `git lfs pull` (the medieval model `.pt` files are LFS
-pointers until then) — this requires `git-lfs` to be installed and
-registered once per machine (`brew install git-lfs && git lfs install`)
-*before* pulling; otherwise `git lfs pull` silently no-ops and the `.pt`
-files stay as tiny pointer text, which only surfaces later as a prediction
-failure, not a clear error at pull time. `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level
-`.env` (gitignored, separate from `landing-page/scripts/.env`) that Compose
-auto-loads. This is now the only deployment path — the old `render.yaml`
-Render Blueprint (single-service, no worker, no Redis) has been retired; it
-predated the job queue and would never have processed predict/encode jobs
-correctly. If a Render service was ever created from it, that needs to be
-deleted/disconnected on Render's side too — removing the file doesn't
-un-hook an existing deploy.
+**Merging to `main` deploys automatically.** `.github/workflows/build-images.yml`
+(job name `ci-cd`) runs on every push to `main`/`develop`/`k8s-deployment` (also
+`workflow_dispatch`):
+1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
+   and `text-service` (`text-service/Dockerfile`, build context is the repo root
+   since it needs the sibling `mothra-text/` submodule) and pushes each to
+   `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, tagged `latest`, by short SHA
+   (`sha-<short>`), and by branch. `worker` reuses the `mothra-backend` image, so
+   it isn't built separately. Checkout pulls submodules recursively and Git LFS
+   (the bundled medieval `.pt` weights — without `lfs: true` they'd check out as
+   pointer stubs and inference would fail at runtime).
+2. **deploy** (needs `build`) — using the `KUBECONFIG` repo secret, pins
+   `k8s/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml` to this commit's
+   `sha-<short>` tag, applies those plus `k8s/configmap.yaml`/`ingress.yaml`, then
+   `kubectl rollout status` on `backend`/`worker`/`ic`/`text-service` (redis and
+   postgres are excluded from CD — see below).
+
+The cluster runs the `mothra` namespace, manifests live in `k8s/` (see
+`k8s/README.md`). **Postgres is not part of this repo's deploy** — it's a
+separate deployment in the `postgres` namespace, reached cross-namespace at
+`mothra-postgres.postgres.svc.cluster.local:5432` via `DATABASE_URL` — so a
+Mothra deploy never touches the database deployment. Ingress is Traefik:
+`mothra.simssa.ca` → backend, `mothra-ic.simssa.ca` → ic, with a `Middleware` in
+`ingress.yaml` adding a `frame-ancestors` CSP on the IC host so the campus
+proxy's blanket `X-Frame-Options: SAMEORIGIN` doesn't block the IC iframe.
+`stored_models` (locally-uploaded custom YOLO checkpoints, written by
+`models_api.py`) is **not baked into the image** — it's a static NFS
+PersistentVolume (RWX, `k8s/stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
+`backend` and `worker` so uploads persist across rollouts and are visible to
+whichever service reads them.
+
+**Manual apply** (redis/postgres/secrets excluded from CD; apply by hand when needed):
+```
+kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
+kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
+kubectl apply -f k8s/redis.yaml
+kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
+kubectl apply -f k8s/ingress.yaml
+```
+
+**Known follow-ups** (from `k8s/README.md`): no real `/healthz` yet, so probes
+are TCP/exec only; `init_db()`/`_migrate_db()` run at import, so keep
+`backend`/`worker` at **1 replica** until a one-shot migration Job replaces
+that; `text-service`'s `/batch-download/{id}` uses local disk keyed by
+`batch_id`, so it needs shared storage (or a single replica) if batch
+downloads are used at scale.
+
+The old `render.yaml` Render Blueprint (single-service, no worker, no Redis)
+is retired — it predated the job queue and would never have processed
+predict/encode jobs correctly. If a Render service was ever created from it,
+that needs to be deleted/disconnected on Render's side too — removing the
+file doesn't un-hook an existing deploy.
+
+### Local/manual container runs (`docker-compose.yml`)
+
+A `docker-compose.yml` at the repo root mirrors the same stack (redis + ic +
+text-service + backend + Celery worker) for local testing without a cluster —
+the k8s manifests were modeled on it, not the other way around. `worker` reuses
+the `backend` image, just overrides the `command:`. Before building:
+`git submodule update --init --recursive` and `git lfs pull` (see above — same
+LFS caveat applies locally: `git-lfs` must be installed and registered,
+`brew install git-lfs && git lfs install`, *before* pulling, or the `.pt` files
+silently stay as pointer text). `DATABASE_URL`/`MOTHRA_SECRET` come from a
+root-level `.env` (gitignored, separate from `landing-page/scripts/.env`) that
+Compose auto-loads.
 
 `staff-finding/` (a sibling directory of `landing-page/`, holding the
 staffline-detection module `staffline_stage.py` imports — see **Staffline
@@ -260,9 +307,12 @@ detection** above) sits outside `landing-page/`'s own Docker build context.
 `.github/workflows/build-images.yml`'s backend image build both pass it in as
 a named BuildKit "additional build context" (`staff_finding`), which
 `landing-page/Dockerfile` then `COPY --from=staff_finding`s into the image
-before `pip install -e`-ing it (`staff-finding/.dockerignore` keeps its large
-test-fixture/experiment directories out of what actually gets sent to the
-Docker daemon). Skipping this wiring wouldn't error at build time — it would
+before `pip install`-ing it (non-editable — the source tree is already
+baked into the image via that `COPY` regardless, so `-e` would only add an
+unused editable-install pointer back at itself; `staff-finding/.dockerignore`
+keeps its large test-fixture/experiment directories out of what actually
+gets sent to the Docker daemon). Skipping this wiring wouldn't error at
+build time — it would
 silently ship a backend/worker image where staffline detection always fails
 at runtime with `ModuleNotFoundError`.
 
@@ -341,9 +391,9 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/model_validation.py` | Validates uploaded YOLO checkpoints, derives text/music/staves class maps |
 | `landing-page/scripts/config.py` / `config.yaml` | Centralized non-secret paths + service URLs, env-var overridable |
 | `landing-page/scripts/celery_app.py` | Celery app instance/config; entrypoint for `celery -A celery_app.celery_app worker` |
-| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events, staged uploads, encode session/manifest storage |
-| `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` — polls `job_events`, re-emits SSE frames |
-| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` | Celery tasks: the actual YOLO inference / MEI-building work, run out-of-request |
+| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage |
+| `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
+| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work, run out-of-request |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
 | `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`) shared by the predict task and `batch_api.py` |
