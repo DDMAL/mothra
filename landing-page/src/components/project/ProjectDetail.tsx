@@ -84,8 +84,11 @@ export default function ProjectDetail({
   textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei files" | "text"
+    "images" | "models" | "generated"
   >("images");
+  const [generatedSubTab, setGeneratedSubTab] = useState<
+    "annotations" | "text" | "mei files"
+  >("annotations");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
@@ -123,9 +126,7 @@ export default function ProjectDetail({
   const meiSection = useAssetSection(project.meiFiles);
   const annSection = useAssetSection(project.annotations ?? []);
 
-  const switchTab = (
-    tab: "images" | "models" | "annotations" | "mei files",
-  ) => {
+  const switchTab = (tab: "images" | "models" | "generated") => {
     setActiveTab(tab);
     imgSection.clearSelection();
     mdlSection.clearSelection();
@@ -136,9 +137,21 @@ export default function ProjectDetail({
     annSection.setPage(0);
   };
 
+  const switchGeneratedSubTab = (tab: "annotations" | "text" | "mei files") => {
+    setGeneratedSubTab(tab);
+    meiSection.clearSelection();
+    annSection.clearSelection();
+    meiSection.setPage(0);
+    annSection.setPage(0);
+  };
+
   const TAB_LABELS: Record<string, string> = {
     images: "Images",
     models: "Models",
+    generated: "Generated files",
+  }
+
+  const GENERATED_SUBTAB_LABELS: Record<string, string> = {
     annotations: "Detected layers",
     text: "Detected text",
     "mei files": "MEI files",
@@ -147,9 +160,12 @@ export default function ProjectDetail({
   const tabs = [
      "images",
      "models",
-     ...(stepsUnlocked >= 1 ? ["annotations", "text"] : []),
-     ...(stepsUnlocked >= 3 ? ["mei files"] : []),
+     ...(stepsUnlocked >= 1 ? ["generated"] : []),
    ] as const;
+
+  const generatedSubTabs = (
+    ["annotations", "text", ...(stepsUnlocked >= 3 ? ["mei files" as const] : [])] as const
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -194,7 +210,7 @@ export default function ProjectDetail({
             });
           });
         }
-        if (activeTab === "annotations" && annSection.selectedIds.size > 0) {
+        if (activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0) {
           const ids = [...annSection.selectedIds];
           const deleted = new Set(ids);
           annSection.clearSelection();
@@ -205,7 +221,7 @@ export default function ProjectDetail({
             });
           });
         }
-        if (activeTab === "mei files" && meiSection.selectedIds.size > 0) {
+        if (activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0) {
           const ids = [...meiSection.selectedIds];
           const deleted = new Set(ids);
           meiSection.clearSelection();
@@ -222,6 +238,7 @@ export default function ProjectDetail({
     return () => window.removeEventListener("keydown", handler);
   }, [
     activeTab,
+    generatedSubTab,
     imgSection,
     mdlSection,
     meiSection,
@@ -448,7 +465,7 @@ export default function ProjectDetail({
                   mdlSection.clearSelection();
                 },
               )}
-              {activeTab === "annotations" && annSection.selectedIds.size > 0 && (
+              {activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0 && (
                 <>
                   {selectionButtons(
                     "annotation",
@@ -500,7 +517,7 @@ export default function ProjectDetail({
                   </button>
                 </>
               )}
-              {activeTab === "mei files" && meiSection.selectedIds.size > 0 && (
+              {activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0 && (
                 <>
                   <button
                     onClick={() =>
@@ -555,11 +572,7 @@ export default function ProjectDetail({
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() =>
-                    switchTab(
-                      tab as "images" | "models" | "annotations" | "mei files",
-                    )
-                  }
+                  onClick={() => switchTab(tab as "images" | "models" | "generated")}
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
                       activeTab === tab
@@ -616,30 +629,46 @@ export default function ProjectDetail({
                 textFindingSettings={textFindingSettings}
               />
             )}
-            {activeTab === "annotations" && (
-              <AnnotationsTab
-                annotations={project.annotations}
-                images={project.images}
-                projectId={project.id}
-                section={annSection}
-                usedNames={usedNames}
-                onUsedNamesChange={onUsedNamesChange}
-              />
-            )}
-            {activeTab === "text" && (
-              <TextAlignmentsTab
-                textAlignments={project.textAlignments}
-                images={project.images}
-                projectId={project.id}
-              />
-            )}
-            {activeTab === "mei files" && (
-              <MeiTab
-                project={project}
-                section={meiSection}
-                onUpdateProject={onUpdateProject}
-                onDeleteMei={onDeleteMei}
-              />
+            {activeTab === "generated" && (
+              <>
+                <div className="flex gap-2 mt-6 mb-4">
+                  {generatedSubTabs.map((sub) => (
+                    <button
+                      key={sub}
+                      onClick={() => switchGeneratedSubTab(sub)}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer
+                        ${generatedSubTab === sub ? "bg-white text-[#4AADAA]" : "text-white/60 hover:text-white/90"}`}
+                    >
+                      {GENERATED_SUBTAB_LABELS[sub]}
+                    </button>
+                  ))}
+                </div>
+                {generatedSubTab === "annotations" && (
+                  <AnnotationsTab
+                    annotations={project.annotations}
+                    images={project.images}
+                    projectId={project.id}
+                    section={annSection}
+                    usedNames={usedNames}
+                    onUsedNamesChange={onUsedNamesChange}
+                  />
+                )}
+                {generatedSubTab === "text" && (
+                  <TextAlignmentsTab
+                    textAlignments={project.textAlignments}
+                    images={project.images}
+                    projectId={project.id}
+                  />
+                )}
+                {generatedSubTab === "mei files" && stepsUnlocked >= 3 && (
+                  <MeiTab
+                    project={project}
+                    section={meiSection}
+                    onUpdateProject={onUpdateProject}
+                    onDeleteMei={onDeleteMei}
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
