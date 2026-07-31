@@ -115,6 +115,7 @@ export default function ProjectDetail({
     () => minNextStep(usedNames.images, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked),
     [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
   );
+  const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -539,6 +540,7 @@ export default function ProjectDetail({
               onBatchStartFolioChange={setBatchStartFolio}
               onBatchEndFolioChange={setBatchEndFolio}
               batchFolioSequence={batchFolioSequence}
+              locked={sourceLocked}
             />
             <div className="flex items-end">
               {tabs.map((tab, i) => (

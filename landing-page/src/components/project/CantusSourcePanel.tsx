@@ -21,12 +21,13 @@ interface CantusSourcePanelProps {
     onBatchStartFolioChange: (folio: string) => void;
     onBatchEndFolioChange: (folio: string) => void;
     batchFolioSequence: string[];
+    locked: boolean;
 }
 
 export default function CantusSourcePanel({
     textFindingSettings, project, onUpdateSourceId, onSourceLoaded,
     imageSubTab, batchStartFolio, batchEndFolio, onBatchStartFolioChange, onBatchEndFolioChange,
-    batchFolioSequence,
+    batchFolioSequence, locked,
 }: CantusSourcePanelProps) {
     const { ocrOnlyMode, sourceId, folio, patch } = textFindingSettings;
     const [sourceIdInput, setSourceIdInput] = useState(sourceId);
@@ -116,17 +117,23 @@ export default function CantusSourcePanel({
                 value={sourceIdInput}
                 onChange={(e) => setSourceIdInput(e.target.value)}
                 placeholder="CantusDB source ID"
+                disabled={locked}
                 className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-40"
                 />
                 <button
                 onClick={handleLoad}
-                disabled={loading || !sourceIdInput.trim() || sourceIdInput.trim() === loadedSource?.sourceId}
+                disabled={loading || !sourceIdInput.trim() || locked || sourceIdInput.trim() === loadedSource?.sourceId}
                 className="px-3 py-1 border border-white/40 text-white text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                 {loading ? "loading..." : "load"}
                 </button>
             </div>
-            <a
+            {locked ? (
+                <p className="text-white/50 text-xs w-fit">
+                    source is locked - this project has already moved past the upload step
+                </p>
+            ) : (
+                <a
                 href="https://cantusdatabase.org/sources/"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -134,6 +141,7 @@ export default function CantusSourcePanel({
             >
                 don't know your source ID?
             </a>
+            )}
             {error && <p className="text-red-200 text-xs">{error}</p>}
             {loadedSource && (
                 <div className="flex flex-col gap-2">
