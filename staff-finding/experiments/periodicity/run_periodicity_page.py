@@ -55,6 +55,7 @@ from shared_utils import (
     run_grouping_and_save,
 )
 from periodicity_detector import (
+    compute_dark_field,
     estimate_period,
     periodicity_trace,
     BAND_HALF_MULTIPLIER,
@@ -104,6 +105,10 @@ def run_periodicity_page(
 
     fit_results: list[ExperimentFitResult] = []
     boxes: list[tuple[int, int, int, int]] = []
+
+    # Computed once per page, not once per staffline: smoothed/dark depend
+    # only on gray and scale_unit, both invariant across the whole page.
+    dark_field = compute_dark_field(gray, scale_unit, blur_sigma_multiplier)
 
     print(
         f"Tracing {len(stafflines)} stafflines (n_teeth={n_teeth}, "
@@ -162,6 +167,7 @@ def run_periodicity_page(
             band_half_multiplier=band_half_multiplier,
             max_step_px=max_step_px,
             blur_sigma_multiplier=blur_sigma_multiplier,
+            dark=dark_field,
             n_teeth=n_teeth,
             teeth_weight=teeth_weight,
         )

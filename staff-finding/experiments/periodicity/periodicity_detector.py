@@ -133,6 +133,24 @@ def estimate_period(
 # ---------------------------------------------------------------------------
 
 
+def compute_dark_field(
+    gray: np.ndarray, scale_unit: float, blur_sigma_multiplier: float = BLUR_SIGMA_MULTIPLIER
+) -> np.ndarray:
+    """Precompute the page-wide darkness field once per page.
+
+    smoothed/dark depend only on gray and scale_unit (via
+    blur_sigma_multiplier), both invariant across a whole page -- hoisted out
+    of periodicity_trace() so a per-staffline loop doesn't redo this full-page
+    Gaussian blur and normalisation once per detection.
+    """
+    sigma = blur_sigma_multiplier * scale_unit
+    if sigma > 0.5:
+        smoothed = gaussian_filter1d(gray.astype(np.float32), sigma=sigma, axis=0)
+    else:
+        smoothed = gray.astype(np.float32)
+    return (255.0 - smoothed) / 255.0
+
+
 def periodicity_trace(
     gray: np.ndarray,
     y_hint: float,
@@ -145,6 +163,7 @@ def periodicity_trace(
     blur_sigma_multiplier: float = BLUR_SIGMA_MULTIPLIER,
     n_teeth: int = N_TEETH,
     teeth_weight: float = TEETH_WEIGHT,
+    dark: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Trace one staffline using DP with a comb-filter data cost.
 
@@ -169,6 +188,11 @@ def periodicity_trace(
         blur_sigma_multiplier: Gaussian pre-blur sigma = multiplier × h.
         n_teeth:               Number of comb teeth (must be odd; 1 = plain DP).
         teeth_weight:          Weight per off-centre tooth (0 = plain DP).
+        dark:                  Precomputed page-wide darkness field from
+                               compute_dark_field(), reused as-is if given.
+                               Computed here (and thrown away) if None --
+                               pass it explicitly from a per-page loop to
+                               avoid redoing the full-page blur per call.
 
     Returns:
         (xs, ys): page-absolute x and y arrays for the traced path.
@@ -195,16 +219,12 @@ def periodicity_trace(
         ys = np.full(len(xs), y_hint)
         return xs, ys
 
-    # Optional Gaussian pre-blur along rows (axis=0) to suppress noise.
-    sigma = blur_sigma_multiplier * scale_unit
-    if sigma > 0.5:
-        smoothed = gaussian_filter1d(gray.astype(np.float32), sigma=sigma, axis=0)
-    else:
-        smoothed = gray.astype(np.float32)
-
-    # dark[y, x] = (255 - pixel) / 255 for the full page, so dark ink = high value.
-    # We keep the full page here so that comb teeth can reach rows outside the band.
-    dark = (255.0 - smoothed) / 255.0  # shape: (page_h, page_w)
+    # dark[y, x] = (255 - pixel) / 255 for the full page, so dark ink = high
+    # value. We keep the full page here so that comb teeth can reach rows
+    # outside the band. Reuse the caller's precomputed field when given
+    # (see the dark parameter above); only compute it here as a fallback.
+    if dark is None:
+        dark = compute_dark_field(gray, scale_unit, blur_sigma_multiplier)
 
     # -----------------------------------------------------------------
     # Build comb cost for the search band.
