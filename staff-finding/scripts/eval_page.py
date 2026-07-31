@@ -60,11 +60,18 @@ def _pred_page_y(item: dict) -> np.ndarray:
     """Page-absolute y-values for a JSOMR staffline item.
 
     Prefers the `centerline_page` block (already page-absolute) when present;
-    falls back to `centerline` + `bounding_box` for legacy crop-local records.
+    falls back to `centerline` + `bounding_box` for legacy crop-local records
+    that predate `centerline_page`. That fallback assumes `bounding_box` is
+    present -- true for detected lines, never true for interpolated ones (no
+    crop of their own) -- so an interpolated record without `centerline_page`
+    (a stale fixture from before the writer emitted it for those too) returns
+    empty rather than crashing on bounding_box=None.
     """
     centerline_page = item.get("centerline_page")
     if centerline_page is not None:
         return np.array(centerline_page["y_values"], dtype=float)
+    if item.get("bounding_box") is None:
+        return np.array([], dtype=float)
     return (
         np.array(item["centerline"]["y_values"], dtype=float)
         + item["bounding_box"]["uly"]
@@ -72,12 +79,18 @@ def _pred_page_y(item: dict) -> np.ndarray:
 
 
 def _pred_page_x(item: dict) -> np.ndarray:
-    """Page-absolute x positions corresponding to each y_value."""
+    """Page-absolute x positions corresponding to each y_value.
+
+    See _pred_page_y for the bounding_box=None fallback case; kept in sync
+    with it since callers zip the two together.
+    """
     centerline_page = item.get("centerline_page")
     if centerline_page is not None:
         x_start = centerline_page["x_start"]
         n = len(centerline_page["y_values"])
         return np.arange(x_start, x_start + n)
+    if item.get("bounding_box") is None:
+        return np.array([], dtype=int)
     x_start = item["centerline"]["x_start"]
     n = len(item["centerline"]["y_values"])
     return np.arange(x_start, x_start + n) + item["bounding_box"]["ulx"]
