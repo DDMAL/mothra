@@ -185,7 +185,9 @@ export default function ModelTab({
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
         {project.models.length === 0 ? (
-          <p className="text-white/70 text-sm">no models yet</p>
+          <p className="text-white/70 text-sm">
+            No models yet -- if no model is uploaded, the default model will be used.
+          </p>
         ) : (
           <AssetGrid
             pagedItems={pagedModels}

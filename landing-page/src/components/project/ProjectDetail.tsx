@@ -135,6 +135,14 @@ export default function ProjectDetail({
     annSection.setPage(0);
   };
 
+  const TAB_LABELS: Record<string, string> = {
+    images: "Images",
+    models: "Models",
+    annotations: "Detected layers",
+    text: "Detected text",
+    "mei files": "MEI files",
+  }
+
   const tabs = [
      "images",
      "models",
@@ -559,7 +567,7 @@ export default function ProjectDetail({
                     }
                     ${i > 0 ? "-ml-px" : ""}`}
                 >
-                  {tab}
+                  {TAB_LABELS[tab] ?? tab}
                 </button>
               ))}
               <div className="flex-1 border-b border-white/50" />
