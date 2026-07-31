@@ -436,7 +436,12 @@ export default function AppRouter({
                   setProjects((prev) =>
                     prev.map((p) =>
                       p.id === selectedProject.id
-                        ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
+                        ? {
+                            ...p,
+                            annotations: fresh.annotations,
+                            textAlignments: fresh.textAlignments,
+                            stafflines: fresh.stafflines,
+                          }
                         : p,
                     ),
                   );
@@ -466,7 +471,12 @@ export default function AppRouter({
                 setProjects((prev) =>
                   prev.map((p) =>
                     p.id === selectedProject.id
-                      ? { ...p, annotations: fresh.annotations, textAlignments: fresh.textAlignments }
+                      ? {
+                          ...p,
+                          annotations: fresh.annotations,
+                          textAlignments: fresh.textAlignments,
+                          stafflines: fresh.stafflines,
+                        }
                       : p,
                   ),
                 );

@@ -14,6 +14,7 @@ import ModelTab from "./ModelTab";
 import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
+import StafflinesTab from "./StafflinesTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
 
@@ -84,7 +85,7 @@ export default function ProjectDetail({
   textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei files" | "text"
+    "images" | "models" | "annotations" | "mei files" | "text" | "stafflines"
   >("images");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
@@ -124,7 +125,7 @@ export default function ProjectDetail({
   const annSection = useAssetSection(project.annotations ?? []);
 
   const switchTab = (
-    tab: "images" | "models" | "annotations" | "mei files",
+    tab: "images" | "models" | "annotations" | "mei files" | "text" | "stafflines",
   ) => {
     setActiveTab(tab);
     imgSection.clearSelection();
@@ -139,7 +140,7 @@ export default function ProjectDetail({
   const tabs = [
      "images",
      "models",
-     ...(stepsUnlocked >= 1 ? ["annotations", "text"] : []),
+     ...(stepsUnlocked >= 1 ? ["annotations", "text", "stafflines"] : []),
      ...(stepsUnlocked >= 3 ? ["mei files"] : []),
    ] as const;
 
@@ -549,7 +550,13 @@ export default function ProjectDetail({
                   key={tab}
                   onClick={() =>
                     switchTab(
-                      tab as "images" | "models" | "annotations" | "mei files",
+                      tab as
+                        | "images"
+                        | "models"
+                        | "annotations"
+                        | "mei files"
+                        | "text"
+                        | "stafflines",
                     )
                   }
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
@@ -621,6 +628,13 @@ export default function ProjectDetail({
             {activeTab === "text" && (
               <TextAlignmentsTab
                 textAlignments={project.textAlignments}
+                images={project.images}
+                projectId={project.id}
+              />
+            )}
+            {activeTab === "stafflines" && (
+              <StafflinesTab
+                stafflines={project.stafflines}
                 images={project.images}
                 projectId={project.id}
               />

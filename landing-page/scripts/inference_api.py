@@ -78,3 +78,27 @@ async def get_annotation_txt(
     if not row:
         raise HTTPException(status_code=404)
     return {"yoloTxt": row[0], "imageName": row[1]}
+
+
+@router.get("/projects/{project_id}/stafflines/{detection_id}")
+async def get_staffline_detection(
+    project_id: int,
+    detection_id: str,
+    user=Depends(get_current_user),
+):
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT s.jsomr_json, s.image_name, s.scale_unit, s.stave_count,"
+            " s.mode_lines_per_stave, s.status"
+            " FROM staffline_detections s"
+            " JOIN projects p ON p.id = s.project_id"
+            " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
+            (detection_id, project_id, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404)
+    return {
+        "jsomrJson": row[0], "imageName": row[1], "scaleUnit": row[2],
+        "staveCount": row[3], "modeLinesPerStave": row[4], "status": row[5],
+    }
