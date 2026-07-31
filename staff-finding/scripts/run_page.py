@@ -44,13 +44,6 @@ from component_filter import filter_components
 from fit_centerline import fit_centerline
 from group_staves import group_staves, page_absolute_x_range
 from yolo_io import parse_yolo_txt, filter_to_class, YoloDetection
-from bgr_adapter import (
-    load_bgr_model,
-    run_bgr_inference,
-    DEFAULT_BGR_WINDOW_SIZE,
-    DEFAULT_BGR_STRIDE,
-    DEFAULT_BGR_CONFIDENCE,
-)
 from fallback_redetect import (
     FallbackCandidate,
     identify_probe_regions,
@@ -63,6 +56,14 @@ from fallback_redetect import (
 
 DEFAULT_STAFFLINE_CLASS = 2
 DEFAULT_CROP_PADDING_PX = 2  # small margin around YOLO box; see driver plan
+
+# Mirrors bgr_adapter.py's own defaults, duplicated here rather than imported:
+# bgr_adapter is only imported lazily, inside process_page()'s use_bgr branch,
+# so --no-bgr (and --help) don't need the external inference_simple dependency
+# to be present just to resolve these function/argparse default values.
+DEFAULT_BGR_WINDOW_SIZE = 512
+DEFAULT_BGR_STRIDE = 256
+DEFAULT_BGR_CONFIDENCE = 0.5
 
 # --- Fallback missed-detection re-probe (opt-in via --fallback-redetect) ---
 DEFAULT_FALLBACK_CONF = 0.15  # deliberate midpoint between the proven page-wide
@@ -224,6 +225,15 @@ def run_fallback_redetect(
 
         candidates: list[FallbackCandidate] = []
         candidate_boxes: list[tuple[int, int, int, int]] = []
+        # Keyed by id(candidate): box_index (used above, len(fit_results) at
+        # probe time) collided every candidate in a region onto the same
+        # box_XXXX_fallback.png, each overwriting the last, and the
+        # acceptance loop below recomputed a different box_index anyway, so
+        # summary_rows ended up pointing at a path nothing had written.
+        # Per-region, per-candidate paths are unique from the moment each
+        # candidate's diagnostics are written, so the accepted subset can
+        # carry its own actual path forward instead of guessing a new one.
+        candidate_paths: dict[int, tuple[Path, Path]] = {}
         if result.boxes is not None:
             for box in result.boxes:
                 if int(box.cls[0]) != staffline_class:
@@ -239,8 +249,8 @@ def run_fallback_redetect(
                 crop, actual_box = crop_with_padding(page_for_crops, page_box, crop_padding)
                 if crop.size == 0:
                     continue
-                box_index = len(fit_results)
-                diag_path = page_output_dir / f"box_{box_index:04d}_fallback.png"
+                cand_index = len(candidates)
+                diag_path = page_output_dir / f"fallback_s{region.stave_id:02d}_c{cand_index:02d}.png"
                 filter_result = filter_components(
                     crop=crop,
                     scale_unit=scale_unit,
@@ -248,7 +258,7 @@ def run_fallback_redetect(
                     merge_components=merge_components,
                     binarization=binarization,
                 )
-                fit_diag_path = page_output_dir / f"box_{box_index:04d}_fallback_fit.png"
+                fit_diag_path = page_output_dir / f"fallback_s{region.stave_id:02d}_c{cand_index:02d}_fit.png"
                 fit_result = fit_centerline(
                     filter_result=filter_result,
                     scale_unit=scale_unit,
@@ -258,14 +268,14 @@ def run_fallback_redetect(
                 fit_result.x_page_offset = float(actual_box[0])
                 fit_result.y_page_offset = float(actual_box[1])
                 stage1_score = _top_score_of(filter_result) or 0.0
-                candidates.append(
-                    FallbackCandidate(
-                        fit=fit_result,
-                        yolo_confidence=float(box.conf[0]),
-                        stage1_score=stage1_score,
-                    )
+                candidate = FallbackCandidate(
+                    fit=fit_result,
+                    yolo_confidence=float(box.conf[0]),
+                    stage1_score=stage1_score,
                 )
+                candidates.append(candidate)
                 candidate_boxes.append(actual_box)
+                candidate_paths[id(candidate)] = (diag_path, fit_diag_path)
 
         sibling_widths = _sibling_widths_for_stave(region.stave_id, grouping_result, fit_results)
         accepted, cap_exceeded = validate_and_select_candidates(region, candidates, sibling_widths)
@@ -293,6 +303,7 @@ def run_fallback_redetect(
                 int(fit_result.x_page_offset + (fit_result.x_end - fit_result.x_start)),
                 int(fit_result.y_page_offset + 1),  # box height isn't tracked post-fit; not load-bearing downstream
             )
+            cand_diag_path, cand_fit_diag_path = candidate_paths[id(candidate)]
             summary_rows.append(
                 {
                     "box_index": box_index,
@@ -304,17 +315,13 @@ def run_fallback_redetect(
                     "flags": "",
                     "n_discarded": None,
                     "top_score": candidate.stage1_score,
-                    "diagnostic_path": str(
-                        (page_output_dir / f"box_{box_index:04d}_fallback.png").relative_to(output_dir)
-                    ),
+                    "diagnostic_path": str(cand_diag_path.relative_to(output_dir)),
                     "fit_x_start": fit_result.x_start,
                     "fit_x_end": fit_result.x_end,
                     "fit_residual_mean": round(fit_result.residual_mean, 3),
                     "fit_residual_max": round(fit_result.residual_max, 3),
                     "fit_flags": ";".join(fit_result.flags),
-                    "fit_diagnostic_path": str(
-                        (page_output_dir / f"box_{box_index:04d}_fallback_fit.png").relative_to(output_dir)
-                    ),
+                    "fit_diagnostic_path": str(cand_fit_diag_path.relative_to(output_dir)),
                     "stave_id": None,
                     "within_stave_index": None,
                     "grouping_flags": None,
@@ -390,6 +397,8 @@ def process_page(
 
     # --- BGR or skip ---
     if use_bgr:
+        from bgr_adapter import load_bgr_model, run_bgr_inference
+
         if bgr_model_path is None:
             raise ValueError("BGR is enabled but no --bgr-model was provided.")
         print(f"Loading BGR model: {bgr_model_path}")
