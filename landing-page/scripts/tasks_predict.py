@@ -128,18 +128,25 @@ def run_predict_task(job_id, project_id, body):
                     "jsonName": "", "detectionCount": n_detections,
                 })
 
-            if has_text_alignment:
-                publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
-                continue
-
+            # Staffline detection is gated only on has_class (fresh stave-class
+            # boxes to work from), never on has_text_alignment -- an image can
+            # have has_text_alignment=True (text-finding already ran) and
+            # has_annotation=False (YOLO just produced brand-new boxes in this
+            # same iteration) at the same time, and those new boxes still need
+            # a staffline_detections row. Ordered before the has_text_alignment
+            # check below so its continue can never skip this block.
             if has_class(yolo_txt, STAFFLINE_CLASS_ID):
                 for sf_ev in run_staffline_detection(
-                    cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
+                    job_id, cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
                     else:
                         publish(sf_ev)
+
+            if has_text_alignment:
+                publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
+                continue
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
             for text_ev in stream_text_finding(

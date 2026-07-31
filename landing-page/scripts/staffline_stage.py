@@ -30,6 +30,8 @@ from typing import Iterator, Optional
 
 import numpy as np
 
+from job_store import check_cancelled, JobCancelled
+
 # Merged 0-indexed class space slot for "staves" -- matches
 # medieval_models.STAVE_CLASS_MAP / yolo_inference.CATEGORY_TO_SLOT["staves"]
 # and staff-finding/scripts/run_page.py's own DEFAULT_STAFFLINE_CLASS.
@@ -180,7 +182,7 @@ def _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, sca
 
 
 def run_staffline_detection(
-    cur, con,
+    job_id: str, cur, con,
     project_id: int, image_id: str, image_name: str, annotation_id: str,
     image_arr: np.ndarray, yolo_txt: str,
     interpolate_missing: bool = False,
@@ -193,6 +195,14 @@ def run_staffline_detection(
     interpolate_missing is plumbed through, default off, matching
     staff-finding/dox/STATUS.md's "not yet validated across the corpus"
     caveat -- flipping it later is a default change, not a re-plumbing job.
+
+    tasks_predict.py's own per-image check_cancelled(job_id) call only runs
+    once per image; a page with many stave boxes can spend real time in the
+    per-box loop below with no cancellation observed in between, so this
+    checks again on every box. JobCancelled is deliberately re-raised, not
+    swallowed by the broad except below -- a cancelled job must actually
+    stop, not be recorded as one failed staffline-detection attempt among
+    many while the outer per-image loop keeps going.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
     from component_filter import filter_components
@@ -213,6 +223,7 @@ def run_staffline_detection(
         fit_results = []
         boxes = []
         for det in detections:
+            check_cancelled(job_id)
             box = det.to_pixel_box(w, h)
             crop, actual_box = _crop_with_padding(image_arr, box, CROP_PADDING_PX)
             if crop.size == 0:
@@ -263,6 +274,23 @@ def run_staffline_detection(
         if grouping_result.rhythm_anomalies:
             message += f", {len(grouping_result.rhythm_anomalies)} stave(s) flagged for review"
         yield {"type": "log", "message": message}
+    except JobCancelled:
+        con.rollback()
+        raise
     except Exception as e:
         con.rollback()
+        try:
+            cur.execute(
+                "INSERT INTO staffline_detections"
+                " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
+                "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'failed')",
+                (
+                    _uuid.uuid4().hex, project_id, image_id, image_name, annotation_id,
+                    json.dumps([]), scale_unit, 0, None, json.dumps({"error": str(e)}),
+                ),
+            )
+            con.commit()
+        except Exception:
+            con.rollback()
         yield {"type": "error", "message": str(e)}
