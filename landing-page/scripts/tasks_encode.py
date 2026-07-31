@@ -132,7 +132,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "validating"})
 
         ev({"type": "stage", "name": "processing"})
-        stem = Path(xml_filename).stem
+        stem = Path(image_filename).stem if image_filename else Path(xml_filename)
         image_ref = Path(image_filename) if image_filename else Path("")
         mei_bytes_out = build_mei(
             glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
