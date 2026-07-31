@@ -97,12 +97,23 @@ def run_predict_task(job_id, project_id, body):
         results = []
         for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment in images:
             check_cancelled(job_id)
+            pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
+            img_arr = np.array(pil_img)
             if has_annotation:
                 publish({"type": "log", "message": f"{image_name}: already annotated — skipping YOLO"})
+                # yolo_txt/ann_id are still needed below for the staffline-detection
+                # check (has_text_alignment can be False even when has_annotation is
+                # True -- see the comment in the validating stage above), so fetch
+                # the annotation a prior run already wrote instead of leaving these
+                # unset.
+                cur.execute(
+                    "SELECT id, yolo_txt FROM annotations WHERE project_id=%s AND image_id=%s"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (project_id, image_id),
+                )
+                ann_id, yolo_txt = cur.fetchone()
             else:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
-                pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-                img_arr = np.array(pil_img)
                 yolo_txt = yolo_models.infer(img_arr)
                 ann_id = write_annotation(
                     cur, con, project_id, image_id, image_name, yolo_txt,
