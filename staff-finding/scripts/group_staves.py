@@ -245,8 +245,11 @@ def group_staves(
             carries source='interpolated'.  Default False.
         interpolation_max_gap: Upper gap bound (pixels) for the
             interpolation trigger.  Gaps above this are treated as
-            inter-stave spacing and are not filled.  Defaults to
-            cut_threshold * INTERPOLATION_GAP_MULTIPLIER when None.
+            inter-stave spacing and are not filled.  When None it is
+            derived adaptively from the page gap distribution (see
+            interpolate_staves._compute_interpolation_max_gap), falling
+            back to cut_threshold * INTERPOLATION_GAP_MULTIPLIER when no
+            gaps are available.
         save_path: If provided, render a page-level diagnostic showing each
             fit colored by its stave assignment, plus annotations of gap
             distribution and cut threshold.

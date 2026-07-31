@@ -52,8 +52,12 @@ RUN pip install --no-cache-dir -r scripts/requirements.txt
 # package-dir="scripts" mapping resolves the same way it does in a bare-metal
 # checkout. .dockerignore there excludes large test-fixture/experiment dirs
 # not needed at runtime.
+# Non-editable: the whole source tree is already baked into the image via
+# the COPY above regardless, so -e buys nothing at runtime (no live-edit
+# workflow makes sense inside a built container) beyond an unnecessary
+# editable-install pointer back at that same source tree.
 COPY --from=staff_finding . /app/staff-finding/
-RUN pip install --no-cache-dir -e /app/staff-finding
+RUN pip install --no-cache-dir /app/staff-finding
 # Prerequisite: `git lfs pull` before `docker build` — the medieval model
 # checkpoints under scripts/assets/models/medieval/ are Git-LFS pointers
 # until that's run, and this COPY would otherwise ship stub files.

@@ -19,6 +19,7 @@ staff-finding/addtl-gt/
 yolov8*.pt
 *.pt
 !models/**/*.pt
+!landing-page/scripts/assets/models/medieval/*.pt
 
 # images
 *.png

@@ -23,6 +23,11 @@ dependencies = ["numpy", "scipy", "scikit-image", "opencv-python"]
 # (test_visualization_saves, test_diagnostic_renders, and others).
 [project.optional-dependencies]
 diagnostics = ["matplotlib"]
+# experiments/ isn't part of py-modules below (none of it ships to production),
+# but gp_fitter.py needs scikit-learn and implicit_neural_fitter.py needs torch,
+# neither otherwise declared anywhere -- install this extra to run those two
+# experiment runners from a clean environment.
+experiments = ["scikit-learn", "torch"]
 
 # Flat py-modules layout, deliberately not a nested/namespaced package: every
 # existing import inside scripts/ (and in scripts/script_tests/) is a flat
