@@ -11,6 +11,7 @@ can be loaded directly into the annotator for correction.
 
 import argparse
 import json
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,7 @@ def run_inference(
 
     timestamp = datetime.now(timezone.utc).isoformat()
     all_predictions = []
+    failed_images = []
 
     for image_path in image_paths:
         stem = image_path.stem
@@ -76,6 +78,7 @@ def run_inference(
             )
         except Exception as e:
             print(f"Skipping {image_path.name}: {e}")
+            failed_images.append({"image": str(image_path), "error": str(e)})
             continue
 
         result = results[0]
@@ -117,8 +120,17 @@ def run_inference(
 
     all_json_path = output_dir / "all_predictions.json"
     all_json_path.write_text(json.dumps(all_predictions, indent=2))
-    print(f"\nDone. Outputs written to {output_dir}/")
+    if failed_images:
+        failed_json_path = output_dir / "failed_images.json"
+        failed_json_path.write_text(json.dumps(failed_images, indent=2))
+        print(
+            f"\nDone, but {len(failed_images)} of {len(image_paths)} image(s) failed "
+            f"and were skipped -- see {failed_json_path}"
+        )
+    else:
+        print(f"\nDone. Outputs written to {output_dir}/")
     print(f"Aggregated results: {all_json_path}")
+    return failed_images
 
 
 def main():
@@ -145,13 +157,15 @@ def main():
     parser.add_argument("--iou", type=float, default=0.7, help="IoU threshold for NMS")
     args = parser.parse_args()
 
-    run_inference(
+    failed_images = run_inference(
         images_dir=Path(args.images_dir),
         weights_path=Path(args.weights),
         output_dir=Path(args.output_dir),
         conf_threshold=args.conf,
         iou_threshold=args.iou,
     )
+    if failed_images:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
