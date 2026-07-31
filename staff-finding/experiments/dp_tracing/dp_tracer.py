@@ -38,6 +38,23 @@ MAX_STEP_PX = 3
 # multiple of h; 0.2h is gentle — just enough to blur single-pixel speckle.
 BLUR_SIGMA_MULTIPLIER = 0.2
 
+# Weight of the distance-from-y_hint penalty added to the per-column data
+# cost.  Without this, the cost only rewards dark pixels, so when the search
+# band (±band_half_multiplier*h) overlaps a neighbouring staffline, the DP
+# can converge onto that darker neighbour instead of following its own
+# YOLO-box hint. The penalty is normalised to [0, 1] across the band before
+# weighting, so it scales consistently regardless of band size.
+#
+# 0.7 was chosen empirically, not just theoretically: on a synthetic band
+# with a faint true line (grey 120) and a darker, thicker distractor
+# (grey 20) 12px from the hint in a 15px half-band, weights below ~0.6 still
+# let the distractor win (confirming the bug is real, not just theoretical);
+# 0.6 is the observed tipping point, and 0.7 keeps a small margin above it.
+# Real manuscript contrast/spacing will differ -- tune alongside real
+# dp_tracing runs before relying on this for anything beyond comparison
+# against the other experiment runners.
+HINT_DISTANCE_PENALTY_WEIGHT = 0.7
+
 
 # ---------------------------------------------------------------------------
 # Core DP
@@ -53,6 +70,7 @@ def dp_trace(
     band_half_multiplier: float = BAND_HALF_MULTIPLIER,
     max_step_px: int = MAX_STEP_PX,
     blur_sigma_multiplier: float = BLUR_SIGMA_MULTIPLIER,
+    hint_distance_penalty_weight: float = HINT_DISTANCE_PENALTY_WEIGHT,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Trace one staffline by DP.
 
@@ -65,6 +83,10 @@ def dp_trace(
         band_half_multiplier: Search band = ± band_half_multiplier × h.
         max_step_px:          Max y-shift allowed between adjacent columns.
         blur_sigma_multiplier: Gaussian blur sigma = multiplier × h.
+        hint_distance_penalty_weight: Weight of the distance-from-y_hint
+            penalty, keeping the trace anchored to its own YOLO hint instead
+            of drifting onto a darker neighbouring staffline within the same
+            search band. 0 reproduces the original darkness-only cost.
 
     Returns:
         (xs, ys): page-absolute x and y arrays for the traced path.
@@ -104,16 +126,25 @@ def dp_trace(
     # shape: (n_band, n_cols)
     band_img = smoothed[y_min : y_max + 1, x_start : x_end + 1] / 255.0
 
+    # Distance-from-y_hint penalty, normalised to [0, 1] across the band and
+    # added at every column so the DP stays anchored to its own YOLO hint
+    # instead of drifting onto a darker neighbouring staffline that also
+    # falls within the search band. Same value at every column (the hint
+    # doesn't move column to column), so computed once here.
+    band_rows = np.arange(y_min, y_max + 1, dtype=np.float32)
+    hint_penalty = np.clip(np.abs(band_rows - y_hint) / max(band_half, 1e-6), 0.0, 1.0)
+    hint_penalty *= hint_distance_penalty_weight
+
     # DP forward pass.
     # dp[y_idx] = minimum cumulative cost to reach y_idx at the current column.
-    dp_prev = band_img[:, 0].copy()
+    dp_prev = band_img[:, 0].copy() + hint_penalty
     dp_table = np.empty((n_cols, n_band), dtype=np.float32)
     dp_table[0] = dp_prev
 
     window = 2 * max_step_px + 1
     for col in range(1, n_cols):
         reachable = minimum_filter1d(dp_prev, size=window, mode="nearest")
-        dp_col = band_img[:, col] + reachable
+        dp_col = band_img[:, col] + hint_penalty + reachable
         dp_table[col] = dp_col
         dp_prev = dp_col
 
