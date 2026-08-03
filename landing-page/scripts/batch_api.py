@@ -56,6 +56,7 @@ class BatchRunBody(BaseModel):
     column_bimodal_threshold: float = 0.5
     masking_enabled: bool = True
     mask_padding: int = 15
+    music_overlap_filter_enabled: bool = True
     # YOLO layer-separation settings, mirroring inference_api.py's PredictBody
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     model_id: Optional[str] = None

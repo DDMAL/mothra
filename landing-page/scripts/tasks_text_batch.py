@@ -84,6 +84,7 @@ def run_text_batch_task(job_id, project_id, body):
             "column_bimodal_threshold": str(body["column_bimodal_threshold"]),
             "masking_enabled": "true" if body["masking_enabled"] else "false",
             "mask_padding": str(body["mask_padding"]),
+            "music_overlap_filter_enabled": "true" if body["music_overlap_filter_enabled"] else "false",
             "music_boxes": json.dumps(music_boxes_by_index),
             "mask_json_list": json.dumps(mask_json_by_index),
         }

@@ -131,6 +131,7 @@ def run_predict_task(job_id, project_id, body):
                 column_bimodal_threshold=body.get("text_column_bimodal_threshold", 0.5),
                 masking_enabled=body.get("text_masking_enabled", True),
                 mask_padding=body.get("text_mask_padding", 15),
+                music_overlap_filter_enabled=body.get("text_music_overlap_filter_enabled", True),
                 mask_json_override=mask_json_override,
                 source_id=body.get("text_source_id") if image_folio else None,
                 folio_override=image_folio,
