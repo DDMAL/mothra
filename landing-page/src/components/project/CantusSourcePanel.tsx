@@ -110,6 +110,10 @@ export default function CantusSourcePanel({
             setSourceIdInput(project.cantusSourceId);
             loadSource(project.cantusSourceId, { preserveFolio: isSameProject });
         } else {
+            // invalidate any still-in-flight load from a previous project so
+            // its (now-stale) response can't land here and set a source that
+            // this project never had
+            loadRequestRef.current++;
             setSourceIdInput("");
             patch({ sourceId: "", folio: ""});
         }
