@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
 import AppRouter from "./components/AppRouter";
@@ -26,6 +26,43 @@ export default function App() {
     projects.find((p) => p.id === selectedProjectId) ?? null;
   const mutations = useProjectMutations(setProjects);
 
+  // Browser back/forward should step through Mothra's own view history
+  // instead of leaving the app on the first Back press (issue #133). There's
+  // no router/URL sync in this app, so `view`/`selectedProjectId` are pushed
+  // into `history.state` by hand here and restored on `popstate` - every
+  // existing `setView`/`setSelectedProjectId` call site is unaffected since
+  // they just call these same state setters.
+  const isPoppingRef = useRef(false);
+  const hasMountedHistoryRef = useRef(false);
+
+  useEffect(() => {
+    window.history.replaceState({ view, selectedProjectId }, "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!hasMountedHistoryRef.current) {
+      hasMountedHistoryRef.current = true;
+      return;
+    }
+    if (isPoppingRef.current) {
+      isPoppingRef.current = false;
+      return;
+    }
+    window.history.pushState({ view, selectedProjectId }, "");
+  }, [view, selectedProjectId]);
+
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      const state = e.state as { view?: View; selectedProjectId?: number | null } | null;
+      isPoppingRef.current = true;
+      setView(state?.view ?? "landing");
+      setSelectedProjectId(state?.selectedProjectId ?? null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  
   const {
     pendingXmlFile,
     setPendingXmlFile,

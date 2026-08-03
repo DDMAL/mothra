@@ -214,7 +214,7 @@ export default function CantusSourcePanel({
                             </p>
                         ) : (
                             <p className="text-white/50 text-xs">
-                            select a folio above before uploading
+                            select a folio above to tag your next upload — already-uploaded images keep the folio they were tagged with
                             </p>
                         )}
                     </>
