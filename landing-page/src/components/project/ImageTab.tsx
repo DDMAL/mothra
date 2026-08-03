@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { toast } from "../../lib/toast";
 import { compareFolios, extractFolioFromFilename, matchCanonicalFolio } from "../../utils/folio";
 import type { FolioReviewRow } from "../../utils/folio";
 import BatchFolioReviewModal from "./BatchFolioReviewModal";
@@ -286,9 +287,6 @@ export default function ImageTab({
           );
           done++;
           setUploadProgress({ done, total });
-          if (imageSubTab === "batch") {
-            onBatchImageUploaded({ id: result.id, name: result.name });
-          }
           return {
             id: result.id,
             name: result.name,
@@ -309,9 +307,6 @@ export default function ImageTab({
           );
           done++;
           setUploadProgress({ done, total });
-          if (imageSubTab === "batch") {
-            onBatchImageUploaded({ id: result.id, name: result.name });
-          }
           return {
             id: result.id,
             name: result.name,
@@ -327,7 +322,19 @@ export default function ImageTab({
         ...project,
         images: [...project.images, ...imageEntries, ...pdfEntries],
       });
+      if (imageSubTab === "batch") {
+        // fire in resolved-array order (selection order), not network
+        // completion order, so BatchTab's index<->folio pairing can't drift
+        // from what the user actually selected
+        for (const entry of [...imageEntries, ...pdfEntries]) {
+          onBatchImageUploaded({ id: entry.id, name: entry.name });
+        }
+      }
       if (imageSubTab === "grid" && activeFolio && (imageEntries.length > 0 || pdfEntries.length > 0)) {
+        const uploaded = [...imageEntries, ...pdfEntries];
+        toast.success(
+          `folio "${activeFolio}" tagged to ${uploaded.length === 1 ? uploaded[0].name : `${uploaded.length} images`} - select a new folio to tag the next upload`,
+        );
         onFolioConsumed?.();
       }
       section.setUploadModal(false);

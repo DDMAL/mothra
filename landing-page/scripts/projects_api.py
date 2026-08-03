@@ -58,7 +58,10 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
 
 def _project_row_to_dict(cur, row, username):
     pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
-    cur.execute("SELECT id, name, folio, source_id, source_name FROM project_images WHERE project_id=%s", (pid,))
+    cur.execute(
+        "SELECT id, name, folio, source_id, source_name FROM project_images"
+        " WHERE project_id=%s ORDER BY created_at ASC, id ASC", (pid,)
+    )
     images = [{"id": r[0], "name": r[1], "folio": r[2], "sourceId": r[3], "sourceName": r[4]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
@@ -95,7 +98,8 @@ def list_projects(user=Depends(get_current_user)):
         pids = tuple(r[0] for r in rows)
 
         cur.execute(
-            "SELECT project_id, id, name, folio, source_id, source_name FROM  project_images WHERE project_id IN %s",
+            "SELECT project_id, id, name, folio, source_id, source_name FROM project_images"
+            " WHERE project_id IN %s ORDER BY created_at ASC, id ASC",
             (pids,),
         )
         images_by_pid: dict = {}
