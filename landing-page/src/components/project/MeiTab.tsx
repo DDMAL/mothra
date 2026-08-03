@@ -222,10 +222,10 @@ export default function MeiTab({
       {meiViewFile && (
         <MeiViewerModal
           file={meiViewFile}
-          project={project}
           onClose={() => setMeiViewFile(null)}
         />
       )}
+
       {validateModal && (
         <Modal onClose={() => setValidateModal(null)}>
           <h2 className="text-xl text-[#1D3335] text-center">

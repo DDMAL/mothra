@@ -118,13 +118,20 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
 
         image_data_uri = None
         if image_name:
-            cur.execute("SELECT data, mime_type FROM project_images WHERE project_id=%s AND name=%s",
-                        (project_id, image_name))
+            cur.execute(
+                "SELECT data, original_data, original_mime_type, mime_type FROM project_images"
+                " WHERE project_id=%s AND name=%s",
+                (project_id, image_name))
             img_row = cur.fetchone()
             if img_row:
-                img_data, mime_type = img_row
-                mime = mime_type or "image/jpeg"
-                image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(img_data)).decode()}"
+                img_data, original_data, original_mime_type, mime_type = img_row
+                image_bytes = original_data if original_data is not None else img_data
+                # original_data (when present) can be a different format than
+                # the resized working copy (e.g. PNG vs. the resize's JPEG) —
+                # use its own mime type, falling back to the working copy's
+                # for rows written before original_mime_type existed.
+                mime = (original_mime_type if original_data is not None else mime_type) or mime_type or "image/jpeg"
+                image_data_uri = f"data:{mime};base64,{base64.b64encode(bytes(image_bytes)).decode()}"
 
     edit_token = _make_edit_token(project_id, mei_id)
     session_id = _uuid.uuid4().hex[:8]

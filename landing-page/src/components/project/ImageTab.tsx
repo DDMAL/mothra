@@ -12,6 +12,7 @@ import Modal from "../shared/Modal";
 import LargeImageWarningModal from "./LargeImageWarningModal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
+import TruncatedName from "../shared/TruncatedName";
 import RenameModal from "./RenameModal";
 import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
@@ -40,8 +41,7 @@ interface ImageTabProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
-    originalWidth?: number,
-    originalHeight?: number,
+    originalFile?: File,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
@@ -222,8 +222,7 @@ export default function ImageTab({
 
   interface PendingUpload {
     file: File;
-    originalWidth?: number;
-    originalHeight?: number;
+    originalFile?: File;
   }
 
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
@@ -274,7 +273,7 @@ export default function ImageTab({
       let done = 0;
 
       const imageEntries = await Promise.all(
-        imageUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+        imageUploads.map(async ({ file: f, originalFile }) => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
@@ -283,7 +282,7 @@ export default function ImageTab({
           // on mount regardless of which sub-tab is active).
           const result = await onUploadImage(
             f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
@@ -302,11 +301,11 @@ export default function ImageTab({
       );
 
       const pdfEntries = await Promise.all(
-        pdfUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+        pdfUploads.map(async ({ file: f, originalFile }) => {
           const pdfFolio = folioAt(seq++);
           const result = await onUploadImage(
             f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
@@ -431,12 +430,8 @@ export default function ImageTab({
     const oversizedSet = new Set(oversized);
     const toPendingUpload = async (f: File): Promise<PendingUpload> => {
       if (!oversizedSet.has(f)) return { file: f };
-      const resized = await resizeImageFile(f, TARGET_RESIZE_BYTES);
-      return {
-        file: resized.file,
-        originalWidth: resized.originalWidth,
-        originalHeight: resized.originalHeight,
-      };
+      const resizedFile = await resizeImageFile(f, TARGET_RESIZE_BYTES);
+      return { file: resizedFile, originalFile: f };
     };
     const [imageUploads, pdfUploads] = await Promise.all([
       Promise.all(imageFiles.map(toPendingUpload)),
@@ -598,6 +593,14 @@ export default function ImageTab({
             getItemBadge={(name) =>
               getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], project.stepsUnlocked)?.badge ?? null
             }
+            onUse={(img) => {
+              if (!usedNames.images.includes(img.name)) {
+                onUsedNamesChange({
+                  ...usedNames, images: [...usedNames.images, img.name],
+                });
+                setValidationError(null);
+              }
+            }}
           />
         )}
       </div>
@@ -743,13 +746,12 @@ export default function ImageTab({
                 <div className="flex flex-col gap-2 text-sm text-white/70 font-mono">
                   <div className="flex justify-between gap-4">
                     <span>name</span>
-                    <span className="text-white truncate">{img.name}</span>
+                    <TruncatedName name={img.name} className="text-white" />
                   </div>
                   {img.folio && (
-                    <div className="flex justify-between gap-4">
-                      <span>folio</span>
-                      <span className="text-white">{img.folio}</span>
-                    </div>
+                    <span className="self-end bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                      {img.folio}
+                    </span>
                   )}
                   <div className="flex justify-between gap-4">
                     <span>type</span>

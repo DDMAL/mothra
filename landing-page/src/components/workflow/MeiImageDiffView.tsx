@@ -18,7 +18,7 @@ export default function MeiImageDiffView({ imageId, diff, imageName }: MeiImageD
   useEffect(() => {
     if (!imageId) return;
     let url: string | null = null;
-    apiFetch(`/api/images/${imageId}`)
+    apiFetch(`/api/images/${imageId}/original`)
       .then((r) => (r.ok ? r.blob() : Promise.reject("fetch failed")))
       .then((blob) => {
         url = URL.createObjectURL(blob);

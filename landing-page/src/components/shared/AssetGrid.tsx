@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Fragment } from "react";
 import type React from "react";
 import Paginator from "./Paginator";
+import TruncatedName from "./TruncatedName";
 
 interface AssetItem {
   id: string;
@@ -25,6 +26,7 @@ interface AssetGridProps<T extends AssetItem> {
   renderThumbnail: (item: T) => ReactNode;
   getItemBadge?: (name: string) => string | null;
   groupBy?: (item: T) => string;
+  onUse?: (item: T) => void;
 }
 
 export default function AssetGrid<T extends AssetItem>({
@@ -36,6 +38,7 @@ export default function AssetGrid<T extends AssetItem>({
   renderThumbnail,
   getItemBadge,
   groupBy,
+  onUse,
 }: AssetGridProps<T>) {
   return (
     <>
@@ -69,6 +72,17 @@ export default function AssetGrid<T extends AssetItem>({
                   }}
                 >
                   {renderThumbnail(item)}
+                  {onUse && !used && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUse(item);
+                      }}
+                      className="absolute top-1.5 left-1.5 z-20 px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
+                    >
+                      use
+                    </button>
+                  )}
                   {badge && (
                     <div className="absolute bottom-0 inset-x-0 flex justify-center pb-1.5 pointer-events-none">
                       <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">
@@ -78,9 +92,10 @@ export default function AssetGrid<T extends AssetItem>({
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-1">
-                  <span className={`text-sm text-white truncate ${used ? "opacity-40" : ""}`}>
-                    {item.name}
-                  </span>
+                  <TruncatedName
+                    name={item.name}
+                    className={`text-sm text-white ${used ? "opacity-40" : ""}`}
+                  />
                   {!used && (
                     <button
                       onClick={(e) => {

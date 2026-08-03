@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import type { MeiFile, ProjectImage } from "../../types";
 import { diffZones } from "../../utils/meiZoneDiff";
 import MeiImageDiffView from "./MeiImageDiffView";
+import TruncatedName from "../shared/TruncatedName";
 
 interface Props {
     originalFiles: MeiFile[];
@@ -57,13 +58,13 @@ export default function MeiCompareModal({ originalFiles, correctedFiles, onClose
                     <button
                     key={p.corrected.id}
                     onClick={() => { setSelectedIndex(i); setViewMode("xml"); }}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer truncate max-w-[140px] ${
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer max-w-[140px] ${
                         i === selectedIndex
                         ? "bg-white text-[#4AADAA]"
                         : "text-[#1D3335]/60 hover:text-[#1D3335]"
                     }`}
                     >
-                    {p.name}
+                    <TruncatedName name={p.name} tailLength={10} className="min-w-0" />
                     </button>
                 ))}
                 </div>

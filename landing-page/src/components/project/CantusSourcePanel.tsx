@@ -1,9 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { CantusSource, Project, ProjectImage } from "../../types";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import { findFolioConflict, compareFolios } from "../../utils/folio";
 import { downloadBlob } from "../../utils/download";
+
+// Persists across CantusSourcePanel unmount/remount (e.g. navigating to the
+// processing/IC view and back) so a slow or failed background revalidation
+// never has to hide a source that was already loaded once this session.
+const sourceCache = new Map<string, CantusSource>();
 
 interface CantusSourcePanelProps {
     textFindingSettings: ReturnType<typeof useTextFindingSettings>;
@@ -31,24 +36,44 @@ export default function CantusSourcePanel({
     const [loadedSource, setLoadedSource] = useState<CantusSource | null>(null);
     const [conflict, setConflict] = useState<ProjectImage | null>(null);
     const [exportError, setExportError] = useState<string | null>(null);
+    // Guards against a stale in-flight load committing its (now-outdated)
+    // result after a newer load has already started — e.g. rapidly loading
+    // source A then source B before A's response arrives.
+    const loadRequestRef = useRef(0);
 
-    const loadSource = async (id: string) => {
+    const loadSource = async (id: string, opts: { preserveFolio?: boolean } = {}) => {
+        const requestId = ++loadRequestRef.current;
+        const cached = sourceCache.get(id);
+        if (cached) {
+            setLoadedSource(cached);
+            onSourceLoaded?.(cached);
+            patch(opts.preserveFolio ? {
+                sourceId: cached.sourceId
+            } : { sourceId: cached.sourceId, folio: "" });
+            onUpdateSourceId(cached.sourceId);
+            setError(null);
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const raw: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
             const data: CantusSource = {...raw, folios: [...raw.folios].sort(compareFolios) };
+            sourceCache.set(id, data);
+            if (requestId !== loadRequestRef.current) return;
             setLoadedSource(data);
             onSourceLoaded?.(data);
-            patch({ sourceId: data.sourceId, folio: ""});
+            patch(opts.preserveFolio ? { sourceId: data.sourceId } : { sourceId: data.sourceId, folio: "" });
             onUpdateSourceId(data.sourceId);
         } catch (e) {
+            if (requestId !== loadRequestRef.current) return;
             setLoadedSource(null);
             onSourceLoaded?.(null);
             patch({ sourceId: "", folio: "" });
             setError((e as Error).message);
         } finally {
-            setLoading(false);
+            if (requestId === loadRequestRef.current) setLoading(false);
         }
     };
 
@@ -57,12 +82,23 @@ export default function CantusSourcePanel({
         if (trimmed) loadSource(trimmed);
     };
 
+    // textFindingSettings (incl. `folio`) is one application-level state
+    // instance shared across all projects (created once in AppRouter), so
+    // "preserve the folio" is only correct when this effect is re-running for
+    // the *same* project (e.g. a remount after navigating to processing/IC and
+    // back) — otherwise a leftover folio from a different project could leak
+    // into a new project's upload, even when two projects share a source id.
+    const prevProjectIdRef = useRef<number | null>(null);
+
     useEffect(() => {
         // project switched — clear all per-project Cantus/OCR state, then
         // load the newly-selected project's own saved source (if any). Keyed on
-        // project.id (not project.cantusSourceId) so this fires on every switch,
-        // including between two projects that happen to share a source id or
-        // both have none.
+        // project.id (not just project.cantusSourceId) so this fires on every
+        // switch, including between two projects that happen to share a source
+        // id or both have none.
+        const isSameProject = prevProjectIdRef.current === project.id;
+        prevProjectIdRef.current = project.id;
+
         setLoadedSource(null);
         setError(null);
         setConflict(null);
@@ -72,13 +108,17 @@ export default function CantusSourcePanel({
 
         if (project.cantusSourceId) {
             setSourceIdInput(project.cantusSourceId);
-            loadSource(project.cantusSourceId);
+            loadSource(project.cantusSourceId, { preserveFolio: isSameProject });
         } else {
+            // invalidate any still-in-flight load from a previous project so
+            // its (now-stale) response can't land here and set a source that
+            // this project never had
+            loadRequestRef.current++;
             setSourceIdInput("");
             patch({ sourceId: "", folio: ""});
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [project.cantusSourceId]);
+    }, [project.id, project.cantusSourceId]);
 
     return (
         <div className="mb-4 bg-white/10 rounded-xl p-4 flex flex-col gap-3 text-sm text-white max-w-xl">
