@@ -12,17 +12,25 @@ import types
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Stub out imports the test sandbox doesn't have, before importing the
-# modules that try to reach for them.
+# modules that try to reach for them. Done via a module-scoped MonkeyPatch
+# (not the function-scoped `monkeypatch` fixture -- these stubs must exist
+# before the `import yolo_io`/`import run_page` below, i.e. before any test
+# function runs) so _restore_stubbed_modules can undo them once every test
+# in this file has run, instead of leaking them into whatever pytest
+# collects next.
+_mp = pytest.MonkeyPatch()
+
 fake_inference = types.ModuleType("inference_simple")
 fake_inference.load_model = lambda *a, **kw: None
 fake_inference.sliding_window_inference = lambda *a, **kw: None
 fake_inference.post_process_ink = lambda *a, **kw: None
 fake_inference.separate_layers = lambda *a, **kw: (None, None)
-sys.modules["inference_simple"] = fake_inference
+_mp.setitem(sys.modules, "inference_simple", fake_inference)
 
 # bgr_adapter.py itself also needs stubbing, not just inference_simple: it
 # does its own os.path.isfile() check across a few hardcoded developer-machine
@@ -38,11 +46,11 @@ fake_bgr_adapter.run_bgr_inference = lambda *a, **kw: None
 fake_bgr_adapter.DEFAULT_BGR_WINDOW_SIZE = 512
 fake_bgr_adapter.DEFAULT_BGR_STRIDE = 256
 fake_bgr_adapter.DEFAULT_BGR_CONFIDENCE = 0.5
-sys.modules["bgr_adapter"] = fake_bgr_adapter
+_mp.setitem(sys.modules, "bgr_adapter", fake_bgr_adapter)
 
 fake_torch = types.ModuleType("torch")
 fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
-sys.modules["torch"] = fake_torch
+_mp.setitem(sys.modules, "torch", fake_torch)
 
 fake_ultralytics = types.ModuleType("ultralytics")
 
@@ -53,10 +61,19 @@ class _FakeYOLO:
 
 
 fake_ultralytics.YOLO = _FakeYOLO
-sys.modules["ultralytics"] = fake_ultralytics
+_mp.setitem(sys.modules, "ultralytics", fake_ultralytics)
 
 import yolo_io
 import run_page
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_stubbed_modules():
+    """Undo the sys.modules stubs above once this file's tests are done,
+    instead of leaking fake torch/ultralytics/inference_simple/bgr_adapter
+    into whatever test file pytest collects next."""
+    yield
+    _mp.undo()
 
 
 def test_parse_yolo_txt():

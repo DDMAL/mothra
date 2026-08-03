@@ -259,6 +259,10 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM text_alignments WHERE project_id=%s", (project_id,))
+        # staffline_detections accumulates forever by design (see CLAUDE.md's
+        # Database schema table) but still carries a project_id FK, which
+        # would otherwise block this same DELETE FROM projects below.
+        cur.execute("DELETE FROM staffline_detections WHERE project_id=%s", (project_id,))
         # IC persists its sessions (incl. page-image BYTEA) in a table it
         # owns; purge this project's rows too. Guarded by to_regclass since
         # the table only exists once the IC service has run against this DB.

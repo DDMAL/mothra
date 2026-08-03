@@ -111,8 +111,16 @@ def run_predict_task(job_id, project_id, body):
                     " ORDER BY created_at DESC LIMIT 1",
                     (project_id, image_id),
                 )
-                ann_id, yolo_txt = cur.fetchone()
-            else:
+                row = cur.fetchone()
+                if row is not None:
+                    ann_id, yolo_txt = row
+                else:
+                    # Annotation was deleted between the validating stage and here
+                    # (e.g. a concurrent duplicate job) -- fall through to a fresh
+                    # YOLO run instead of crashing on an empty unpack.
+                    has_annotation = False
+                    publish({"type": "log", "message": f"{image_name}: annotation disappeared since validation — re-running YOLO"})
+            if not has_annotation:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
                 yolo_txt = yolo_models.infer(img_arr)
                 ann_id = write_annotation(

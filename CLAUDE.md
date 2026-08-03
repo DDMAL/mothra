@@ -311,10 +311,11 @@ before `pip install`-ing it (non-editable — the source tree is already
 baked into the image via that `COPY` regardless, so `-e` would only add an
 unused editable-install pointer back at itself; `staff-finding/.dockerignore`
 keeps its large test-fixture/experiment directories out of what actually
-gets sent to the Docker daemon). Skipping this wiring wouldn't error at
-build time — it would
-silently ship a backend/worker image where staffline detection always fails
-at runtime with `ModuleNotFoundError`.
+gets sent to the Docker daemon). Skipping this wiring doesn't silently ship a
+broken image — it fails the build itself: `docker compose build`'s
+`backend`/`worker` targets and the GitHub Actions backend build both error out
+at `COPY --from=staff_finding` with a missing-named-context failure, before
+any image is produced.
 
 **Requires the `docker-buildx` plugin (BuildKit).** Without it, `docker
 compose build` prints `Docker Compose requires buildx plugin to be

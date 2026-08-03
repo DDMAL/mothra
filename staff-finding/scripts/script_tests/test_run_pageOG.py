@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 # Import only the pieces that don't trigger the inference_simple import.
 # We do this by importing from the module file directly, bypassing the
@@ -16,22 +17,32 @@ sys.path.insert(0, str(_SCRIPTS_DIR))  # so run_pageOG.py's sibling imports reso
 spec = importlib.util.spec_from_file_location(
     "run_page_partial", str(_SCRIPTS_DIR / "run_pageOG.py")
 )
-# Stub out imports the test environment doesn't have.
+# Stub out imports the test environment doesn't have, via a module-scoped
+# MonkeyPatch so _restore_stubbed_modules can undo them once this file's
+# tests are done, instead of leaking them into whatever pytest collects next.
 import types
+
+_mp = pytest.MonkeyPatch()
 
 fake_inference = types.ModuleType("inference_simple")
 fake_inference.load_model = lambda *a, **kw: None
 fake_inference.sliding_window_inference = lambda *a, **kw: None
 fake_inference.post_process_ink = lambda *a, **kw: None
 fake_inference.separate_layers = lambda *a, **kw: (None, None)
-sys.modules["inference_simple"] = fake_inference
+_mp.setitem(sys.modules, "inference_simple", fake_inference)
 
 fake_torch = types.ModuleType("torch")
 fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
-sys.modules["torch"] = fake_torch
+_mp.setitem(sys.modules, "torch", fake_torch)
 
 run_page = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run_page)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_stubbed_modules():
+    yield
+    _mp.undo()
 
 
 def test_parse_yolo_txt():

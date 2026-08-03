@@ -33,13 +33,18 @@ YOLO-level annotations.
 
 ## Supervision signal
 
-Ground truth is constructed from the YOLO bounding boxes:
-- For each GT staffline box, create a Gaussian blob of width σ≈h/2 centred on
-  the box y-center, repeated at every x-column within the box's x-range.
-- This gives a (H × W) target heatmap per page.
+Prefer per-column centerline annotations where available (the main pipeline's
+JSOMR `centerline`/`centerline_page` output, or corrected GT) as ground truth:
+build the target heatmap as a Gaussian blob of width σ≈h/2 centred on the
+annotated y at each x-column, following the actual curve.
 
-More precise supervision (actual centerline positions) would improve results but
-is not required to get started — the YOLO GT is sufficient for a first model.
+Flat box-centre targets (a single Gaussian blob at the box y-center, repeated
+unchanged across the box's x-range) are only a coarse fallback when no
+centerline annotation exists — they reward a horizontal line and actively
+penalise the warped stafflines this model needs to fit. If used, treat the
+resulting model explicitly as coarse first-stage/pretraining supervision,
+followed by a separate curve-refinement step against real centerline data,
+not as the final output.
 
 ## What's needed to implement
 

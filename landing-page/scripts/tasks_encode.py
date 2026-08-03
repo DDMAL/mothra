@@ -51,7 +51,7 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
             try:
                 cur.execute(
                     "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
-                    " AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+                    " AND status='succeeded' ORDER BY created_at DESC, id DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()

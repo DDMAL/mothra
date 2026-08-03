@@ -76,6 +76,48 @@ this is a punch list, not a plan.
   but storage still grows unbounded per re-run. Same category of gap as
   `job_uploads`/`job_sessions` (CLAUDE.md's own "things that don't exist
   yet" list) — plan a cleanup job alongside those, not in isolation.
+  **Explicit deferral** (CodeRabbit followed up asking for either a bound or
+  an explicit deferral statement): treat this as blocking, not a nice-to-have
+  — do not point staffline detection at a production database until a
+  retention bound (time- or count-based, scoped so it doesn't discard rows
+  `interpolate_staves`' before/after comparison still needs) ships alongside
+  the `job_uploads`/`job_sessions` cleanup job.
+- **Three checked-in e2e `stave_grouping_report.txt` baselines show genuinely
+  fragmented grouping — confirmed still-reproducible on current code, not
+  stale fixtures** (CodeRabbit, PR #53: Gent right,
+  `F-Pn-Latin-15181_107r`, `F-Pn-Latin-15181_221`). Re-ran all three through
+  the current pipeline rather than assuming the checked-in numbers just
+  predated a later fix:
+  - `F-Pn-Latin-15181_107r`/`_221` (`test_model.sh --fallback-redetect`)
+    reproduce their checked-in `reconciled_duplicate_fits` /
+    `staves_with_unexpected_count` numbers almost exactly (gap values match
+    to ~0.1px), even after the fallback-redetect existing-line-distance fix
+    (`ecaa401`) — that fix had nothing to reject on either page
+    (`fallback_redetect_report.txt`: 0 candidates / "no under-populated
+    staves found"), so it isn't the relevant bottleneck here. These two are
+    an accurate record of a real, current `group_staves.py`
+    duplicate/companion-reconciliation limitation on dense, tightly-spaced
+    staves (35-45% of fits end up marked duplicate/companion; mode line
+    count collapses to 1 or 4 instead of this manuscript's real stave size).
+  - Gent right didn't reproduce cleanly enough to even compare: two
+    plausible source YOLO `.txt` files exist
+    (`image-sets/gent/right/inference/corrected/...` vs
+    `e2e_tests/29may/Gent15_17_right/Gent15_17_right_corrected.txt` — they
+    differ in content and line count), and re-running `run_page.py` against
+    either one produces box_index 0 at different coordinates than the
+    checked-in fixture, so neither is confirmed as the original input.
+    Both attempts still show heavy fragmentation (mode 5 with 8/17 staves
+    unexpected, or mode 1 with 14/20 unexpected) — same symptom as the
+    other two pages, just via an input this session couldn't pin down
+    precisely.
+  - Not attempting a fix here: this is a real algorithmic gap in
+    `group_staves.py`'s reconciliation logic on dense staves, not a
+    one-line bug, and forcing a low-confidence change (or regenerating the
+    fixtures as-is) to make these three pages look clean risks either
+    overfitting to them or just checking in a different flavor of the same
+    fragmentation. CodeRabbit's ask — regenerate, then assert acceptable
+    per-stave counts — is the right ask; it's blocked on the reconciliation
+    fix landing first.
 - **`component_filter.py`'s `discarded`/`score_breakdown[...]["kept"]`
   bookkeeping doesn't account for companion retention** (CodeRabbit, PR #53,
   `component_filter.py:280-299`, Minor) — companions folded into the active
@@ -187,9 +229,12 @@ behavior, not just a passing compile):
   line. Added an existing-line-distance rejection before ranking.
 - `eval_page.py`: crashed on interpolated JSOMR records missing
   `centerline_page` (no `bounding_box` to fall back to). Now degrades to an
-  empty result instead of crashing; the double-page-offset issue for stale
-  pre-`centerline_page` fixtures is a fixture-regeneration problem, not a
-  code one — left as-is.
+  empty result instead of crashing. CodeRabbit followed up asking for the
+  fixture-regeneration side too (the double-page-offset risk for stale
+  pre-`centerline_page` fixtures) — regenerated all four tracked
+  `implicit_neural*` Gent-right fixtures via `run_implicit_neural_page.py`;
+  every record now carries `centerline_page`, verified against
+  `eval_page.py`'s own `_pred_page_y`/`_pred_page_x` helpers.
 - `dp_tracer.py` (experiment): the DP cost only rewarded dark pixels, so a
   trace could drift onto a darker neighbouring staffline within the same
   search band. Added a distance-from-hint penalty, weight chosen by actually
