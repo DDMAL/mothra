@@ -24,27 +24,43 @@ interface Props {
     label?: string;
 }
 
-function reconstructPlainText(boxes: SylBox[], lineSpacing: number): string {
-    if (boxes.length === 0) return "";
+interface PlainTextToken {
+    index: number;
+    syl: string;
+}
+
+function reconstructPlainText(boxes: SylBox[], lineSpacing: number): PlainTextToken[][] {
+    if (boxes.length === 0) return [];
     const threshold = (lineSpacing > 0 ? lineSpacing : 40) * 0.6;
-    const sorted = [...boxes].sort((a, b) => a.ul[1] - b.ul[1]);
-    const lines: SylBox[][] = [];
-    for (const box of sorted) {
-        const line = lines[lines.length - 1];
-        if (line && Math.abs(box.ul[1] - line[0].ul[1]) < threshold) {
-            line.push(box);
+    const indexed = boxes.map((box, index) => ({ box, index }));
+    const sorted = [...indexed].sort((a, b) => a.box.ul[1] - b.box.ul[1]);
+    const grouped: (typeof indexed)[] = [];
+    for (const item of sorted) {
+        const line = grouped[grouped.length - 1];
+        if (line && Math.abs(item.box.ul[1] - line[0].box.ul[1]) < threshold) {
+            line.push(item);
         } else {
-            lines.push([box]);
+            grouped.push([item]);
         }
     }
-    return lines
-        .map((line) => 
-            [...line]
-                .sort((a, b) => a.ul[0] - b.ul[0])
-                .map((b) => b.syl)
-                .join(" "),
-        )
-        .join("\n");
+    return grouped.map((line) =>
+        [...line]
+            .sort((a, b) => a.box.ul[0] - b.box.ul[0])
+            .map(({ box, index }) => ({ index, syl: box.syl })),
+    );
+}
+
+function plainTextLinesToString(lines: PlainTextToken[][]): string {
+    return lines.map((line) => line.map((t) => t.syl).join(" ")).join("\n");
+}
+
+function boxScreenRect(b: SylBox, scaleX: number, scaleY: number) {
+    return {
+        x: b.ul[0] * scaleX,
+        y: b.ul[1] * scaleY,
+        w: (b.lr[0] - b.ul[0]) * scaleX,
+        h: (b.lr[1] - b.ul[1]) * scaleY,
+    };
 }
 
 export default function TextAlignmentViewerModal({ alignment, projectId, onClose, label }: Props) {
@@ -52,6 +68,8 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
     const [logsOpen, setLogsOpen] = useState(false);
     const [textPanelOpen, setTextPanelOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [hoveredBoxIndex, setHoveredBoxIndex] = useState<number | null>(null);
+    const [imgReady, setImgReady] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const zoom = useZoomPan();
@@ -61,6 +79,18 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
         });
+    };
+
+    const handleDownloadText = (text: string) => {
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(label ?? alignment.imageName).replace(/\.[^.]+$/, "")}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
     };
     
     const drawOverlay = useCallback(() => {
@@ -76,21 +106,23 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
         const scaleY = dh / img.naturalHeight;
         const ctx = canvas.getContext("2d")!;
         ctx.clearRect(0, 0, dw, dh);
-        viewState.boxes.forEach((b) => {
-            const x = b.ul[0] * scaleX;
-            const y = b.ul[1] * scaleY;
-            const w = (b.lr[0] - b.ul[0]) * scaleX;
-            const h = (b.lr[1] - b.ul[1]) * scaleY;
-            ctx.fillStyle = BOX_COLOR + "20";
-            ctx.strokeStyle = BOX_COLOR;
-            ctx.lineWidth = 1.5;
+        viewState.boxes.forEach((b, i) => {
+            const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
+            const hovered = i === hoveredBoxIndex;
+            ctx.fillStyle = BOX_COLOR + (hovered ? "45" : "20");
+            ctx.strokeStyle = hovered ? "#1D3335" : BOX_COLOR;
+            ctx.lineWidth = hovered ? 2.5 : 1.5;
             ctx.fillRect(x, y, w, h);
             ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = BOX_COLOR;
-            ctx.font = "11px monospace";
+            ctx.fillStyle = hovered ? "#1D3335" : BOX_COLOR;
+            ctx.font = hovered ? "bold 11px monospace" : "11px monospace";
             ctx.fillText(b.syl, x, Math.max(10, y - 2));
         });
-    }, [viewState]);
+    }, [viewState, hoveredBoxIndex]);
+
+    useEffect(() => {
+        drawOverlay();
+    }, [drawOverlay]);
 
     useEffect(() => {
         if (!alignment.imageSrc) {
@@ -163,12 +195,37 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                         alt={alignment.imageName}
                                         className="block max-h-[min(65vh,650px)] max-w-full select-none"
                                         draggable={false}
-                                        onLoad={drawOverlay}
+                                        onLoad={() => {
+                                            setImgReady(true);
+                                            drawOverlay();
+                                        }}
                                     />
                                     <canvas
                                         ref={canvasRef}
                                         className="absolute inset-0 pointer-events-none"
                                     />
+                                    {imgReady && viewState.status === "ready" && imgRef.current && (() => {
+                                        const img = imgRef.current;
+                                        const scaleX = img.clientWidth / img.naturalWidth;
+                                        const scaleY = img.clientHeight / img.naturalHeight;
+                                        return viewState.boxes.map((b, i) => {
+                                            const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    onMouseEnter={() => setHoveredBoxIndex(i)}
+                                                    onMouseLeave={() =>
+                                                        // Only clear if this box is still the one hovered — if the
+                                                        // cursor already moved into an overlapping box, that box's
+                                                        // onMouseEnter may have already fired first, and this
+                                                        // shouldn't stomp on it.
+                                                        setHoveredBoxIndex((cur) => (cur === i ? null : cur))
+                                                    }
+                                                    style={{ position: "absolute", left: x, top: y, width: w, height: h }}
+                                                />
+                                            );
+                                        });
+                                    })()}
                                 </div>
                                 <div
                                     className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/85 rounded-lg shadow px-1 py-1"
@@ -205,22 +262,50 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                     {textPanelOpen ? "v" : ">"} view plain text
                                 </button>
                                 {textPanelOpen && (() => {
-                                    const plainText =
+                                    const lines =
                                         viewState.status === "ready"
                                             ? reconstructPlainText(viewState.boxes, alignment.medianLineSpacing)
-                                            : "";
+                                            : [];
+                                    const plainText = plainTextLinesToString(lines);
                                     return (
                                         <div className="mt-2 bg-white/60 rounded-xl p-3 relative">
-                                            <button
-                                                onClick={() => handleCopyText(plainText)}
-                                                className="absolute top-2 right-2 text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
-                                            >
-                                                {copied ? "copied" : "copy"}
-                                            </button>
-                                            {plainText ? (
-                                                <p className="text-[#1D3335] text-sm whitespace-pre-wrap font-serif pr-14">
-                                                    {plainText}
-                                                </p>
+                                            <div className="absolute top-2 right-2 flex items-center gap-3">
+                                                <button
+                                                    onClick={() => handleDownloadText(plainText)}
+                                                    disabled={!plainText}
+                                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                                >
+                                                    download
+                                                </button>
+                                                <button
+                                                    onClick={() => handleCopyText(plainText)}
+                                                    disabled={!plainText}
+                                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                                >
+                                                    {copied ? "copied" : "copy"}
+                                                </button>
+                                            </div>
+                                            {lines.length > 0 ? (
+                                                <div className="text-[#1D3335] text-sm whitespace-pre-wrap font-serif pr-32">
+                                                    {lines.map((line, li) => (
+                                                        <div key={li}>
+                                                            {line.map((tok, ti) => (
+                                                                <span key={tok.index}>
+                                                                    <span
+                                                                        className={
+                                                                            tok.index === hoveredBoxIndex
+                                                                                ? "bg-[#4AADAA]/50 rounded px-0.5"
+                                                                                : ""
+                                                                        }
+                                                                    >
+                                                                        {tok.syl}
+                                                                    </span>
+                                                                    {ti < line.length - 1 ? " " : ""}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             ) : (
                                                 <p className="text-[#1D3335]/40 text-sm font-mono">
                                                     no syllables detected
