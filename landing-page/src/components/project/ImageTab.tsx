@@ -598,6 +598,7 @@ export default function ImageTab({
                 onUsedNamesChange({
                   ...usedNames, images: [...usedNames.images, img.name],
                 });
+                setValidationError(null);
               }
             }}
           />
@@ -748,7 +749,7 @@ export default function ImageTab({
                     <TruncatedName name={img.name} className="text-white" />
                   </div>
                   {img.folio && (
-                    <span className="absolute top-1 right-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                    <span className="self-end bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
                       {img.folio}
                     </span>
                   )}

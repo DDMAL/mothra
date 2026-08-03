@@ -452,6 +452,22 @@ def _migrate_db():
     finally:
         cur.close()
         release_db_conn(con)
+
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        # The working-copy `mime_type` column can't be reused for original_data:
+        # a client-side resize (imageResize.ts) always re-encodes the working
+        # copy as JPEG, while original_data keeps whatever format the source
+        # file actually was (PNG, TIFF, ...) — serving/embedding original_data
+        # under the working copy's mime_type mislabels it.
+        cur.execute("ALTER TABLE project_images ADD COLUMN original_mime_type TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
         
     # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
     con = get_db_conn(); cur = con.cursor()

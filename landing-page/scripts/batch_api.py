@@ -225,10 +225,10 @@ def cantus_bundle(project_id: int, source_id: str, user=Depends(get_current_user
                 stem = _sanitize_stem(folio) or _sanitize_stem(name) or "unknown"
                 unique_stem, n = stem, 2
                 while unique_stem in used_stems:
-                    unique_stem = f"{stem}-{n}"; n += 1
+                    unique_stem = f"{stem}-{n}"
+                    n += 1
                 used_stems.add(unique_stem)
                 mei_filename = f"{siglum}_{unique_stem}.mei"
-                        
                 zf.writestr(mei_filename, xml_content)
                 filenames.append(mei_filename)
             zf.writestr("README.txt", _cantus_bundle_readme(source_id, siglum, filenames))

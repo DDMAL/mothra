@@ -26,13 +26,16 @@ export default function TruncatedName({
   const tail = hasHead ? name.slice(name.length - tailLength) : name;
 
   return (
-    <span className={`inline-flex min-w-0 max-w-full ${className}`} title={name + suffix}>
+    <span
+      className={`inline-flex min-w-0 max-w-full overflow-hidden ${className}`}
+      title={name + suffix}
+    >
       {head && (
         <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
           {head}
         </span>
       )}
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap shrink-0">
+      <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap shrink-0">
         {tail}
         {suffix}
       </span>

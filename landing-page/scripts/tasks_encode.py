@@ -132,7 +132,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "validating"})
 
         ev({"type": "stage", "name": "processing"})
-        stem = Path(image_filename).stem if image_filename else Path(xml_filename)
+        stem = Path(image_filename).stem if image_filename else Path(xml_filename).stem
         image_ref = Path(image_filename) if image_filename else Path("")
         mei_bytes_out = build_mei(
             glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
@@ -142,9 +142,13 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         )
         original_bytes = _fetch_original_bytes(project_id, image_name)
         if original_bytes and page_w:
-            orig_w, _orig_h = Image.open(io.BytesIO(original_bytes)).size
-            mei_bytes_out = scale_facsimile(mei_bytes_out, orig_w / page_w)
-            ev({"type": "log", "message": f"rescaled facsimile to original image size ({orig_w}px wide)"})
+            try:
+                orig_w, _orig_h = Image.open(io.BytesIO(original_bytes)).size
+            except Exception as e:
+                ev({"type": "log", "message": f"[warn] could not decode original image, keeping unscaled facsimile: {e}"})
+            else:
+                mei_bytes_out = scale_facsimile(mei_bytes_out, orig_w / page_w)
+                ev({"type": "log", "message": f"rescaled facsimile to original image size ({orig_w}px wide)"})
 
         validation_warnings = validate_mei(mei_bytes_out)
         for w in validation_warnings:

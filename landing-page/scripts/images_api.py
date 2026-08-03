@@ -57,20 +57,21 @@ async def upload_image(
 
         mime_type = file.content_type or "image/png"
         original_data = psycopg2.Binary(original_bytes) if original_bytes else None
+        original_mime_type = original_file.content_type if (original_file and original_bytes) else None
         if existing:
             cur.execute(
                 "UPDATE project_images SET mime_type=%s, data=%s, folio=%s, source_id=%s, source_name=%s,"
-                " original_data=%s WHERE id=%s",
+                " original_data=%s, original_mime_type=%s WHERE id=%s",
                 (mime_type, psycopg2.Binary(image_bytes), folio or None, source_id or None,
-                 source_name or None, original_data, image_id)
+                 source_name or None, original_data, original_mime_type, image_id)
             )
         else:
             cur.execute(
                 "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name,"
-                " original_data)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                " original_data, original_mime_type)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes),
-                 folio or None, source_id or None, source_name or None, original_data)
+                 folio or None, source_id or None, source_name or None, original_data, original_mime_type)
             )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()
@@ -98,16 +99,20 @@ def get_original_image(image_id: str, user=Depends(get_current_user)):
     (Neon's edit-session bootstrap, the MEI diff view) never need to branch."""
     with db_cursor() as (con, cur):
         cur.execute(
-            "SELECT original_data, data, mime_type FROM project_images WHERE id=%s "
+            "SELECT original_data, original_mime_type, data, mime_type FROM project_images WHERE id=%s "
             " AND project_id IN (SELECT id FROM projects WHERE user_id=%s)",
             (image_id, user["id"]),
         )
         row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404)
-    original_data, data, mime_type = row
+    original_data, original_mime_type, data, mime_type = row
     image_bytes = original_data if original_data is not None else data
-    return Response(content=bytes(image_bytes), media_type=mime_type or "image/png")
+    # Fall back to the working-copy mime_type for rows written before
+    # original_mime_type existed — best effort, may mislabel pre-migration
+    # originals whose format differs from their resized working copy.
+    resolved_mime_type = (original_mime_type if original_data is not None else mime_type) or mime_type
+    return Response(content=bytes(image_bytes), media_type=resolved_mime_type or "image/png")
 
 @router.get("/images/{image_id}/meta")
 def get_image_meta(image_id: str, user=Depends(get_current_user)):
