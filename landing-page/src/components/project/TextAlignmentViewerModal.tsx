@@ -179,165 +179,170 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                             {viewState.message}
                         </div>
                     ) : (
-                        <div className="p-4 flex flex-col items-center">
-                            <div
-                                ref={zoom.containerRef}
-                                {...zoom.panHandlers}
-                                onDoubleClick={zoom.reset}
-                                className={`relative w-full h-[min(65vh,650px)] overflow-hidden rounded-xl bg-black/5 flex items-center justify-center ${
-                                    zoom.isPannable ? (zoom.isDragging ? "cursor-grabbing" : "cursor-grab") : ""
-                                }`}
-                            >
-                                <div className="relative" style={zoom.transformStyle}>
-                                    <img
-                                        ref={imgRef}
-                                        src={viewState.imageUrl}
-                                        alt={alignment.imageName}
-                                        className="block max-h-[min(65vh,650px)] max-w-full select-none"
-                                        draggable={false}
-                                        onLoad={() => {
-                                            setImgReady(true);
-                                            drawOverlay();
-                                        }}
-                                    />
-                                    <canvas
-                                        ref={canvasRef}
-                                        className="absolute inset-0 pointer-events-none"
-                                    />
-                                    {imgReady && viewState.status === "ready" && imgRef.current && (() => {
-                                        const img = imgRef.current;
-                                        const scaleX = img.clientWidth / img.naturalWidth;
-                                        const scaleY = img.clientHeight / img.naturalHeight;
-                                        return viewState.boxes.map((b, i) => {
-                                            const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
-                                            return (
-                                                <div
-                                                    key={i}
-                                                    onMouseEnter={() => setHoveredBoxIndex(i)}
-                                                    onMouseLeave={() =>
-                                                        // Only clear if this box is still the one hovered — if the
-                                                        // cursor already moved into an overlapping box, that box's
-                                                        // onMouseEnter may have already fired first, and this
-                                                        // shouldn't stomp on it.
-                                                        setHoveredBoxIndex((cur) => (cur === i ? null : cur))
-                                                    }
-                                                    style={{ position: "absolute", left: x, top: y, width: w, height: h }}
-                                                />
-                                            );
-                                        });
-                                    })()}
-                                </div>
-                                <div
-                                    className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/85 rounded-lg shadow px-1 py-1"
-                                    onDoubleClick={(e) => e.stopPropagation()}
-                                >
-                                    <button
-                                        onClick={zoom.zoomOut}
-                                        disabled={!zoom.canZoomOut}
-                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                        <div className="p-4">
+                            <div className="flex gap-3 items-start">
+                                <div className="flex-1 min-w-0 flex flex-col items-center">
+                                    <div
+                                        ref={zoom.containerRef}
+                                        {...zoom.panHandlers}
+                                        onDoubleClick={zoom.reset}
+                                        className={`relative w-full h-[min(65vh,650px)] overflow-hidden rounded-xl bg-black/5 flex items-center justify-center ${
+                                            zoom.isPannable ? (zoom.isDragging ? "cursor-grabbing" : "cursor-grab") : ""
+                                        }`}
                                     >
-                                        −
-                                    </button>
-                                    <button
-                                        onClick={zoom.reset}
-                                        className="px-2 h-7 flex items-center justify-center text-[#1D3335] text-xs font-mono rounded hover:bg-[#C8E6E3] cursor-pointer"
-                                    >
-                                        {Math.round(zoom.scale * 100)}%
-                                    </button>
-                                    <button
-                                        onClick={zoom.zoomIn}
-                                        disabled={!zoom.canZoomIn}
-                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="mt-4 w-full">
-                                <button
-                                    onClick={() => setTextPanelOpen((o) => !o)}
-                                    className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
-                                >
-                                    {textPanelOpen ? "v" : ">"} view plain text
-                                </button>
-                                {textPanelOpen && (() => {
-                                    const lines =
-                                        viewState.status === "ready"
-                                            ? reconstructPlainText(viewState.boxes, alignment.medianLineSpacing)
-                                            : [];
-                                    const plainText = plainTextLinesToString(lines);
-                                    return (
-                                        <div className="mt-2 bg-white/60 rounded-xl p-3 relative">
-                                            <div className="absolute top-2 right-2 flex items-center gap-3">
-                                                <button
-                                                    onClick={() => handleDownloadText(plainText)}
-                                                    disabled={!plainText}
-                                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                                                >
-                                                    download
-                                                </button>
-                                                <button
-                                                    onClick={() => handleCopyText(plainText)}
-                                                    disabled={!plainText}
-                                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                                                >
-                                                    {copied ? "copied" : "copy"}
-                                                </button>
-                                            </div>
-                                            {lines.length > 0 ? (
-                                                <div className="text-[#1D3335] text-sm whitespace-pre-wrap font-serif pr-32">
-                                                    {lines.map((line, li) => (
-                                                        <div key={li}>
-                                                            {line.map((tok, ti) => (
-                                                                <span key={tok.index}>
-                                                                    <span
-                                                                        className={
-                                                                            tok.index === hoveredBoxIndex
-                                                                                ? "bg-[#4AADAA]/50 rounded px-0.5"
-                                                                                : ""
-                                                                        }
-                                                                    >
-                                                                        {tok.syl}
-                                                                    </span>
-                                                                    {ti < line.length - 1 ? " " : ""}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <p className="text-[#1D3335]/40 text-sm font-mono">
-                                                    no syllables detected
-                                                </p>
-                                            )}
+                                        <div className="relative" style={zoom.transformStyle}>
+                                            <img
+                                                ref={imgRef}
+                                                src={viewState.imageUrl}
+                                                alt={alignment.imageName}
+                                                className="block max-h-[min(65vh,650px)] max-w-full select-none"
+                                                draggable={false}
+                                                onLoad={() => {
+                                                    setImgReady(true);
+                                                    drawOverlay();
+                                                }}
+                                            />
+                                            <canvas
+                                                ref={canvasRef}
+                                                className="absolute inset-0 pointer-events-none"
+                                            />
+                                            {imgReady && viewState.status === "ready" && imgRef.current && (() => {
+                                                const img = imgRef.current;
+                                                const scaleX = img.clientWidth / img.naturalWidth;
+                                                const scaleY = img.clientHeight / img.naturalHeight;
+                                                return viewState.boxes.map((b, i) => {
+                                                    const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
+                                                    return (
+                                                        <div
+                                                            key={i}
+                                                            onMouseEnter={() => setHoveredBoxIndex(i)}
+                                                            onMouseLeave={() =>
+                                                                // Only clear if this box is still the one hovered — if the
+                                                                // cursor already moved into an overlapping box, that box's
+                                                                // onMouseEnter may have already fired first, and this
+                                                                // shouldn't stomp on it.
+                                                                setHoveredBoxIndex((cur) => (cur === i ? null : cur))
+                                                            }
+                                                            style={{ position: "absolute", left: x, top: y, width: w, height: h }}
+                                                        />
+                                                    );
+                                                });
+                                            })()}
                                         </div>
-                                    );
-                                })()}
-                            </div>
+                                        <div
+                                            className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/85 rounded-lg shadow px-1 py-1"
+                                            onDoubleClick={(e) => e.stopPropagation()}
+                                        >
+                                            <button
+                                                onClick={zoom.zoomOut}
+                                                disabled={!zoom.canZoomOut}
+                                                className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                            >
+                                                −
+                                            </button>
+                                            <button
+                                                onClick={zoom.reset}
+                                                className="px-2 h-7 flex items-center justify-center text-[#1D3335] text-xs font-mono rounded hover:bg-[#C8E6E3] cursor-pointer"
+                                            >
+                                                {Math.round(zoom.scale * 100)}%
+                                            </button>
+                                            <button
+                                                onClick={zoom.zoomIn}
+                                                disabled={!zoom.canZoomIn}
+                                                className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                    </div>
 
-                            <div className="mt-4 w-full">
-                                <button
-                                    onClick={() => setLogsOpen((o) => !o)}
-                                    className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
-                                >
-                                    {logsOpen ? "v" : ">"} view logs
-                                </button>
-                                {logsOpen && (
-                                    <div className="mt-2 bg-[#1D3335] rounded-xl h-32 w-full overflow-y-auto p-3">
-                                        {viewState.logText ? (
-                                            viewState.logText.split("\n").map((line, i) => (
-                                                <div key={i} className="text-white/70 text-xs font-mono leading-5">
-                                                    {line}
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="text-white/30 text-xs font-mono">
-                                                no logs recorded for this run
+                                    <div className="mt-4 w-full">
+                                        <button
+                                            onClick={() => setLogsOpen((o) => !o)}
+                                            className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
+                                        >
+                                            {logsOpen ? "v" : ">"} view logs
+                                        </button>
+                                        {logsOpen && (
+                                            <div className="mt-2 bg-[#1D3335] rounded-xl h-32 w-full overflow-y-auto p-3">
+                                                {viewState.logText ? (
+                                                    viewState.logText.split("\n").map((line, i) => (
+                                                        <div key={i} className="text-white/70 text-xs font-mono leading-5">
+                                                            {line}
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="text-white/30 text-xs font-mono">
+                                                        no logs recorded for this run
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
-                                )}
+                                </div>
+
+                                <div className="shrink-0 flex h-[min(65vh,650px)]">
+                                    <button
+                                        onClick={() => setTextPanelOpen((o) => !o)}
+                                        title={textPanelOpen ? "Hide plain text" : "Show plain text"}
+                                        className="shrink-0 w-6 flex items-center justify-center bg-[#1D3335]/10 hover:bg-[#1D3335]/20 rounded-l-lg text-[#1D3335] text-xs cursor-pointer select-none"
+                                    >
+                                        {textPanelOpen ? "›" : "‹"}
+                                    </button>
+                                    {textPanelOpen && (() => {
+                                        const lines =
+                                            viewState.status === "ready"
+                                                ? reconstructPlainText(viewState.boxes, alignment.medianLineSpacing)
+                                                : [];
+                                        const plainText = plainTextLinesToString(lines);
+                                        return (
+                                            <div className="w-72 bg-white/60 rounded-r-xl p-3 overflow-y-auto">
+                                                <div className="flex items-center justify-end gap-3 mb-2">
+                                                    <button
+                                                        onClick={() => handleDownloadText(plainText)}
+                                                        disabled={!plainText}
+                                                        className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                                    >
+                                                        download
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCopyText(plainText)}
+                                                        disabled={!plainText}
+                                                        className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                                    >
+                                                        {copied ? "copied" : "copy"}
+                                                    </button>
+                                                </div>
+                                                {lines.length > 0 ? (
+                                                    <div className="text-[#1D3335] text-sm whitespace-pre-wrap font-serif">
+                                                        {lines.map((line, li) => (
+                                                            <div key={li}>
+                                                                {line.map((tok, ti) => (
+                                                                    <span key={tok.index}>
+                                                                        <span
+                                                                            className={
+                                                                                tok.index === hoveredBoxIndex
+                                                                                    ? "bg-[#4AADAA]/50 rounded px-0.5"
+                                                                                    : ""
+                                                                            }
+                                                                        >
+                                                                            {tok.syl}
+                                                                        </span>
+                                                                        {ti < line.length - 1 ? " " : ""}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[#1D3335]/40 text-sm font-mono">
+                                                        no syllables detected
+                                                    </p>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
                             </div>
                         </div>
                     )}
