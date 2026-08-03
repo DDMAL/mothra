@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { type TextAlignment } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import TruncatedName from "../shared/TruncatedName";
+import { useZoomPan } from "../../hooks/useZoomPan";
 
 interface SylBox {
     syl: string;
@@ -23,12 +24,45 @@ interface Props {
     label?: string;
 }
 
+function reconstructPlainText(boxes: SylBox[], lineSpacing: number): string {
+    if (boxes.length === 0) return "";
+    const threshold = (lineSpacing > 0 ? lineSpacing : 40) * 0.6;
+    const sorted = [...boxes].sort((a, b) => a.ul[1] - b.ul[1]);
+    const lines: SylBox[][] = [];
+    for (const box of sorted) {
+        const line = lines[lines.length - 1];
+        if (line && Math.abs(box.ul[1] - line[0].ul[1]) < threshold) {
+            line.push(box);
+        } else {
+            lines.push([box]);
+        }
+    }
+    return lines
+        .map((line) => 
+            [...line]
+                .sort((a, b) => a.ul[0] - b.ul[0])
+                .map((b) => b.syl)
+                .join(" "),
+        )
+        .join("\n");
+}
+
 export default function TextAlignmentViewerModal({ alignment, projectId, onClose, label }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading"});
     const [logsOpen, setLogsOpen] = useState(false);
+    const [textPanelOpen, setTextPanelOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
+    const zoom = useZoomPan();
 
+    const handleCopyText = (text: string) => {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        });
+    };
+    
     const drawOverlay = useCallback(() => {
         if (viewState.status !== "ready") return;
         const canvas = canvasRef.current;
@@ -114,19 +148,89 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                         </div>
                     ) : (
                         <div className="p-4 flex flex-col items-center">
-                            <div className="relative inline-block">
-                                <img
-                                    ref={imgRef}
-                                    src={viewState.imageUrl}
-                                    alt={alignment.imageName}
-                                    className="block max-w-full"
-                                    onLoad={drawOverlay}
-                                />
-                                <canvas
-                                    ref={canvasRef}
-                                    className="absolute inset-0 pointer-events-none"
-                                />
+                            <div
+                                ref={zoom.containerRef}
+                                {...zoom.panHandlers}
+                                onDoubleClick={zoom.reset}
+                                className={`relative w-full h-[min(65vh,650px)] overflow-hidden rounded-xl bg-black/5 flex items-center justify-center ${
+                                    zoom.isPannable ? (zoom.isDragging ? "cursor-grabbing" : "cursor-grab") : ""
+                                }`}
+                            >
+                                <div className="relative" style={zoom.transformStyle}>
+                                    <img
+                                        ref={imgRef}
+                                        src={viewState.imageUrl}
+                                        alt={alignment.imageName}
+                                        className="block max-h-[min(65vh,650px)] max-w-full select-none"
+                                        draggable={false}
+                                        onLoad={drawOverlay}
+                                    />
+                                    <canvas
+                                        ref={canvasRef}
+                                        className="absolute inset-0 pointer-events-none"
+                                    />
+                                </div>
+                                <div
+                                    className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/85 rounded-lg shadow px-1 py-1"
+                                    onDoubleClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                        onClick={zoom.zoomOut}
+                                        disabled={!zoom.canZoomOut}
+                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                    >
+                                        −
+                                    </button>
+                                    <button
+                                        onClick={zoom.reset}
+                                        className="px-2 h-7 flex items-center justify-center text-[#1D3335] text-xs font-mono rounded hover:bg-[#C8E6E3] cursor-pointer"
+                                    >
+                                        {Math.round(zoom.scale * 100)}%
+                                    </button>
+                                    <button
+                                        onClick={zoom.zoomIn}
+                                        disabled={!zoom.canZoomIn}
+                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                    >
+                                        +
+                                    </button>
+                                </div>
                             </div>
+
+                            <div className="mt-4 w-full">
+                                <button
+                                    onClick={() => setTextPanelOpen((o) => !o)}
+                                    className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
+                                >
+                                    {textPanelOpen ? "v" : ">"} view plain text
+                                </button>
+                                {textPanelOpen && (() => {
+                                    const plainText =
+                                        viewState.status === "ready"
+                                            ? reconstructPlainText(viewState.boxes, alignment.medianLineSpacing)
+                                            : "";
+                                    return (
+                                        <div className="mt-2 bg-white/60 rounded-xl p-3 relative">
+                                            <button
+                                                onClick={() => handleCopyText(plainText)}
+                                                className="absolute top-2 right-2 text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                                            >
+                                                {copied ? "copied" : "copy"}
+                                            </button>
+                                            {plainText ? (
+                                                <p className="text-[#1D3335] text-sm whitespace-pre-wrap font-serif pr-14">
+                                                    {plainText}
+                                                </p>
+                                            ) : (
+                                                <p className="text-[#1D3335]/40 text-sm font-mono">
+                                                    no syllables detected
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
                             <div className="mt-4 w-full">
                                 <button
                                     onClick={() => setLogsOpen((o) => !o)}
