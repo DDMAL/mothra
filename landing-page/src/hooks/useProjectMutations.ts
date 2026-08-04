@@ -7,7 +7,7 @@ import { normalizeProjects } from "../utils/projects";
 type SetProjects = Dispatch<SetStateAction<Project[]>>;
 
 export function useProjectMutations(setProjects: SetProjects) {
-  const createProject = async (name: string) => {
+  const createProject = async (name: string, imageFile?: File) => {
     try {
       const r = await apiFetch("/api/projects", {
         method: "POST",
@@ -15,7 +15,40 @@ export function useProjectMutations(setProjects: SetProjects) {
         body: JSON.stringify({ name }),
       });
       if (!r.ok) throw new Error("failed to create project");
-      const project = await r.json();
+      let project: Project = await r.json();
+      if (imageFile) {
+        // A failed auto-upload shouldn't undo project creation — the project
+        // still exists and is usable, the user just needs to upload the
+        // image manually from the Images tab instead.
+        try {
+          const form = new FormData();
+          form.append("file", imageFile);
+          const ir = await apiFetch(`/api/projects/${project.id}/images`, {
+            method: "POST",
+            body: form,
+          });
+          if (!ir.ok) throw new Error("image upload failed");
+          const uploaded = await ir.json();
+          project = {
+            ...project,
+            images: [
+              ...project.images,
+              {
+                id: uploaded.id,
+                name: uploaded.name,
+                src: `/api/images/${uploaded.id}`,
+                folio: uploaded.folio,
+                sourceId: uploaded.sourceId,
+                sourceName: uploaded.sourceName,
+              },
+            ],
+          };
+        } catch {
+          toast.error(
+            `"${name}" was created, but the image failed to upload — try uploading it from the Images tab instead`,
+          );
+        }
+      }
       setProjects((prev) => [...prev, project]);
     } catch (e) {
      toast.error((e as Error).message);

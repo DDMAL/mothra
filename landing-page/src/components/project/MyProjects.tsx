@@ -13,7 +13,7 @@ const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";
 interface MyProjectsProps {
   projects: Project[];
   onSelectProject: (id: number) => void;
-  onCreateProject: (name: string) => void;
+  onCreateProject: (name: string, imageFile?: File) => void;
   onRenameProject: (id: number, newName: string) => void;
   onDeleteProject: (id: number) => void;
   onRestoreProject: (id: number) => void;
@@ -102,6 +102,7 @@ export default function MyProjects({
   const [sourceIdInput, setSourceIdInput] = useState("");
   const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
   const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
+  const [pickedImageFile, setPickedImageFile] = useState<File | null>(null)
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<
     number | null
@@ -466,6 +467,7 @@ export default function MyProjects({
             setShowSourceLookup(false);
             setSourceIdInput("");
             setSourceLookupError(null);
+            setPickedImageFile(null);
           }}
           size="lg"
           backdrop="none"
@@ -502,10 +504,25 @@ export default function MyProjects({
                 className="hidden"
                 onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) setNewName(suggestProjectNameFromFilename(file.name));
+                    if (file) {
+                      setNewName(suggestProjectNameFromFilename(file.name));
+                      setPickedImageFile(file);
+                    }
                     e.target.value = "";
                 }}
             />
+            {pickedImageFile && (
+                <p className="text-[#1D3335]/50 text-[11px] flex items-center gap-1.5">
+                    will upload "{pickedImageFile.name}" to this project
+                    <button
+                        onClick={() => setPickedImageFile(null)}
+                        title="don't upload this file"
+                        className="text-[#1D3335]/40 hover:text-[#1D3335] cursor-pointer"
+                    >
+                        ✕
+                    </button>
+                </p>
+            )}
             {showSourceLookup && (
                 <div className="flex flex-col items-center gap-2">
                     <div className="flex items-center gap-2">
@@ -530,11 +547,12 @@ export default function MyProjects({
           <button
             onClick={() => {
               if (!newName.trim()) return;
-              onCreateProject(newName.trim());
+              onCreateProject(newName.trim(), pickedImageFile ?? undefined);
               setNewName("");
               setShowSourceLookup(false);
               setSourceIdInput("");
               setSourceLookupError(null);
+              setPickedImageFile(null);
               setShowCreate(false);
             }}
             className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
