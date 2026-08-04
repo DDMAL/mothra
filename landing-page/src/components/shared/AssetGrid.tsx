@@ -64,7 +64,7 @@ export default function AssetGrid<T extends AssetItem>({
               )}
               <div className="flex flex-col gap-2">
                 <div
-                  className={`relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
+                  className={`group relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
                           ${section.selectedIds.has(item.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
                           ${used ? "opacity-40 cursor-default" : ""}`}
                   onClick={(e) => {
@@ -83,6 +83,20 @@ export default function AssetGrid<T extends AssetItem>({
                       use
                     </button>
                   )}
+                  {!used && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });
+                      }}
+                      // Faintly visible by default (not opacity-0) so it stays
+                      // discoverable on touch/keyboard, which have no hover —
+                      // hovering the thumbnail just makes it more prominent.
+                      className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/40 text-white text-base leading-none opacity-70 group-hover:opacity-100 group-hover:bg-black/70 hover:opacity-100 hover:bg-black/70 transition-all cursor-pointer"
+                    >
+                      ⋮
+                    </button>
+                  )}
                   {badge && (
                     <div className="absolute bottom-0 inset-x-0 flex justify-center pb-1.5 pointer-events-none">
                       <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">
@@ -91,23 +105,10 @@ export default function AssetGrid<T extends AssetItem>({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-1">
-                  <TruncatedName
-                    name={item.name}
-                    className={`text-sm text-white ${used ? "opacity-40" : ""}`}
-                  />
-                  {!used && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });
-                      }}
-                      className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                    >
-                      ⋮
-                    </button>
-                  )}
-                </div>
+                <TruncatedName
+                  name={item.name}
+                  className={`text-sm text-white ${used ? "opacity-40" : ""}`}
+                />
               </div>
             </Fragment>
           );
