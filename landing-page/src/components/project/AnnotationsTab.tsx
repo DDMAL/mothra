@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import type { AnnotationSet, ProjectImage } from "../../types";
 import { AuthImage } from "../shared/AuthImage";
 import AnnotationViewerModal from "./AnnotationViewerModal";
+import TruncatedName from "../shared/TruncatedName";
 import type { useAssetSection } from "../../hooks/useAssetSection";
 import { sortBySourceThenFolio, sourceGroupLabel } from "../../utils/folio";
 
@@ -26,7 +27,7 @@ export default function AnnotationsTab({
 }: AnnotationsTabProps) {
   const [viewSet, setViewSet] = useState<AnnotationSet | null>(null);
   if (annotations.length === 0) {
-    return <p className="mt-6 text-white/70 text-sm">no annotations yet</p>;
+    return <p className="mt-6 text-white/70 text-sm">no detected layers yet</p>;
   }
 
   const sortedAnnotations = sortBySourceThenFolio(
@@ -127,9 +128,11 @@ export default function AnnotationsTab({
                     </button>
                   </div>
                 </div>
-                <span className="text-sm text-white truncate">
-                  {set.imageName.replace(/\.[^.]+$/, "")}_annotations
-                </span>
+                <TruncatedName
+                  name={set.imageName.replace(/\.[^.]+$/, "")}
+                  suffix="_annotations"
+                  className="text-sm text-white"
+                />
                 {set.detectionCount !== undefined && (
                   <span className="text-xs text-white/50">
                     {set.detectionCount} detection

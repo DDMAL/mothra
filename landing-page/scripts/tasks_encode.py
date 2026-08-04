@@ -1,3 +1,5 @@
+import io
+from PIL import Image
 import base64
 import json
 import mimetypes
@@ -13,9 +15,28 @@ from auth_api import get_db_conn, release_db_conn
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
-    image_dimensions,
+    image_dimensions, scale_facsimile,
 )
 import staffline_adapter
+
+def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) -> Optional[bytes]:
+    """Looks up the original (pre-resize) image bytes for (project_id, image_name),
+    if the image was resized at upload time. Returns None if it never was, or
+    project_id/image_name are missing."""
+    if not (project_id and image_name):
+        return None
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT original_data FROM project_images WHERE project_id=%s AND name=%s",
+            (project_id, image_name),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return bytes(row[0]) if row and row[0] is not None else None
+    finally:
+        release_db_conn(con)
 
 def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h):
     """Looks up saved text-alignment + stave annotations for one image.
@@ -140,7 +161,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "validating"})
 
         ev({"type": "stage", "name": "processing"})
-        stem = Path(xml_filename).stem
+        stem = Path(image_filename).stem if image_filename else Path(xml_filename).stem
         image_ref = Path(image_filename) if image_filename else Path("")
         mei_bytes_out = build_mei(
             glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
@@ -148,6 +169,16 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             clef_line=clef_line or 3,
             text_alignment=text_alignment,
         )
+        original_bytes = _fetch_original_bytes(project_id, image_name)
+        if original_bytes and page_w:
+            try:
+                orig_w, _orig_h = Image.open(io.BytesIO(original_bytes)).size
+            except Exception as e:
+                ev({"type": "log", "message": f"[warn] could not decode original image, keeping unscaled facsimile: {e}"})
+            else:
+                mei_bytes_out = scale_facsimile(mei_bytes_out, orig_w / page_w)
+                ev({"type": "log", "message": f"rescaled facsimile to original image size ({orig_w}px wide)"})
+
         validation_warnings = validate_mei(mei_bytes_out)
         for w in validation_warnings:
             ev({"type": "log", "message": f"[warn] {w}"})

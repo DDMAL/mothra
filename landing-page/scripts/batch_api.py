@@ -32,7 +32,6 @@ from tasks_text_batch import run_text_batch_task
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
-from encode_to_mei import scale_facsimile, get_encoded_dimensions
 
 router = APIRouter()
 
@@ -57,6 +56,7 @@ class BatchRunBody(BaseModel):
     column_bimodal_threshold: float = 0.5
     masking_enabled: bool = True
     mask_padding: int = 15
+    music_overlap_filter_enabled: bool = True
     # YOLO layer-separation settings, mirroring inference_api.py's PredictBody
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     model_id: Optional[str] = None
@@ -201,7 +201,7 @@ def cantus_bundle(project_id: int, source_id: str, user=Depends(get_current_user
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
         cur.execute("""
-            SELECT m.name, m.xml_content, pi.folio, pi.original_width
+            SELECT m.name, m.xml_content, pi.folio
             FROM mei_files m
             JOIN project_images pi ON pi.project_id = m.project_id AND pi.name = m.image_name
             WHERE m.project_id=%s AND pi.source_id=%s AND m.corrected=1
@@ -222,21 +222,15 @@ def cantus_bundle(project_id: int, source_id: str, user=Depends(get_current_user
         buf = io.BytesIO()
         used_stems, filenames = set(), []
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for name, xml_content, folio, original_width in rows:
+            for name, xml_content, folio in rows:
                 stem = _sanitize_stem(folio) or _sanitize_stem(name) or "unknown"
                 unique_stem, n = stem, 2
                 while unique_stem in used_stems:
-                    unique_stem = f"{stem}-{n}"; n += 1
+                    unique_stem = f"{stem}-{n}"
+                    n += 1
                 used_stems.add(unique_stem)
                 mei_filename = f"{siglum}_{unique_stem}.mei"
-
-                xml_bytes = xml_content.encode("utf-8")
-                if original_width:
-                    dims = get_encoded_dimensions(xml_bytes)
-                    if dims and dims[0]:
-                        xml_bytes = scale_facsimile(xml_bytes, original_width / dims[0])
-                        
-                zf.writestr(mei_filename, xml_bytes)
+                zf.writestr(mei_filename, xml_content)
                 filenames.append(mei_filename)
             zf.writestr("README.txt", _cantus_bundle_readme(source_id, siglum, filenames))
 

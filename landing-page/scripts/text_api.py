@@ -172,6 +172,7 @@ def stream_text_finding(
         column_bimodal_threshold: float = 0.5,
         masking_enabled: bool = True,
         mask_padding: int = 15,
+        music_overlap_filter_enabled: bool = True,
         mask_json_override: Optional[str] = None,
         source_id: Optional[int] = None,
         folio_override: Optional[str] = None,
@@ -197,6 +198,7 @@ def stream_text_finding(
         "column_bimodal_threshold": str(column_bimodal_threshold),
         "masking_enabled": "true" if masking_enabled else "false",
         "mask_padding": str(mask_padding),
+        "music_overlap_filter_enabled": "true" if music_overlap_filter_enabled else "false",
     }
     if source_id is not None:
         fields["source_id"] = str(source_id)
@@ -258,9 +260,17 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
     user=Depends(get_current_user),
     masking_enabled: bool = True,
     mask_padding: int = 15,
+    music_overlap_filter_enabled: bool = True,
     source_id: Optional[int] = None,
     folio: Optional[str] = None,
 ):
+    """Stream single-image text-finding results for one project image over SSE.
+
+    Fetches the named image, then forwards it to `stream_text_finding` and
+    re-emits each yielded event as a `data: {...}\\n\\n` frame. Unlike the
+    batch/predict paths this runs synchronously in-request, not as a Celery
+    job — single-image text-finding is fast enough not to need the job queue.
+    """
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
 
     def generate():
@@ -273,6 +283,7 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
             column_bimodal_threshold=column_bimodal_threshold,
             masking_enabled=masking_enabled,
             mask_padding=mask_padding,
+            music_overlap_filter_enabled=music_overlap_filter_enabled,
             source_id=source_id,
             folio_override=folio,
         ):

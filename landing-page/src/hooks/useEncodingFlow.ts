@@ -33,7 +33,11 @@ export function useEncodingFlow(
     stem?: string;
   }) => {
     const pair = pendingBatchPairs[ev.item];
-    const stem = ev.stem ?? pair?.xmlFile.name.replace(/\.xml$/i, "") ?? `item-${ev.item}`;
+    const stem =
+      ev.stem ??
+      pair?.imageFile.name.replace(/\.[^.]+$/, "") ??
+      pair?.xmlFile.name.replace(/\.xml$/i, "") ??
+      `item-${ev.item}`;
     const imageName = pair?.imageFile.name ?? ev.image_name;
     const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) => c.charCodeAt(0));
     const xmlText = new TextDecoder().decode(xmlBytes);
@@ -66,7 +70,10 @@ export function useEncodingFlow(
     manifest: Record<string, unknown> | null;
   }) => {
     setNeonManifest(ev.manifest ?? null);
-    const stem = pendingXmlFile?.name.replace(".xml", "") ?? "output";
+    const stem =
+      pendingImageFile?.name.replace(/\.[^.]+$/, "") ??
+      pendingXmlFile?.name.replace(/\.xml$/i, "") ??
+      "output";
     settleMeiContent({ bytes: ev.mei_base64, stem });
     const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) => c.charCodeAt(0));
     const xmlText = new TextDecoder().decode(xmlBytes);

@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { AnnotationSet } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
+import TruncatedName from "../shared/TruncatedName";
+import { useZoomPan } from "../../hooks/useZoomPan";
 
 interface BBox {
     cls: number;
@@ -39,6 +41,7 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
     const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
+    const zoom = useZoomPan();
 
     const drawOverlay = useCallback(() => {
         if (viewState.status !== "ready") return;
@@ -104,9 +107,10 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
             <div className="fixed z-50 top-[4.5rem] bottom-4 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-5xl bg-[#C8E6E3] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
                 {/* header */}
                 <div className="flex items-center gap-4 px-6 py-3 border-b border-[#1D3335]/20 shrink-0">
-                    <p className="font-mono text-sm text-[#1D3335] font-semibold truncate flex-1">
-                        {set.imageName}
-                    </p>
+                    <TruncatedName
+                        name={set.imageName}
+                        className="font-mono text-sm text-[#1D3335] font-semibold flex-1 min-w-0"
+                    />
                     {set.detectionCount !== undefined && (
                         <span className="text-xs text-[#1D3335]/60">
                             {set.detectionCount} detection{set.detectionCount !== 1 ? "s" : ""}
@@ -131,19 +135,54 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
                             {viewState.message}
                         </div>
                     ) : (
-                        <div className="p-4 flex justify-center">
-                            <div className="relative inline-block">
-                                <img
-                                    ref={imgRef}
-                                    src={viewState.imageUrl}
-                                    alt={set.imageName}
-                                    className="block max-w-full"
-                                    onLoad={drawOverlay}
-                                />
-                                <canvas
-                                    ref={canvasRef}
-                                    className="absolute inset-0 pointer-events-none"
-                                />
+                        <div className="p-4">
+                            <div
+                                ref={zoom.containerRef}
+                                {...zoom.panHandlers}
+                                onDoubleClick={zoom.reset}
+                                className={`relative w-full h-[min(65vh,650px)] overflow-hidden rounded-xl bg-black/5 flex items-center justify-center ${
+                                    zoom.isPannable ? (zoom.isDragging ? "cursor-grabbing" : "cursor-grab") : ""
+                                }`}
+                            >
+                                <div className="relative" style={zoom.transformStyle}>
+                                    <img
+                                        ref={imgRef}
+                                        src={viewState.imageUrl}
+                                        alt={set.imageName}
+                                        className="block max-h-[min(65vh,650px)] max-w-full select-none"
+                                        draggable={false}
+                                        onLoad={drawOverlay}
+                                    />
+                                    <canvas
+                                        ref={canvasRef}
+                                        className="absolute inset-0 pointer-events-none"
+                                    />
+                                </div>
+                                <div
+                                    className="absolute bottom-3 right-3 z-10 flex items-center gap-1 bg-white/85 rounded-lg shadow px-1 py-1"
+                                    onDoubleClick={(e) => e.stopPropagation()}
+                                >
+                                    <button
+                                        onClick={zoom.zoomOut}
+                                        disabled={!zoom.canZoomOut}
+                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                    >
+                                        −
+                                    </button>
+                                    <button
+                                        onClick={zoom.reset}
+                                        className="px-2 h-7 flex items-center justify-center text-[#1D3335] text-xs font-mono rounded hover:bg-[#C8E6E3] cursor-pointer"
+                                    >
+                                        {Math.round(zoom.scale * 100)}%
+                                    </button>
+                                    <button
+                                        onClick={zoom.zoomIn}
+                                        disabled={!zoom.canZoomIn}
+                                        className="w-7 h-7 flex items-center justify-center text-[#1D3335] text-base leading-none rounded hover:bg-[#C8E6E3] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                                    >
+                                        +
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

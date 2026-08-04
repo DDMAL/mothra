@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import type { ProjectImage, TextAlignment } from "../../types";
 import { AuthImage } from "../shared/AuthImage";
 import TextAlignmentViewerModal from "./TextAlignmentViewerModal";
+import TruncatedName from "../shared/TruncatedName";
 import { sortBySourceThenFolio, sourceGroupLabel } from "../../utils/folio";
 
 interface TextAlignmentsTabProps {
@@ -18,7 +19,7 @@ export default function TextAlignmentsTab({
   const [viewSet, setViewSet] = useState<TextAlignment | null>(null);
   if (textAlignments.length === 0) {
     return (
-      <p className="mt-6 text-white/70 text-sm">no text-finding results yet</p>
+      <p className="mt-6 text-white/70 text-sm">no detected text yet</p>
     );
   }
 
@@ -92,9 +93,10 @@ export default function TextAlignmentsTab({
                     </button>
                   </div>
                 </div>
-                <span className="text-sm text-white truncate">
-                  {labelById.get(set.id)}
-                </span>
+                <TruncatedName
+                  name={labelById.get(set.id) ?? ""}
+                  className="text-sm text-white"
+                />
                 <span className="text-xs text-white/50">
                   {set.syllableCount} syllable
                   {set.syllableCount !== 1 ? "s" : ""}

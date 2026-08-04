@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { toast } from "../../lib/toast";
 import { compareFolios, extractFolioFromFilename, matchCanonicalFolio } from "../../utils/folio";
 import type { FolioReviewRow } from "../../utils/folio";
 import BatchFolioReviewModal from "./BatchFolioReviewModal";
@@ -12,6 +13,7 @@ import Modal from "../shared/Modal";
 import LargeImageWarningModal from "./LargeImageWarningModal";
 import ContextMenu from "../shared/ContextMenu";
 import AssetGrid from "../shared/AssetGrid";
+import TruncatedName from "../shared/TruncatedName";
 import RenameModal from "./RenameModal";
 import QuickLookModal from "../shared/QuickLookModal";
 import FileDropZone from "../shared/FileDropZone";
@@ -40,8 +42,7 @@ interface ImageTabProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
-    originalWidth?: number,
-    originalHeight?: number,
+    originalFile?: File,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   setValidationError: (e: string | null) => void;
@@ -222,8 +223,7 @@ export default function ImageTab({
 
   interface PendingUpload {
     file: File;
-    originalWidth?: number;
-    originalHeight?: number;
+    originalFile?: File;
   }
 
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
@@ -261,11 +261,29 @@ export default function ImageTab({
     });
   };
 
+  /**
+   * Upload each pending image/PDF-page file and merge the successes into the
+   * project. Uses `Promise.allSettled` (not `Promise.all`) so one failed
+   * upload can't discard uploads that already succeeded — those are still
+   * recorded and only the failures are reported, instead of a retry
+   * re-uploading files that already made it through.
+   */
   const finishUpload = async(
     imageUploads: PendingUpload[],
     pdfUploads: PendingUpload[],
     folioOverride?: Map<string, string>,
   ) => {
+    type UploadEntry = {
+      id: string;
+      name: string;
+      src: string;
+      folio?: string;
+      sourceId?: string;
+      sourceName?: string;
+    };
+    const isFulfilled = (
+      r: PromiseSettledResult<UploadEntry>,
+    ): r is PromiseFulfilledResult<UploadEntry> => r.status === "fulfilled";
     try {
       setConverting(true);
       let seq = 0;
@@ -273,8 +291,10 @@ export default function ImageTab({
       setUploadProgress(total > 0 ? { done: 0, total } : null);
       let done = 0;
 
-      const imageEntries = await Promise.all(
-        imageUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+      // allSettled (not all) so one failed upload can't discard uploads that
+      // already succeeded - a retry would otherwise re-upload the same file
+      const imageSettled = await Promise.allSettled(
+        imageUploads.map(async ({ file: f, originalFile }): Promise<UploadEntry> => {
           const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
@@ -283,13 +303,10 @@ export default function ImageTab({
           // on mount regardless of which sub-tab is active).
           const result = await onUploadImage(
             f, folio, folio ? cantusSourceId : undefined, folio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
-          if (imageSubTab === "batch") {
-            onBatchImageUploaded({ id: result.id, name: result.name });
-          }
           return {
             id: result.id,
             name: result.name,
@@ -301,18 +318,15 @@ export default function ImageTab({
         }),
       );
 
-      const pdfEntries = await Promise.all(
-        pdfUploads.map(async ({ file: f, originalWidth, originalHeight }) => {
+      const pdfSettled = await Promise.allSettled(
+        pdfUploads.map(async ({ file: f, originalFile }): Promise<UploadEntry> => {
           const pdfFolio = folioAt(seq++);
           const result = await onUploadImage(
             f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
-            originalWidth, originalHeight,
+            originalFile,
           );
           done++;
           setUploadProgress({ done, total });
-          if (imageSubTab === "batch") {
-            onBatchImageUploaded({ id: result.id, name: result.name });
-          }
           return {
             id: result.id,
             name: result.name,
@@ -324,15 +338,39 @@ export default function ImageTab({
         }),
       );
 
-      onUpdateProject({
-        ...project,
-        images: [...project.images, ...imageEntries, ...pdfEntries],
-      });
-      if (imageSubTab === "grid" && activeFolio && (imageEntries.length > 0 || pdfEntries.length > 0)) {
-        onFolioConsumed?.();
+      // selection order (not network completion order) so BatchTab's
+      // index<->folio pairing can't drift from what the user actually selected
+      const imageEntries = imageSettled.filter(isFulfilled).map((r) => r.value);
+      const pdfEntries = pdfSettled.filter(isFulfilled).map((r) => r.value);
+      const failures = [...imageSettled, ...pdfSettled]
+        .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+        .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+
+      if (imageEntries.length > 0 || pdfEntries.length > 0) {
+        onUpdateProject({
+          ...project,
+          images: [...project.images, ...imageEntries, ...pdfEntries],
+        });
+        if (imageSubTab === "batch") {
+          for (const entry of [...imageEntries, ...pdfEntries]) {
+            onBatchImageUploaded({ id: entry.id, name: entry.name });
+          }
+        }
+        if (imageSubTab === "grid" && activeFolio) {
+          const uploaded = [...imageEntries, ...pdfEntries];
+          toast.success(
+            `folio "${activeFolio}" tagged to ${uploaded.length === 1 ? uploaded[0].name : `${uploaded.length} images`} - select a new folio to tag the next upload`,
+          );
+          onFolioConsumed?.();
+        }
       }
-      section.setUploadModal(false);
-      section.setDragging(false);
+
+      if (failures.length > 0) {
+        setUploadError(failures.join("; "));
+      } else {
+        section.setUploadModal(false);
+        section.setDragging(false);
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "upload failed");
     } finally {
@@ -431,12 +469,8 @@ export default function ImageTab({
     const oversizedSet = new Set(oversized);
     const toPendingUpload = async (f: File): Promise<PendingUpload> => {
       if (!oversizedSet.has(f)) return { file: f };
-      const resized = await resizeImageFile(f, TARGET_RESIZE_BYTES);
-      return {
-        file: resized.file,
-        originalWidth: resized.originalWidth,
-        originalHeight: resized.originalHeight,
-      };
+      const resizedFile = await resizeImageFile(f, TARGET_RESIZE_BYTES);
+      return { file: resizedFile, originalFile: f };
     };
     const [imageUploads, pdfUploads] = await Promise.all([
       Promise.all(imageFiles.map(toPendingUpload)),
@@ -581,23 +615,31 @@ export default function ImageTab({
             totalPages={totalImagePages}
             renderThumbnail={(img) =>
               img.src ? (
-                <>
-                  <AuthImage
-                    src={img.src}
-                    alt={img.name}
-                    className="w-full h-full object-cover"
-                  />
-                  {img.folio && (
-                    <span className="absolute top-1 left-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-                      {img.folio}
-                    </span>
-                  )}
-                </>
+                <AuthImage
+                  src={img.src}
+                  alt={img.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : null
+            }
+            topLeftBadge={(img) =>
+              img.folio ? (
+                <span className="bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                  {img.folio}
+                </span>
               ) : null
             }
             getItemBadge={(name) =>
               getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], project.stepsUnlocked)?.badge ?? null
             }
+            onUse={(img) => {
+              if (!usedNames.images.includes(img.name)) {
+                onUsedNamesChange({
+                  ...usedNames, images: [...usedNames.images, img.name],
+                });
+                setValidationError(null);
+              }
+            }}
           />
         )}
       </div>
@@ -743,13 +785,12 @@ export default function ImageTab({
                 <div className="flex flex-col gap-2 text-sm text-white/70 font-mono">
                   <div className="flex justify-between gap-4">
                     <span>name</span>
-                    <span className="text-white truncate">{img.name}</span>
+                    <TruncatedName name={img.name} className="text-white" />
                   </div>
                   {img.folio && (
-                    <div className="flex justify-between gap-4">
-                      <span>folio</span>
-                      <span className="text-white">{img.folio}</span>
-                    </div>
+                    <span className="self-end bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                      {img.folio}
+                    </span>
                   )}
                   <div className="flex justify-between gap-4">
                     <span>type</span>

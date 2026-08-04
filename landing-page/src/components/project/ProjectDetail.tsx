@@ -17,6 +17,7 @@ import AnnotationsTab from "./AnnotationsTab";
 import StafflinesTab from "./StafflinesTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
+import TruncatedName from "../shared/TruncatedName";
 
 const STEPS = [
   "annotate",
@@ -44,8 +45,7 @@ interface ProjectDetailProps {
     folio?: string,
     sourceId?: string,
     sourceName?: string,
-    originalWidth?: number,
-    originalHeight?: number,
+    originalFile?: File,
   ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
   onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
@@ -85,8 +85,11 @@ export default function ProjectDetail({
   textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "annotations" | "mei files" | "text" | "stafflines"
+    "images" | "models" | "generated"
   >("images");
+  const [generatedSubTab, setGeneratedSubTab] = useState<
+    "annotations" | "text" | "mei files"
+  >("annotations");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
@@ -124,9 +127,7 @@ export default function ProjectDetail({
   const meiSection = useAssetSection(project.meiFiles);
   const annSection = useAssetSection(project.annotations ?? []);
 
-  const switchTab = (
-    tab: "images" | "models" | "annotations" | "mei files" | "text" | "stafflines",
-  ) => {
+  const switchTab = (tab: "images" | "models" | "generated") => {
     setActiveTab(tab);
     imgSection.clearSelection();
     mdlSection.clearSelection();
@@ -137,12 +138,29 @@ export default function ProjectDetail({
     annSection.setPage(0);
   };
 
-  const tabs = [
-     "images",
-     "models",
-     ...(stepsUnlocked >= 1 ? ["annotations", "text", "stafflines"] : []),
-     ...(stepsUnlocked >= 3 ? ["mei files"] : []),
-   ] as const;
+  const switchGeneratedSubTab = (tab: "annotations" | "text" | "mei files") => {
+    setGeneratedSubTab(tab);
+    meiSection.clearSelection();
+    annSection.clearSelection();
+    meiSection.setPage(0);
+    annSection.setPage(0);
+  };
+
+  const TAB_LABELS: Record<string, string> = {
+    images: "Images",
+    models: "Models",
+    generated: "Generated files",
+  }
+
+  const GENERATED_SUBTAB_LABELS: Record<string, string> = {
+    annotations: "Detected layers",
+    text: "Detected text",
+    "mei files": "MEI files",
+  }
+
+  const tabs = ["images", "models", "generated"] as const;
+
+  const generatedSubTabs = ["annotations", "text", "mei files"] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -187,7 +205,7 @@ export default function ProjectDetail({
             });
           });
         }
-        if (activeTab === "annotations" && annSection.selectedIds.size > 0) {
+        if (activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0) {
           const ids = [...annSection.selectedIds];
           const deleted = new Set(ids);
           annSection.clearSelection();
@@ -198,7 +216,7 @@ export default function ProjectDetail({
             });
           });
         }
-        if (activeTab === "mei files" && meiSection.selectedIds.size > 0) {
+        if (activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0) {
           const ids = [...meiSection.selectedIds];
           const deleted = new Set(ids);
           meiSection.clearSelection();
@@ -215,6 +233,7 @@ export default function ProjectDetail({
     return () => window.removeEventListener("keydown", handler);
   }, [
     activeTab,
+    generatedSubTab,
     imgSection,
     mdlSection,
     meiSection,
@@ -441,7 +460,7 @@ export default function ProjectDetail({
                   mdlSection.clearSelection();
                 },
               )}
-              {activeTab === "annotations" && annSection.selectedIds.size > 0 && (
+              {activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0 && (
                 <>
                   {selectionButtons(
                     "annotation",
@@ -493,7 +512,7 @@ export default function ProjectDetail({
                   </button>
                 </>
               )}
-              {activeTab === "mei files" && meiSection.selectedIds.size > 0 && (
+              {activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0 && (
                 <>
                   <button
                     onClick={() =>
@@ -548,17 +567,7 @@ export default function ProjectDetail({
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() =>
-                    switchTab(
-                      tab as
-                        | "images"
-                        | "models"
-                        | "annotations"
-                        | "mei files"
-                        | "text"
-                        | "stafflines",
-                    )
-                  }
+                  onClick={() => switchTab(tab as "images" | "models" | "generated")}
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
                       activeTab === tab
@@ -567,7 +576,7 @@ export default function ProjectDetail({
                     }
                     ${i > 0 ? "-ml-px" : ""}`}
                 >
-                  {tab}
+                  {TAB_LABELS[tab] ?? tab}
                 </button>
               ))}
               <div className="flex-1 border-b border-white/50" />
@@ -615,37 +624,46 @@ export default function ProjectDetail({
                 textFindingSettings={textFindingSettings}
               />
             )}
-            {activeTab === "annotations" && (
-              <AnnotationsTab
-                annotations={project.annotations}
-                images={project.images}
-                projectId={project.id}
-                section={annSection}
-                usedNames={usedNames}
-                onUsedNamesChange={onUsedNamesChange}
-              />
-            )}
-            {activeTab === "text" && (
-              <TextAlignmentsTab
-                textAlignments={project.textAlignments}
-                images={project.images}
-                projectId={project.id}
-              />
-            )}
-            {activeTab === "stafflines" && (
-              <StafflinesTab
-                stafflines={project.stafflines}
-                images={project.images}
-                projectId={project.id}
-              />
-            )}
-            {activeTab === "mei files" && (
-              <MeiTab
-                project={project}
-                section={meiSection}
-                onUpdateProject={onUpdateProject}
-                onDeleteMei={onDeleteMei}
-              />
+            {activeTab === "generated" && (
+              <>
+                <div className="flex gap-2 mt-6 mb-4">
+                  {generatedSubTabs.map((sub) => (
+                    <button
+                      key={sub}
+                      onClick={() => switchGeneratedSubTab(sub)}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer
+                        ${generatedSubTab === sub ? "bg-white text-[#4AADAA]" : "text-white/60 hover:text-white/90"}`}
+                    >
+                      {GENERATED_SUBTAB_LABELS[sub]}
+                    </button>
+                  ))}
+                </div>
+                {generatedSubTab === "annotations" && (
+                  <AnnotationsTab
+                    annotations={project.annotations}
+                    images={project.images}
+                    projectId={project.id}
+                    section={annSection}
+                    usedNames={usedNames}
+                    onUsedNamesChange={onUsedNamesChange}
+                  />
+                )}
+                {generatedSubTab === "text" && (
+                  <TextAlignmentsTab
+                    textAlignments={project.textAlignments}
+                    images={project.images}
+                    projectId={project.id}
+                  />
+                )}
+                {generatedSubTab === "mei files" && (
+                  <MeiTab
+                    project={project}
+                    section={meiSection}
+                    onUpdateProject={onUpdateProject}
+                    onDeleteMei={onDeleteMei}
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
@@ -720,7 +738,7 @@ export default function ProjectDetail({
             <span className="text-white/80">selected:</span>
             {usedNames.models.map((name) => (
               <div key={name} className="flex items-center justify-between">
-                <span className="truncate flex-1 mr-2">{name}</span>
+                <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                 {stepsUnlocked === 0 && (
                   <button
                     onClick={() =>
@@ -741,7 +759,7 @@ export default function ProjectDetail({
                 <hr className="border-white/40 my-1" />
                 {usedNames.annotations.map((name) => (
                   <div key={name} className="flex items-center justify-between">
-                    <span className="truncate flex-1 mr-2">{name}</span>
+                    <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                     {stepsUnlocked < 2 && (
                       <button
                         onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
@@ -757,7 +775,7 @@ export default function ProjectDetail({
               const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked) !== null;
               return (
                 <div key={name} className="flex items-center justify-between">
-                  <span className="truncate flex-1 mr-2">{name}</span>
+                  <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
                   {!hasProgress && (
                     <button
                       onClick={() =>

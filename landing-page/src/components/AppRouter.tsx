@@ -272,14 +272,13 @@ export default function AppRouter({
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
-          onUploadImage={async (file, folio, sourceId, sourceName, originalWidth, originalHeight) => {
+          onUploadImage={async (file, folio, sourceId, sourceName, originalFile) => {
             const form = new FormData();
             form.append("file", file);
             if (folio) form.append("folio", folio);
             if (sourceId) form.append("source_id", sourceId);
             if (sourceName) form.append("source_name", sourceName);
-            if (originalWidth) form.append("original_width", String(originalWidth));
-            if (originalHeight) form.append("original_height", String(originalHeight));
+            if (originalFile) form.append("original_file", originalFile);
             const r = await apiFetchOrThrow(
               `/api/projects/${selectedProject.id}/images`,
               {
@@ -381,6 +380,7 @@ export default function AppRouter({
                   column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
                   masking_enabled: textFindingSettings.maskingEnabled,
                   mask_padding: textFindingSettings.maskPadding,
+                  music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
                   model_preset: inferenceSettings.modelPreset,
                   model_id: inferenceSettings.modelPreset === "custom" ? (inferenceSettings.customModelId || null) : null,
                   yolo_confidence_threshold: inferenceSettings.threshold,
@@ -420,6 +420,7 @@ export default function AppRouter({
                 text_column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
                 text_masking_enabled: textFindingSettings.maskingEnabled,
                 text_mask_padding: textFindingSettings.maskPadding,
+                text_music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
                 text_mask_model_id: textFindingSettings.maskModelId || null,
                 text_source_id: !textFindingSettings.ocrOnlyMode && textFindingSettings.sourceId
                   ? Number(textFindingSettings.sourceId)

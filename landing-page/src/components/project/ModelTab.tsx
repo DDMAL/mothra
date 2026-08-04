@@ -185,7 +185,9 @@ export default function ModelTab({
     <>
       <div className="mt-6" onClick={() => section.clearSelection()}>
         {project.models.length === 0 ? (
-          <p className="text-white/70 text-sm">no models yet</p>
+          <p className="text-white/70 text-sm">
+            No models yet -- if no model is uploaded, the default model will be used.
+          </p>
         ) : (
           <AssetGrid
             pagedItems={pagedModels}
@@ -475,6 +477,17 @@ export default function ModelTab({
                         />
                         <span className="text-white/70 text-xs">
                           enable text-region masking (blacks out neume/music regions before Kraken segmentation to reduce over-segmentation artifacts)
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={textFindingSettings.musicOverlapFilterEnabled}
+                          onChange={(e) => textFindingSettings.patch({ musicOverlapFilterEnabled: e.target.checked })}
+                          className="accent-[#1D3335]"
+                        />
+                        <span className="text-white/70 text-xs">
+                          drop text lines that mostly overlap detected music (helps on pages with music-notation artifacts; can hide real text on pages with interleaved text/music — check the run log for dropped lines)
                         </span>
                       </label>
 
