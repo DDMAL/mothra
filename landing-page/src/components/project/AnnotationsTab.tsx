@@ -27,7 +27,7 @@ export default function AnnotationsTab({
 }: AnnotationsTabProps) {
   const [viewSet, setViewSet] = useState<AnnotationSet | null>(null);
   if (annotations.length === 0) {
-    return <p className="mt-6 text-white/70 text-sm">no annotations yet</p>;
+    return <p className="mt-6 text-white/70 text-sm">no detected layers yet</p>;
   }
 
   const sortedAnnotations = sortBySourceThenFolio(

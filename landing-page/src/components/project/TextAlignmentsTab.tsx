@@ -19,7 +19,7 @@ export default function TextAlignmentsTab({
   const [viewSet, setViewSet] = useState<TextAlignment | null>(null);
   if (textAlignments.length === 0) {
     return (
-      <p className="mt-6 text-white/70 text-sm">no text-finding results yet</p>
+      <p className="mt-6 text-white/70 text-sm">no detected text yet</p>
     );
   }
 
