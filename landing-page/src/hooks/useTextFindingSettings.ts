@@ -12,6 +12,7 @@ export interface TextFindingSettings {
   ocrOnlyMode: boolean;
   sourceId: string;
   folio: string;
+  musicOverlapFilterEnabled: boolean;
 }
 
 export function useTextFindingSettings() {
@@ -29,6 +30,8 @@ export function useTextFindingSettings() {
   const [sourceId, setSourceId] = useState("");
   const [folio, setFolio] = useState("");
 
+  const [musicOverlapFilterEnabled, setMusicOverlapFilterEnabled] = useState(true);
+
   const patch = (p: Partial<TextFindingSettings>) => {
     if (p.columnCount !== undefined) setColumnCount(p.columnCount);
     if (p.segmentationModelId !== undefined) setSegmentationModelId(p.segmentationModelId);
@@ -41,11 +44,12 @@ export function useTextFindingSettings() {
     if (p.ocrOnlyMode !== undefined) setOcrOnlyMode(p.ocrOnlyMode);
     if (p.sourceId !== undefined) setSourceId(p.sourceId);
     if (p.folio !== undefined) setFolio(p.folio);
+    if (p.musicOverlapFilterEnabled !== undefined) setMusicOverlapFilterEnabled(p.musicOverlapFilterEnabled);
   };
 
   return {
     columnCount, segmentationModelId, recognitionModelId, device, columnBimodalThreshold,
-    maskingEnabled, maskPadding, maskModelId,
+    maskingEnabled, musicOverlapFilterEnabled, maskPadding, maskModelId,
     ocrOnlyMode, sourceId, folio,
     patch,
   };

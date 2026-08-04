@@ -27,6 +27,7 @@ interface AssetGridProps<T extends AssetItem> {
   getItemBadge?: (name: string) => string | null;
   groupBy?: (item: T) => string;
   onUse?: (item: T) => void;
+  topLeftBadge?: (item: T) => ReactNode;
 }
 
 export default function AssetGrid<T extends AssetItem>({
@@ -39,6 +40,7 @@ export default function AssetGrid<T extends AssetItem>({
   getItemBadge,
   groupBy,
   onUse,
+  topLeftBadge,
 }: AssetGridProps<T>) {
   return (
     <>
@@ -64,7 +66,7 @@ export default function AssetGrid<T extends AssetItem>({
               )}
               <div className="flex flex-col gap-2">
                 <div
-                  className={`relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
+                  className={`group relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
                           ${section.selectedIds.has(item.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
                           ${used ? "opacity-40 cursor-default" : ""}`}
                   onClick={(e) => {
@@ -72,15 +74,35 @@ export default function AssetGrid<T extends AssetItem>({
                   }}
                 >
                   {renderThumbnail(item)}
-                  {onUse && !used && (
+                  {(topLeftBadge?.(item) || (onUse && !used)) && (
+                    <div className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
+                      {topLeftBadge?.(item)}
+                      {onUse && !used && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUse(item);
+                          }}
+                          className="px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
+                        >
+                          use
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {!used && (
                     <button
+                      aria-label={`Open actions for ${item.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onUse(item);
+                        section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });
                       }}
-                      className="absolute top-1.5 left-1.5 z-20 px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
+                      // Faintly visible by default (not opacity-0) so it stays
+                      // discoverable on touch/keyboard, which have no hover —
+                      // hovering the thumbnail just makes it more prominent.
+                      className="absolute top-1.5 right-1.5 z-20 w-6 h-6 flex items-center justify-center rounded-full bg-black/40 text-white text-base leading-none opacity-70 group-hover:opacity-100 group-hover:bg-black/70 hover:opacity-100 hover:bg-black/70 transition-all cursor-pointer"
                     >
-                      use
+                      ⋮
                     </button>
                   )}
                   {badge && (
@@ -91,23 +113,10 @@ export default function AssetGrid<T extends AssetItem>({
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-1">
-                  <TruncatedName
-                    name={item.name}
-                    className={`text-sm text-white ${used ? "opacity-40" : ""}`}
-                  />
-                  {!used && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });
-                      }}
-                      className="text-white text-lg leading-none hover:opacity-70 cursor-pointer flex-shrink-0"
-                    >
-                      ⋮
-                    </button>
-                  )}
-                </div>
+                <TruncatedName
+                  name={item.name}
+                  className={`text-sm text-white ${used ? "opacity-40" : ""}`}
+                />
               </div>
             </Fragment>
           );

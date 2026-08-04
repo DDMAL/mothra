@@ -157,15 +157,9 @@ export default function ProjectDetail({
     "mei files": "MEI files",
   }
 
-  const tabs = [
-     "images",
-     "models",
-     ...(stepsUnlocked >= 1 ? ["generated"] : []),
-   ] as const;
+  const tabs = ["images", "models", "generated"] as const;
 
-  const generatedSubTabs = (
-    ["annotations", "text", ...(stepsUnlocked >= 3 ? ["mei files" as const] : [])] as const
-  );
+  const generatedSubTabs = ["annotations", "text", "mei files"] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -660,7 +654,7 @@ export default function ProjectDetail({
                     projectId={project.id}
                   />
                 )}
-                {generatedSubTab === "mei files" && stepsUnlocked >= 3 && (
+                {generatedSubTab === "mei files" && (
                   <MeiTab
                     project={project}
                     section={meiSection}

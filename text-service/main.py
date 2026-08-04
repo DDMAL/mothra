@@ -36,8 +36,6 @@ for _f in BATCH_DIR.glob("*.zip"):
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
 from steps.gt_manifest import fetch_cantus_csv, make_output_stem
 from steps.nw_chant_allocator import _folio_sort_key, read_folio_state
-from PIL import Image as PILImage
-from steps.mothra_mask import MothraImageMask
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -78,50 +76,41 @@ def _bbox_overlap_ratio(line_bbox: list[float], music_bbox: list[float]) -> floa
     line_area = max(1.0, (lx1 - lx0) * (ly1 - ly0))
     return (iw * ih) / line_area
 
-def filter_lines_over_music(lines: list[dict], music_boxes: list[list[float]], threshold: float = 0.3) -> tuple[list[dict], int]:
-    """Drop detected text lines that mostly overlap a YOLO music region - BLLA over-segmentation artifacts from neume notation, not real chant text."""
+def filter_lines_over_music(lines: list[dict], music_boxes: list[list[float]], threshold: float = 0.3) -> tuple[list[dict], list[dict]]:
+    """Drop detected text lines that mostly overlap a YOLO music region - BLLA over-segmentation artifacts from neume notation, not real chant text.
+
+    Returns (kept, dropped) - the dropped line dicts themselves, not just a
+    count, so callers can log exactly what was removed (issue #131 flagged this
+    filter as an unauditable silent drop on manuscripts with interleaved text
+    and music)."""
     if not music_boxes:
-        return lines, 0
-    kept, dropped = [], 0
+        return lines, []
+    kept, dropped = [], []
     for line in lines:
         if any(_bbox_overlap_ratio(line["bbox"], mb) > threshold for mb in music_boxes):
-            dropped += 1
+            dropped.append(line)
             continue
         kept.append(line)
     return kept, dropped
 
-def _apply_mothra_mask(image_path: Path, mask_json: Optional[str], padding_px: int) -> Optional[Path]:
-    """Black out everything except mothra-detected text regions in the image
-    at image_path, replicating run_pipeline.py's main() CLI masking block
-    (which only exists in the CLI entrypoint, not in run()).
+def _write_mask_json_tmp(mask_json: Optional[str]) -> Optional[Path]:
+    """Write mask_json content to a scratch temp file so run()'s own
+    mothra_json_path/padding masking (mothra-text/run_pipeline.py) can read it,
+    instead of text-service pre-masking the image itself. run() didn't support
+    mothra_json_path when this integration was first written; now that it does,
+    this is the sanctioned single implementation of the masking logic instead of
+    a second hand-rolled copy that can drift from it over time.
 
-    mask_json is JSON *content*, not a file path — MothraImageMask's
-    constructor only accepts a path, so this writes it to a scratch temp
-    file first and deletes that scratch file once the masker has parsed it.
-
-    Returns the path to a new temp masked-image file, or None if mask_json
-    was falsy (caller keeps using the original image_path). Caller owns
-    deleting the returned path.
+    Returns the path to the temp JSON file, or None if mask_json is falsy.
+    Caller owns deleting the returned path.
     """
     if not mask_json:
         return None
-    tmp_json = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, encoding="utf-8"
-        ) as _tmpf:
-            _tmpf.write(mask_json)
-            tmp_json = _tmpf.name
-        img = PILImage.open(image_path).convert("RGB")
-        masker = MothraImageMask(tmp_json, padding_px=padding_px)
-        masked_img = masker.apply(img)
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as _tmp:
-            masked_img.save(_tmp.name)
-            return Path(_tmp.name)
-    finally:
-        if tmp_json:
-            Path(tmp_json).unlink(missing_ok=True)
-
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as _tmpf:
+        _tmpf.write(mask_json)
+        return Path(_tmpf.name)
 
 class _QueueLogHandler(logging.Handler):
     """Relays one request's log records onto a queue for SSE relay.
@@ -187,7 +176,17 @@ async def run_text_pipeline(
     masking_enabled: bool = Form(True),
     mask_padding: int = Form(15),
     mask_json: Optional[str] = Form(None),
+    music_overlap_filter_enabled: bool = Form(True),
 ):
+    """Run Kraken segmentation + HTR over a single image and stream progress as SSE.
+
+    Stages a mothra-mask JSON to a scratch temp file (if masking is enabled
+    and provided) for `run()` to apply itself via `mothra_json_path`, invokes
+    `run()` on a worker thread (relaying its logger through `_QueueLogHandler`
+    onto this request's SSE stream), then optionally drops text lines that
+    mostly overlap a YOLO music region via `filter_lines_over_music` before
+    emitting the final `text_alignment`/`log_text` result event.
+    """
     image_bytes = await image.read()
     image_filename = image.filename or "page.jpg"
     parsed_music_boxes = json.loads(music_boxes) if music_boxes else []
@@ -208,7 +207,7 @@ async def run_text_pipeline(
         handler = _QueueLogHandler(log_queue)
         root_logger = logging.getLogger()
         root_logger.addHandler(handler)
-        _mask_tmp: Optional[Path] = None
+        _mask_json_tmp: Optional[Path] = None
         try:
             yield event({"type": "stage", "name": "checking"})
             image_path = tmp_dir / image_filename
@@ -228,15 +227,14 @@ async def run_text_pipeline(
             if column_count:
                 yield event({"type": "log", "message": f"column count forced to {column_count}"})
 
-            active_image_path = image_path
+            mothra_json_path: Optional[str] = None
             if masking_enabled and mask_json:
                 try:
-                    _mask_tmp = _apply_mothra_mask(image_path, mask_json, mask_padding)
+                    _mask_json_tmp = _write_mask_json_tmp(mask_json)
+                    mothra_json_path = str(_mask_json_tmp)
+                    yield event({"type": "log", "message": f"text-region mask will be applied by run() (padding={mask_padding}px)"})
                 except Exception as exc:
-                    yield event({"type": "log", "message": f"text-region masking failed, continuing unmasked: {exc}"})
-                if _mask_tmp:
-                    active_image_path = _mask_tmp
-                    yield event({"type": "log", "message": f"applied text-region mask (padding={mask_padding}px)"})
+                    yield event({"type": "log", "message": f"text-region masking setup failed, continuing unmasked: {exc}"})
             elif masking_enabled and not mask_json:
                 yield event({"type": "log", "message": "text-region masking enabled but no mask JSON available; running without masking"})
             else:
@@ -250,7 +248,7 @@ async def run_text_pipeline(
                 handler.thread_ident = threading.current_thread().ident
                 try:
                     result_holder["value"] = run(
-                        image_path=str(active_image_path),
+                        image_path=str(image_path),
                         folio=folio,
                         source_id=source_id,
                         segmentation_model=segmentation_model,
@@ -259,6 +257,8 @@ async def run_text_pipeline(
                         column_bimodal_threshold=column_bimodal_threshold,
                         column_count=column_count,
                         ocr_only_mode=(source_id is None),
+                        mothra_json_path=mothra_json_path,
+                        padding=mask_padding,
                     )
                 except Exception as exc:
                     result_holder["error"] = exc
@@ -276,13 +276,17 @@ async def run_text_pipeline(
                 raise result_holder["error"]
             collection, manifest = result_holder["value"]
             payload = _build_pipeline_payload(
-                collection, str(active_image_path), manifest, folio=folio, mode=("ocr_only" if source_id is None else "cantus_aligned"),
+                collection, str(image_path), manifest, folio=folio, mode=("ocr_only" if source_id is None else "cantus_aligned"),
             )
-            if parsed_music_boxes:
-                kept_lines, n_dropped = filter_lines_over_music(payload["lines"], parsed_music_boxes)
+            if parsed_music_boxes and music_overlap_filter_enabled:
+                kept_lines, dropped_lines = filter_lines_over_music(payload["lines"], parsed_music_boxes)
                 payload["lines"] = kept_lines
-                if n_dropped:
-                    yield event({"type": "log", "message": f"dropped {n_dropped} line(s) overlapping YOLO music regions"})
+                for dl in dropped_lines:
+                    yield event({"type": "log", "message": f"dropped line overlapping YOLO music region: bbox={dl['bbox']}, text={dl.get('text', '')!r}"})
+                if dropped_lines:
+                    yield event({"type": "log", "message": f"dropped {len(dropped_lines)} line(s) overlapping YOLO music regions (disable via music_overlap_filter_enabled)"})
+            elif parsed_music_boxes and not music_overlap_filter_enabled:
+                yield event({"type": "log", "message": "music-overlap filter disabled; all detected lines kept"})
             mei_json_path = tmp_dir / "mei_alignment.json"
             _write_mei_json(payload, str(mei_json_path))
             text_alignment = json.loads(mei_json_path.read_text())
@@ -295,8 +299,8 @@ async def run_text_pipeline(
             yield event({"type": "error", "message": str(e)})
         finally:
             root_logger.removeHandler(handler)
-            if _mask_tmp:
-                _mask_tmp.unlink(missing_ok=True)
+            if _mask_json_tmp:
+                _mask_json_tmp.unlink(missing_ok=True)
             shutil.rmtree(tmp_dir, ignore_errors=True)
     
     return StreamingResponse(
@@ -319,7 +323,16 @@ async def run_text_batch(
     mask_json_list: Optional[str] = Form(None),
     masking_enabled: bool = Form(True),
     mask_padding: int = Form(15),
+    music_overlap_filter_enabled: bool = Form(True),
 ):
+    """Run Kraken segmentation + HTR over a batch of Cantus-aligned folios and
+    stream progress as SSE.
+
+    Same per-folio pipeline as `run_text_pipeline` (mask staging, `run()`,
+    optional `filter_lines_over_music`), but iterated across `images`/`folios`
+    with `prev_folio_state`/`folio_state_out` threaded from one folio to the
+    next so `run()` can track chant allocation continuity across the batch.
+    """
     folio_list = json.loads(folios)
     if len(folio_list) != len(images):
         raise HTTPException(status_code=400, detail="folios count must match images count")
@@ -375,22 +388,21 @@ async def run_text_batch(
                 try:
                     for i, (image_path, folio, stem) in enumerate(zip(image_paths, folio_list, stems)):
                         logger.info("Folio %d/%d: %s", i + 1, len(folio_list), folio)
-                        active_image_path = Path(image_path)
-                        mask_tmp = None
+                        mask_json_tmp = None
                         folio_mask_json = parsed_mask_json[i] if i < len(parsed_mask_json) else None
+                        mothra_json_path = None
                         if masking_enabled and folio_mask_json:
                             try:
-                                mask_tmp = _apply_mothra_mask(active_image_path, folio_mask_json, mask_padding)
+                                mask_json_tmp = _write_mask_json_tmp(folio_mask_json)
+                                mothra_json_path = str(mask_json_tmp)
                             except Exception as exc:
-                                logger.info("folio %s: text-region masking failed, continuing unmasked: %s", folio, exc)
-                            if mask_tmp:
-                                active_image_path = mask_tmp
+                                logger.info("folio %s: text-region masking setup failed, continuing unmasked: %s", folio, exc)
                         state_tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
                         state_path = state_tmp.name
                         state_tmp.close()
                         try:
                             collection, manifest = run(
-                                image_path=str(active_image_path),
+                                image_path=image_path,
                                 folio=folio,
                                 source_id=source_id,
                                 segmentation_model=segmentation_model,
@@ -400,16 +412,21 @@ async def run_text_batch(
                                 prev_folio_state=prev_state,
                                 folio_state_out=state_path,
                                 column_count=column_count,
+                                mothra_json_path=mothra_json_path,
+                                padding=mask_padding,
                             )
                             payload = _build_pipeline_payload(
-                                collection, str(active_image_path), manifest, folio=stem, mode="cantus_aligned",
+                                collection, image_path, manifest, folio=stem, mode="cantus_aligned",
                             )
                             folio_boxes = parsed_music_boxes[i] if i < len(parsed_music_boxes) else []
-                            if folio_boxes:
-                                kept_lines, n_dropped = filter_lines_over_music(payload["lines"], folio_boxes)
+                            if folio_boxes and music_overlap_filter_enabled:
+                                kept_lines, dropped_lines = filter_lines_over_music(payload["lines"], folio_boxes)
                                 payload["lines"] = kept_lines
-                                if n_dropped:
-                                    logger.info("folio %s: dropped %d line(s) overlapping YOLO music regions", folio, n_dropped)
+                                if dropped_lines:
+                                    logger.info(
+                                        "folio %s: dropped %d line(s) overlapping YOLO music regions: %s",
+                                        folio, len(dropped_lines), [dl["bbox"] for dl in dropped_lines],
+                                    )
                             mei_json_path = tmp_out / f"{stem}.json"
                             _write_mei_json(payload, str(mei_json_path))
                             text_alignment = json.loads(mei_json_path.read_text())
@@ -427,8 +444,8 @@ async def run_text_batch(
                             result_holder["completed"] += 1
                         finally:
                             Path(state_path).unlink(missing_ok=True)
-                            if mask_tmp:
-                                mask_tmp.unlink(missing_ok=True)
+                            if mask_json_tmp:
+                                mask_json_tmp.unlink(missing_ok=True)
                 except Exception as exc:
                     result_holder["error"] = exc
                     result_holder["failed_folio"] = folio_list[result_holder["completed"]]

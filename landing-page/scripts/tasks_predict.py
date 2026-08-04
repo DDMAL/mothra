@@ -11,6 +11,14 @@ from text_api import stream_text_finding
 
 @celery_app.task(name="predict.run")
 def run_predict_task(job_id, project_id, body):
+    """Celery task backing `POST /api/projects/{id}/predict`.
+
+    Loads the requested YOLO model set, runs layer-separation inference over
+    the project's images, writes the resulting annotations, and (if
+    text-finding params are present in `body`) streams text-finding via
+    `stream_text_finding`. Progress/log/error events are published to
+    `job_events` via `publish_event` for `GET /api/jobs/{id}/stream` to relay.
+    """
     import numpy as np
     from PIL import Image
 
@@ -131,6 +139,7 @@ def run_predict_task(job_id, project_id, body):
                 column_bimodal_threshold=body.get("text_column_bimodal_threshold", 0.5),
                 masking_enabled=body.get("text_masking_enabled", True),
                 mask_padding=body.get("text_mask_padding", 15),
+                music_overlap_filter_enabled=body.get("text_music_overlap_filter_enabled", True),
                 mask_json_override=mask_json_override,
                 source_id=body.get("text_source_id") if image_folio else None,
                 folio_override=image_folio,

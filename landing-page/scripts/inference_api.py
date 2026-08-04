@@ -26,6 +26,7 @@ class PredictBody(BaseModel):
     text_column_bimodal_threshold: float = 0.5
     text_masking_enabled: bool = True
     text_mask_padding: int = 15
+    text_music_overlap_filter_enabled: bool = True
     text_mask_model_id: Optional[str] = None
     text_source_id: Optional[int] = None
 
