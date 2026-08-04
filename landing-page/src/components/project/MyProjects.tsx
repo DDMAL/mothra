@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { apiFetchOrThrow } from "../../lib/apiFetch";
+import { suggestProjectNameFromFilename } from "../../utils/folio";
 import { AuthImage } from "../shared/AuthImage";
-import type { Project, MeiFile } from "../../types";
+import type { Project, MeiFile, CantusSource } from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
 import { formatLastOpened } from "../../utils/time";
 import Modal from "../shared/Modal";
@@ -90,6 +92,11 @@ export default function MyProjects({
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showSourceLookup, setShowSourceLookup] = useState(false);
+  const [sourceIdInput, setSourceIdInput] = useState("");
+  const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
+  const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<
     number | null
@@ -103,6 +110,21 @@ export default function MyProjects({
   const [sortBy, setSortBy] = useState<"lastOpened" | "dateCreated" | "nameAZ">(
     "lastOpened",
   );
+
+  const handleSourceLookup = async() => {
+    const id = sourceIdInput.trim();
+    if (!id) return;
+    setSourceLookupLoading(true);
+    setSourceLookupError(null);
+    try {
+      const source: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
+      setNewName(source.name);
+    } catch (e) {
+      setSourceLookupError((e as Error).message);
+    } finally {
+      setSourceLookupLoading(false);
+    }
+  };
 
   const activeProjects = projects
     .filter((p) => !p.deletedAt)
@@ -436,6 +458,9 @@ export default function MyProjects({
           onClose={() => {
             setShowCreate(false);
             setNewName("");
+            setShowSourceLookup(false);
+            setSourceIdInput("");
+            setSourceLookupError(null);
           }}
           size="lg"
           backdrop="none"
@@ -449,11 +474,62 @@ export default function MyProjects({
             placeholder="project name"
             className="bg-white rounded-2xl px-6 py-3 text-center text-[#1D3335] outline-none text-sm placeholder:text-[#1D3335]/60"
           />
+
+          <div className="flex flex-col items-center gap-2 -mt-2">
+            <div className="flex items-center justify-center gap-2 text-xs">
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+                >
+                    name from a file
+                </button>
+                <span className="text-[#1D3335]/30">|</span>
+                <button
+                    onClick={() => setShowSourceLookup((v) => !v)}
+                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+                >
+                    name from a Cantus source
+                </button>
+            </div>
+            <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) setNewName(suggestProjectNameFromFilename(file.name));
+                    e.target.value = "";
+                }}
+            />
+            {showSourceLookup && (
+                <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                        <input
+                            value={sourceIdInput}
+                            onChange={(e) => setSourceIdInput(e.target.value)}
+                            placeholder="CantusDB source ID"
+                            className="bg-white rounded-xl px-3 py-1.5 text-center text-[#1D3335] outline-none text-xs placeholder:text-[#1D3335]/60 w-36"
+                        />
+                        <button
+                            onClick={handleSourceLookup}
+                            disabled={sourceLookupLoading || !sourceIdInput.trim()}
+                            className="px-3 py-1.5 border border-[#1D3335]/40 text-[#1D3335] text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {sourceLookupLoading ? "loading..." : "look up"}
+                        </button>
+                    </div>
+                    {sourceLookupError && <p className="text-red-600 text-xs">{sourceLookupError}</p>}
+                </div>
+            )}
+        </div>
           <button
             onClick={() => {
               if (!newName.trim()) return;
               onCreateProject(newName.trim());
               setNewName("");
+              setShowSourceLookup(false);
+              setSourceIdInput("");
+              setSourceLookupError(null);
               setShowCreate(false);
             }}
             className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
