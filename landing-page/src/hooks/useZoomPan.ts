@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 
 const MIN_SCALE = 1;
-const MAX_SCALE = 6;
+export const MAX_SCALE = 6;
 const ZOOM_STEP = 0.4;
 
 interface ZoomPanState {

@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import type { AnnotationSet } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import TruncatedName from "../shared/TruncatedName";
-import { useZoomPan } from "../../hooks/useZoomPan";
+import { useZoomPan, MAX_SCALE } from "../../hooks/useZoomPan";
 
 interface BBox {
     cls: number;
@@ -78,9 +78,21 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
         if (!canvas || !img) return;
         const dw = img.clientWidth;
         const dh = img.clientHeight;
-        canvas.width = dw;
-        canvas.height = dh;
+        // Backing buffer sized for MAX_SCALE (not just the 100%-zoom display
+        // size) so the ancestor's CSS `transform: scale()` zoom stays crisp
+        // all the way up instead of blurrily upscaling a buffer that was
+        // only ever rendered at 100% 
+        canvas.width = dw * MAX_SCALE;
+        canvas.height = dh * MAX_SCALE;
+        // <canvas> is a replaced element: with no explicit CSS size it
+        // displays at its backing-buffer resolution (canvas.width/height),
+        // not shrunk to fit its container — pin the *displayed* size to
+        // dw/dh explicitly so the bigger MAX_SCALE backing buffer doesn't
+        // render at its full (huge) intrinsic size.
+        canvas.style.width = `${dw}px`;
+        canvas.style.height = `${dh}px`;
         const ctx = canvas.getContext("2d")!;
+        ctx.scale(MAX_SCALE, MAX_SCALE);
         ctx.clearRect(0, 0, dw, dh);
         viewState.boxes.forEach((b) => {
             const color = PALETTE[b.cls % PALETTE.length];

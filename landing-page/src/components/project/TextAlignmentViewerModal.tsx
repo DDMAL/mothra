@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { type TextAlignment } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import TruncatedName from "../shared/TruncatedName";
-import { useZoomPan } from "../../hooks/useZoomPan";
+import { useZoomPan, MAX_SCALE } from "../../hooks/useZoomPan";
 
 interface SylBox {
     syl: string;
@@ -133,12 +133,31 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
         const canvas = canvasRef.current;
         if (!canvas) return;
         const { dw, dh, nw, nh } = imgSize;
-        canvas.width = dw;
-        canvas.height = dh;
+        // Backing buffer sized for MAX_SCALE (not just the 100%-zoom display
+        // size) so the ancestor's CSS `transform: scale()` zoom stays crisp
+        // all the way up instead of blurrily upscaling a buffer that was
+        // only ever rendered at 100% — see issue #139's zoomed-in blur report.
+        canvas.width = dw * MAX_SCALE;
+        canvas.height = dh * MAX_SCALE;
+        // <canvas> is a replaced element: with no explicit CSS size it
+        // displays at its backing-buffer resolution (canvas.width/height),
+        // not shrunk to fit its container — pin the *displayed* size to
+        // dw/dh explicitly so the bigger MAX_SCALE backing buffer doesn't
+        // render at its full (huge) intrinsic size.
+        canvas.style.width = `${dw}px`;
+        canvas.style.height = `${dh}px`;
         const scaleX = dw / nw;
         const scaleY = dh / nh;
         const ctx = canvas.getContext("2d")!;
+        ctx.scale(MAX_SCALE, MAX_SCALE);
         ctx.clearRect(0, 0, dw, dh);
+        // Divided by the *current* zoom (not MAX_SCALE) so the label stays a
+        // roughly constant, legible on-screen size instead of growing right
+        // along with the (now-crisp) boxes and overlapping its neighbors —
+        // box outlines are still meant to visibly grow when zoomed in, only
+        // the text needs to stay put.
+        const fontPx = 11 / zoom.scale;
+        const labelYFloor = 10 / zoom.scale;
         viewState.boxes.forEach((b, i) => {
             const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
             const hovered = i === hoveredBoxIndex;
@@ -148,10 +167,10 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             ctx.fillRect(x, y, w, h);
             ctx.strokeRect(x, y, w, h);
             ctx.fillStyle = hovered ? "#1D3335" : BOX_COLOR;
-            ctx.font = hovered ? "bold 11px monospace" : "11px monospace";
-            ctx.fillText(b.syl, x, Math.max(10, y - 2));
+            ctx.font = `${hovered ? "bold " : ""}${fontPx}px monospace`;
+            ctx.fillText(b.syl, x, Math.max(labelYFloor, y - 2));
         });
-    }, [viewState, hoveredBoxIndex, imgSize]);
+    }, [viewState, hoveredBoxIndex, imgSize, zoom.scale]);
 
     useEffect(() => {
         drawOverlay();
