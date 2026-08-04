@@ -61,27 +61,40 @@ export function sourceGroupLabel(images: ProjectImage[], imageName?: string): st
 }
 
 
-/** Best-effort folio token pulled out of an arbitrary filename (not a bare
- * folio string) — e.g. "A-Gu_29_002r.jpeg" -> "002r". Searches for the LAST
- * digit-run + r/v token bounded by non-alphanumeric characters or string
- * start/end (an optional separator like "-"/"_"/space between the digits
- * and the r/v is allowed, e.g. "002-r"), on the theory that the folio is
- * usually the final identifying component before the extension. Returns
- * undefined for names with no such token (e.g. "IMG_0001.jpg", or roman-
- * numeral foliation like "ir") — callers should fall back to positional
- * assignment in that case, exactly as before this function existed. */
-export function extractFolioFromFilename(filename: string): string | undefined {
-    const base = filename.replace(/\.[^.]+$/, "");
+function lastFolioMatch(base: string): RegExpExecArray | undefined {
     const re = /(?:^|[^a-z0-9])0*(\d{1,4})[-_\s]?([rv])(?:$|[^a-z0-9])/gi;
     let match: RegExpExecArray | null;
-    let last: RegExpExecArray | null = null;
+    let last: RegExpExecArray | undefined;
     while ((match = re.exec(base)) !== null) {
         last = match;
         // step back one char so an immediately-adjacent following token can still be found
         re.lastIndex = match.index + match[0].length - 1;
     }
+    return last;
+}
+
+export function extractFolioFromFilename(filename: string): string | undefined {
+    const base = filename.replace(/\.[^.]+$/, "");
+    const last = lastFolioMatch(base);
     if (!last) return undefined;
     return `${last[1]}${last[2].toLowerCase()}`;
+}
+
+/** Best-effort project-name suggestion from an uploaded image's filename —
+ * strips the trailing folio token `extractFolioFromFilename` finds (plus its
+ * separator), e.g. "Ch._Fco_002r.jpg" -> "Ch. Fco". Falls back to the bare
+ * filename (minus extension) when there's no recognizable folio token, or
+ * when nothing is left after stripping it, so this always returns something
+ * usable rather than requiring callers to handle an empty/undefined case. */
+export function suggestProjectNameFromFilename(filename: string): string {
+    const base = filename.replace(/\.[^.]+$/, "");
+    const last = lastFolioMatch(base);
+    // Only strip the folio token when it ends the filename — otherwise it's
+    // a folio-shaped substring in the middle (e.g. "Ch_002r_copy.jpg") and
+    // slicing at its index would discard trailing text ("copy") too.
+    const prefix =
+        last && last.index + last[0].length === base.length ? base.slice(0, last.index) : base;
+    return prefix.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim() || base.trim();
 }
 
 /** Resolves `candidate` (as extracted from a filename) to the EXACT canonical

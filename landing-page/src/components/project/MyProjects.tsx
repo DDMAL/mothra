@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { apiFetchOrThrow } from "../../lib/apiFetch";
+import { suggestProjectNameFromFilename } from "../../utils/folio";
+import { getOversizedFiles, resizeImageFile, TARGET_RESIZE_BYTES } from "../../utils/imageResize";
 import { AuthImage } from "../shared/AuthImage";
-import type { Project, MeiFile } from "../../types";
+import type { Project, MeiFile, CantusSource } from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
+import LargeImageWarningModal from "./LargeImageWarningModal";
 import { formatLastOpened } from "../../utils/time";
 import Modal from "../shared/Modal";
 
@@ -11,7 +15,7 @@ const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";
 interface MyProjectsProps {
   projects: Project[];
   onSelectProject: (id: number) => void;
-  onCreateProject: (name: string) => void;
+  onCreateProject: (name: string, imageFile?: File) => void;
   onRenameProject: (id: number, newName: string) => void;
   onDeleteProject: (id: number) => void;
   onRestoreProject: (id: number) => void;
@@ -47,9 +51,14 @@ function sortProjects(
   if (!a.isPinned && b.isPinned) return 1;
   if (sortBy === "nameAZ") return a.name.localeCompare(b.name);
   if (sortBy === "dateCreated") return b.id - a.id;
-  if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
-  if (!a.lastOpenedAt) return 1;
-  if (!b.lastOpenedAt) return -1;
+  // A project with no lastOpenedAt hasn't been opened since it was created —
+  // treat that as more recent than something opened a while ago and not
+  // touched since, so a just-created project surfaces at the top of the
+  // default "last opened" sort instead of sinking to the bottom until the
+  // user opens something else first.
+  if (!a.lastOpenedAt && !b.lastOpenedAt) return b.id - a.id;
+  if (!a.lastOpenedAt) return -1;
+  if (!b.lastOpenedAt) return 1;
   return (
     new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime()
   );
@@ -90,6 +99,15 @@ export default function MyProjects({
   const [tab, setTab] = useState<"active" | "trash">("active");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showSourceLookup, setShowSourceLookup] = useState(false);
+  const [sourceIdInput, setSourceIdInput] = useState("");
+  const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
+  const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
+  const [pickedImageFile, setPickedImageFile] = useState<File | null>(null)
+  const [pickedFileError, setPickedFileError] = useState<string | null>(null);
+  const [pendingSizeWarning, setPendingSizeWarning] = useState<File | null>(null);
+  const [resizingCreateImage, setResizingCreateImage] = useState(false);
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<
     number | null
@@ -103,6 +121,77 @@ export default function MyProjects({
   const [sortBy, setSortBy] = useState<"lastOpened" | "dateCreated" | "nameAZ">(
     "lastOpened",
   );
+
+  // Bumped whenever the create-project form resets (finalizeCreate or the
+  // modal's onClose), so an in-flight source lookup can tell it's stale and
+  // skip writing its result into whatever new create session followed it.
+  const createSessionId = useRef(0);
+
+  const handleSourceLookup = async() => {
+    const id = sourceIdInput.trim();
+    if (!id) return;
+    const sessionId = createSessionId.current;
+    setSourceLookupLoading(true);
+    setSourceLookupError(null);
+    try {
+      const source: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
+      if (createSessionId.current !== sessionId) return;
+      setNewName(source.name);
+    } catch (e) {
+      if (createSessionId.current !== sessionId) return;
+      setSourceLookupError((e as Error).message);
+    } finally {
+      if (createSessionId.current === sessionId) setSourceLookupLoading(false);
+    }
+  };
+
+  // Shared by the plain "create project" click and both size-warning
+  // resolutions below, so all three paths reset the same modal state and
+  // call onCreateProject exactly once.
+  const finalizeCreate = (imageFile?: File) => {
+    onCreateProject(newName.trim(), imageFile);
+    createSessionId.current++;
+    setNewName("");
+    setShowSourceLookup(false);
+    setSourceIdInput("");
+    setSourceLookupError(null);
+    setPickedImageFile(null);
+    setPickedFileError(null);
+    setPendingSizeWarning(null);
+    setShowCreate(false);
+  };
+
+  const handleCreateClick = () => {
+    if (!newName.trim()) return;
+    if (pickedImageFile && getOversizedFiles([pickedImageFile]).length > 0) {
+      setPendingSizeWarning(pickedImageFile);
+      return;
+    }
+    finalizeCreate(pickedImageFile ?? undefined);
+  };
+
+  const resolveCreateSizeWarning = async (action: "resize" | "asis" | "cancel") => {
+    if (!pendingSizeWarning) return;
+    if (action === "cancel") {
+      setPendingSizeWarning(null);
+      return;
+    }
+    if (action === "asis") {
+      finalizeCreate(pendingSizeWarning);
+      return;
+    }
+    setResizingCreateImage(true);
+    try {
+      const resized = await resizeImageFile(pendingSizeWarning, TARGET_RESIZE_BYTES);
+      finalizeCreate(resized);
+    } finally {
+      // Always clear the flag, even on failure — `finalizeCreate` (which also
+      // clears it via the `pendingSizeWarning` reset) never runs in that
+      // case, and leaving it `true` would keep LargeImageWarningModal stuck
+      // with every action disabled and no way to retry/upload-as-is/cancel.
+      setResizingCreateImage(false);
+    }
+  };
 
   const activeProjects = projects
     .filter((p) => !p.deletedAt)
@@ -434,8 +523,14 @@ export default function MyProjects({
       {showCreate && (
         <Modal
           onClose={() => {
+            createSessionId.current++;
             setShowCreate(false);
             setNewName("");
+            setShowSourceLookup(false);
+            setSourceIdInput("");
+            setSourceLookupError(null);
+            setPickedImageFile(null);
+            setPickedFileError(null);
           }}
           size="lg"
           backdrop="none"
@@ -449,18 +544,94 @@ export default function MyProjects({
             placeholder="project name"
             className="bg-white rounded-2xl px-6 py-3 text-center text-[#1D3335] outline-none text-sm placeholder:text-[#1D3335]/60"
           />
+
+          <div className="flex flex-col items-center gap-2 -mt-2">
+            <div className="flex items-center justify-center gap-2 text-xs">
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+                >
+                    name from a file
+                </button>
+                <span className="text-[#1D3335]/30">|</span>
+                <button
+                    onClick={() => setShowSourceLookup((v) => !v)}
+                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+                >
+                    name from a Cantus source
+                </button>
+            </div>
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      if (!file.type.startsWith("image/")) {
+                        setPickedFileError("please choose an image file");
+                        e.target.value = "";
+                        return;
+                      }
+                      setPickedFileError(null);
+                      setNewName(suggestProjectNameFromFilename(file.name));
+                      setPickedImageFile(file);
+                    }
+                    e.target.value = "";
+                }}
+            />
+            {pickedImageFile && (
+                <p className="text-[#1D3335]/50 text-[11px] flex items-center gap-1.5">
+                    will upload "{pickedImageFile.name}" to this project
+                    <button
+                        onClick={() => setPickedImageFile(null)}
+                        title="don't upload this file"
+                        className="text-[#1D3335]/40 hover:text-[#1D3335] cursor-pointer"
+                    >
+                        ✕
+                    </button>
+                </p>
+            )}
+            {pickedFileError && <p className="text-red-600 text-[11px]">{pickedFileError}</p>}
+            {showSourceLookup && (
+                <div className="flex flex-col items-center gap-2">
+                    <div className="flex items-center gap-2">
+                        <input
+                            value={sourceIdInput}
+                            onChange={(e) => setSourceIdInput(e.target.value)}
+                            placeholder="CantusDB source ID"
+                            className="bg-white rounded-xl px-3 py-1.5 text-center text-[#1D3335] outline-none text-xs placeholder:text-[#1D3335]/60 w-36"
+                        />
+                        <button
+                            onClick={handleSourceLookup}
+                            disabled={sourceLookupLoading || !sourceIdInput.trim()}
+                            className="px-3 py-1.5 border border-[#1D3335]/40 text-[#1D3335] text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            {sourceLookupLoading ? "loading..." : "look up"}
+                        </button>
+                    </div>
+                    {sourceLookupError && <p className="text-red-600 text-xs">{sourceLookupError}</p>}
+                </div>
+            )}
+        </div>
           <button
-            onClick={() => {
-              if (!newName.trim()) return;
-              onCreateProject(newName.trim());
-              setNewName("");
-              setShowCreate(false);
-            }}
-            className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
+            onClick={handleCreateClick}
+            className="bg-[#1D3335] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
           >
             create project
           </button>
         </Modal>
+      )}
+
+      {pendingSizeWarning && (
+        <LargeImageWarningModal
+          oversizedFiles={[pendingSizeWarning]}
+          resizing={resizingCreateImage}
+          onResize={() => resolveCreateSizeWarning("resize")}
+          onUploadAsIs={() => resolveCreateSizeWarning("asis")}
+          onCancel={() => resolveCreateSizeWarning("cancel")}
+        />
       )}
 
       {projectToDelete && (
