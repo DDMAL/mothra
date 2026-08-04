@@ -89,9 +89,15 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
     }, [viewState, anomalousStaveIds]);
 
     useEffect(() => {
+        let disposed = false;
+        let imageUrl: string | undefined;
+        setViewState({ status: "loading" });
+
         if (!detection.imageSrc) {
             setViewState({ status: "error", message: "No image source for this detection." });
-            return;
+            return () => {
+                disposed = true;
+            };
         }
         Promise.all([
             apiFetch(`/api/projects/${projectId}/stafflines/${detection.id}`)
@@ -100,7 +106,11 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                 .then((r) => (r.ok ? r.blob() : Promise.reject("image fetch failed"))),
         ])
             .then(([data, blob]) => {
-                const imageUrl = URL.createObjectURL(blob);
+                imageUrl = URL.createObjectURL(blob);
+                if (disposed) {
+                    URL.revokeObjectURL(imageUrl);
+                    return;
+                }
                 setViewState({
                     status: "ready",
                     imageUrl,
@@ -108,10 +118,16 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                     records: (data as { jsomrJson: JsomrLineRecord[] }).jsomrJson ?? [],
                 });
             })
-            .catch(() =>
-                setViewState({ status: "error", message: "Failed to load staffline detection view." }),
-            );
-    }, []);
+            .catch(() => {
+                if (!disposed) {
+                    setViewState({ status: "error", message: "Failed to load staffline detection view." });
+                }
+            });
+        return () => {
+            disposed = true;
+            if (imageUrl) URL.revokeObjectURL(imageUrl);
+        };
+    }, [detection.id, detection.imageSrc, projectId]);
 
     const anomalyNotes =
         viewState.status === "ready"
@@ -126,6 +142,9 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
 
     return (
         <>
+            {/* Matches AnnotationViewerModal's overlay/panel shell verbatim (not Modal.tsx --
+                Modal.tsx only supports a vertically-centered, fixed-size dialog, not this
+                viewport-stretched layout both image viewers need). */}
             <div className="fixed top-14 inset-x-0 bottom-0 z-40 bg-black/60" onClick={onClose} />
             <div className="fixed z-50 top-[4.5rem] bottom-4 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-5xl bg-[#C8E6E3] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-fade-in">
                 <div className="flex items-center gap-4 px-6 py-3 border-b border-[#1D3335]/20 shrink-0">
@@ -136,7 +155,7 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                         {detection.staveCount ?? 0} stave{detection.staveCount !== 1 ? "s" : ""}
                     </span>
                     {anomalousStaveIds.size > 0 && (
-                        <span className="text-xs font-semibold" style={{ color: ANOMALY_COLOR }}>
+                        <span className="text-xs font-semibold text-[#FF3B30]">
                             {anomalousStaveIds.size} flagged for review
                         </span>
                     )}

@@ -46,9 +46,9 @@ export interface TextAlignment {
 export interface StafflineSet {
   id: string;
   imageName: string;
-  imageSrc?: string;
-  staveCount?: number;
-  modeLinesPerStave?: number;
+  imageSrc?: string | null;
+  staveCount?: number | null;
+  modeLinesPerStave?: number | null;
   status?: string;
 }
 
