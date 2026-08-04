@@ -49,9 +49,14 @@ function sortProjects(
   if (!a.isPinned && b.isPinned) return 1;
   if (sortBy === "nameAZ") return a.name.localeCompare(b.name);
   if (sortBy === "dateCreated") return b.id - a.id;
-  if (!a.lastOpenedAt && !b.lastOpenedAt) return 0;
-  if (!a.lastOpenedAt) return 1;
-  if (!b.lastOpenedAt) return -1;
+  // A project with no lastOpenedAt hasn't been opened since it was created —
+  // treat that as more recent than something opened a while ago and not
+  // touched since, so a just-created project surfaces at the top of the
+  // default "last opened" sort instead of sinking to the bottom until the
+  // user opens something else first.
+  if (!a.lastOpenedAt && !b.lastOpenedAt) return b.id - a.id;
+  if (!a.lastOpenedAt) return -1;
+  if (!b.lastOpenedAt) return 1;
   return (
     new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime()
   );
