@@ -29,6 +29,12 @@ interface PlainTextToken {
     syl: string;
 }
 
+/**
+ * Group syllable boxes into reading-order lines for the plaintext side panel.
+ * Boxes are clustered by vertical position (within `lineSpacing * 0.6` of the
+ * first box in each cluster) since `syl_boxes` from the alignment JSON have
+ * no line grouping of their own, then each line is sorted left-to-right.
+ */
 function reconstructPlainText(boxes: SylBox[], lineSpacing: number): PlainTextToken[][] {
     if (boxes.length === 0) return [];
     const threshold = (lineSpacing > 0 ? lineSpacing : 40) * 0.6;
@@ -50,10 +56,12 @@ function reconstructPlainText(boxes: SylBox[], lineSpacing: number): PlainTextTo
     );
 }
 
+/** Flatten reconstructed lines into the plain-text form used for copy/download. */
 function plainTextLinesToString(lines: PlainTextToken[][]): string {
     return lines.map((line) => line.map((t) => t.syl).join(" ")).join("\n");
 }
 
+/** Convert a syllable box's image-space `ul`/`lr` corners to on-screen pixels. */
 function boxScreenRect(b: SylBox, scaleX: number, scaleY: number) {
     return {
         x: b.ul[0] * scaleX,
@@ -68,17 +76,24 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
     const [logsOpen, setLogsOpen] = useState(false);
     const [textPanelOpen, setTextPanelOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [copyFailed, setCopyFailed] = useState(false);
     const [hoveredBoxIndex, setHoveredBoxIndex] = useState<number | null>(null);
-    const [imgReady, setImgReady] = useState(false);
+    const [imgSize, setImgSize] = useState<{ dw: number; dh: number; nw: number; nh: number } | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const zoom = useZoomPan();
 
     const handleCopyText = (text: string) => {
-        navigator.clipboard.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        });
+        navigator.clipboard
+            .writeText(text)
+            .then(() => setCopied(true))
+            .catch(() => setCopyFailed(true))
+            .finally(() => {
+                setTimeout(() => {
+                    setCopied(false);
+                    setCopyFailed(false);
+                }, 1500);
+            });
     };
 
     const handleDownloadText = (text: string) => {
@@ -93,17 +108,34 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
         URL.revokeObjectURL(url);
     };
     
-    const drawOverlay = useCallback(() => {
-        if (viewState.status !== "ready") return;
-        const canvas = canvasRef.current;
+    const measure = useCallback(() => {
         const img = imgRef.current;
-        if (!canvas || !img || !img.naturalWidth) return;
-        const dw = img.clientWidth;
-        const dh = img.clientHeight;
+        if (!img || !img.naturalWidth) return;
+        setImgSize({
+            dw: img.clientWidth,
+            dh: img.clientHeight,
+            nw: img.naturalWidth,
+            nh: img.naturalHeight,
+        });
+    }, []);
+
+    useEffect(() => {
+        const img = imgRef.current;
+        if (!img || viewState.status !== "ready") return;
+        const ro = new ResizeObserver(measure);
+        ro.observe(img);
+        return () => ro.disconnect();
+    }, [measure, viewState.status]);
+
+    const drawOverlay = useCallback(() => {
+        if (viewState.status !== "ready" || !imgSize) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const { dw, dh, nw, nh } = imgSize;
         canvas.width = dw;
         canvas.height = dh;
-        const scaleX = dw / img.naturalWidth;
-        const scaleY = dh / img.naturalHeight;
+        const scaleX = dw / nw;
+        const scaleY = dh / nh;
         const ctx = canvas.getContext("2d")!;
         ctx.clearRect(0, 0, dw, dh);
         viewState.boxes.forEach((b, i) => {
@@ -118,7 +150,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             ctx.font = hovered ? "bold 11px monospace" : "11px monospace";
             ctx.fillText(b.syl, x, Math.max(10, y - 2));
         });
-    }, [viewState, hoveredBoxIndex]);
+    }, [viewState, hoveredBoxIndex, imgSize]);
 
     useEffect(() => {
         drawOverlay();
@@ -197,19 +229,15 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                                 alt={alignment.imageName}
                                                 className="block max-h-[min(65vh,650px)] max-w-full select-none"
                                                 draggable={false}
-                                                onLoad={() => {
-                                                    setImgReady(true);
-                                                    drawOverlay();
-                                                }}
+                                                onLoad={measure}
                                             />
                                             <canvas
                                                 ref={canvasRef}
                                                 className="absolute inset-0 pointer-events-none"
                                             />
-                                            {imgReady && viewState.status === "ready" && imgRef.current && (() => {
-                                                const img = imgRef.current;
-                                                const scaleX = img.clientWidth / img.naturalWidth;
-                                                const scaleY = img.clientHeight / img.naturalHeight;
+                                            {imgSize && viewState.status === "ready" && (() => {
+                                                const scaleX = imgSize.dw / imgSize.nw;
+                                                const scaleY = imgSize.dh / imgSize.nh;
                                                 return viewState.boxes.map((b, i) => {
                                                     const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
                                                     return (
@@ -310,7 +338,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                                         disabled={!plainText}
                                                         className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                                                     >
-                                                        {copied ? "copied" : "copy"}
+                                                        {copyFailed ? "copy failed" : copied ? "copied" : "copy"}
                                                     </button>
                                                 </div>
                                                 {lines.length > 0 ? (

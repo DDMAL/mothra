@@ -19,6 +19,12 @@ from yolo_inference import resolve_yolo_models, write_annotation
 
 @celery_app.task(name="text_batch.run")
 def run_text_batch_task(job_id, project_id, body):
+    """Celery task backing `POST /api/projects/{id}/text-batch/run`.
+
+    Runs YOLO layer-separation over each image (for music-box/mask context),
+    then forwards the batch to the text-service's `/batch-run` endpoint and
+    relays its SSE progress as `job_events` rows via `publish_event`.
+    """
     def publish(obj):
         publish_event(job_id, obj)
     
@@ -84,7 +90,7 @@ def run_text_batch_task(job_id, project_id, body):
             "column_bimodal_threshold": str(body["column_bimodal_threshold"]),
             "masking_enabled": "true" if body["masking_enabled"] else "false",
             "mask_padding": str(body["mask_padding"]),
-            "music_overlap_filter_enabled": "true" if body["music_overlap_filter_enabled"] else "false",
+            "music_overlap_filter_enabled": "true" if body.get("music_overlap_filter_enabled", True) else "false",
             "music_boxes": json.dumps(music_boxes_by_index),
             "mask_json_list": json.dumps(mask_json_by_index),
         }

@@ -178,6 +178,15 @@ async def run_text_pipeline(
     mask_json: Optional[str] = Form(None),
     music_overlap_filter_enabled: bool = Form(True),
 ):
+    """Run Kraken segmentation + HTR over a single image and stream progress as SSE.
+
+    Stages a mothra-mask JSON to a scratch temp file (if masking is enabled
+    and provided) for `run()` to apply itself via `mothra_json_path`, invokes
+    `run()` on a worker thread (relaying its logger through `_QueueLogHandler`
+    onto this request's SSE stream), then optionally drops text lines that
+    mostly overlap a YOLO music region via `filter_lines_over_music` before
+    emitting the final `text_alignment`/`log_text` result event.
+    """
     image_bytes = await image.read()
     image_filename = image.filename or "page.jpg"
     parsed_music_boxes = json.loads(music_boxes) if music_boxes else []
@@ -316,6 +325,14 @@ async def run_text_batch(
     mask_padding: int = Form(15),
     music_overlap_filter_enabled: bool = Form(True),
 ):
+    """Run Kraken segmentation + HTR over a batch of Cantus-aligned folios and
+    stream progress as SSE.
+
+    Same per-folio pipeline as `run_text_pipeline` (mask staging, `run()`,
+    optional `filter_lines_over_music`), but iterated across `images`/`folios`
+    with `prev_folio_state`/`folio_state_out` threaded from one folio to the
+    next so `run()` can track chant allocation continuity across the batch.
+    """
     folio_list = json.loads(folios)
     if len(folio_list) != len(images):
         raise HTTPException(status_code=400, detail="folios count must match images count")

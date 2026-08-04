@@ -92,6 +92,7 @@ export default function AssetGrid<T extends AssetItem>({
                   )}
                   {!used && (
                     <button
+                      aria-label={`Open actions for ${item.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });

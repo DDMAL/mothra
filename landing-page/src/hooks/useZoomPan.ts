@@ -12,6 +12,9 @@ interface ZoomPanState {
 
 const IDLE: ZoomPanState = { scale: MIN_SCALE, x: 0, y: 0 };
 
+/** Clamp scale to [MIN_SCALE, MAX_SCALE] and snap back to `IDLE` (centered,
+ * unpanned) once zoomed all the way back out, so panning can't get "stuck"
+ * offset at 1x zoom. */
 function clampState(s: ZoomPanState): ZoomPanState {
     const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.scale))
     return scale === MIN_SCALE ? IDLE : { ...s, scale };

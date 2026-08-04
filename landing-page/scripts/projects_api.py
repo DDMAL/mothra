@@ -57,6 +57,12 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
 
 
 def _project_row_to_dict(cur, row, username):
+    """Build one project's full API dict (images/models/MEI/annotations/text
+    alignments) from its `projects` row, issuing the per-project child-table
+    queries needed to assemble it. Images are ordered by `created_at, id` so
+    upload order is stable across requests rather than following whatever
+    order Postgres happens to return rows in.
+    """
     pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
     cur.execute(
         "SELECT id, name, folio, source_id, source_name FROM project_images"
@@ -84,6 +90,14 @@ def _project_row_to_dict(cur, row, username):
 
 @router.get("/projects")
 def list_projects(user=Depends(get_current_user)):
+    """List all of the current user's projects with their child rows.
+
+    Batches the images/models/MEI/annotations/text-alignments lookups across
+    all of the user's project ids (one query per child table instead of one
+    per project) to avoid N+1 queries, then reassembles each project's dict
+    via `_build_project_dict`. Images are ordered by `created_at, id` for the
+    same reason as `_project_row_to_dict`.
+    """
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, "
