@@ -13,7 +13,7 @@ interface SylBox {
 type ViewState =
     | { status: "loading" }
     | { status: "error"; message: string }
-    | { status: "ready"; imageUrl: string; boxes: SylBox[]; logText: string };
+    | { status: "ready"; imageUrl: string; boxes: SylBox[]; logText: string; prettyJson: string };
 
 const BOX_COLOR = "#4AADAA";
 
@@ -73,6 +73,7 @@ function boxScreenRect(b: SylBox, scaleX: number, scaleY: number) {
 
 export default function TextAlignmentViewerModal({ alignment, projectId, onClose, label }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading"});
+    const [activeTab, setActiveTab] = useState<"image" | "json">("image");
     const [logsOpen, setLogsOpen] = useState(false);
     const [textPanelOpen, setTextPanelOpen] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -96,12 +97,12 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             });
     };
 
-    const handleDownloadText = (text: string) => {
-        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const handleDownload = (text: string, extension: string, mimeType = "text/plain;charset=utf-8") => {
+        const blob = new Blob([text], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${(label ?? alignment.imageName).replace(/\.[^.]+$/, "")}.txt`;
+        a.download = `${(label ?? alignment.imageName).replace(/\.[^.]+$/, "")}.${extension}`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -175,6 +176,10 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                     imageUrl,
                     boxes: parsed.syl_boxes ?? [],
                     logText: (data as { logText?: string }).logText ?? "",
+                    // alignmentJson comes back compact (no whitespace) from the
+                    // backend's json.dumps(alignment) — re-stringify with
+                    // indentation purely for the "json" tab's readability.
+                    prettyJson: JSON.stringify(parsed, null, 2),
                 });
             })
             .catch(() =>
@@ -191,6 +196,21 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                         name={label ?? alignment.imageName}
                         className="font-mono text-sm text-[#1D3335] font-semibold flex-1 min-w-0"
                     />
+                    <div className="flex items-center gap-1 bg-[#1D3335]/10 rounded-full p-0.5 shrink-0">
+                        {(["image", "json"] as const).map((t) => (
+                            <button
+                                key={t}
+                                onClick={() => setActiveTab(t)}
+                                className={`px-3 py-1 rounded-full text-xs font-mono transition-colors cursor-pointer ${
+                                    activeTab === t
+                                        ? "bg-[#1D3335] text-white"
+                                        : "text-[#1D3335]/60 hover:text-[#1D3335]"
+                                }`}
+                            >
+                                {t === "image" ? "image overlay" : "json"}
+                            </button>
+                        ))}
+                    </div>
                     <span className="text-xs text-[#1D3335]/60">
                         {alignment.syllableCount} syllable{alignment.syllableCount !== 1 ? "s" : ""}
                     </span>
@@ -209,6 +229,26 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                     ) : viewState.status === "error" ? (
                         <div className="flex items-center justify-center h-full text-[#1D3335]/60 text-sm">
                             {viewState.message}
+                        </div>
+                    ) : activeTab === "json" ? (
+                        <div className="p-4">
+                            <div className="flex items-center justify-end gap-3 mb-2">
+                                <button
+                                    onClick={() => handleDownload(viewState.prettyJson, "json", "application/json")}
+                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                                >
+                                    download
+                                </button>
+                                <button
+                                    onClick={() => handleCopyText(viewState.prettyJson)}
+                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                                >
+                                    {copyFailed ? "copy failed" : copied ? "copied" : "copy"}
+                                </button>
+                            </div>
+                            <pre className="bg-[#1D3335] text-white/80 text-xs font-mono rounded-xl p-4 overflow-auto h-[min(65vh,650px)] whitespace-pre">
+                                {viewState.prettyJson}
+                            </pre>
                         </div>
                     ) : (
                         <div className="p-4">
@@ -327,7 +367,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                             <div className="w-72 bg-white/60 rounded-r-xl p-3 overflow-y-auto">
                                                 <div className="flex items-center justify-end gap-3 mb-2">
                                                     <button
-                                                        onClick={() => handleDownloadText(plainText)}
+                                                        onClick={() => handleDownload(plainText, "txt")}
                                                         disabled={!plainText}
                                                         className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                                                     >
