@@ -583,18 +583,18 @@ export default function ImageTab({
             totalPages={totalImagePages}
             renderThumbnail={(img) =>
               img.src ? (
-                <>
-                  <AuthImage
-                    src={img.src}
-                    alt={img.name}
-                    className="w-full h-full object-cover"
-                  />
-                  {img.folio && (
-                    <span className="absolute top-1 left-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-                      {img.folio}
-                    </span>
-                  )}
-                </>
+                <AuthImage
+                  src={img.src}
+                  alt={img.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : null
+            }
+            topLeftBadge={(img) =>
+              img.folio ? (
+                <span className="bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
+                  {img.folio}
+                </span>
               ) : null
             }
             getItemBadge={(name) =>

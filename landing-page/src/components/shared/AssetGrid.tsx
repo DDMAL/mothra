@@ -27,6 +27,7 @@ interface AssetGridProps<T extends AssetItem> {
   getItemBadge?: (name: string) => string | null;
   groupBy?: (item: T) => string;
   onUse?: (item: T) => void;
+  topLeftBadge?: (item: T) => ReactNode;
 }
 
 export default function AssetGrid<T extends AssetItem>({
@@ -39,6 +40,7 @@ export default function AssetGrid<T extends AssetItem>({
   getItemBadge,
   groupBy,
   onUse,
+  topLeftBadge,
 }: AssetGridProps<T>) {
   return (
     <>
@@ -72,16 +74,21 @@ export default function AssetGrid<T extends AssetItem>({
                   }}
                 >
                   {renderThumbnail(item)}
-                  {onUse && !used && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUse(item);
-                      }}
-                      className="absolute top-1.5 left-1.5 z-20 px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
-                    >
-                      use
-                    </button>
+                  {(topLeftBadge?.(item) || (onUse && !used)) && (
+                    <div className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
+                      {topLeftBadge?.(item)}
+                      {onUse && !used && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUse(item);
+                          }}
+                          className="px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
+                        >
+                          use
+                        </button>
+                      )}
+                    </div>
                   )}
                   {!used && (
                     <button
