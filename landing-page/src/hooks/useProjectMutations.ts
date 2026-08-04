@@ -15,7 +15,12 @@ export function useProjectMutations(setProjects: SetProjects) {
         body: JSON.stringify({ name }),
       });
       if (!r.ok) throw new Error("failed to create project");
-      let project: Project = await r.json();
+      const project: Project = await r.json();
+      // Add the project to local state right away — a slow or stalled
+      // image upload shouldn't leave the (already server-side-created)
+      // project missing from the list, where the user could be tempted to
+      // submit the create flow again.
+      setProjects((prev) => [...prev, project]);
       if (imageFile) {
         // A failed auto-upload shouldn't undo project creation — the project
         // still exists and is usable, the user just needs to upload the
@@ -29,27 +34,25 @@ export function useProjectMutations(setProjects: SetProjects) {
           });
           if (!ir.ok) throw new Error("image upload failed");
           const uploaded = await ir.json();
-          project = {
-            ...project,
-            images: [
-              ...project.images,
-              {
-                id: uploaded.id,
-                name: uploaded.name,
-                src: `/api/images/${uploaded.id}`,
-                folio: uploaded.folio,
-                sourceId: uploaded.sourceId,
-                sourceName: uploaded.sourceName,
-              },
-            ],
+          const uploadedImage: Project["images"][number] = {
+            id: uploaded.id,
+            name: uploaded.name,
+            src: `/api/images/${uploaded.id}`,
+            folio: uploaded.folio,
+            sourceId: uploaded.sourceId,
+            sourceName: uploaded.sourceName,
           };
+          setProjects((prev) =>
+            prev.map((p) =>
+              p.id === project.id ? { ...p, images: [...p.images, uploadedImage] } : p,
+            ),
+          );
         } catch {
           toast.error(
             `"${name}" was created, but the image failed to upload — try uploading it from the Images tab instead`,
           );
         }
       }
-      setProjects((prev) => [...prev, project]);
     } catch (e) {
      toast.error((e as Error).message);
     }

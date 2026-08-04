@@ -105,6 +105,7 @@ export default function MyProjects({
   const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
   const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
   const [pickedImageFile, setPickedImageFile] = useState<File | null>(null)
+  const [pickedFileError, setPickedFileError] = useState<string | null>(null);
   const [pendingSizeWarning, setPendingSizeWarning] = useState<File | null>(null);
   const [resizingCreateImage, setResizingCreateImage] = useState(false);
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
@@ -121,18 +122,26 @@ export default function MyProjects({
     "lastOpened",
   );
 
+  // Bumped whenever the create-project form resets (finalizeCreate or the
+  // modal's onClose), so an in-flight source lookup can tell it's stale and
+  // skip writing its result into whatever new create session followed it.
+  const createSessionId = useRef(0);
+
   const handleSourceLookup = async() => {
     const id = sourceIdInput.trim();
     if (!id) return;
+    const sessionId = createSessionId.current;
     setSourceLookupLoading(true);
     setSourceLookupError(null);
     try {
       const source: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
+      if (createSessionId.current !== sessionId) return;
       setNewName(source.name);
     } catch (e) {
+      if (createSessionId.current !== sessionId) return;
       setSourceLookupError((e as Error).message);
     } finally {
-      setSourceLookupLoading(false);
+      if (createSessionId.current === sessionId) setSourceLookupLoading(false);
     }
   };
 
@@ -141,11 +150,13 @@ export default function MyProjects({
   // call onCreateProject exactly once.
   const finalizeCreate = (imageFile?: File) => {
     onCreateProject(newName.trim(), imageFile);
+    createSessionId.current++;
     setNewName("");
     setShowSourceLookup(false);
     setSourceIdInput("");
     setSourceLookupError(null);
     setPickedImageFile(null);
+    setPickedFileError(null);
     setPendingSizeWarning(null);
     setShowCreate(false);
   };
@@ -170,9 +181,16 @@ export default function MyProjects({
       return;
     }
     setResizingCreateImage(true);
-    const resized = await resizeImageFile(pendingSizeWarning, TARGET_RESIZE_BYTES);
-    setResizingCreateImage(false);
-    finalizeCreate(resized);
+    try {
+      const resized = await resizeImageFile(pendingSizeWarning, TARGET_RESIZE_BYTES);
+      finalizeCreate(resized);
+    } finally {
+      // Always clear the flag, even on failure — `finalizeCreate` (which also
+      // clears it via the `pendingSizeWarning` reset) never runs in that
+      // case, and leaving it `true` would keep LargeImageWarningModal stuck
+      // with every action disabled and no way to retry/upload-as-is/cancel.
+      setResizingCreateImage(false);
+    }
   };
 
   const activeProjects = projects
@@ -505,12 +523,14 @@ export default function MyProjects({
       {showCreate && (
         <Modal
           onClose={() => {
+            createSessionId.current++;
             setShowCreate(false);
             setNewName("");
             setShowSourceLookup(false);
             setSourceIdInput("");
             setSourceLookupError(null);
             setPickedImageFile(null);
+            setPickedFileError(null);
           }}
           size="lg"
           backdrop="none"
@@ -544,10 +564,17 @@ export default function MyProjects({
             <input
                 ref={fileInputRef}
                 type="file"
+                accept="image/*"
                 className="hidden"
                 onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      if (!file.type.startsWith("image/")) {
+                        setPickedFileError("please choose an image file");
+                        e.target.value = "";
+                        return;
+                      }
+                      setPickedFileError(null);
                       setNewName(suggestProjectNameFromFilename(file.name));
                       setPickedImageFile(file);
                     }
@@ -566,6 +593,7 @@ export default function MyProjects({
                     </button>
                 </p>
             )}
+            {pickedFileError && <p className="text-red-600 text-[11px]">{pickedFileError}</p>}
             {showSourceLookup && (
                 <div className="flex flex-col items-center gap-2">
                     <div className="flex items-center gap-2">
@@ -589,7 +617,7 @@ export default function MyProjects({
         </div>
           <button
             onClick={handleCreateClick}
-            className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
+            className="bg-[#1D3335] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
           >
             create project
           </button>

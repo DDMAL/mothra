@@ -141,11 +141,10 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
         canvas.height = dh * MAX_SCALE;
         // <canvas> is a replaced element: with no explicit CSS size it
         // displays at its backing-buffer resolution (canvas.width/height),
-        // not shrunk to fit its container — pin the *displayed* size to
-        // dw/dh explicitly so the bigger MAX_SCALE backing buffer doesn't
-        // render at its full (huge) intrinsic size.
-        canvas.style.width = `${dw}px`;
-        canvas.style.height = `${dh}px`;
+        // not shrunk to fit its container — the `w-full h-full` Tailwind
+        // classes on the element pin the *displayed* size to its container
+        // (which matches dw/dh) so the bigger MAX_SCALE backing buffer
+        // doesn't render at its full (huge) intrinsic size.
         const scaleX = dw / nw;
         const scaleY = dh / nh;
         const ctx = canvas.getContext("2d")!;
@@ -292,7 +291,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                             />
                                             <canvas
                                                 ref={canvasRef}
-                                                className="absolute inset-0 pointer-events-none"
+                                                className="absolute inset-0 w-full h-full pointer-events-none"
                                             />
                                             {imgSize && viewState.status === "ready" && (() => {
                                                 const scaleX = imgSize.dw / imgSize.nw;

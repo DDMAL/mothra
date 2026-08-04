@@ -89,7 +89,11 @@ export function extractFolioFromFilename(filename: string): string | undefined {
 export function suggestProjectNameFromFilename(filename: string): string {
     const base = filename.replace(/\.[^.]+$/, "");
     const last = lastFolioMatch(base);
-    const prefix = last ? base.slice(0, last.index) : base;
+    // Only strip the folio token when it ends the filename — otherwise it's
+    // a folio-shaped substring in the middle (e.g. "Ch_002r_copy.jpg") and
+    // slicing at its index would discard trailing text ("copy") too.
+    const prefix =
+        last && last.index + last[0].length === base.length ? base.slice(0, last.index) : base;
     return prefix.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim() || base.trim();
 }
 
