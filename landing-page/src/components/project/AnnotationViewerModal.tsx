@@ -102,7 +102,7 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
             const h = b.bh * dh;
             ctx.fillStyle = color + "20";
             ctx.strokeStyle = color;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 0.75;
             ctx.fillRect(x, y, w, h);
             ctx.strokeRect(x, y, w, h);
         });

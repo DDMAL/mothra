@@ -163,7 +163,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
             const hovered = i === hoveredBoxIndex;
             ctx.fillStyle = BOX_COLOR + (hovered ? "45" : "20");
             ctx.strokeStyle = hovered ? "#1D3335" : BOX_COLOR;
-            ctx.lineWidth = hovered ? 2.5 : 1.5;
+            ctx.lineWidth = hovered ? 1.25 : 0.75;
             ctx.fillRect(x, y, w, h);
             ctx.strokeRect(x, y, w, h);
             ctx.fillStyle = hovered ? "#1D3335" : BOX_COLOR;

@@ -99,8 +99,23 @@ export function useZoomPan() {
     }, []);
 
     const reset = useCallback(() => setState(IDLE), []);
-    const zoomIn = useCallback(() => zoomBy(ZOOM_STEP), [zoomBy]);
-    const zoomOut = useCallback(() => zoomBy(-ZOOM_STEP), [zoomBy]);
+
+    // The +/- buttons zoom toward the container's own center (not the
+    // cursor, unlike wheel-zoom) — passing that as the origin reuses zoomBy's
+    // "keep this point stationary" math, which conveniently also means the
+    // pan offset scales smoothly toward/away from (0,0) as scale changes,
+    // instead of staying frozen and then snapping to 0 the instant scale
+    // hits exactly MIN_SCALE.
+    const zoomTowardCenter = useCallback((delta: number) => {
+        if (!containerNode) {
+            zoomBy(delta);
+            return;
+        }
+        const rect = containerNode.getBoundingClientRect();
+        zoomBy(delta, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    }, [zoomBy, containerNode]);
+    const zoomIn = useCallback(() => zoomTowardCenter(ZOOM_STEP), [zoomTowardCenter]);
+    const zoomOut = useCallback(() => zoomTowardCenter(-ZOOM_STEP), [zoomTowardCenter]);
 
     return {
         containerRef,
