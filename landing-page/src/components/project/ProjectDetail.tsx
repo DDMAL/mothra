@@ -14,6 +14,7 @@ import ModelTab from "./ModelTab";
 import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
+import StafflinesTab from "./StafflinesTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
 import TruncatedName from "../shared/TruncatedName";

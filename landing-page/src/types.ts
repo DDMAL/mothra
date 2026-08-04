@@ -25,6 +25,7 @@ export interface Project {
   isPinned?: boolean;
   textAlignments: TextAlignment[];
   cantusSourceId?: string;
+  stafflines: StafflineSet[];
 }
 
 export interface CantusSource {
@@ -40,6 +41,28 @@ export interface TextAlignment {
   siglum?: string;
   medianLineSpacing: number;
   syllableCount: number;
+}
+
+export interface StafflineSet {
+  id: string;
+  imageName: string;
+  imageSrc?: string | null;
+  staveCount?: number | null;
+  modeLinesPerStave?: number | null;
+  status?: string;
+}
+
+// Field names here are snake_case, matching landing-page/scripts/staffline_stage.py's
+// _assemble_jsomr_records verbatim -- jsomr_json is stored/returned as-is (JSONB, not
+// reshaped server-side), unlike every other camelCase field on this page.
+export interface JsomrLineRecord {
+  id: string;
+  source: "detected" | "fallback_redetected" | "interpolated";
+  bounding_box: { ulx: number; uly: number; lrx: number; lry: number } | null;
+  centerline_page: { x_start: number; x_end: number; y_values: number[] };
+  stave_id: number | null;
+  rhythm_status: string | null;
+  within_stave_index: number | null;
 }
 
 export interface ProjectModel {

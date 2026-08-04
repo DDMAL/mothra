@@ -45,6 +45,7 @@ from component_filter import filter_components
 # placeholder — adjust to wherever inference_simple.py lives in your environment,
 # or pip-install it as a package and import normally.
 import sys
+
 INFERENCE_SCRIPT_DIR = "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts"
 # mini: /Users/kyriebouressa/Documents/muscrat/layer_sep/scripts
 # macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
@@ -55,7 +56,6 @@ from inference_simple import (  # noqa: E402  (sys.path insertion above)
     post_process_ink,
     separate_layers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,16 +72,20 @@ DEFAULT_BGR_CONFIDENCE = 0.5
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class YoloDetection:
     """One detection parsed from a YOLO-format .txt line."""
+
     class_id: int
     x_center_norm: float
     y_center_norm: float
     width_norm: float
     height_norm: float
 
-    def to_pixel_box(self, image_width: int, image_height: int) -> tuple[int, int, int, int]:
+    def to_pixel_box(
+        self, image_width: int, image_height: int
+    ) -> tuple[int, int, int, int]:
         """Convert normalized coords to pixel (ulx, uly, lrx, lry)."""
         cx = self.x_center_norm * image_width
         cy = self.y_center_norm * image_height
@@ -98,6 +102,7 @@ class YoloDetection:
 # YOLO parsing
 # ---------------------------------------------------------------------------
 
+
 def parse_yolo_txt(yolo_path: Path) -> list[YoloDetection]:
     """Parse a YOLO .txt file. One detection per line: class cx cy w h."""
     detections = []
@@ -111,15 +116,19 @@ def parse_yolo_txt(yolo_path: Path) -> list[YoloDetection]:
                 print(f"  Skipping malformed line {line_num} in {yolo_path}: {line!r}")
                 continue
             try:
-                detections.append(YoloDetection(
-                    class_id=int(parts[0]),
-                    x_center_norm=float(parts[1]),
-                    y_center_norm=float(parts[2]),
-                    width_norm=float(parts[3]),
-                    height_norm=float(parts[4]),
-                ))
+                detections.append(
+                    YoloDetection(
+                        class_id=int(parts[0]),
+                        x_center_norm=float(parts[1]),
+                        y_center_norm=float(parts[2]),
+                        width_norm=float(parts[3]),
+                        height_norm=float(parts[4]),
+                    )
+                )
             except ValueError:
-                print(f"  Skipping unparseable line {line_num} in {yolo_path}: {line!r}")
+                print(
+                    f"  Skipping unparseable line {line_num} in {yolo_path}: {line!r}"
+                )
     return detections
 
 
@@ -133,6 +142,7 @@ def filter_to_class(
 # ---------------------------------------------------------------------------
 # BGR adapter
 # ---------------------------------------------------------------------------
+
 
 def run_bgr_inference(
     model,
@@ -149,7 +159,8 @@ def run_bgr_inference(
     only.
     """
     probability_map = sliding_window_inference(
-        model, image_rgb,
+        model,
+        image_rgb,
         window_size=window_size,
         stride=stride,
         device=device,
@@ -162,6 +173,7 @@ def run_bgr_inference(
 # ---------------------------------------------------------------------------
 # Cropping
 # ---------------------------------------------------------------------------
+
 
 def crop_with_padding(
     image: np.ndarray,
@@ -186,6 +198,7 @@ def crop_with_padding(
 # Scale unit derivation
 # ---------------------------------------------------------------------------
 
+
 def compute_page_scale_unit(
     detections: list[YoloDetection],
     image_width: int,
@@ -209,6 +222,7 @@ def compute_page_scale_unit(
 # ---------------------------------------------------------------------------
 # Main driver
 # ---------------------------------------------------------------------------
+
 
 def process_page(
     page_path: Path,
@@ -261,7 +275,8 @@ def process_page(
         bgr_model = load_model(str(bgr_model_path), device)
         print("Running BGR inference (this can take a minute on CPU)...")
         page_for_crops = run_bgr_inference(
-            bgr_model, page_rgb,
+            bgr_model,
+            page_rgb,
             window_size=bgr_window_size,
             stride=bgr_stride,
             confidence=bgr_confidence,
@@ -269,7 +284,9 @@ def process_page(
         )
         # Save the BGR-processed page for inspection.
         processed_save_path = page_output_dir / f"{page_name}_bgr.png"
-        cv2.imwrite(str(processed_save_path), cv2.cvtColor(page_for_crops, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(
+            str(processed_save_path), cv2.cvtColor(page_for_crops, cv2.COLOR_RGB2BGR)
+        )
         print(f"  Saved BGR-processed page to {processed_save_path}")
     else:
         print("BGR disabled (--no-bgr): cropping directly from original page.")
@@ -293,24 +310,33 @@ def process_page(
             save_path=diag_path,
         )
 
-        summary_rows.append({
-            "box_index": idx,
-            "ulx": actual_box[0],
-            "uly": actual_box[1],
-            "lrx": actual_box[2],
-            "lry": actual_box[3],
-            "n_kept_pixels": len(result.coords),
-            "flags": ";".join(result.flags),
-            "n_discarded": len(result.discarded),
-            "top_score": _top_score_of(result),
-            "diagnostic_path": str(diag_path.relative_to(output_dir)),
-        })
+        summary_rows.append(
+            {
+                "box_index": idx,
+                "ulx": actual_box[0],
+                "uly": actual_box[1],
+                "lrx": actual_box[2],
+                "lry": actual_box[3],
+                "n_kept_pixels": len(result.coords),
+                "flags": ";".join(result.flags),
+                "n_discarded": len(result.discarded),
+                "top_score": _top_score_of(result),
+                "diagnostic_path": str(diag_path.relative_to(output_dir)),
+            }
+        )
 
     # --- Write summary CSV ---
     summary_path = page_output_dir / "summary.csv"
     fieldnames = [
-        "box_index", "ulx", "uly", "lrx", "lry",
-        "n_kept_pixels", "flags", "n_discarded", "top_score",
+        "box_index",
+        "ulx",
+        "uly",
+        "lrx",
+        "lry",
+        "n_kept_pixels",
+        "flags",
+        "n_discarded",
+        "top_score",
         "diagnostic_path",
     ]
     with summary_path.open("w", newline="") as f:
@@ -333,27 +359,48 @@ def _top_score_of(result) -> Optional[float]:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run Stage 1 component filter on every staffline detection of a page."
     )
     parser.add_argument("--page", type=Path, required=True, help="Page image path")
     parser.add_argument("--yolo", type=Path, required=True, help="YOLO .txt path")
-    parser.add_argument("--bgr-model", type=Path, required=False,
-                        help="BGR model checkpoint (required unless --no-bgr is set)")
-    parser.add_argument("--output", type=Path, required=True, help="Output directory root")
-    parser.add_argument("--staffline-class", type=int, default=DEFAULT_STAFFLINE_CLASS,
-                        help=f"YOLO class id for stafflines (default: {DEFAULT_STAFFLINE_CLASS})")
-    parser.add_argument("--crop-padding", type=int, default=DEFAULT_CROP_PADDING_PX,
-                        help=f"Pixels of padding around YOLO box (default: {DEFAULT_CROP_PADDING_PX})")
-    parser.add_argument("--device", type=str,
-                        default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device for BGR inference (cuda/cpu)")
+    parser.add_argument(
+        "--bgr-model",
+        type=Path,
+        required=False,
+        help="BGR model checkpoint (required unless --no-bgr is set)",
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output directory root"
+    )
+    parser.add_argument(
+        "--staffline-class",
+        type=int,
+        default=DEFAULT_STAFFLINE_CLASS,
+        help=f"YOLO class id for stafflines (default: {DEFAULT_STAFFLINE_CLASS})",
+    )
+    parser.add_argument(
+        "--crop-padding",
+        type=int,
+        default=DEFAULT_CROP_PADDING_PX,
+        help=f"Pixels of padding around YOLO box (default: {DEFAULT_CROP_PADDING_PX})",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device for BGR inference (cuda/cpu)",
+    )
     parser.add_argument("--bgr-window-size", type=int, default=DEFAULT_BGR_WINDOW_SIZE)
     parser.add_argument("--bgr-stride", type=int, default=DEFAULT_BGR_STRIDE)
     parser.add_argument("--bgr-confidence", type=float, default=DEFAULT_BGR_CONFIDENCE)
-    parser.add_argument("--no-bgr", action="store_true",
-                        help="Skip BGR preprocessing entirely; crop directly from original page.")
+    parser.add_argument(
+        "--no-bgr",
+        action="store_true",
+        help="Skip BGR preprocessing entirely; crop directly from original page.",
+    )
     args = parser.parse_args()
 
     use_bgr = not args.no_bgr

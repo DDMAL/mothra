@@ -1,0 +1,266 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: Ordo_virtutum-000
+Mode lines per stave: 2
+Line count distribution: {2: 9, 3: 3, 4: 2, 1: 1, 6: 4, 8: 1, 7: 2, 5: 2}
+Cut threshold (px): 17.0
+Flags: mode_count_below_typical, staves_with_unexpected_count:2,5,7,8,10,11,12,15,16,22,23
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 12.5 px  
+  Gap 1: 25.9 px  >>> INTER-STAVE <<<
+  Gap 2: 0.1 px  
+  Gap 3: 6.5 px  
+  Gap 4: 22.1 px  >>> INTER-STAVE <<<
+  Gap 5: 11.1 px  
+  Gap 6: 1.5 px  
+  Gap 7: 0.2 px  
+  Gap 8: 21.9 px  >>> INTER-STAVE <<<
+  Gap 9: 31.7 px  >>> INTER-STAVE <<<
+  Gap 10: 5.9 px  
+  Gap 11: 17.4 px  >>> INTER-STAVE <<<
+  Gap 12: 0.1 px  
+  Gap 13: 1.4 px  
+  Gap 14: 0.9 px  
+  Gap 15: 39.2 px  >>> INTER-STAVE <<<
+  Gap 16: 0.8 px  
+  Gap 17: 22.4 px  >>> INTER-STAVE <<<
+  Gap 18: 0.0 px  
+  Gap 19: 0.2 px  
+  Gap 20: 0.4 px  
+  Gap 21: 0.2 px  
+  Gap 22: 0.1 px  
+  Gap 23: 45.9 px  >>> INTER-STAVE <<<
+  Gap 24: 12.1 px  
+  Gap 25: 2.4 px  
+  Gap 26: 7.0 px  
+  Gap 27: 0.0 px  
+  Gap 28: 1.2 px  
+  Gap 29: 0.3 px  
+  Gap 30: 5.6 px  
+  Gap 31: 60.3 px  >>> INTER-STAVE <<<
+  Gap 32: 11.7 px  
+  Gap 33: 31.1 px  >>> INTER-STAVE <<<
+  Gap 34: 10.3 px  
+  Gap 35: 1.6 px  
+  Gap 36: 11.3 px  
+  Gap 37: 0.2 px  
+  Gap 38: 11.8 px  
+  Gap 39: 32.7 px  >>> INTER-STAVE <<<
+  Gap 40: 0.2 px  
+  Gap 41: 15.1 px  
+  Gap 42: 0.6 px  
+  Gap 43: 3.0 px  
+  Gap 44: 1.6 px  
+  Gap 45: 13.0 px  
+  Gap 46: 35.8 px  >>> INTER-STAVE <<<
+  Gap 47: 6.3 px  
+  Gap 48: 11.4 px  
+  Gap 49: 0.0 px  
+  Gap 50: 11.6 px  
+  Gap 51: 10.9 px  
+  Gap 52: 18.5 px  >>> INTER-STAVE <<<
+  Gap 53: 2.2 px  
+  Gap 54: 18.8 px  >>> INTER-STAVE <<<
+  Gap 55: 1.8 px  
+  Gap 56: 50.6 px  >>> INTER-STAVE <<<
+  Gap 57: 5.0 px  
+  Gap 58: 0.4 px  
+  Gap 59: 2.5 px  
+  Gap 60: 11.1 px  
+  Gap 61: 43.2 px  >>> INTER-STAVE <<<
+  Gap 62: 0.2 px  
+  Gap 63: 9.5 px  
+  Gap 64: 0.3 px  
+  Gap 65: 13.2 px  
+  Gap 66: 0.2 px  
+  Gap 67: 0.0 px  
+  Gap 68: 50.6 px  >>> INTER-STAVE <<<
+  Gap 69: 5.2 px  
+  Gap 70: 9.0 px  
+  Gap 71: 45.6 px  >>> INTER-STAVE <<<
+  Gap 72: 4.1 px  
+  Gap 73: 17.4 px  >>> INTER-STAVE <<<
+  Gap 74: 0.5 px  
+  Gap 75: 1.4 px  
+  Gap 76: 44.0 px  >>> INTER-STAVE <<<
+  Gap 77: 0.2 px  
+  Gap 78: 20.6 px  >>> INTER-STAVE <<<
+  Gap 79: 1.2 px  
+  Gap 80: 51.7 px  >>> INTER-STAVE <<<
+  Gap 81: 0.0 px  
+  Gap 82: 2.8 px  
+  Gap 83: 2.4 px  
+  Gap 84: 10.2 px  
+  Gap 85: 11.1 px  
+  Gap 86: 34.9 px  >>> INTER-STAVE <<<
+  Gap 87: 0.1 px  
+  Gap 88: 12.1 px  
+  Gap 89: 0.1 px  
+  Gap 90: 9.8 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 13: line 0, y=106.4px
+  Fit 39: line 1, y=118.9px
+
+Stave 1:
+  Fit 109: line 0, y=144.8px
+  Fit 22: line 1, y=144.9px
+  Fit 42: line 2, y=151.4px
+
+Stave 2:
+  Fit 15: line 0, y=173.5px
+  Fit 63: line 1, y=184.6px
+  Fit 43: line 2, y=186.1px
+  Fit 104: line 3, y=186.3px
+
+Stave 3:
+  Fit 11: line 0, y=208.2px
+
+Stave 4:
+  Fit 35: line 0, y=239.9px
+  Fit 31: line 1, y=245.8px [gap_near_threshold]
+
+Stave 5:
+  Fit 107: line 0, y=263.2px
+  Fit 82: line 1, y=263.3px
+  Fit 49: line 2, y=264.7px
+  Fit 50: line 3, y=265.6px
+
+Stave 6:
+  Fit 40: line 0, y=304.8px
+  Fit 27: line 1, y=305.6px
+
+Stave 7:
+  Fit 67: line 0, y=328.0px
+  Fit 99: line 1, y=328.0px
+  Fit 19: line 2, y=328.2px
+  Fit 83: line 3, y=328.6px
+  Fit 29: line 4, y=328.8px
+  Fit 71: line 5, y=328.9px
+
+Stave 8:
+  Fit 65: line 0, y=374.8px
+  Fit 17: line 1, y=386.9px
+  Fit 102: line 2, y=389.3px
+  Fit 61: line 3, y=396.3px
+  Fit 92: line 4, y=396.3px
+  Fit 16: line 5, y=397.5px
+  Fit 94: line 6, y=397.8px
+  Fit 77: line 7, y=403.4px
+
+Stave 9:
+  Fit 26: line 0, y=463.7px
+  Fit 48: line 1, y=475.4px
+
+Stave 10:
+  Fit 54: line 0, y=506.5px
+  Fit 64: line 1, y=516.8px
+  Fit 28: line 2, y=518.4px
+  Fit 58: line 3, y=529.7px
+  Fit 74: line 4, y=529.9px
+  Fit 37: line 5, y=541.7px
+
+Stave 11:
+  Fit 1: line 0, y=574.4px
+  Fit 21: line 1, y=574.6px [gap_near_threshold]
+  Fit 95: line 2, y=589.7px
+  Fit 81: line 3, y=590.3px
+  Fit 8: line 4, y=593.3px
+  Fit 32: line 5, y=594.9px
+  Fit 41: line 6, y=607.9px
+
+Stave 12:
+  Fit 10: line 0, y=643.7px
+  Fit 6: line 1, y=650.0px
+  Fit 45: line 2, y=661.4px
+  Fit 60: line 3, y=661.4px
+  Fit 24: line 4, y=673.0px
+  Fit 75: line 5, y=683.9px [gap_near_threshold]
+
+Stave 13:
+  Fit 7: line 0, y=702.4px
+  Fit 2: line 1, y=704.6px [gap_near_threshold]
+
+Stave 14:
+  Fit 34: line 0, y=723.4px
+  Fit 12: line 1, y=725.2px
+
+Stave 15:
+  Fit 38: line 0, y=775.8px
+  Fit 88: line 1, y=780.8px
+  Fit 36: line 2, y=781.2px
+  Fit 89: line 3, y=783.7px
+  Fit 46: line 4, y=794.8px
+
+Stave 16:
+  Fit 53: line 0, y=838.0px
+  Fit 105: line 1, y=838.2px
+  Fit 69: line 2, y=847.7px
+  Fit 66: line 3, y=848.0px
+  Fit 80: line 4, y=861.2px
+  Fit 93: line 5, y=861.4px
+  Fit 97: line 6, y=861.4px
+
+Stave 17:
+  Fit 73: line 0, y=912.0px
+  Fit 47: line 1, y=917.2px
+  Fit 55: line 2, y=926.2px
+
+Stave 18:
+  Fit 44: line 0, y=971.8px
+  Fit 57: line 1, y=975.9px [gap_near_threshold]
+
+Stave 19:
+  Fit 30: line 0, y=993.3px
+  Fit 96: line 1, y=993.8px
+  Fit 18: line 2, y=995.2px
+
+Stave 20:
+  Fit 3: line 0, y=1039.2px
+  Fit 4: line 1, y=1039.4px
+
+Stave 21:
+  Fit 23: line 0, y=1060.0px
+  Fit 25: line 1, y=1061.2px
+
+Stave 22:
+  Fit 62: line 0, y=1112.9px
+  Fit 85: line 1, y=1112.9px
+  Fit 90: line 2, y=1115.7px
+  Fit 78: line 3, y=1118.1px
+  Fit 76: line 4, y=1128.3px
+  Fit 56: line 5, y=1139.4px
+
+Stave 23:
+  Fit 0: line 0, y=1174.3px
+  Fit 33: line 1, y=1174.4px
+  Fit 59: line 2, y=1186.5px
+  Fit 84: line 3, y=1186.6px
+  Fit 14: line 4, y=1196.4px
+
+Unassigned fits:
+  Fit 5 [no_y_position_available]
+  Fit 9 [no_y_position_available]
+  Fit 20 [no_y_position_available]
+  Fit 51 [no_y_position_available]
+  Fit 52 [no_y_position_available]
+  Fit 68 [no_y_position_available]
+  Fit 70 [no_y_position_available]
+  Fit 72 [no_y_position_available]
+  Fit 79 [no_y_position_available]
+  Fit 86 [no_y_position_available]
+  Fit 87 [no_y_position_available]
+  Fit 91 [no_y_position_available]
+  Fit 98 [no_y_position_available]
+  Fit 100 [no_y_position_available]
+  Fit 101 [no_y_position_available]
+  Fit 103 [no_y_position_available]
+  Fit 106 [no_y_position_available]
+  Fit 108 [no_y_position_available]
+  Fit 110 [no_y_position_available]

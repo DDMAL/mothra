@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mothra-staff-finding"
+version = "0.1.0"
+description = "Staffline detection: component filtering, centerline fitting, and stave grouping for medieval manuscript OMR."
+requires-python = ">=3.10"
+# opencv-python, not -headless: component_filter.py/group_staves.py import cv2
+# at module top. Consumers that already pull in plain opencv-python
+# transitively (e.g. landing-page's backend, via ultralytics) must keep using
+# that same variant -- opencv-python and opencv-python-headless both provide
+# the `cv2` module and installing both in one environment is a known conflict.
+dependencies = ["numpy", "scipy", "scikit-image", "opencv-python"]
+
+# matplotlib is deliberately NOT a required dependency: every diagnostic-save
+# code path (component_filter._save_diagnostic, fit_centerline._save_fit_diagnostic,
+# group_staves._save_grouping_diagnostic) imports it lazily, only reached when
+# a caller passes save_path != None. Production callers (e.g. landing-page's
+# staffline_stage.py) always pass save_path=None and never need it. Install
+# the "diagnostics" extra to also run the tests that exercise save_path
+# (test_visualization_saves, test_diagnostic_renders, and others).
+[project.optional-dependencies]
+diagnostics = ["matplotlib"]
+# experiments/ isn't part of py-modules below (none of it ships to production),
+# but gp_fitter.py needs scikit-learn and implicit_neural_fitter.py needs torch,
+# neither otherwise declared anywhere -- install this extra to run those two
+# experiment runners from a clean environment.
+experiments = ["scikit-learn", "torch"]
+
+# Flat py-modules layout, deliberately not a nested/namespaced package: every
+# existing import inside scripts/ (and in scripts/script_tests/) is a flat
+# `from component_filter import ...`, relied on by an actively-developed test
+# suite. Only the six landmine-free algorithmic modules are listed -- never
+# run_page.py or bgr_adapter.py, which unconditionally import an external,
+# unvendored ink-separation dependency at module load time.
+[tool.setuptools]
+package-dir = { "" = "scripts" }
+py-modules = [
+    "component_filter",
+    "fit_centerline",
+    "group_staves",
+    "interpolate_staves",
+    "fallback_redetect",
+    "yolo_io",
+]

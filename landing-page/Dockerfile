@@ -43,6 +43,21 @@ COPY scripts/requirements.txt ./scripts/requirements.txt
 # app's auto-device (torch.cuda.is_available() -> False).
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121
 RUN pip install --no-cache-dir -r scripts/requirements.txt
+# staff-finding/ is a sibling repo dir, outside this build context (context is
+# landing-page/, not the repo root) — provided via the "staff_finding"
+# additional build context (docker-compose.yml's build.additional_contexts /
+# build-images.yml's build-contexts input). staffline_stage.py imports its
+# packaged modules (component_filter, fit_centerline, group_staves, ...)
+# directly. Landed at /app/staff-finding so its own pyproject.toml's relative
+# package-dir="scripts" mapping resolves the same way it does in a bare-metal
+# checkout. .dockerignore there excludes large test-fixture/experiment dirs
+# not needed at runtime.
+# Non-editable: the whole source tree is already baked into the image via
+# the COPY above regardless, so -e buys nothing at runtime (no live-edit
+# workflow makes sense inside a built container) beyond an unnecessary
+# editable-install pointer back at that same source tree.
+COPY --from=staff_finding . /app/staff-finding/
+RUN pip install --no-cache-dir /app/staff-finding
 # Prerequisite: `git lfs pull` before `docker build` — the medieval model
 # checkpoints under scripts/assets/models/medieval/ are Git-LFS pointers
 # until that's run, and this COPY would otherwise ship stub files.

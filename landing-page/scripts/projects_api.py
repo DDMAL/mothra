@@ -23,7 +23,8 @@ router = APIRouter()
 
 def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
                          deleted_at, last_opened_at, is_pinned, used_annotation_json,
-                         images, models, mei, annotations, text_alignments, cantus_source_id):
+                         images, models, mei, annotations, text_alignments, cantus_source_id,
+                         stafflines):
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -36,6 +37,7 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
         "usedAnnotationNames": json.loads(used_annotation_json or "[]"),
         "textAlignments": text_alignments,
         "cantusSourceId": cantus_source_id,
+        "stafflines": stafflines,
     }
 
 
@@ -53,6 +55,15 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
         "id": tid, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "medianLineSpacing": spacing, "syllableCount": syl_count,
+    }
+
+
+def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status):
+    return {
+        "id": did, "imageName": img_name,
+        "imageSrc": f"/api/images/{img_id}" if img_id else None,
+        "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
+        "status": status,
     }
 
 
@@ -81,10 +92,16 @@ def _project_row_to_dict(cur, row, username):
         " FROM text_alignments WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
     text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()]
+    cur.execute(
+        "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status"
+        " FROM staffline_detections WHERE project_id=%s ORDER BY created_at ASC", (pid,)
+    )
+    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in cur.fetchall()]
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
         images, models, mei, annotations, text_alignments, cantus_source_id,
+        stafflines,
     )
 
 
@@ -155,6 +172,16 @@ def list_projects(user=Depends(get_current_user)):
                 _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count)
             )
 
+        cur.execute(
+            "SELECT project_id, id, image_id, image_name, stave_count, mode_lines_per_stave, status"
+            " FROM staffline_detections WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
+        )
+        stafflines_by_pid: dict = {}
+        for pid, did, img_id, img_name, stave_count, mode_lines_per_stave, status in cur.fetchall():
+            stafflines_by_pid.setdefault(pid, []).append(
+                _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status)
+            )
+
         result = [
             _build_project_dict(
                 row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
@@ -164,6 +191,7 @@ def list_projects(user=Depends(get_current_user)):
                 annotations=ann_by_pid.get(row[0], []),
                 text_alignments=text_by_pid.get(row[0], []),
                 cantus_source_id=row[9],
+                stafflines=stafflines_by_pid.get(row[0], []),
             )
             for row in rows
         ]
@@ -277,6 +305,10 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         cur.execute("DELETE FROM project_models WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM mei_files WHERE project_id=%s", (project_id,))
         cur.execute("DELETE FROM text_alignments WHERE project_id=%s", (project_id,))
+        # staffline_detections accumulates forever by design (see CLAUDE.md's
+        # Database schema table) but still carries a project_id FK, which
+        # would otherwise block this same DELETE FROM projects below.
+        cur.execute("DELETE FROM staffline_detections WHERE project_id=%s", (project_id,))
         # IC persists its sessions (incl. page-image BYTEA) in a table it
         # owns; purge this project's rows too. Guarded by to_regclass since
         # the table only exists once the IC service has run against this DB.

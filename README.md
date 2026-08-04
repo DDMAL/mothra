@@ -291,6 +291,60 @@ python val.py --weights runs/train/exp/weights/best.pt
 
 ---
 
+## Staff-Finding Evaluation
+
+Two scripts in `staff-finding/scripts/` measure how well the pipeline's fitted centerlines match ground-truth staffline annotations. Ground truth is supplied as standard YOLO `.txt` files (one detection per line); predictions come from the `*_stafflines.json` output of `run_page.py`.
+
+A predicted fit and a GT staffline box are considered a **match** when the fit's mean page-absolute y-center falls within `0.5 × scale_unit` pixels of the GT box's y-center. Matching is 1-to-1, resolved greedily by ascending distance.
+
+### Metrics reported
+
+| Metric | What it measures |
+|---|---|
+| `precision` | Fraction of predicted fits that matched a GT line |
+| `recall` | Fraction of GT lines that were matched |
+| `f1` | Harmonic mean of precision and recall |
+| `split_ratio` | `n_pred / n_gt` — values > 1 indicate over-detection |
+| `mean_y_mae_px` | Mean absolute y-error (pixels) for matched pairs, over their x-overlap |
+
+Each result row also records `page`, `variant` (e.g. `sauvola_no_bgr`), `gt_source` (annotator name or `corrected`), and a UTC `timestamp`.
+
+### `eval_page.py` — single page
+
+Evaluates one (GT, prediction) pair and optionally appends a row to a CSV.
+
+```bash
+python staff-finding/scripts/eval_page.py \
+  --gt   staff-finding/image-sets/gent/right/inference/corrected/GentAnt1475_0017_AC_rightcrop.txt \
+  --pred staff-finding/e2e_tests/.../GentAnt1475_0017_AC_rightcrop_stafflines.json \
+  --image staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg \
+  --gt-source corrected_kyrie \
+  --variant sauvola_no_bgr \
+  --output results.csv
+```
+
+### `eval_batch.py` — multiple pages and variants
+
+Reads a manifest CSV listing all (GT, prediction, image, metadata) triples and runs evaluation on each row, writing a combined results CSV. Pass `--summarize` to print a per-variant aggregate table (mean ± std across pages).
+
+```bash
+python staff-finding/scripts/eval_batch.py \
+  --manifest staff-finding/e2e_tests/eval_manifest.csv \
+  --output   staff-finding/e2e_tests/eval_results.csv \
+  --summarize
+```
+
+**Manifest format** (`eval_manifest.csv`):
+
+```csv
+page_name,image,gt_txt,gt_source,pred_json,variant
+GentAnt1475_0017_AC_rightcrop,staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg,path/to/gt.txt,corrected_kyrie,path/to/stafflines.json,sauvola_no_bgr
+```
+
+One row per (page × variant) combination. The `gt_source` column supports annotator tracking when multiple ground-truth sources are in use.
+
+---
+
 ## Evaluation Metrics
 
 ### Layout Detection (Phase 1)

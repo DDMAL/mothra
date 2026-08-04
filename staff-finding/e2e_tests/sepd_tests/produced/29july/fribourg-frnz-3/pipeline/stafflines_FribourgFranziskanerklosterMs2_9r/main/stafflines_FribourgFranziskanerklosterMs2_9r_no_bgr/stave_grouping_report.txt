@@ -1,0 +1,163 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: stafflines_FribourgFranziskanerklosterMs2_9r
+Mode lines per stave: 4
+Line count distribution: {2: 3, 7: 1, 5: 1, 4: 4, 1: 4, 6: 1}
+Cut threshold (px): 92.2
+Flags: reconciled_duplicate_fits:32, staves_with_unexpected_count:0,1,5,6,7,9,10,11,12
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 60.6 px  
+  Gap 1: 141.2 px  >>> INTER-STAVE <<<
+  Gap 2: 40.6 px  
+  Gap 3: 62.1 px  
+  Gap 4: 20.7 px  
+  Gap 5: 43.3 px  
+  Gap 6: 16.7 px  
+  Gap 7: 42.6 px  
+  Gap 8: 122.5 px  >>> INTER-STAVE <<<
+  Gap 9: 39.8 px  
+  Gap 10: 61.3 px  
+  Gap 11: 62.6 px  
+  Gap 12: 58.3 px  
+  Gap 13: 271.4 px  >>> INTER-STAVE <<<
+  Gap 14: 52.4 px  
+  Gap 15: 7.0 px  
+  Gap 16: 53.4 px  
+  Gap 17: 165.7 px  >>> INTER-STAVE <<<
+  Gap 18: 68.7 px  
+  Gap 19: 63.3 px  
+  Gap 20: 60.8 px  
+  Gap 21: 181.9 px  >>> INTER-STAVE <<<
+  Gap 22: 128.4 px  >>> INTER-STAVE <<<
+  Gap 23: 61.3 px  
+  Gap 24: 236.0 px  >>> INTER-STAVE <<<
+  Gap 25: 50.0 px  
+  Gap 26: 10.3 px  
+  Gap 27: 10.1 px  
+  Gap 28: 50.5 px  
+  Gap 29: 10.6 px  
+  Gap 30: 159.5 px  >>> INTER-STAVE <<<
+  Gap 31: 63.7 px  
+  Gap 32: 62.8 px  
+  Gap 33: 60.6 px  
+  Gap 34: 171.9 px  >>> INTER-STAVE <<<
+  Gap 35: 127.9 px  >>> INTER-STAVE <<<
+  Gap 36: 61.5 px  
+  Gap 37: 191.3 px  >>> INTER-STAVE <<<
+  Gap 38: 127.5 px  >>> INTER-STAVE <<<
+  Gap 39: 559.3 px  >>> INTER-STAVE <<<
+  Gap 40: 62.2 px  
+  Gap 41: 78.9 px  
+  Gap 42: 57.2 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 5: line 0, y=1170.9px [rhythm_under_populated]
+  Fit 19: line 1, y=1231.5px [rhythm_under_populated]
+
+Stave 1:
+  Fit 71: line 0, y=1372.7px [rhythm_over_populated]
+  Fit 20: line 1, y=1413.3px [rhythm_over_populated]
+  Fit 30: line 2, y=1475.4px [rhythm_over_populated]
+  Fit 53: line 3, y=1496.1px [rhythm_over_populated]
+  Fit 35: line 4, y=1539.4px [rhythm_over_populated]
+  Fit 33: line 5, y=1556.1px [rhythm_over_populated]
+  Fit 49: line 6, y=1598.7px [rhythm_over_populated]
+
+Stave 2:
+  Fit 21: line 0, y=1721.2px
+  Fit 0: line 1, y=1761.0px
+  Fit 18: line 2, y=1822.3px
+  Fit 45: line 3, y=1884.9px
+  Fit 57: line 4, y=1943.2px
+
+Stave 3:
+  Fit 60: line 0, y=2214.6px
+  Fit 28: line 1, y=2267.0px
+  Fit 61: line 2, y=2274.0px
+  Fit 8: line 3, y=2327.4px
+
+Stave 4:
+  Fit 63: line 0, y=2493.1px
+  Fit 50: line 1, y=2561.8px
+  Fit 17: line 2, y=2625.1px
+  Fit 3: line 3, y=2685.9px
+
+Stave 5:
+  Fit 27: line 0, y=2867.8px [rhythm_under_populated]
+
+Stave 6:
+  Fit 16: line 0, y=2996.2px [rhythm_under_populated]
+  Fit 41: line 1, y=3057.5px [rhythm_under_populated]
+
+Stave 7:
+  Fit 74: line 0, y=3293.5px
+  Fit 65: line 1, y=3343.5px
+  Fit 31: line 2, y=3353.8px
+  Fit 75: line 3, y=3363.9px
+  Fit 11: line 4, y=3414.4px
+  Fit 29: line 5, y=3425.0px
+
+Stave 8:
+  Fit 69: line 0, y=3584.5px
+  Fit 6: line 1, y=3648.2px
+  Fit 12: line 2, y=3711.0px
+  Fit 46: line 3, y=3771.6px
+
+Stave 9:
+  Fit 73: line 0, y=3943.5px [rhythm_under_populated]
+
+Stave 10:
+  Fit 44: line 0, y=4071.4px [rhythm_under_populated]
+  Fit 42: line 1, y=4132.9px [rhythm_under_populated]
+
+Stave 11:
+  Fit 48: line 0, y=4324.2px [rhythm_under_populated]
+
+Stave 12:
+  Fit 47: line 0, y=4451.7px [rhythm_under_populated]
+
+Stave 13:
+  Fit 4: line 0, y=5011.0px
+  Fit 51: line 1, y=5073.2px [gap_near_threshold]
+  Fit 55: line 2, y=5152.1px
+  Fit 26: line 3, y=5209.3px
+
+Unassigned fits:
+  Fit 1 [duplicate_of:30]
+  Fit 2 [duplicate_of:3]
+  Fit 7 [duplicate_of:50]
+  Fit 9 [duplicate_of:16]
+  Fit 10 [duplicate_of:45]
+  Fit 13 [duplicate_of:42]
+  Fit 14 [duplicate_of:57]
+  Fit 15 [duplicate_of:48]
+  Fit 22 [duplicate_of:63]
+  Fit 23 [duplicate_of:20]
+  Fit 24 [duplicate_of:41]
+  Fit 25 [duplicate_of:75]
+  Fit 32 [duplicate_of:61]
+  Fit 34 [duplicate_of:27]
+  Fit 36 [duplicate_of:48]
+  Fit 37 [duplicate_of:31]
+  Fit 38 [duplicate_of:48]
+  Fit 39 [duplicate_of:55]
+  Fit 40 [duplicate_of:8]
+  Fit 43 [duplicate_of:16]
+  Fit 52 [duplicate_of:47]
+  Fit 54 [duplicate_of:47]
+  Fit 56 [duplicate_of:19]
+  Fit 58 [duplicate_of:45]
+  Fit 59 [duplicate_of:74]
+  Fit 62 [duplicate_of:28]
+  Fit 64 [duplicate_of:6]
+  Fit 66 [duplicate_of:74]
+  Fit 67 [duplicate_of:19]
+  Fit 68 [duplicate_of:69]
+  Fit 70 [duplicate_of:12]
+  Fit 72 [duplicate_of:69]

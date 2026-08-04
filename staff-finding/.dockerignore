@@ -1,0 +1,14 @@
+# landing-page's Docker build only needs pyproject.toml + scripts/ (the
+# mothra-staff-finding package staffline_stage.py installs and imports).
+# Everything below is test fixtures / experiment / dev-only output that would
+# otherwise balloon the build context sent to the Docker daemon -- see
+# landing-page/.dockerignore for the same pattern applied to stored_models.
+e2e_tests/
+addtl-gt/
+grouping_tests/
+image-sets/
+mergetests/
+models/
+experiments/
+dox/
+.pytest_cache/

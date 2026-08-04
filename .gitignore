@@ -10,10 +10,22 @@ predictions*/
 staff-finding/page_tests
 staff-finding/grouping_tests
 staff-finding/scripts/__pycache__/
+staff-finding/models/
+.claude/
+zzzz/
+staff-finding/addtl-gt/
 
 # Downloaded pretrained weights
 yolov8*.pt
+*.pt
 !models/**/*.pt
+!landing-page/scripts/assets/models/medieval/*.pt
+
+# images
+*.png
+*.jpg
+*.jpeg
+*.zip
 
 # Training logs
 training_output.log
@@ -52,11 +64,26 @@ landing-page/public/neon/
 landing-page/dist/
 landing-page/.vite/
 
-# Claude Code local config
-.claude/
-
 .idea
 
 # Kubernetes secrets — real values, never commit. Use the template instead:
 # cp k8s/secret.yaml.example k8s/secret.yaml
 k8s/secret.yaml
+
+# ad hoc e2e_tests scratch run output (not curated regression fixtures)
+staff-finding/e2e_tests/29may/Gent15_17_left/run_page/Gent15_17_left.json
+staff-finding/e2e_tests/29may/Gent15_17_left/run_page/left_crop_nobgr/
+staff-finding/e2e_tests/29may/Gent15_17_right/run_page/gent_right_implicit_neural/
+staff-finding/e2e_tests/29may/Gent15_17_right/run_page/gp_centerlines/GentAnt1475_0017_AC_rightcrop_stafflines(1).json
+staff-finding/e2e_tests/29may/Gent15_17_right/run_page/gp_centerlines_shape-metrics/
+staff-finding/e2e_tests/sepd_tests/produced/28July/
+staff-finding/e2e_tests/sepd_tests/produced/29july/A-KN_CCl_1018/
+staff-finding/e2e_tests/sepd_tests/produced/29july/AddMs413-nobgr/
+staff-finding/e2e_tests/sepd_tests/produced/29july/F-fgrm/
+staff-finding/e2e_tests/sepd_tests/produced/29july/NZ-Wt/
+staff-finding/e2e_tests/sepd_tests/produced/29july/fribourg-frnzk-2/
+staff-finding/e2e_tests/sepd_tests/produced/29july/fribourg_frnzk_pre-intp-fix/
+staff-finding/e2e_tests/sepd_tests/produced/29july/lArsenal/
+staff-finding/e2e_tests/sepd_tests/produced/29july/ms234/
+staff-finding/e2e_tests/sepd_tests/produced/29july/reisencod-model1/
+staff-finding/e2e_tests/sepd_tests/produced/29july/reisencodex-model2/

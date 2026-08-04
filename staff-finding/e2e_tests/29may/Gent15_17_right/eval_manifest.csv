@@ -1,0 +1,3 @@
+page_name,image,gt_txt,gt_source,pred_json,variant
+GentAnt1475_0017_AC_rightcrop,staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg,staff-finding/image-sets/gent/right/inference/corrected/GentAnt1475_0017_AC_rightcrop.txt,corrected,staff-finding/e2e_tests/29may/Gent15_17_right/run_page/sauvola_no_bgr/GentAnt1475_0017_AC_rightcrop_no_bgr/GentAnt1475_0017_AC_rightcrop_stafflines.json,sauvola_no_bgr
+GentAnt1475_0017_AC_rightcrop,staff-finding/image-sets/gent/right/GentAnt1475_0017_AC_rightcrop.jpg,staff-finding/image-sets/gent/right/inference/corrected/GentAnt1475_0017_AC_rightcrop.txt,corrected,staff-finding/e2e_tests/29may/Gent15_17_right/run_page/otsu_no_bgr/GentAnt1475_0017_AC_rightcrop_stafflines.json,otsu_no_bgr

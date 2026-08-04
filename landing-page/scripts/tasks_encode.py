@@ -17,6 +17,7 @@ from encode_to_mei import (
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
     image_dimensions, scale_facsimile,
 )
+import staffline_adapter
 
 def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) -> Optional[bytes]:
     """Looks up the original (pre-resize) image bytes for (project_id, image_name),
@@ -38,11 +39,21 @@ def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) 
         release_db_conn(con)
 
 def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h):
-    """Looks up saved text-alignment + YOLO stave annotations for one image.
-    Falls back to None/[] on any lookup failure or missing project_id/image_name,
-    mirroring the try/except-pass behavior of the original inline generator code."""
+    """Looks up saved text-alignment + stave annotations for one image.
+    Falls back to None/[]/None on any lookup failure or missing
+    project_id/image_name, mirroring the try/except-pass behavior of the
+    original inline generator code.
+
+    Stave hints are resolved through a 3-tier fallback (this function only
+    implements the first two; estimate_staves_from_glyphs is tier 3, applied
+    by the caller when yolo_stave_hints is empty): the rich, per-line
+    staffline_detections data (tier 1, when a project has it) wins over the
+    coarser yolo_txt-geometry heuristic in parse_yolo_stave_hints (tier 2,
+    today's only source, still the fallback for projects/images that predate
+    this feature or whose staffline detection failed/was skipped)."""
     text_alignment = None
     yolo_stave_hints = []
+    stave_source = None
     if project_id and image_name:
         con = get_db_conn()
         try:
@@ -60,19 +71,36 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                 pass
             try:
                 cur.execute(
-                    "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
-                    "ORDER BY created_at DESC LIMIT 1",
+                    "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
+                    " AND status='succeeded' ORDER BY created_at DESC, id DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()
                 if row and row[0]:
-                    yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                    jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
+                    yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
+                    if yolo_stave_hints:
+                        stave_source = "staffline_detection"
             except Exception:
                 pass
+            if not yolo_stave_hints:
+                try:
+                    cur.execute(
+                        "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (image_name, project_id),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                        if yolo_stave_hints:
+                            stave_source = "yolo_annotation"
+                except Exception:
+                    pass
             cur.close()
         finally:
             release_db_conn(con)
-    return text_alignment, yolo_stave_hints
+    return text_alignment, yolo_stave_hints, stave_source
 
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
@@ -113,12 +141,13 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints = _resolve_hints(project_id, image_name, page_w, page_h)
+        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h)
         if text_alignment:
             ev({"type": "log", "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
         if yolo_stave_hints:
             staves = yolo_stave_hints
-            ev({"type": "log", "message": f" {len(staves)} stave(s) from YOLO annotations"})
+            label = "staffline detection" if stave_source == "staffline_detection" else "YOLO annotations"
+            ev({"type": "log", "message": f" {len(staves)} stave(s) from {label}"})
         else:
             staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
             ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})

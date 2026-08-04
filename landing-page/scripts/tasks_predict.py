@@ -7,6 +7,7 @@ from auth_api import get_db_conn, release_db_conn, _log_activity
 from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
+from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
 
 
 @celery_app.task(name="predict.run")
@@ -104,12 +105,31 @@ def run_predict_task(job_id, project_id, body):
         results = []
         for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment in images:
             check_cancelled(job_id)
+            pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
+            img_arr = np.array(pil_img)
             if has_annotation:
                 publish({"type": "log", "message": f"{image_name}: already annotated — skipping YOLO"})
-            else:
+                # yolo_txt/ann_id are still needed below for the staffline-detection
+                # check (has_text_alignment can be False even when has_annotation is
+                # True -- see the comment in the validating stage above), so fetch
+                # the annotation a prior run already wrote instead of leaving these
+                # unset.
+                cur.execute(
+                    "SELECT id, yolo_txt FROM annotations WHERE project_id=%s AND image_id=%s"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (project_id, image_id),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    ann_id, yolo_txt = row
+                else:
+                    # Annotation was deleted between the validating stage and here
+                    # (e.g. a concurrent duplicate job) -- fall through to a fresh
+                    # YOLO run instead of crashing on an empty unpack.
+                    has_annotation = False
+                    publish({"type": "log", "message": f"{image_name}: annotation disappeared since validation — re-running YOLO"})
+            if not has_annotation:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
-                pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-                img_arr = np.array(pil_img)
                 yolo_txt = yolo_models.infer(img_arr)
                 ann_id = write_annotation(
                     cur, con, project_id, image_id, image_name, yolo_txt,
@@ -123,6 +143,22 @@ def run_predict_task(job_id, project_id, body):
                     "txtName": f"annotation-{ann_id}.txt",
                     "jsonName": "", "detectionCount": n_detections,
                 })
+
+            # Staffline detection is gated only on has_class (fresh stave-class
+            # boxes to work from), never on has_text_alignment -- an image can
+            # have has_text_alignment=True (text-finding already ran) and
+            # has_annotation=False (YOLO just produced brand-new boxes in this
+            # same iteration) at the same time, and those new boxes still need
+            # a staffline_detections row. Ordered before the has_text_alignment
+            # check below so its continue can never skip this block.
+            if has_class(yolo_txt, STAFFLINE_CLASS_ID):
+                for sf_ev in run_staffline_detection(
+                    job_id, cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
+                ):
+                    if sf_ev.get("type") == "error":
+                        publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
+                    else:
+                        publish(sf_ev)
 
             if has_text_alignment:
                 publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})

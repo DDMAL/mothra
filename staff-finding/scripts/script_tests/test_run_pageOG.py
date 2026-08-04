@@ -1,31 +1,48 @@
 """Sanity check for the parts of run_page.py that don't need the BGR model."""
+
 import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-sys.path.insert(0, "/home/claude")
 # Import only the pieces that don't trigger the inference_simple import.
 # We do this by importing from the module file directly, bypassing the
 # sys.path injection at module top.
 import importlib.util
-spec = importlib.util.spec_from_file_location("run_page_partial", "/home/claude/run_page.py")
-# Stub out imports the test environment doesn't have.
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_SCRIPTS_DIR))  # so run_pageOG.py's sibling imports resolve
+spec = importlib.util.spec_from_file_location(
+    "run_page_partial", str(_SCRIPTS_DIR / "run_pageOG.py")
+)
+# Stub out imports the test environment doesn't have, via a module-scoped
+# MonkeyPatch so _restore_stubbed_modules can undo them once this file's
+# tests are done, instead of leaking them into whatever pytest collects next.
 import types
+
+_mp = pytest.MonkeyPatch()
+
 fake_inference = types.ModuleType("inference_simple")
 fake_inference.load_model = lambda *a, **kw: None
 fake_inference.sliding_window_inference = lambda *a, **kw: None
 fake_inference.post_process_ink = lambda *a, **kw: None
 fake_inference.separate_layers = lambda *a, **kw: (None, None)
-sys.modules["inference_simple"] = fake_inference
+_mp.setitem(sys.modules, "inference_simple", fake_inference)
 
 fake_torch = types.ModuleType("torch")
 fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
-sys.modules["torch"] = fake_torch
+_mp.setitem(sys.modules, "torch", fake_torch)
 
 run_page = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run_page)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_stubbed_modules():
+    yield
+    _mp.undo()
 
 
 def test_parse_yolo_txt():
@@ -82,14 +99,18 @@ def test_crop_with_padding_clamping():
     # Box near top-left corner; padding should clamp.
     box = (5, 5, 50, 50)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (0, 0, 60, 60)
     assert crop.shape == (60, 60, 3)
 
     # Box near bottom-right; padding should clamp.
     box = (180, 90, 199, 99)
     crop, actual = run_page.crop_with_padding(img, box, padding=10)
-    print(f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}")
+    print(
+        f"crop near far corner with padding=10: actual box={actual}, crop shape={crop.shape}"
+    )
     assert actual == (170, 80, 200, 100)
     assert crop.shape == (20, 30, 3)
 

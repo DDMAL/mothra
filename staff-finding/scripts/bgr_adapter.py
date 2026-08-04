@@ -6,26 +6,47 @@ Wraps the inference helpers from the external manuscript-ink-separation script
 point writes to disk; this module provides the same processing pipeline but
 returns the ink-on-white image directly, without disk I/O.
 
-If the path to the external script changes, update INFERENCE_SCRIPT_DIR below.
-This module is the single place that needs to know where it lives; downstream
-code imports from here.
+If the path to the external script changes, update _CANDIDATE_DIRS below (or
+set MUSCRAT_LAYER_SEP_DIR). This module is the single place that needs to
+know where it lives; downstream code imports from here.
 """
 
+import os
 import sys
 from typing import Optional
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Location of the external inference script
 # ---------------------------------------------------------------------------
 
-# Adjust to wherever inference_simple.py lives in your environment, or
-# pip-install it as a package and import normally.
-INFERENCE_SCRIPT_DIR = "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts"
-# mini: /Users/kyriebouressa/Documents/muscrat/layer_sep/scripts
-# macbook: "/Users/ekaterina/Documents/Documents - angantyr/muscrat/layer_sep/scripts/"
+# Known locations of the external muscrat/layer_sep repo across the machines
+# this project has been developed on; first one that actually contains
+# inference_simple.py wins. Override with MUSCRAT_LAYER_SEP_DIR for a machine
+# not listed here.
+_CANDIDATE_DIRS = [
+    os.environ.get("MUSCRAT_LAYER_SEP_DIR"),
+    "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts",  # mini
+    "/Users/ekaterina/Documents/muscrat/layer_sep/scripts",  # macbook
+    "/Users/ekaterina/Documents/Documents_angantyr/GitHub/muscrat/layer_sep/scripts",
+]
+INFERENCE_SCRIPT_DIR = next(
+    (
+        d
+        for d in _CANDIDATE_DIRS
+        if d and os.path.isfile(os.path.join(d, "inference_simple.py"))
+    ),
+    None,
+)
+if INFERENCE_SCRIPT_DIR is None:
+    raise ModuleNotFoundError(
+        "Could not find inference_simple.py (external muscrat/layer_sep repo, "
+        "needed for BGR preprocessing) in any known location:\n  "
+        + "\n  ".join(d for d in _CANDIDATE_DIRS if d)
+        + "\nSet MUSCRAT_LAYER_SEP_DIR to override, or pass --no-bgr to skip "
+        "BGR preprocessing entirely (run_page.py only)."
+    )
 
 sys.path.insert(0, INFERENCE_SCRIPT_DIR)
 from inference_simple import (  # noqa: E402  (sys.path insertion above)
@@ -34,7 +55,6 @@ from inference_simple import (  # noqa: E402  (sys.path insertion above)
     post_process_ink,
     separate_layers,
 )
-
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -48,6 +68,7 @@ DEFAULT_BGR_CONFIDENCE = 0.5
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def load_bgr_model(checkpoint_path: str, device: str):
     """Load the BGR model from a checkpoint. Thin wrapper for naming clarity."""
@@ -81,7 +102,8 @@ def run_bgr_inference(
         RGB ink layer (same dtype and spatial size as image_rgb).
     """
     probability_map = sliding_window_inference(
-        model, image_rgb,
+        model,
+        image_rgb,
         window_size=window_size,
         stride=stride,
         device=device,
