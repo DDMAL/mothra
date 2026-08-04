@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import { suggestProjectNameFromFilename } from "../../utils/folio";
+import { getOversizedFiles, resizeImageFile, TARGET_RESIZE_BYTES } from "../../utils/imageResize";
 import { AuthImage } from "../shared/AuthImage";
 import type { Project, MeiFile, CantusSource } from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
+import LargeImageWarningModal from "./LargeImageWarningModal";
 import { formatLastOpened } from "../../utils/time";
 import Modal from "../shared/Modal";
 
@@ -103,6 +105,8 @@ export default function MyProjects({
   const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
   const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
   const [pickedImageFile, setPickedImageFile] = useState<File | null>(null)
+  const [pendingSizeWarning, setPendingSizeWarning] = useState<File | null>(null);
+  const [resizingCreateImage, setResizingCreateImage] = useState(false);
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<
     number | null
@@ -130,6 +134,45 @@ export default function MyProjects({
     } finally {
       setSourceLookupLoading(false);
     }
+  };
+
+  // Shared by the plain "create project" click and both size-warning
+  // resolutions below, so all three paths reset the same modal state and
+  // call onCreateProject exactly once.
+  const finalizeCreate = (imageFile?: File) => {
+    onCreateProject(newName.trim(), imageFile);
+    setNewName("");
+    setShowSourceLookup(false);
+    setSourceIdInput("");
+    setSourceLookupError(null);
+    setPickedImageFile(null);
+    setPendingSizeWarning(null);
+    setShowCreate(false);
+  };
+
+  const handleCreateClick = () => {
+    if (!newName.trim()) return;
+    if (pickedImageFile && getOversizedFiles([pickedImageFile]).length > 0) {
+      setPendingSizeWarning(pickedImageFile);
+      return;
+    }
+    finalizeCreate(pickedImageFile ?? undefined);
+  };
+
+  const resolveCreateSizeWarning = async (action: "resize" | "asis" | "cancel") => {
+    if (!pendingSizeWarning) return;
+    if (action === "cancel") {
+      setPendingSizeWarning(null);
+      return;
+    }
+    if (action === "asis") {
+      finalizeCreate(pendingSizeWarning);
+      return;
+    }
+    setResizingCreateImage(true);
+    const resized = await resizeImageFile(pendingSizeWarning, TARGET_RESIZE_BYTES);
+    setResizingCreateImage(false);
+    finalizeCreate(resized);
   };
 
   const activeProjects = projects
@@ -545,21 +588,22 @@ export default function MyProjects({
             )}
         </div>
           <button
-            onClick={() => {
-              if (!newName.trim()) return;
-              onCreateProject(newName.trim(), pickedImageFile ?? undefined);
-              setNewName("");
-              setShowSourceLookup(false);
-              setSourceIdInput("");
-              setSourceLookupError(null);
-              setPickedImageFile(null);
-              setShowCreate(false);
-            }}
+            onClick={handleCreateClick}
             className="bg-[#1E6B70] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
           >
             create project
           </button>
         </Modal>
+      )}
+
+      {pendingSizeWarning && (
+        <LargeImageWarningModal
+          oversizedFiles={[pendingSizeWarning]}
+          resizing={resizingCreateImage}
+          onResize={() => resolveCreateSizeWarning("resize")}
+          onUploadAsIs={() => resolveCreateSizeWarning("asis")}
+          onCancel={() => resolveCreateSizeWarning("cancel")}
+        />
       )}
 
       {projectToDelete && (
