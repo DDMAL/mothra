@@ -16,6 +16,7 @@ from job_store import publish_event, check_cancelled, JobCancelled
 from auth_api import get_db_conn, release_db_conn
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
+from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
 
 @celery_app.task(name="text_batch.run")
 def run_text_batch_task(job_id, project_id, body):
@@ -67,13 +68,29 @@ def run_text_batch_task(job_id, project_id, body):
         for image_id, (name, data, mime) in zip(image_ids, images):
             check_cancelled(job_id)
             pil_img = Image.open(io.BytesIO(data)).convert("RGB")
-            yolo_txt = yolo_models.infer(np.array(pil_img))
-            write_annotation(cur, con, project_id, image_id, name, yolo_txt,
+            img_arr = np.array(pil_img)
+            yolo_txt = yolo_models.infer(img_arr)
+            ann_id = write_annotation(cur, con, project_id, image_id, name, yolo_txt,
                              yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash)
             music_boxes_by_index.append(_music_boxes_for_image(project_id, name, data))
             mask_json_by_index.append(_mask_json_for_image(project_id, name, data) if body["masking_enabled"] else None)
             n = len(yolo_txt.splitlines()) if yolo_txt else 0
             publish({"type": "log", "message": f"{name}: layer separation done ({n} detection(s))"})
+
+            # Mirrors tasks_predict.py's own predict-job pipeline: this path
+            # also runs fresh YOLO layer-separation per image and previously
+            # never called staffline_stage.py, so batch-run images got no
+            # staffline_detections row at all (see
+            # documentation_allons-y/STAFFLINE_INTEGRATION_FOLLOWUPS.md's
+            # "batch_api.py's text-batch-run path" bullet).
+            if has_class(yolo_txt, STAFFLINE_CLASS_ID):
+                for sf_ev in run_staffline_detection(
+                    job_id, cur, con, project_id, image_id, name, ann_id, img_arr, yolo_txt,
+                ):
+                    if sf_ev.get("type") == "error":
+                        publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
+                    else:
+                        publish(sf_ev)
         publish({"type": "stage_done", "name": "checking"})
 
         publish({"type": "stage", "name": "validating"})
