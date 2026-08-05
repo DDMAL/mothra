@@ -1,6 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { type StafflineSet, type JsomrLineRecord } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
+import { computeRhythmGaps } from "../../lib/rhythmGaps";
+import RhythmChart from "./RhythmChart";
 
 type ViewState =
     | { status: "loading" }
@@ -24,8 +26,14 @@ interface Props {
 export default function StafflineViewerModal({ detection, projectId, onClose, label }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
     const [notesOpen, setNotesOpen] = useState(false);
+    const [tab, setTab] = useState<"overlay" | "rhythm">("overlay");
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
+
+    const rhythmSummary = useMemo(
+        () => (viewState.status === "ready" ? computeRhythmGaps(viewState.records) : null),
+        [viewState],
+    );
 
     const anomalousStaveIds =
         viewState.status === "ready"
@@ -159,6 +167,23 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                             {anomalousStaveIds.size} flagged for review
                         </span>
                     )}
+                    {viewState.status === "ready" && rhythmSummary && (
+                        <div className="flex bg-[#1D3335]/10 rounded-full p-0.5 text-xs font-mono">
+                            {(["overlay", "rhythm"] as const).map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setTab(t)}
+                                    className={`px-3 py-1 rounded-full cursor-pointer transition-colors ${
+                                        tab === t
+                                            ? "bg-[#1D3335] text-white"
+                                            : "text-[#1D3335]/60 hover:text-[#1D3335]"
+                                    }`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <button
                         onClick={onClose}
                         className="text-[#1D3335] text-lg leading-none hover:opacity-60 cursor-pointer ml-2"
@@ -174,6 +199,10 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                     ) : viewState.status === "error" ? (
                         <div className="flex items-center justify-center h-full text-[#1D3335]/60 text-sm">
                             {viewState.message}
+                        </div>
+                    ) : tab === "rhythm" && rhythmSummary ? (
+                        <div className="p-4">
+                            <RhythmChart summary={rhythmSummary} />
                         </div>
                     ) : (
                         <div className="p-4 flex flex-col items-center">
