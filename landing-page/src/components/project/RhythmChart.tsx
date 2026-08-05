@@ -34,14 +34,26 @@ export default function RhythmChart({ summary }: Props) {
 
   const yToPx = (v: number) => PAD_T + plotH - (v / yMax) * plotH;
 
+  const description = bars
+    .map(
+      (b) =>
+        `stave ${b.staveId} gap ${b.gapIndex}: ${b.gapPx.toFixed(1)}px${b.isAnomalous ? " (flagged)" : ""}`,
+    )
+    .join("; ");
+
   return (
     <div className="w-full overflow-x-auto">
       <svg
+        role="img"
+        aria-labelledby="rhythm-chart-title"
+        aria-describedby="rhythm-chart-desc"
         viewBox={`0 0 ${chartW} ${CHART_H}`}
         width={chartW}
         height={CHART_H}
         className="min-w-full"
       >
+        <title id="rhythm-chart-title">Staffline rhythm gap distribution</title>
+        <desc id="rhythm-chart-desc">{description}</desc>
         {/* axes */}
         <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T + plotH} stroke="#1D3335" strokeWidth={1} />
         <line
@@ -94,27 +106,44 @@ export default function RhythmChart({ summary }: Props) {
           strokeDasharray="5,3"
         />
 
-        {/* bars */}
+        {/* bars -- anomalous ones get a dark outline too, not just the red
+            fill, so they're distinguishable without relying on color alone */}
         {bars.map((b, i) => {
           const x = PAD_L + i * (barW + BAR_GAP);
           const y = yToPx(b.gapPx);
           const h = PAD_T + plotH - y;
           const color = b.isAnomalous ? ANOMALY_COLOR : PALETTE[b.staveId % PALETTE.length];
-          return <rect key={i} x={x} y={y} width={barW} height={Math.max(h, 0.5)} fill={color} />;
+          return (
+            <rect
+              key={i}
+              x={x}
+              y={y}
+              width={barW}
+              height={Math.max(h, 0.5)}
+              fill={color}
+              stroke={b.isAnomalous ? "#1D3335" : "none"}
+              strokeWidth={b.isAnomalous ? 1.5 : 0}
+            >
+              <title>
+                stave {b.staveId} gap {b.gapIndex}: {b.gapPx.toFixed(1)}px
+                {b.isAnomalous ? " (flagged)" : ""}
+              </title>
+            </rect>
+          );
         })}
       </svg>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] font-mono text-[#1D3335]/70">
         <span>
-          <span style={{ color: NOISE_FLOOR_COLOR }}>┅</span> noise floor ({noiseFloorPx.toFixed(1)}px)
+          <span className="text-[#1D3335]">┅</span> noise floor ({noiseFloorPx.toFixed(1)}px)
         </span>
         <span>
-          <span style={{ color: CUT_THRESHOLD_COLOR }}>┅</span> cut threshold ({cutThresholdPx.toFixed(1)}px)
+          <span className="text-[#FF3B30]">┅</span> cut threshold ({cutThresholdPx.toFixed(1)}px)
         </span>
         <span>
-          <span style={{ color: MAX_INTERP_COLOR }}>┅</span> max interp. gap ({maxInterpGapPx.toFixed(1)}px)
+          <span className="text-[#FFA500]">┅</span> max interp. gap ({maxInterpGapPx.toFixed(1)}px)
         </span>
         <span>
-          <span style={{ color: ANOMALY_COLOR }}>■</span> flagged stave
+          <span className="text-[#FF3B30]">■</span> flagged stave
         </span>
       </div>
       <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
