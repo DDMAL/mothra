@@ -88,7 +88,7 @@ export default function ProjectDetail({
     "images" | "models" | "generated"
   >("images");
   const [generatedSubTab, setGeneratedSubTab] = useState<
-    "annotations" | "text" | "mei files"
+    "annotations" | "text" | "stafflines" | "mei files"
   >("annotations");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
@@ -138,7 +138,7 @@ export default function ProjectDetail({
     annSection.setPage(0);
   };
 
-  const switchGeneratedSubTab = (tab: "annotations" | "text" | "mei files") => {
+  const switchGeneratedSubTab = (tab: "annotations" | "text" | "stafflines" | "mei files") => {
     setGeneratedSubTab(tab);
     meiSection.clearSelection();
     annSection.clearSelection();
@@ -155,12 +155,13 @@ export default function ProjectDetail({
   const GENERATED_SUBTAB_LABELS: Record<string, string> = {
     annotations: "Detected layers",
     text: "Detected text",
+    stafflines: "Stafflines",
     "mei files": "MEI files",
   }
 
   const tabs = ["images", "models", "generated"] as const;
 
-  const generatedSubTabs = ["annotations", "text", "mei files"] as const;
+  const generatedSubTabs = ["annotations", "text", "stafflines", "mei files"] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -651,6 +652,13 @@ export default function ProjectDetail({
                 {generatedSubTab === "text" && (
                   <TextAlignmentsTab
                     textAlignments={project.textAlignments}
+                    images={project.images}
+                    projectId={project.id}
+                  />
+                )}
+                {generatedSubTab === "stafflines" && (
+                  <StafflinesTab
+                    stafflines={project.stafflines}
                     images={project.images}
                     projectId={project.id}
                   />
