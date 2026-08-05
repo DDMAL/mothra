@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-staging
+  namespace: mothra
+  labels:
+    app: worker-staging
+    mothra.env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-staging
+  template:
+    metadata:
+      labels:
+        app: worker-staging
+        mothra.env: staging
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      # --- GPU (MIG-backed vGPU) — identical to k8s/worker.yaml, on purpose ---
+      # Staging deliberately mirrors production's GPU setup so predict jobs
+      # exercise the same code path. The trade-off is real and worth knowing:
+      # because neither Deployment requests nvidia.com/gpu (see k8s/worker.yaml
+      # for why — the device plugin would clobber NVIDIA_VISIBLE_DEVICES on a MIG
+      # guest), the GPU is not a schedulable resource and nothing stops both
+      # workers from opening the *same* MIG instance. With --concurrency=2 each,
+      # that is up to 4 CUDA threads on one partition. Expect intermittent
+      # `torch.OutOfMemoryError: CUDA out of memory` in whichever job loses —
+      # possibly a *production* one — and note it will NOT appear as OOMKilled,
+      # since the memory limit below covers host RAM, not VRAM. If that starts
+      # happening, scale this Deployment to 0 and only scale it up for GPU tests.
+      runtimeClassName: nvidia
+      nodeSelector:
+        gpu: "true"
+        kubernetes.io/hostname: k3s-gpu-node-1
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: worker
+          # Placeholder tag — rewritten to this commit's sha-<short> by the deploy
+          # job; sha-0000000 is not a real tag so a missed rewrite fails loudly.
+          image: ghcr.io/ddmal/mothra-backend:sha-0000000
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - celery_app.celery_app
+            - worker
+            - --loglevel=info
+            - --pool=threads
+            - --concurrency=2
+          env:
+            # MIG instance is injected by the NVIDIA runtime (not the device
+            # plugin) — see the scheduling note above. compute,utility is
+            # required or cuInit → CUDA_ERROR_NO_DEVICE.
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
+          # Both names must carry -staging: production's ConfigMap/Secret are
+          # resolvable from this namespace, and picking them up here would point
+          # the worker at production's broker and database without any error.
+          envFrom:
+            - configMapRef:
+                name: mothra-config-staging
+            - secretRef:
+                name: mothra-secrets-staging
+          volumeMounts:
+            - name: stored-models
+              mountPath: /app/scripts/stored_models
+          # Cold start on GPU (torch CUDA init + model load) is slow — gate
+          # liveness behind a generous startupProbe (like Rodan's GPU worker).
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 30"
+            periodSeconds: 30
+            timeoutSeconds: 35
+            failureThreshold: 30
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A celery_app.celery_app inspect ping -d celery@$(hostname) --timeout 30"
+            periodSeconds: 60
+            timeoutSeconds: 40
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: stored-models
+          persistentVolumeClaim:
+            claimName: mothra-stored-models-staging

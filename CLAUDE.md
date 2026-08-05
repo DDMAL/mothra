@@ -296,46 +296,66 @@ needs no re-plumbing):
 
 ### Deployment (Kubernetes, CI/CD via GitHub Actions)
 
-**Merging to `main` deploys automatically.** `.github/workflows/build-images.yml`
-(job name `ci-cd`) runs on every push to `main`/`develop`/`k8s-deployment` (also
-`workflow_dispatch`):
+**Merging to `main` deploys production automatically; pushing `develop` deploys
+staging.** `.github/workflows/build-images.yml` (job name `ci-cd`) runs on every
+push to `main`/`develop`/`k8s-deployment` (also `workflow_dispatch`):
 1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
-   `text-service` (`text-service/Dockerfile`, build context is the repo root
-   since it needs the sibling `mothra-text/` submodule), and
-   `paco-classifier-service` (`paco-classifier-service/Dockerfile`, same
-   repo-root-context reasoning — needs the sibling `paco-classifier/`
-   submodule) and pushes each to
-   `ghcr.io/ddmal/mothra-{backend,ic,text-service,paco-classifier-service}`,
-   tagged `latest`, by short SHA (`sha-<short>`), and by branch. `worker`
-   reuses the `mothra-backend` image, so it isn't built separately. Checkout
-   pulls submodules recursively and Git LFS (the bundled medieval `.pt`
-   weights, tracked in this repo's own `.gitattributes` — without `lfs: true`
-   they'd check out as pointer stubs and inference would fail at runtime;
-   the staffline classifier's `model_0.h5`/`model_1.h5` weights need no such
-   step — they live inside the `paco-classifier` submodule itself, which
-   `submodules: recursive` already checks out in full).
-2. **deploy** (needs `build`) — using the `KUBECONFIG` repo secret, pins
-   `k8s/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml`/`paco-classifier-service.yaml`
-   to this commit's `sha-<short>` tag, applies those plus
-   `k8s/configmap.yaml`/`ingress.yaml`, then `kubectl rollout status` on
-   `backend`/`worker`/`ic`/`text-service`/`paco-classifier-service` (redis and
-   postgres are excluded from CD — see below).
+   and `text-service` (`text-service/Dockerfile`, build context is the repo root
+   since it needs the sibling `mothra-text/` submodule) and pushes each to
+   `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, tagged by short SHA
+   (`sha-<short>`), by branch, and `latest` **from `main` only** (both environments
+   share these image repos, so an ungated `latest` would be whichever one pushed
+   last). `worker` reuses the `mothra-backend` image, so it isn't built separately.
+   Checkout pulls submodules recursively and Git LFS (the bundled medieval `.pt`
+   weights — without `lfs: true` they'd check out as pointer stubs and inference
+   would fail at runtime).
+2. **resolve** — maps the ref to an environment: `main` → production, any other ref
+   → staging. Outputs `dir` (`k8s` or `k8s/staging`) and `suffix` (`""` or
+   `-staging`). `workflow_dispatch` takes an `environment` input
+   (`auto`/`staging`/`production`, default `auto`) so staging can be redeployed from
+   `main`; dispatching `production` from a non-`main` ref is refused.
+3. **deploy** (needs `build` + `resolve`) — using the `KUBECONFIG` repo secret, pins
+   `$dir/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml` to this commit's
+   `sha-<short>` tag (and now *fails* if that `sed` matched nothing, since `sed`
+   exits 0 on no-match and would otherwise ship a stale tag), applies those plus
+   `$dir/configmap.yaml`/`ingress.yaml`, then `kubectl rollout status` on
+   `backend{suffix}`/`worker{suffix}`/`ic{suffix}`/`text-service{suffix}`. redis,
+   postgres, secrets and the PV/PVC are excluded from CD. `concurrency` is keyed on
+   the resolved environment, so production and staging deploys don't block each other.
 
-The cluster runs the `mothra` namespace, manifests live in `k8s/` (see
-`k8s/README.md`). **Postgres is not part of this repo's deploy** — it's a
-separate deployment in the `postgres` namespace, reached cross-namespace at
-`mothra-postgres.postgres.svc.cluster.local:5432` via `DATABASE_URL` — so a
-Mothra deploy never touches the database deployment. Ingress is Traefik:
-`mothra.simssa.ca` → backend, `mothra-ic.simssa.ca` → ic, with a `Middleware` in
-`ingress.yaml` adding a `frame-ancestors` CSP on the IC host so the campus
-proxy's blanket `X-Frame-Options: SAMEORIGIN` doesn't block the IC iframe.
+**Two environments share the `mothra` namespace**, separated only by naming:
+production manifests are in `k8s/`, staging's are in `k8s/staging/` with *identical
+filenames*, and every staging object suffixes `-staging` onto its `metadata.name`,
+`app` label **and selectors** (see `k8s/README.md`). Dropping that suffix from an
+`app` label makes production's Service select a staging pod; leaving a staging
+manifest pointing at `mothra-secrets`/`mothra-config` makes staging boot green
+against the production database and `_migrate_db()` ALTER production's tables — both
+fail silently, so treat the suffix as the invariant when editing these files.
+Committed staging manifests carry the placeholder image tag `sha-0000000`, which is
+deliberately not a real tag so a missed rewrite fails loudly.
+
+**Postgres is not part of this repo's deploy** — each environment has its own
+deployment in the `postgres` namespace, reached cross-namespace via `DATABASE_URL`
+(`mothra-postgres.postgres.svc.cluster.local:5432` for production,
+`mothra-staging-postgres.postgres.svc.cluster.local:5432` for staging; **same
+database name `mothra`, only the host differs**) — so a Mothra deploy never touches
+the database deployment. Ingress is Traefik: `mothra.simssa.ca` → backend and
+`mothra-ic.simssa.ca` → ic for production, `mothra.staging.simssa.ca` /
+`mothra-ic.staging.simssa.ca` for staging, each with a `Middleware` in its
+`ingress.yaml` adding a `frame-ancestors` CSP on the IC host so the campus proxy's
+blanket `X-Frame-Options: SAMEORIGIN` doesn't block the IC iframe. Staging also runs
+its own `redis-staging` broker — a shared broker would let the two environments'
+Celery workers steal each other's tasks off the default `celery` queue, and the
+worker's `celery inspect ping` probes would still pass while that happened.
 `stored_models` (locally-uploaded custom YOLO checkpoints, written by
 `models_api.py`) is **not baked into the image** — it's a static NFS
-PersistentVolume (RWX, `k8s/stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
+PersistentVolume (RWX, `stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
 `backend` and `worker` so uploads persist across rollouts and are visible to
-whichever service reads them.
+whichever service reads them; each environment gets its own PV on its own NFS path
+(`/srv/nfs/mothra/…` vs `/srv/nfs/mothra-staging/…`), since a shared one would let a
+staging delete destroy a production checkpoint.
 
-**Manual apply** (redis/postgres/secrets excluded from CD; apply by hand when needed):
+**Manual apply** (redis/postgres/secrets/PV excluded from CD; apply by hand when needed):
 ```
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
@@ -343,13 +363,23 @@ kubectl apply -f k8s/redis.yaml
 kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/paco-classifier-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
 ```
+Same commands with `k8s/staging/` for staging. `kubectl apply -f k8s/` does not
+recurse into `k8s/staging/` (that needs `-R`), so the two can't be mixed up by a
+directory-wide apply. Staging's one-time prerequisites (its Postgres deployment, the
+NFS export, DNS/proxy vhosts, its Secret, and the first-boot ordering) are in
+`k8s/README.md` — none of them are created by this repo.
 
 **Known follow-ups** (from `k8s/README.md`): no real `/healthz` yet, so probes
 are TCP/exec only; `init_db()`/`_migrate_db()` run at import, so keep
 `backend`/`worker` at **1 replica** until a one-shot migration Job replaces
-that; `text-service`'s `/batch-download/{id}` uses local disk keyed by
+that (and on a *fresh* database, backend and worker racing that import-time
+migration can `CrashLoopBackOff` once before self-healing — bring backend up first);
+`text-service`'s `/batch-download/{id}` uses local disk keyed by
 `batch_id`, so it needs shared storage (or a single replica) if batch
-downloads are used at scale.
+downloads are used at scale. Both `worker` Deployments are pinned to
+`k3s-gpu-node-1` and share one MIG instance with no scheduler arbitration, so
+concurrent inference in both environments can raise `torch.OutOfMemoryError` in
+either one (not visible as `OOMKilled` — the memory limit covers host RAM, not VRAM).
 
 The old `render.yaml` Render Blueprint (single-service, no worker, no Redis)
 is retired — it predated the job queue and would never have processed

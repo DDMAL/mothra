@@ -1,0 +1,99 @@
+# Traefik ingress for the Mothra *staging* app (HTTP, no TLS). Two hosts:
+#   mothra.staging.simssa.ca    → backend-staging (SPA + /api + /neon + /Neon-gh + /assets)
+#   mothra-ic.staging.simssa.ca → ic-staging      (browser-facing Interactive Classifier
+#                                                  iframe origin; IC_PUBLIC_URL in
+#                                                  k8s/staging/configmap.yaml points here)
+# backend-staging reaches ic-staging server-to-server at http://ic-staging:8000
+# (IC_API_URL). Both hosts need DNS records and a campus-proxy vhost — see
+# k8s/README.md.
+#
+# Traefik streams responses (no buffering), so the job-progress SSE
+# (GET /api/jobs/{id}/stream) works without extra config.
+#
+# The two hosts are *separate* Ingress objects because the IC host needs a
+# router-scoped middleware (below) that must not apply to the main host —
+# a `router.middlewares` annotation hits every router its Ingress creates.
+# Both objects plus the Middleware live in this one file so the single
+# `kubectl apply -f <dir>/ingress.yaml` in .github/workflows/build-images.yml
+# creates the Middleware before the Ingress that references it.
+---
+# Lets mothra.staging.simssa.ca embed the staging IC SPA in an iframe.
+#
+# The campus front proxy (134.87.11.29, nginx) injects a blanket
+# `X-Frame-Options: SAMEORIGIN` into every response it fronts. mothra-ic.staging
+# is a different host from mothra.staging, so browsers refuse the iframe outright
+# ("refused to connect") even when the IC service itself is healthy. Traefik
+# cannot strip that header — nginx sits *in front* and appends its copy after
+# Traefik is done — but CSP `frame-ancestors` obsoletes X-Frame-Options per the
+# CSP spec: when a response carries both, browsers ignore XFO and enforce
+# frame-ancestors instead. So we add the header we want rather than trying to
+# remove the one we don't. Expect `curl -I` to keep showing the proxy's
+# SAMEORIGIN alongside this CSP — that is working as intended.
+#
+# NOTE: this apiVersion is Traefik v3's API group. On Traefik v2 before 2.11 it
+# is `traefik.containo.us/v1alpha1` instead — confirm against the cluster with
+# `kubectl get crd | grep middlewares` before assuming this applies cleanly.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ic-frame-ancestors-staging
+  namespace: mothra
+  labels:
+    app: mothra
+    mothra.env: staging
+spec:
+  headers:
+    customResponseHeaders:
+      Content-Security-Policy: "frame-ancestors https://mothra.staging.simssa.ca"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mothra-staging
+  namespace: mothra
+  labels:
+    app: mothra
+    mothra.env: staging
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: mothra.staging.simssa.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-staging
+                port:
+                  number: 8001
+---
+# The middleware reference format is `<namespace>-<middleware-name>@kubernetescrd`
+# (here: namespace `mothra` + name `ic-frame-ancestors-staging`). A typo fails
+# silently — Traefik serves the route with no middleware attached and the iframe
+# stays blocked. Doubly easy to get wrong now that a similarly-named production
+# middleware (`mothra-ic-frame-ancestors@kubernetescrd`) lives in this same
+# namespace, so verify with the curl in k8s/README.md after deploying.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mothra-ic-staging
+  namespace: mothra
+  labels:
+    app: mothra
+    mothra.env: staging
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: mothra-ic-frame-ancestors-staging@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: mothra-ic.staging.simssa.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ic-staging
+                port:
+                  number: 8000

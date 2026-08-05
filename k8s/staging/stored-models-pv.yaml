@@ -1,0 +1,39 @@
+# Static NFS PersistentVolume for staging's user-uploaded model files.
+# Shared by backend-staging + worker-staging (both read/write it) → ReadWriteMany.
+# Mounted at /app/scripts/stored_models in both Deployments.
+#
+# Separate from production's PV on purpose: models_api.py deletes files, so a
+# shared volume would let a staging delete destroy a production-uploaded
+# checkpoint.
+#
+# The NFS path must exist AND be exported on the server before the first staging
+# deploy. Static binding never touches NFS, so the PVC shows `Bound` either way —
+# the failure only appears at pod start as
+#   MountVolume.SetUp failed ... mount.nfs4: ... No such file or directory
+# with the pod stuck in ContainerCreating until `rollout status` times out.
+# /srv/nfs/mothra-staging is outside the existing /srv/nfs/mothra export, so this
+# needs an /etc/exports entry + `exportfs -ra`, not just a mkdir, and must sit
+# inside the NFSv4 pseudo-root.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mothra-stored-models-staging-pv
+  labels:
+    app: mothra
+    component: stored-models
+    mothra.env: staging
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""          # static binding, no dynamic provisioner
+  mountOptions:
+    - nfsvers=4.1
+  nfs:
+    server: 192.168.236.201                        # mothra-data storage VM
+    path: /srv/nfs/mothra-staging/stored_models
+  claimRef:
+    namespace: mothra
+    name: mothra-stored-models-staging

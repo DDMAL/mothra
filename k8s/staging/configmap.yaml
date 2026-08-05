@@ -1,0 +1,27 @@
+# Non-secret config for backend-staging (and the subset worker-staging needs).
+# Staging shares the `mothra` namespace with production, so every service URL
+# below must name the *-staging Service explicitly: the short cluster-DNS names
+# used by k8s/configmap.yaml (`ic`, `text-service`, `redis`) resolve to the
+# production Services from in here. App is served at https://mothra.staging.simssa.ca.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mothra-config-staging
+  namespace: mothra
+  labels:
+    mothra.env: staging
+data:
+  # MUST NOT be production's broker. Both environments' Celery workers listen on
+  # the same default `celery` queue, so a shared broker lets staging consume
+  # production tasks (and vice versa) — and it fails *silently*: worker-staging's
+  # `celery inspect ping -d celery@$(hostname)` probes still pass, while the
+  # production job it stole hangs forever with no error logged anywhere.
+  CELERY_BROKER_URL: "redis://redis-staging:6379/0"
+  IC_API_URL: "http://ic-staging:8000"                 # server-to-server (cluster DNS)
+  TEXT_API_URL: "http://text-service-staging:8002"     # server-to-server (cluster DNS)
+  # TLS is terminated by the campus front proxy (134.87.11.29), which forces
+  # http→https, so browsers are always on https — use https here to avoid
+  # mixed-content (IC iframe) and CORS-origin mismatches.
+  IC_PUBLIC_URL: "https://mothra-ic.staging.simssa.ca"  # browser-facing IC iframe origin
+  ALLOWED_ORIGINS: "https://mothra.staging.simssa.ca"   # backend CORS origin
+  STORAGE_QUOTA_MB: "500"
