@@ -60,6 +60,7 @@ export interface JsomrLineRecord {
   source: "detected" | "fallback_redetected" | "interpolated";
   bounding_box: { ulx: number; uly: number; lrx: number; lry: number } | null;
   centerline_page: { x_start: number; x_end: number; y_values: number[] };
+  scale_unit: number;
   stave_id: number | null;
   rhythm_status: string | null;
   within_stave_index: number | null;
