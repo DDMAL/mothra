@@ -37,10 +37,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Pillow: only thing staffline_adapter.py's own import chain
-      # (encode_to_mei.py) needs beyond stdlib + the staff-finding package.
+      # Pillow: staffline_adapter.py's own import chain (encode_to_mei.py)
+      # needs it beyond stdlib + the staff-finding package. PyYAML: pulled
+      # in transitively by test_bbox_pipeline_integrity.py's medieval_models
+      # import (medieval_models.py -> config.py, which loads config.yaml).
       - name: Install dependencies
-        run: pip install -e "./staff-finding[diagnostics]" pytest Pillow
+        run: pip install -e "./staff-finding[diagnostics]" pytest Pillow PyYAML
 
       - name: staff-finding -- scripts/test_group_staves.py
         working-directory: staff-finding
@@ -71,8 +73,8 @@ jobs:
         working-directory: staff-finding
         run: python -m pytest scripts/script_tests/test_run_pageOG.py
 
-      - name: landing-page -- staffline_adapter tests
-        run: python -m pytest landing-page/scripts/tests/test_staffline_adapter.py
+      - name: landing-page -- DB-independent scripts tests
+        run: python -m pytest landing-page/scripts/tests/
 
   # Type-checks the landing-page frontend on every branch push. Before this
   # job existed, nothing compiled TypeScript until `npm run build` ran inside
