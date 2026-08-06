@@ -17,7 +17,21 @@ type ViewState =
     | { status: "error"; message: string }
     | { status: "ready"; imageUrl: string; boxes: BBox[]; rawYolo: string };
 
-const PALETTE = ["#4AADAA", "#FFA500", "#E87BF7", "#F76B6B", "#6BF7A5", "#F7E16B"];
+// cls indices follow the merged 0=text/1=music/2=staves slot convention
+// documented in medieval_models.py / yolo_inference.py's CATEGORY_TO_SLOT —
+// true for both the medieval preset and any custom model with a class map.
+// Text gets the same bright pink as TextAlignmentViewerModal's syllable
+// boxes; stave boxes aren't drawn here at all (filtered out in drawOverlay
+// below) since they're redundant with the dedicated staffline viewer.
+const TEXT_COLOR = "#f03ad7";
+const MUSIC_COLOR = "#FFA500";
+const OTHER_COLORS = ["#F76B6B", "#6BF7A5", "#F7E16B"];
+
+function colorForClass(cls: number): string {
+    if (cls === 0) return TEXT_COLOR;
+    if (cls === 1) return MUSIC_COLOR;
+    return OTHER_COLORS[cls % OTHER_COLORS.length];
+}
 
 function parseYolo(txt: string): BBox[] {
     return txt
@@ -93,18 +107,20 @@ export default function AnnotationViewerModal({ set, projectId, onClose }: Props
         const ctx = canvas.getContext("2d")!;
         ctx.scale(MAX_SCALE, MAX_SCALE);
         ctx.clearRect(0, 0, dw, dh);
-        viewState.boxes.forEach((b) => {
-            const color = PALETTE[b.cls % PALETTE.length];
-            const x = (b.cx - b.bw / 2) * dw;
-            const y = (b.cy - b.bh / 2) * dh;
-            const w = b.bw * dw;
-            const h = b.bh * dh;
-            ctx.fillStyle = color + "20";
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 0.75;
-            ctx.fillRect(x, y, w, h);
-            ctx.strokeRect(x, y, w, h);
-        });
+        viewState.boxes
+            .filter((b) => b.cls !== 2) // staves — not shown in this viewer
+            .forEach((b) => {
+                const color = colorForClass(b.cls);
+                const x = (b.cx - b.bw / 2) * dw;
+                const y = (b.cy - b.bh / 2) * dh;
+                const w = b.bw * dw;
+                const h = b.bh * dh;
+                ctx.fillStyle = color + "20";
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 0.75;
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+            });
     }, [viewState]);
 
     useEffect(() => {

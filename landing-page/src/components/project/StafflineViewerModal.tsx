@@ -7,7 +7,7 @@ import RhythmChart from "./RhythmChart";
 type ViewState =
     | { status: "loading" }
     | { status: "error"; message: string }
-    | { status: "ready"; imageUrl: string; records: JsomrLineRecord[] };
+    | { status: "ready"; imageUrl: string; records: JsomrLineRecord[]; prettyJson: string };
 
 // Matches AnnotationViewerModal's class-color palette, extended here to
 // color-code by stave_id instead of YOLO class -- keeps the "index into a
@@ -26,9 +26,36 @@ interface Props {
 export default function StafflineViewerModal({ detection, projectId, onClose, label }: Props) {
     const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
     const [notesOpen, setNotesOpen] = useState(false);
-    const [tab, setTab] = useState<"overlay" | "rhythm">("overlay");
+    const [tab, setTab] = useState<"overlay" | "rhythm" | "raw">("overlay");
+    const [copied, setCopied] = useState(false);
+    const [copyFailed, setCopyFailed] = useState(false);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
+
+    const handleCopyText = (text: string) => {
+        navigator.clipboard
+            .writeText(text)
+            .then(() => setCopied(true))
+            .catch(() => setCopyFailed(true))
+            .finally(() => {
+                setTimeout(() => {
+                    setCopied(false);
+                    setCopyFailed(false);
+                }, 1500);
+            });
+    };
+
+    const handleDownload = (text: string, extension: string, mimeType = "text/plain;charset=utf-8") => {
+        const blob = new Blob([text], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(label ?? detection.imageName).replace(/\.[^.]+$/, "")}.${extension}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
 
     const rhythmSummary = useMemo(
         () => (viewState.status === "ready" ? computeRhythmGaps(viewState.records) : null),
@@ -119,11 +146,15 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                     URL.revokeObjectURL(imageUrl);
                     return;
                 }
+                // jsomrJson is a native array (JSONB column) -- no JSON.parse needed.
+                const records = (data as { jsomrJson: JsomrLineRecord[] }).jsomrJson ?? [];
                 setViewState({
                     status: "ready",
                     imageUrl,
-                    // jsomrJson is a native array (JSONB column) -- no JSON.parse needed.
-                    records: (data as { jsomrJson: JsomrLineRecord[] }).jsomrJson ?? [],
+                    records,
+                    // Pretty-printed purely for the "raw" tab's readability, same
+                    // as TextAlignmentViewerModal's prettyJson.
+                    prettyJson: JSON.stringify(records, null, 2),
                 });
             })
             .catch(() => {
@@ -167,21 +198,23 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                             {anomalousStaveIds.size} flagged for review
                         </span>
                     )}
-                    {viewState.status === "ready" && rhythmSummary && (
+                    {viewState.status === "ready" && (
                         <div className="flex bg-[#1D3335]/10 rounded-full p-0.5 text-xs font-mono">
-                            {(["overlay", "rhythm"] as const).map((t) => (
-                                <button
-                                    key={t}
-                                    onClick={() => setTab(t)}
-                                    className={`px-3 py-1 rounded-full cursor-pointer transition-colors ${
-                                        tab === t
-                                            ? "bg-[#1D3335] text-white"
-                                            : "text-[#1D3335]/60 hover:text-[#1D3335]"
-                                    }`}
-                                >
-                                    {t}
-                                </button>
-                            ))}
+                            {(rhythmSummary ? (["overlay", "rhythm", "raw"] as const) : (["overlay", "raw"] as const)).map(
+                                (t) => (
+                                    <button
+                                        key={t}
+                                        onClick={() => setTab(t)}
+                                        className={`px-3 py-1 rounded-full cursor-pointer transition-colors ${
+                                            tab === t
+                                                ? "bg-[#1D3335] text-white"
+                                                : "text-[#1D3335]/60 hover:text-[#1D3335]"
+                                        }`}
+                                    >
+                                        {t}
+                                    </button>
+                                ),
+                            )}
                         </div>
                     )}
                     <button
@@ -203,6 +236,26 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                     ) : tab === "rhythm" && rhythmSummary ? (
                         <div className="p-4">
                             <RhythmChart summary={rhythmSummary} />
+                        </div>
+                    ) : tab === "raw" ? (
+                        <div className="p-4">
+                            <div className="flex items-center justify-end gap-3 mb-2">
+                                <button
+                                    onClick={() => handleDownload(viewState.prettyJson, "json", "application/json")}
+                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                                >
+                                    download
+                                </button>
+                                <button
+                                    onClick={() => handleCopyText(viewState.prettyJson)}
+                                    className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                                >
+                                    {copyFailed ? "copy failed" : copied ? "copied" : "copy"}
+                                </button>
+                            </div>
+                            <pre className="bg-[#1D3335] text-white/80 text-xs font-mono rounded-xl p-4 overflow-auto h-[min(65vh,650px)] whitespace-pre">
+                                {viewState.prettyJson}
+                            </pre>
                         </div>
                     ) : (
                         <div className="p-4 flex flex-col items-center">

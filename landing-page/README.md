@@ -53,10 +53,8 @@ tables and how the job queue works end to end).
   redis-cli ping   # should print PONG
   ```
 
-- A **Postgres database** — this project is developed against
-  [Neon](https://neon.tech), but the backend only talks to it via a plain
-  `psycopg2` DSN, so a local Postgres install works exactly the same way.
-  If you don't already have one running:
+- A **local Postgres database** — the backend just needs a plain `psycopg2`
+  DSN, so any Postgres install works. If you don't already have one running:
 
   ```bash
   brew install postgresql@16
@@ -104,12 +102,12 @@ pip install -r requirements.txt
 Create `landing-page/scripts/.env`:
 
 ```
-DATABASE_URL=postgresql://user:password@host/dbname
+DATABASE_URL=postgresql://localhost/mothra_dev
 MOTHRA_SECRET=<any long random string>
 ```
 
 - `DATABASE_URL` is **required** — the backend fails to start without it.
-  Points at any Postgres (Neon or local, per above) — tables are created
+  Points at your local Postgres (per above) — tables are created
   automatically on first run (see `auth_api.py:init_db`).
 - `MOTHRA_SECRET` signs JWTs. If omitted, a random one is generated each
   process start, which invalidates every existing login token on restart —
@@ -303,7 +301,7 @@ git submodule update --init --recursive   # if not already done
 git lfs pull                              # medieval model .pt files are LFS pointers otherwise
 
 # create a root-level .env (gitignored, separate from landing-page/scripts/.env):
-#   DATABASE_URL=postgresql://...
+#   DATABASE_URL=postgresql://host.docker.internal/mothra_dev
 #   MOTHRA_SECRET=...
 
 docker compose build
@@ -314,8 +312,10 @@ Open **http://localhost:8001** (the backend container serves the built
 frontend directly — there's no separate `:5173` container).
 `IC_API_URL`/`TEXT_API_URL` are wired to the compose
 service names (`http://ic:8000`, `http://text-service:8002`) automatically;
-`DATABASE_URL` still points at your Postgres (Neon or otherwise) — Postgres
-itself isn't a compose service.
+Postgres itself isn't a compose service, so `DATABASE_URL` still points at
+your local Postgres install (per Prerequisites above) — from inside a
+container that means `host.docker.internal`, not `localhost`, or the
+containers won't be able to reach a Postgres running on the host machine.
 
 The `text-service` image is large (pulls in `torch`/`kraken`/`htrflow`) and
 the first `docker compose build` will take a while.

@@ -15,7 +15,8 @@ type ViewState =
     | { status: "error"; message: string }
     | { status: "ready"; imageUrl: string; boxes: SylBox[]; logText: string; prettyJson: string };
 
-const BOX_COLOR = "#4AADAA";
+
+const BOX_COLOR = "#e809ca";
 
 interface Props {
     alignment: TextAlignment;
@@ -150,22 +151,34 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
         const ctx = canvas.getContext("2d")!;
         ctx.scale(MAX_SCALE, MAX_SCALE);
         ctx.clearRect(0, 0, dw, dh);
-        // Divided by the *current* zoom (not MAX_SCALE) so the label stays a
-        // roughly constant, legible on-screen size instead of growing right
-        // along with the (now-crisp) boxes and overlapping its neighbors —
-        // box outlines are still meant to visibly grow when zoomed in, only
-        // the text needs to stay put.
-        const fontPx = 11 / zoom.scale;
-        const labelYFloor = 10 / zoom.scale;
+        // Divided by sqrt(current zoom), not the current zoom outright, so the
+        // label grows only partway toward matching the (now-crisp) boxes —
+        // fully compensating the CSS transform (dividing by zoom.scale)
+        // pinned the label at a constant ~13px on screen at every zoom
+        // level, which read as too small once zoomed in a long way. This
+        // still damps growth relative to the boxes themselves (so labels
+        // don't balloon and overlap their neighbors) while letting them
+        // actually get more legible as you zoom in.
+        const fontPx = 10 / Math.sqrt(zoom.scale);
+        const labelYFloor = fontPx * 1.1;
         viewState.boxes.forEach((b, i) => {
             const { x, y, w, h } = boxScreenRect(b, scaleX, scaleY);
             const hovered = i === hoveredBoxIndex;
-            ctx.fillStyle = BOX_COLOR + (hovered ? "45" : "20");
-            ctx.strokeStyle = hovered ? "#1D3335" : BOX_COLOR;
+            // Non-hovered border/label get alpha (not the fully opaque
+            // BOX_COLOR) — at full opacity, a neon-bright stroke drawn right
+            // through every letter's ascenders/descenders (boxes butt up
+            // against each other across the whole line) reads as glare and
+            // fights the manuscript's own ink for attention. Translucent —
+            // like an actual highlighter pen — keeps the mark visible
+            // without drowning out the text it's marking. Hover stays
+            // solid/dark since it's a deliberate, momentary emphasis, not
+            // the resting state the eye has to read through.
+            ctx.fillStyle = BOX_COLOR + (hovered ? "45" : "14");
+            ctx.strokeStyle = hovered ? "#910c80" : BOX_COLOR + "80";
             ctx.lineWidth = hovered ? 1.25 : 0.75;
             ctx.fillRect(x, y, w, h);
             ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = hovered ? "#1D3335" : BOX_COLOR;
+            ctx.fillStyle = hovered ? "#910c80" : BOX_COLOR + "cc";
             ctx.font = `${hovered ? "bold " : ""}${fontPx}px monospace`;
             ctx.fillText(b.syl, x, Math.max(labelYFloor, y - 2));
         });
@@ -371,9 +384,12 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                     <button
                                         onClick={() => setTextPanelOpen((o) => !o)}
                                         title={textPanelOpen ? "Hide plain text" : "Show plain text"}
-                                        className="shrink-0 w-6 flex items-center justify-center bg-[#1D3335]/10 hover:bg-[#1D3335]/20 rounded-l-lg text-[#1D3335] text-xs cursor-pointer select-none"
+                                        className="shrink-0 w-6 flex flex-col items-center justify-center gap-2 bg-[#1D3335]/10 hover:bg-[#1D3335]/20 rounded-l-lg text-[#1D3335] cursor-pointer select-none"
                                     >
-                                        {textPanelOpen ? "›" : "‹"}
+                                        <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] font-mono tracking-wide">
+                                            view text
+                                        </span>
+                                        <span className="text-xs">{textPanelOpen ? "›" : "‹"}</span>
                                     </button>
                                     {textPanelOpen && (() => {
                                         const lines =
@@ -408,7 +424,7 @@ export default function TextAlignmentViewerModal({ alignment, projectId, onClose
                                                                         <span
                                                                             className={
                                                                                 tok.index === hoveredBoxIndex
-                                                                                    ? "bg-[#4AADAA]/50 rounded px-0.5"
+                                                                                    ? "bg-[#06B6D4]/50 rounded px-0.5"
                                                                                     : ""
                                                                             }
                                                                         >
