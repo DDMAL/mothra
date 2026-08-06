@@ -104,7 +104,7 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
 
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
-                include_name_fields=False):
+                include_name_fields=False, allow_synthetic_lines=False):
     """Runs the checking/validating/processing pipeline for one XML+image
     pair, publishing the same event sequence the old synchronous generator
     yielded. Returns (session_id, result_payload)."""
@@ -149,8 +149,19 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             label = "staffline detection" if stave_source == "staffline_detection" else "YOLO annotations"
             ev({"type": "log", "message": f" {len(staves)} stave(s) from {label}"})
         else:
-            staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
-            ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
+            staves, stave_source = estimate_staves_from_glyphs(
+                glyphs, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+            )
+            if stave_source == "placeholder_no_glyphs":
+                ev({"type": "log", "message":
+                    " [warn] no glyphs at all -- stave geometry is a full-page placeholder, not a real detection"})
+            elif stave_source == "glyph_estimate_unresolved_lines":
+                ev({"type": "log", "message":
+                    f" [warn] estimated {len(staves)} stave(s) from glyph positions, but too few real staff-line"
+                    " glyphs to resolve pitch -- notes on these staves default to unresolved pitch (a3)."
+                    " Pass allow_synthetic_lines to fabricate plausible-looking lines instead."})
+            else:
+                ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
         n_input_staves = len(staves)
         glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, page_w, page_h)
         if len(staves) > n_input_staves:
@@ -187,7 +198,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
         session_put(session_id, mei_bytes_out, stem, manifest)
 
-        result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest}
+        result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest, "stave_source": stave_source}
         if include_name_fields:
             result["image_name"] = image_filename
             result["stem"] = stem
@@ -199,7 +210,8 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
 
 @celery_app.task(name="encode.upload")
 def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
-                           image_filename, project_id, image_name, clef_shape, clef_line):
+                           image_filename, project_id, image_name, clef_shape, clef_line,
+                           allow_synthetic_lines=False):
     def publish(obj):
         publish_event(job_id, obj)
 
@@ -207,7 +219,8 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     image_bytes = fetch_upload(image_upload_id) if image_upload_id else None
     try:
         _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
-                    project_id, image_name, clef_shape, clef_line, include_name_fields=False)
+                    project_id, image_name, clef_shape, clef_line, include_name_fields=False,
+                    allow_synthetic_lines=allow_synthetic_lines)
         publish({"type": "done"})
         drop_upload(xml_upload_id)
         if image_upload_id:
@@ -217,10 +230,11 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
         # leave the upload rows in place so a retry can still fetch them
 
 @celery_app.task(name="encode.batch")
-def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
+def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
+                           allow_synthetic_lines=False):
     def publish(obj):
         publish_event(job_id, obj)
-    
+
     succeeded, failed = [], []
     for i, item in enumerate(items):
         check_cancelled(job_id)
@@ -232,7 +246,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             session_id, _ = _encode_one(
                 publish, xml_bytes, item["xml_filename"], image_bytes, item["image_filename"],
                 project_id, item["image_name"], clef_shape, clef_line,
-                item=i, include_name_fields=True,
+                item=i, include_name_fields=True, allow_synthetic_lines=allow_synthetic_lines,
             )
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})

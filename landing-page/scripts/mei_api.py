@@ -21,6 +21,7 @@ class AddMeiBody(BaseModel):
     xmlContent: str
     imageName: Optional[str] = None
     logs: Optional[list[str]] = None
+    staveSource: Optional[str] = None
 
 @router.post("/projects/{project_id}/mei")
 def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
@@ -28,8 +29,8 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
         require_project_owner(cur, project_id, user["id"])
         mei_id = _uuid.uuid4().hex
         cur.execute(
-            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name) VALUES (%s,%s,%s,%s,%s)",
-            (mei_id, project_id, body.name, body.xmlContent, body.imageName))
+            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name, stave_source) VALUES (%s,%s,%s,%s,%s,%s)",
+            (mei_id, project_id, body.name, body.xmlContent, body.imageName, body.staveSource))
         if body.logs:
             content = "\n".join(body.logs)
             cur.execute(

@@ -78,7 +78,13 @@ interface AppRouterProps {
   handleLoginSuccess: (user: CurrentUser, token: string) => void;
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
-  handleEncodeResult: (ev: { session_id: string; mei_base64: string; manifest: Record<string, unknown> | null }) => void;
+  handleEncodeResult: (ev: {
+    session_id: string;
+    mei_base64: string;
+    manifest: Record<string, unknown> | null;
+    stave_source?: string | null;
+    logs?: string[];
+  }) => void;
   pendingBatchPairs: { xmlFile: File; imageFile: File }[];
   setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
   handleEncodeBatchResult: (ev: {
@@ -88,6 +94,8 @@ interface AppRouterProps {
     manifest: Record<string, unknown> | null;
     image_name?: string;
     stem?: string;
+    stave_source?: string | null;
+    logs?: string[];
   }) => void;
 }
 

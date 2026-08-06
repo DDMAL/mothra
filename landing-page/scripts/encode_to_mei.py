@@ -293,12 +293,23 @@ def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveB
     return _staves_from_staff_lines(lines, img_w, img_h)
 
 def _cluster_glyphs_into_staves(
-        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto"
+        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto",
+        allow_synthetic_lines: bool = False,
 ) -> list[tuple[StaveBbox, list[Glyph]]]:
     """Cluster glyphs into stave-sized row groups by Y-center gap, pairing each
     synthesized StaveBbox with the exact glyphs that produced it. Shared by
     estimate_staves_from_glyphs's no-stave-data fallback and by
-    assign_glyphs_to_staves's missed-stave recovery (see there)."""
+    assign_glyphs_to_staves's missed-stave recovery (see there).
+
+    The resulting StaveBbox's bounding box is always real (derived from the
+    glyph cluster itself), but its internal `line_ys` -- used only for pitch
+    computation, via _nc_pitch -- has no real measured staff-line data behind
+    it in this fallback. allow_synthetic_lines controls whether to fabricate
+    plausible-looking, perfectly evenly-spaced line_ys anyway (the old,
+    always-on behavior) or leave line_ys empty so _nc_pitch's own <2-entry
+    guard degrades to an explicit unresolved default ("a", "3") instead of a
+    confident-looking but invented pitch. Default False -- see
+    estimate_staves_from_glyphs's own docstring for why."""
     if not glyphs:
         return []
     neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
@@ -330,28 +341,42 @@ def _cluster_glyphs_into_staves(
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
-            line_ys=[est_uly + h * j / 3 for j in range(4)],
+            line_ys=[est_uly + h * j / 3 for j in range(4)] if allow_synthetic_lines else [],
         )
         groups.append((stave, row))
     return groups
 
 
 def estimate_staves_from_glyphs(
-    glyphs: list[Glyph], page_w: int, page_h: int
-) -> list[StaveBbox]:
-    """Estimate stave bounding boxes from GameraXML glyphs.
+    glyphs: list[Glyph], page_w: int, page_h: int, allow_synthetic_lines: bool = False,
+) -> tuple[list[StaveBbox], str]:
+    """Estimate stave bounding boxes from GameraXML glyphs. This is tier 3 of
+    tasks_encode.py's 3-tier stave-source fallback (staffline_detection ->
+    yolo_annotation -> this) -- the caller uses the returned tag as that
+    tier's `stave_source` value.
 
     Primary strategy: cluster the detected staff lines (wide, flat glyphs with
     aspect ratio ≥ 8 spanning >20% of page width).  These are highly reliable
     stave anchors and are unaffected by text characters that fill inter-stave
     gaps and cause the neume-Y-clustering approach to collapse all staves into
-    one.
+    one. Tagged "glyph_estimate" -- real, page-specific geometry.
 
     Fallback: if too few staff lines are available, cluster neume-like glyphs
-    by Y-center gap (original approach with tighter outlier filtering).
+    by Y-center gap (original approach with tighter outlier filtering). The
+    stave bounding box here is still real (from the glyph cluster), but its
+    internal line positions are not measured -- see _cluster_glyphs_into_staves's
+    own docstring for allow_synthetic_lines. Tagged "glyph_estimate_synthetic_lines"
+    when allow_synthetic_lines fabricated plausible-looking line_ys, or
+    "glyph_estimate_unresolved_lines" (default) when it didn't -- either way,
+    distinct from "glyph_estimate" so this weaker case is never conflated with
+    strategy 1's real per-page staff-line geometry.
+
+    Zero-glyph case: no real geometry exists at all. Returns one hardcoded
+    full-page StaveBbox tagged "placeholder_no_glyphs" -- callers should treat
+    this as a warning-worthy result, not silent success.
     """
     if not glyphs:
-        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)]
+        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)], "placeholder_no_glyphs"
 
     # ── Strategy 1: use staff line glyphs ──────────────────────────────────
     # Staff lines span most of the page width and have ncols >> nrows.
@@ -364,10 +389,16 @@ def estimate_staves_from_glyphs(
     if len(staff_lines) >= 4:
         staves = _staves_from_staff_lines(staff_lines, page_w, page_h)
         if staves:
-            return staves
+            return staves, "glyph_estimate"
 
     # ── Strategy 2: neume Y-gap clustering (fallback) ──────────────────────
-    return [stave for stave, _ in _cluster_glyphs_into_staves(glyphs, page_w, page_h)]
+    staves = [
+        stave for stave, _ in _cluster_glyphs_into_staves(
+            glyphs, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+        )
+    ]
+    detail = "glyph_estimate_synthetic_lines" if allow_synthetic_lines else "glyph_estimate_unresolved_lines"
+    return staves, detail
 
 
 def _staves_from_staff_lines(
