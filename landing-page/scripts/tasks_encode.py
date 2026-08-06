@@ -174,7 +174,9 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             else:
                 ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
         n_input_staves = len(staves)
-        glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, page_w, page_h)
+        glyphs_by_stave, staves = assign_glyphs_to_staves(
+            glyphs, staves, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+        )
         if len(staves) > n_input_staves:
             ev({"type": "log", "message":
                 f" recovered {len(staves) - n_input_staves} stave(s) the detector missed"})

@@ -338,7 +338,10 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                     </button>
                 </div>
                 {interpolateError && (
-                    <div className="px-6 py-2 bg-[#FF3B30]/10 text-[#FF3B30] text-xs font-mono border-b border-[#1D3335]/10">
+                    <div
+                        role="alert"
+                        className="px-6 py-2 bg-[#FF3B30]/10 text-[#FF3B30] text-xs font-mono border-b border-[#1D3335]/10"
+                    >
                         {interpolateError}
                     </div>
                 )}

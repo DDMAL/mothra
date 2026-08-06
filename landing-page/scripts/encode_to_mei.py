@@ -164,7 +164,8 @@ def image_dimensions(header: bytes) -> Optional[tuple]:
     return None
 
 def assign_glyphs_to_staves(
-        glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int
+        glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int,
+        allow_synthetic_lines: bool = False,
 ) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
     """Assign each glyph to a stave.
 
@@ -179,6 +180,13 @@ def assign_glyphs_to_staves(
     detected stave is assigned to it as before; a row that overlaps nothing
     is a system the detector missed, and gets a synthesized stave of its own.
 
+    allow_synthetic_lines is forwarded to that recovery clustering
+    (_cluster_glyphs_into_staves) so a recovered stave's line_ys follows the
+    same opt-in-fabrication rule as tier-3's own estimate_staves_from_glyphs
+    fallback -- without this, a page could end up with tier-3 staves carrying
+    synthetic pitch geometry while recovered staves silently didn't, even
+    though the caller asked for synthetic lines everywhere.
+
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
     <sb>/<clef> from the RETURNED staves list, not the one passed in.
@@ -189,7 +197,9 @@ def assign_glyphs_to_staves(
         return result, staves
 
     result = {i: [] for i in range(len(staves))}
-    row_groups = _cluster_glyphs_into_staves(glyphs, page_w, page_h, id_prefix="row")
+    row_groups = _cluster_glyphs_into_staves(
+        glyphs, page_w, page_h, id_prefix="row", allow_synthetic_lines=allow_synthetic_lines,
+    )
 
     for row_stave, members in row_groups:
         best_idx, best_overlap = None, 0
@@ -970,8 +980,17 @@ def trace_stave_zone_parity(staves: list[StaveBbox], mei_bytes: bytes) -> list[s
         if zone is None:
             mismatches.append(f"stave {stave.id}: no matching zone written")
             continue
-        written = (int(zone.get("ulx")), int(zone.get("uly")), int(zone.get("lrx")), int(zone.get("lry")))
-        expected = (stave.ulx, stave.uly, stave.lrx, stave.lry)
+        # float(), not int(): build_mei() writes str(stave.ulx) etc. verbatim,
+        # and StaveBbox's own type hints (int) aren't enforced at runtime --
+        # a fractional coordinate reaching here would otherwise raise
+        # ValueError and abort the whole encode job over what's meant to be a
+        # tracing-only check.
+        try:
+            written = tuple(float(zone.get(k)) for k in ("ulx", "uly", "lrx", "lry"))
+        except (TypeError, ValueError):
+            mismatches.append(f"stave {stave.id}: zone has unparsable coordinates")
+            continue
+        expected = tuple(float(v) for v in (stave.ulx, stave.uly, stave.lrx, stave.lry))
         if written != expected:
             mismatches.append(f"stave {stave.id}: expected {expected}, zone has {written}")
 

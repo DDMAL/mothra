@@ -328,18 +328,28 @@ def run_staffline_detection(
             "package_version": _package_version(),
         }
 
+        new_id = _uuid.uuid4().hex
         cur.execute(
             "INSERT INTO staffline_detections"
             " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
             "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
             " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
             (
-                _uuid.uuid4().hex, project_id, image_id, image_name, annotation_id,
+                new_id, project_id, image_id, image_name, annotation_id,
                 json.dumps(records), scale_unit, len(stave_ids),
                 grouping_result.mode_lines_per_stave, json.dumps(settings),
             ),
         )
         con.commit()
+
+        # Callers that need to look this row back up right after (e.g.
+        # inference_api.py's interpolate-confirm route) should key off this
+        # id directly, not re-query "the latest row for this image" --
+        # created_at uses DEFAULT NOW() (transaction-start time, so rows
+        # inserted in the same transaction can share an identical value) and
+        # id is a random uuid4, so neither is a reliable insertion-order
+        # tiebreak on its own.
+        yield {"type": "detection_id", "id": new_id}
 
         message = (
             f"{image_name}: staffline detection found {len(records)} line(s) across "

@@ -168,7 +168,7 @@ def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, 
 
 
 @router.post("/projects/{project_id}/stafflines/{detection_id}/interpolate-preview")
-async def preview_staffline_interpolation(
+def preview_staffline_interpolation(
     project_id: int,
     detection_id: str,
     user=Depends(get_current_user),
@@ -180,7 +180,13 @@ async def preview_staffline_interpolation(
     it via interpolate-confirm below. See staffline_stage.preview_interpolation's
     own docstring for why this is opt-in review-first rather than always-on:
     staff-finding/dox/STATUS.md flags interpolate_missing as "not yet
-    validated across the corpus"."""
+    validated across the corpus".
+
+    Plain `def`, not `async def`: this does blocking, CPU-bound work
+    (image decode + component filtering/centerline fitting) directly, so
+    FastAPI needs to run it in its threadpool rather than on the event
+    loop, where it would stall every other concurrent request for its
+    duration."""
     with db_cursor() as (con, cur):
         _image_id, image_name, _ann_id, image_arr, yolo_txt = _load_image_and_yolo_for_detection(
             cur, project_id, detection_id, user["id"],
@@ -192,7 +198,7 @@ async def preview_staffline_interpolation(
 
 
 @router.post("/projects/{project_id}/stafflines/{detection_id}/interpolate-confirm")
-async def confirm_staffline_interpolation(
+def confirm_staffline_interpolation(
     project_id: int,
     detection_id: str,
     user=Depends(get_current_user),
@@ -214,12 +220,18 @@ async def confirm_staffline_interpolation(
     existing check_cancelled(job_id) calls have something to look up --
     job_store.get_job_status() returns None for an unknown id, which
     check_cancelled treats as "not cancelled", so this never actually
-    behaves like a trackable/cancellable job (there isn't one)."""
+    behaves like a trackable/cancellable job (there isn't one).
+
+    Plain `def`, not `async def` -- same reason as interpolate-preview
+    above, and this one additionally holds a pooled DB connection open for
+    the whole detection run, so it especially shouldn't sit on the event
+    loop."""
     with db_cursor() as (con, cur):
         image_id, image_name, annotation_id, image_arr, yolo_txt = _load_image_and_yolo_for_detection(
             cur, project_id, detection_id, user["id"],
         )
         throwaway_job_id = _uuid.uuid4().hex
+        new_detection_id = None
         error_message = None
         for ev in staffline_stage.run_staffline_detection(
             throwaway_job_id, cur, con, project_id, image_id, image_name, annotation_id,
@@ -227,14 +239,22 @@ async def confirm_staffline_interpolation(
         ):
             if ev.get("type") == "error":
                 error_message = ev.get("message", "staffline detection failed")
+            elif ev.get("type") == "detection_id":
+                new_detection_id = ev.get("id")
         if error_message:
             raise HTTPException(status_code=500, detail=error_message)
+        if not new_detection_id:
+            raise HTTPException(status_code=500, detail="interpolation did not produce a new detection")
 
+        # Look up by the id run_staffline_detection itself just generated and
+        # inserted, not "the latest row for this image" -- created_at uses
+        # DEFAULT NOW() (transaction-start time, so same-transaction inserts
+        # can share an identical value) and id is a random uuid4, so neither
+        # is a reliable insertion-order tiebreak on its own.
         cur.execute(
             "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status"
-            " FROM staffline_detections WHERE project_id=%s AND image_id=%s"
-            " ORDER BY created_at DESC, id DESC LIMIT 1",
-            (project_id, image_id),
+            " FROM staffline_detections WHERE id=%s AND project_id=%s",
+            (new_detection_id, project_id),
         )
         row = cur.fetchone()
     if not row:
