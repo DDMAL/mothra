@@ -154,6 +154,9 @@ def run_predict_task(job_id, project_id, body):
             # a staffline_detections row. Ordered before the has_text_alignment
             # check below so its continue can never skip this block.
             if has_class(yolo_txt, STAFFLINE_CLASS_ID):
+                publish({"type": "log", "message":
+                    f"[trace] {image_name}: stave-class boxes came from model"
+                    f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
                 ):

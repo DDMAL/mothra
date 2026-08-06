@@ -216,6 +216,9 @@ def run_staffline_detection(
     if not detections:
         return
 
+    yield {"type": "log", "message":
+           f"[trace] {image_name}: {len(detections)} raw stave-class box(es) parsed from YOLO annotation"}
+
     h, w = image_arr.shape[:2]
     scale_unit = _compute_page_scale_unit(detections, w, h)
 
@@ -234,6 +237,10 @@ def run_staffline_detection(
             fit_result.y_page_offset = float(actual_box[1])
             fit_results.append(fit_result)
             boxes.append(actual_box)
+
+        yield {"type": "log", "message":
+               f"[trace] {image_name}: {len(fit_results)}/{len(detections)} box(es) survived crop+fit"
+               f" (non-degenerate)"}
 
         if not fit_results:
             yield {

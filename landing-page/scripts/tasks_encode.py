@@ -15,7 +15,7 @@ from auth_api import get_db_conn, release_db_conn
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
-    image_dimensions, scale_facsimile,
+    image_dimensions, scale_facsimile, trace_stave_zone_parity,
 )
 import staffline_adapter
 
@@ -38,7 +38,7 @@ def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) 
     finally:
         release_db_conn(con)
 
-def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h):
+def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h, ev=None):
     """Looks up saved text-alignment + stave annotations for one image.
     Falls back to None/[]/None on any lookup failure or missing
     project_id/image_name, mirroring the try/except-pass behavior of the
@@ -50,7 +50,14 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     staffline_detections data (tier 1, when a project has it) wins over the
     coarser yolo_txt-geometry heuristic in parse_yolo_stave_hints (tier 2,
     today's only source, still the fallback for projects/images that predate
-    this feature or whose staffline detection failed/was skipped)."""
+    this feature or whose staffline detection failed/was skipped).
+
+    ev, if given, is _encode_one's own event-publishing closure -- used here
+    only to emit [trace] lines confirming staves_from_jsomr()'s input/output
+    record counts (and whether any stave fell back to its centerline-derived
+    bbox instead of a real detected one), so a silent drop between the
+    stored JSOMR and the StaveBbox list handed to build_mei() is directly
+    visible in the job log, not just inferred from code review."""
     text_alignment = None
     yolo_stave_hints = []
     stave_source = None
@@ -81,6 +88,10 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                     yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
                     if yolo_stave_hints:
                         stave_source = "staffline_detection"
+                    if ev:
+                        ev({"type": "log", "message":
+                            f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
+                            f" -> {len(yolo_stave_hints)} stave(s) out"})
             except Exception:
                 pass
             if not yolo_stave_hints:
@@ -141,7 +152,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h)
+        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h, ev=ev)
         if text_alignment:
             ev({"type": "log", "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
         if yolo_stave_hints:
@@ -180,6 +191,8 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             clef_line=clef_line or 3,
             text_alignment=text_alignment,
         )
+        for msg in trace_stave_zone_parity(staves, mei_bytes_out):
+            ev({"type": "log", "message": msg})
         original_bytes = _fetch_original_bytes(project_id, image_name)
         if original_bytes and page_w:
             try:

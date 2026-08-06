@@ -931,6 +931,55 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
 
     return warnings
 
+
+def trace_stave_zone_parity(staves: list[StaveBbox], mei_bytes: bytes) -> list[str]:
+    """Parse a just-built MEI's actual <zone type="staff"> elements back out
+    and confirm they match the StaveBbox list build_mei() was handed for it
+    -- same count, same coordinates. build_mei() writes each zone's
+    ulx/uly/lrx/lry straight from the corresponding StaveBbox (zone id
+    convention: `sz-{stave.id}`, see build_mei() itself), so any mismatch
+    here would mean something between stave resolution and encoding silently
+    altered the geometry Neon ends up displaying -- not something that
+    should ever legitimately happen, hence a "[warn]"-prefixed message
+    rather than a quiet one when it does.
+
+    Returns a list of "[trace] ..." message strings for the caller to
+    publish however it likes (a job-log event, a print, a test assertion --
+    kept DB/Celery-independent on purpose so it's testable like the rest of
+    this module, unlike tasks_encode.py which connects to Postgres at
+    import time)."""
+    try:
+        root = ET.fromstring(mei_bytes)
+        zones = {
+            z.get(XML_ID): z
+            for z in root.iter(_tag("zone"))
+            if z.get("type") == "staff"
+        }
+    except ET.ParseError as e:
+        return [f"[trace] [warn] could not parse MEI back out to verify zones: {e}"]
+
+    if len(zones) != len(staves):
+        return [
+            f"[trace] [warn] stave/zone count mismatch: {len(staves)} StaveBbox(es) handed to"
+            f" build_mei(), {len(zones)} type=\"staff\" zone(s) actually written"
+        ]
+
+    mismatches = []
+    for stave in staves:
+        zone = zones.get(f"sz-{stave.id}")
+        if zone is None:
+            mismatches.append(f"stave {stave.id}: no matching zone written")
+            continue
+        written = (int(zone.get("ulx")), int(zone.get("uly")), int(zone.get("lrx")), int(zone.get("lry")))
+        expected = (stave.ulx, stave.uly, stave.lrx, stave.lry)
+        if written != expected:
+            mismatches.append(f"stave {stave.id}: expected {expected}, zone has {written}")
+
+    if mismatches:
+        return [f"[trace] [warn] {len(mismatches)} stave zone(s) diverged from input: " + "; ".join(mismatches)]
+    return [f"[trace] {len(staves)} stave zone(s) verified identical to build_mei()'s input"]
+
+
 def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
     mei_b64 = base64.b64encode(mei_bytes).decode()
     return {
