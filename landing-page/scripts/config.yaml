@@ -8,6 +8,7 @@ paths:
   neon_manifests_dir: ../public/neon/samples/manifests
   mock_data_dir: mock_data
   medieval_models_dir: assets/models/medieval
+  mei_encoding_dir: assets/mei_encoding
 
 services:
   ic_api_url: http://localhost:8000

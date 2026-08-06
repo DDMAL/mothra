@@ -29,6 +29,8 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 import sys
 
+from neume_mapping import NcTemplate, resolve_neume_mapping
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
     from extract_ms_id import extract_manuscript_id
@@ -442,58 +444,6 @@ def _staves_from_staff_lines(
         ))
     return staves
 
-@dataclass
-class _NcSpec:
-    tilt: str = ""       # "" plain | "n" virga stem | "se" inclinatum diamond
-    quilisma: bool = False
-    y_fraction: float = 0.5
-
-# Ordered nc specs per neume type (one entry = one note component).
-# Ichiro appends variant codes (e.g. "clivis2a") — _nc_specs_for strips them.
-_NEUME_NC_MAP: dict[str, list[_NcSpec]] = {
-    # ── single-note ────────────────────────────────────────────────────────
-    "punctum":              [_NcSpec(y_fraction=0.5)],
-    "virga":                [_NcSpec(tilt="n", y_fraction=0.5)],
-    "quilisma":             [_NcSpec(quilisma=True, y_fraction=0.5)],
-    "inclinatum":           [_NcSpec(tilt="se", y_fraction=0.5)],
-    "oriscus":              [_NcSpec(y_fraction=0.5)],
-    # ── two-note ───────────────────────────────────────────────────────────
-    "podatus":              [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],          # ascending (= pes)
-    "pes":                  [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "clivis":               [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],          # descending
-    "distropha":            [_NcSpec(y_fraction=0.4), _NcSpec(y_fraction=0.6)],
-    "bivirga":              [_NcSpec(tilt="n", y_fraction=0.4), _NcSpec(tilt="n", y_fraction=0.6)],
-    # ── three-note ─────────────────────────────────────────────────────────
-    "torculus":             [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
-    "porrectus":            [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "scandicus":            [_NcSpec(y_fraction=0.83), _NcSpec(y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.17)],
-    "climacus":             [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83)],
-    "tristropha":           [_NcSpec(y_fraction=0.33), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.67)],
-    "trivirga":             [_NcSpec(tilt="n", y_fraction=0.33), _NcSpec(tilt="n", y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.67)],
-    # ── four-note ──────────────────────────────────────────────────────────
-    "torculusresupinus":    [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "porrectusflexus":      [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
-    "scandicusflexus":      [_NcSpec(y_fraction=0.8), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.2), _NcSpec(y_fraction=0.5)],
-    "climacusresupinus":    [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83), _NcSpec(y_fraction=0.5)],
-}
-
-_NEUME_PREFIXES = ("neume--", "neume.", "neume_", "neume/")
-
-def _nc_specs_for(class_name: str) -> list[_NcSpec]:
-    """Map an Ichiro class name to an ordered list of nc specs.
-
-    Handles prefixes ("neume.", "neume--") and variant suffixes ("clivis2a" → "clivis").
-    Falls back to a single plain nc for unknown types.
-    """
-    name = class_name.lower().strip()
-    for prefix in _NEUME_PREFIXES:
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    # Strip trailing variant code: digits + optional letter ("2a", "3b", "1")
-    base = re.sub(r"\d+[a-z]?$", "", name).strip("_.-")
-    return _NEUME_NC_MAP.get(name) or _NEUME_NC_MAP.get(base) or [_NcSpec()]
-
 _PITCH_NOTES = ["c", "d", "e", "f", "g", "a", "b"]
 
 def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tuple[str, str]:
@@ -504,20 +454,52 @@ def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tupl
     note_abs = clef_abs - step
     return _PITCH_NOTES[note_abs % 7], str(note_abs // 7)
 
-def _nc_pitch(nc_cy: float, line_ys: list[float], clef_line: int = 3) -> tuple[str, str]:
-    """Return (pname, oct) for a note at nc_cy given staff line Y positions.
-
-    line_ys must be sorted ascending (smallest Y = top of image = highest pitch).
-    Falls back to ("a", "3") when line data is unavailable.
-    """
+def _step_from_y(y: float, line_ys: list[float], clef_line: int = 3) -> Optional[int]:
+    """Diatonic step (relative to the clef line) for a point at height y,
+    given sorted ascending staff line Y positions. Returns None when there
+    isn't enough line data to place it (len(line_ys) < 2) — callers fall
+    back to a fixed default pitch in that case, same as this file's old
+    per-component behaviour before @intm-chaining replaced the y_fraction
+    heuristic (see neume_mapping.py and mothra#137)."""
     if len(line_ys) < 2:
-        return "a", "3"
-    spacings = [line_ys[i+1] - line_ys[i] for i in range(len(line_ys) - 1)]
+        return None
+    spacings = [line_ys[i + 1] - line_ys[i] for i in range(len(line_ys) - 1)]
     line_spacing = sum(spacings) / len(spacings)
     clef_idx = len(line_ys) - clef_line
     clef_y = line_ys[clef_idx]
-    step = round((nc_cy - clef_y) / (line_spacing / 2))
-    return _pitch_from_step(step)
+    return round((y - clef_y) / (line_spacing / 2))
+
+def _component_pitches(
+    anchor_step: Optional[int],
+    components: list[NcTemplate],
+    clef_note: str = "c",
+    clef_oct: int = 4,
+) -> list[tuple[str, str]]:
+    """(pname, oct) for each component of one neume glyph.
+
+    The FIRST component's pitch comes from anchor_step (the glyph's own
+    position on the stave — see _step_from_y, called with the glyph's bbox
+    center, matching the old default y_fraction=0.5 anchor). Every later
+    component's pitch is the previous one's step minus its own @intm delta:
+    @intm is positive when that note sits a step ABOVE the previous one
+    (higher pitch), while _pitch_from_step's own convention is the
+    opposite — positive step = LOWER pitch (see its docstring) — hence the
+    subtraction. Verified against the CSVs' own ascending/descending
+    neumes: podatus's second <nc intm="1S"/> must end up higher than its
+    first; clivis's second <nc intm="-1S"/> must end up lower.
+
+    Falls back to a fixed ("a", "3") for every component (matching this
+    file's pre-existing fallback) when anchor_step is None.
+    """
+    if anchor_step is None:
+        return [("a", "3")] * len(components)
+    pitches = []
+    step = anchor_step
+    for j, comp in enumerate(components):
+        if j > 0:
+            step -= comp.intm
+        pitches.append(_pitch_from_step(step, clef_note, clef_oct))
+    return pitches
 
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
@@ -533,9 +515,12 @@ def build_mei(
     text_alignment: dict | None = None,
     clef_shape: str = "C",
     clef_line: int = 3,
+    notation_type: str = "square",
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
+    neume_mapping = resolve_neume_mapping(notation_type)
+    missing_classes: set[str] = set()
 
     # meiHead
 
@@ -722,22 +707,34 @@ def build_mei(
                 })
                 stave = staves[stave_idx] if stave_idx < len(staves) else None
                 line_ys = stave.line_ys if stave else []
-                for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
+                entry = neume_mapping.get(glyph.class_name.lower().strip())
+                if entry is not None:
+                    components = entry.components
+                else:
+                    components = [NcTemplate()]
+                    missing_classes.add(glyph.class_name)
+                anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
+                pitches = _component_pitches(anchor_step, components)
+                for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
-                    nc_cy = glyph.uly + spec.y_fraction * glyph.nrows
-                    pname, oct_str = _nc_pitch(nc_cy, line_ys, clef_line)
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
                         "facs": f"#z-{glyph.id}",
                         "pname": pname,
                         "oct": oct_str,
                     }
-                    if spec.tilt:
-                        nc_attrs["tilt"] = spec.tilt
-                    if spec.quilisma:
-                        nc_attrs["quilisma"] = "true"
-                    ET.SubElement(neume, _tag("nc"), nc_attrs)
-    
+                    nc_attrs.update(comp.attrs)
+                    nc_el = ET.SubElement(neume, _tag("nc"), nc_attrs)
+                    if comp.liquescent:
+                        ET.SubElement(nc_el, _tag("liquescent"))
+
+    if missing_classes:
+        print(
+            f" [neume-mapping:{notation_type}] {len(missing_classes)} classification(s) not found in "
+            f"the mapping — encoded as a single plain <nc>: {', '.join(sorted(missing_classes))}",
+            file=sys.stderr,
+        )
+
     _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
     _XML_MODEL_PI = (
         '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
@@ -940,6 +937,8 @@ def main():
                         help="multiply all facsimile zone coordinates by this factor ")
     parser.add_argument("--syllable-gap-mult", type=float, default=SYLLABLE_GAP_MULTIPLIER,
                         metavar="FLOAT", help="gap-to-median-glyph-width ratio for syllable clustering (default: 1.5)",)
+    parser.add_argument("--notation-type", type=str, default="square", choices=["square", "hufnagel"],
+                        help="which bundled neume-to-MEI mapping CSV to use (default: square)")
     args = parser.parse_args()
 
     stem = args.image.stem
@@ -975,7 +974,8 @@ def main():
     assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
-    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, syllable_gap_mult=args.syllable_gap_mult,)
+    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, 
+                          syllable_gap_mult=args.syllable_gap_mult, notation_type=args.notation_type)
     if scale != 1.0:
         mei_bytes = scale_facsimile(mei_bytes, scale)
     for w in validate_mei(mei_bytes):
