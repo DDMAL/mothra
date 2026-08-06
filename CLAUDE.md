@@ -296,9 +296,13 @@ needs no re-plumbing):
 
 ### Deployment (Kubernetes, CI/CD via GitHub Actions)
 
-**Merging to `main` deploys production automatically; pushing `develop` deploys
-staging.** `.github/workflows/build-images.yml` (job name `ci-cd`) runs on every
-push to `main`/`develop`/`k8s-deployment` (also `workflow_dispatch`):
+**Merging to `main` deploys production automatically. Staging is deployed on
+demand from any branch** — Actions → `ci-cd` → Run workflow → pick the branch →
+leave `environment: auto`. Staging is deliberately *not* push-triggered: it's a
+single shared environment behind a ~25-minute three-image build, so having ~20
+active branches auto-deploy into it would only thrash both.
+`.github/workflows/build-images.yml` (job name `ci-cd`) therefore runs on push to
+`main` only, plus `workflow_dispatch` from any ref:
 1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
    and `text-service` (`text-service/Dockerfile`, build context is the repo root
    since it needs the sibling `mothra-text/` submodule) and pushes each to
@@ -322,6 +326,13 @@ push to `main`/`develop`/`k8s-deployment` (also `workflow_dispatch`):
    `backend{suffix}`/`worker{suffix}`/`ic{suffix}`/`text-service{suffix}`. redis,
    postgres, secrets and the PV/PVC are excluded from CD. `concurrency` is keyed on
    the resolved environment, so production and staging deploys don't block each other.
+
+A dispatched run executes the **selected branch's** copy of the workflow and of
+`k8s/staging/`, not `main`'s. That's what makes it possible to test manifest edits
+on the branch that makes them, but it also means a branch cut before the staging
+commit (`654f18e`) still carries the pre-staging workflow — no `resolve` job, so it
+would deploy the *production* manifests. Merge `main` into a branch before
+dispatching it.
 
 **Two environments share the `mothra` namespace**, separated only by naming:
 production manifests are in `k8s/`, staging's are in `k8s/staging/` with *identical

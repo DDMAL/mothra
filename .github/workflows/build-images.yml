@@ -11,23 +11,36 @@ name: ci-cd
 #   any other ref   → staging,    manifests in k8s/staging/
 # Both manifest sets use identical *filenames*; the `resolve` job below picks the
 # directory, and staging's object names carry a -staging suffix. See k8s/README.md.
+#
+# Only main deploys automatically (to production). Staging is deployed on demand
+# from *any* branch: Actions → ci-cd → Run workflow → pick the branch → leave
+# `environment: auto`. Auto-deploying staging on every push is deliberately not
+# done — one shared staging environment and a ~25min three-image build don't
+# survive ~20 active branches pushing into them.
+# Note that a dispatched run uses the *selected branch's* copy of this workflow
+# and of k8s/staging/, not main's — see the caveat in k8s/README.md.
 
 on:
   push:
     branches:
       - main             # → production
-      - develop          # → staging
-      - k8s-deployment   # → staging
   workflow_dispatch:
     inputs:
       environment:
-        description: "Manifest set to deploy (auto = main→production, any other ref→staging)"
+        description: "Manifest set to deploy (auto = main→production, any other branch→staging)"
         type: choice
         default: auto
         options:
           - auto
           - staging
           - production
+
+# Distinguishes the on-demand staging runs (now the common case) from main's
+# automatic production deploys in the Actions run list.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('manual · {0} · {1}', inputs.environment, github.ref_name)
+      || format('push · {0}', github.ref_name) }}
 
 permissions:
   contents: read

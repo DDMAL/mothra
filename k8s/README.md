@@ -13,7 +13,7 @@ editing anything here.
 |---|---|---|
 | manifests | `k8s/` | `k8s/staging/` |
 | object names | `backend`, `mothra-config`, … | `backend-staging`, `mothra-config-staging`, … |
-| deployed by | push to `main` | push to `develop` (or any non-`main` ref) |
+| deployed by | push to `main` (automatic) | `workflow_dispatch` from the branch (any non-`main` ref) |
 | app host | `mothra.simssa.ca` | `mothra.staging.simssa.ca` |
 | IC host | `mothra-ic.simssa.ca` | `mothra-ic.staging.simssa.ca` |
 | Postgres | `mothra-postgres.postgres…` | `mothra-staging-postgres.postgres…` |
@@ -112,11 +112,28 @@ the commit's `sha-<short>` tag.
 
 | trigger | environment |
 |---|---|
+| `workflow_dispatch` from any non-`main` branch, `environment: auto` (default) | staging (`k8s/staging/`) |
+| `workflow_dispatch`, `environment: staging` | staging, from any branch (incl. `main`) |
 | push to `main` | production (`k8s/`) |
-| push to `develop` / `k8s-deployment` | staging (`k8s/staging/`) |
-| `workflow_dispatch`, `environment: auto` (default) | same rule as above |
-| `workflow_dispatch`, `environment: staging` | staging, from any branch |
+| `workflow_dispatch` from `main`, `environment: auto` | production |
 | `workflow_dispatch`, `environment: production` | production — **refused unless run from `main`** |
+
+**Deploying a branch to staging:** Actions → **ci-cd** → **Run workflow** → pick
+the branch in the dropdown → leave `environment` at `auto` → **Run workflow**. The
+run shows up as `manual · auto · <branch>`. It builds that branch's three images,
+tags them `sha-<short>`, and rolls staging onto them.
+
+Staging deploys are **not** automatic on push. There is one shared staging
+environment (one deployment set, one `mothra-staging-postgres`) and a ~25-minute
+three-image build, so ~20 active branches auto-deploying would just thrash both;
+whoever dispatches last owns staging either way.
+
+**Caveat — a dispatched run uses the *selected branch's* files.** That is both the
+point (you can test edits to `k8s/staging/*.yaml` on the branch that makes them) and
+the footgun: a branch cut before the staging commit (`654f18e`) carries the *old*
+workflow, which has no `resolve` job and deploys the **production** manifests. Merge
+or rebase `main` into a branch before dispatching it. Likewise, a stale branch
+redeploys whatever `k8s/staging/` looked like on that branch.
 
 Committed staging manifests carry the placeholder tag `sha-0000000`, which is not a
 real tag: if the deploy job's `sed` ever fails to rewrite it, the rollout fails
