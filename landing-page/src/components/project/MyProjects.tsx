@@ -8,6 +8,7 @@ import DeleteProjectModal from "./DeleteProjectModal";
 import LargeImageWarningModal from "./LargeImageWarningModal";
 import { formatLastOpened } from "../../utils/time";
 import Modal from "../shared/Modal";
+import TruncatedName from "../shared/TruncatedName";
 
 const LIST_COLS = "grid-cols-[2fr_1fr_1fr_5rem]";
 const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";
@@ -318,17 +319,17 @@ export default function MyProjects({
                         className="bg-white rounded-lg px-3 py-1 text-[#1D3335] outline-none text-sm w-2/3"
                       />
                     ) : (
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-1.5">
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <PinButton
                             isPinned={!!p.isPinned}
                             onToggle={() => onTogglePin(p.id)}
                           />
                           <span
                             onClick={() => onSelectProject(p.id)}
-                            className="cursor-pointer hover:underline"
+                            className="cursor-pointer hover:underline min-w-0"
                           >
-                            {p.name}
+                            <TruncatedName name={p.name} />
                           </span>
                         </div>
                         <MeiProgress meiFiles={p.meiFiles} />
@@ -403,14 +404,15 @@ export default function MyProjects({
                           )}
                         </div>
                         <div className="p-3 flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
                             <PinButton
                               isPinned={!!p.isPinned}
                               onToggle={() => onTogglePin(p.id)}
                             />
-                            <span className="font-semibold text-[#1D3335] text-sm truncate">
-                              {p.name}
-                            </span>
+                            <TruncatedName
+                              name={p.name}
+                              className="font-semibold text-[#1D3335] text-sm"
+                            />
                           </div>
                           <span className="text-[#1D3335]/50 text-xs">
                             {formatLastOpened(p.lastOpenedAt)}

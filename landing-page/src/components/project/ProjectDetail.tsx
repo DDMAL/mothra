@@ -253,14 +253,14 @@ export default function ProjectDetail({
     <>
       <button
         onClick={onUse}
-        className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+        className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
       >
         use {count} {noun}
         {count > 1 ? "s" : ""}
       </button>
       <button
         onClick={onDelete}
-        className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+        className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
       >
         delete {count} {noun}
         {count > 1 ? "s" : ""}
@@ -336,17 +336,17 @@ export default function ProjectDetail({
 
         <div className="flex-1 min-w-0">
           {/* header */}
-          <div className="flex items-center gap-4 mb-8">
+          <div className="flex items-center gap-4 mb-3">
             <button
               onClick={onBack}
-              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer"
+              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0"
             >
               ←
             </button>
-            <h1 className="text-4xl font-bold italic text-white">
-              {project.name}
+            <h1 className="text-4xl font-bold italic text-white min-w-0 shrink">
+              <TruncatedName name={project.name} />
             </h1>
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => setProjectMenu((v) => !v)}
                 className="text-white text-2xl hover:opacity-70 cursor-pointer leading-none"
@@ -383,18 +383,21 @@ export default function ProjectDetail({
                 </>
               )}
             </div>
+          </div>
 
+          {/* action buttons — on their own row so a long project name never crowds them out */}
+          <div className="flex items-center gap-3 flex-wrap mb-8">
             {activeTab === "images" ? (
               <button
                 onClick={() => imgSection.setUploadModal(true)}
-                className="ml-4 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer"
+                className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer shrink-0"
               >
                 + new image
               </button>
             ) : activeTab === "models" ? (
               <button
                 onClick={() => mdlSection.setUploadModal(true)}
-                className="ml-4 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer"
+                className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer shrink-0"
               >
                 + upload model
               </button>
@@ -497,7 +500,7 @@ export default function ProjectDetail({
                         .filter((a) => annSection.selectedIds.has(a.id))
                         .forEach((a) => onDownloadAnnotation(a.id, "txt"))
                     }
-                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
                     download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.txt)
                   </button>
@@ -507,7 +510,7 @@ export default function ProjectDetail({
                         .filter((a) => annSection.selectedIds.has(a.id))
                         .forEach((a) => onDownloadAnnotation(a.id, "json"))
                     }
-                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
                     download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.json)
                   </button>
@@ -526,7 +529,7 @@ export default function ProjectDetail({
                           ),
                         )
                     }
-                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
                     download {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
                   </button>
@@ -541,7 +544,7 @@ export default function ProjectDetail({
                         meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
                       });
                     }}
-                    className="ml-2 px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20"
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
                     delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
                   </button>
