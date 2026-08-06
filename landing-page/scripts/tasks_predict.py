@@ -1,4 +1,5 @@
 import io
+import threading
 from pathlib import Path
 
 from celery_app import celery_app
@@ -8,7 +9,65 @@ from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
 from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
+from paco_api import classify_stafflines, PacoClassifierError
 
+
+def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_name, publish):
+    """Medieval-preset-only per-image inference: runs the text/music YOLO
+    pass and a classifier-then-stave-YOLO pass concurrently, since the
+    Paco-classifier call is the slow half of this and the two passes are
+    otherwise independent until their outputs are concatenated below.
+
+    The background thread touches NO shared DB state (no cur/con) — i
+    only calls classify_stafflines (plain HTTP) and yolo_models.infer_staves
+    (a pure in-process model call). write_annotation/run_staffline_detection
+    stay strictly main-thread-only, after this function returns. All
+    success/failure state is written into stave_result for the main thread
+    to read AFTER .join() — a bare threading.Thread does not propagate
+    exceptions to its caller on its own, so wrapping try/except around
+    thread.join() instead of inside _stave_pipeline would silently break
+    the fallback path below.
+
+    Returns (yolo_txt, staffline_source_arr) — the merged text+music+stave
+    YOLO lines, and whichever image array the stave boxes were actually
+    detected against, so run_staffline_detection crops the SAME image the
+    stave model saw (not always the raw page).
+    """
+    import cv2
+    import numpy as np
+
+    stave_result = {}
+
+    def _stave_pipeline():
+        try:
+            stafflines_png, _background_png = classify_stafflines(image_bytes, mime_type)
+            arr = cv2.imdecode(np.frombuffer(stafflines_png, np.uint8), cv2.IMREAD_COLOR)
+            if arr is None:
+                raise PacoClassifierError("could not decode stafflines PNG from paco-classifier-service")
+            if arr.shape[:2] != img_arr.shape[:2]:
+                raise PacoClassifierError(f"classifier output {arr.shape[:2]} != page {img_arr.shape[:2]}")
+            stave_result["yolo_txt"] = yolo_models.infer_staves(arr)
+            stave_result["source_arr"] = arr
+        except Exception as e:
+            stave_result["error"] = e
+
+    thread = threading.Thread(target=_stave_pipeline, daemon=True)
+    thread.start()
+    tm_txt = yolo_models.infer_text_music(img_arr)
+    thread.join()
+
+    if "error" in stave_result:
+        publish({
+            "type": "log",
+            "message": f"{image_name}: staffline classifier unavailable ({stave_result['error']}) — falling back to raw-image stave detection",
+        })
+        st_txt = yolo_models.infer_staves(img_arr)
+        source_arr = img_arr
+    else:
+        st_txt = stave_result["yolo_txt"]
+        source_arr = stave_result["source_arr"]
+
+    return "\n".join(filter(None, [tm_txt, st_txt])), source_arr
 
 @celery_app.task(name="predict.run")
 def run_predict_task(job_id, project_id, body):
@@ -85,7 +144,7 @@ def run_predict_task(job_id, project_id, body):
             has_annotation = cur.fetchone() is not None
             cur.execute("SELECT 1 FROM text_alignments WHERE project_id=%s AND image_id=%s", (project_id, iid))
             has_text_alignment = cur.fetchone() is not None
-            # annotation and text-finding are independent steps — an image that
+            # annotation and text-finding are independent steps — an image tha
             # already has one but not the other (e.g. a job that died between the
             # two, or a race from concurrent duplicate jobs) must still run
             # whichever step is missing, not be skipped wholesale.
@@ -130,7 +189,13 @@ def run_predict_task(job_id, project_id, body):
                     publish({"type": "log", "message": f"{image_name}: annotation disappeared since validation — re-running YOLO"})
             if not has_annotation:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
-                yolo_txt = yolo_models.infer(img_arr)
+                if yolo_models.medieval_models is not None:
+                    yolo_txt, staffline_source_arr = _run_medieval_inference(
+                        yolo_models, img_arr, bytes(image_data), mime_type, image_name, publish,
+                    )
+                else:
+                    yolo_txt = yolo_models.infer(img_arr)
+                    staffline_source_arr = img_arr
                 ann_id = write_annotation(
                     cur, con, project_id, image_id, image_name, yolo_txt,
                     yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
@@ -143,17 +208,19 @@ def run_predict_task(job_id, project_id, body):
                     "txtName": f"annotation-{ann_id}.txt",
                     "jsonName": "", "detectionCount": n_detections,
                 })
+            else:
+                staffline_source_arr = img_arr  # reused annotation -- no fresh classifier run to redo
 
             # Staffline detection is gated only on has_class (fresh stave-class
             # boxes to work from), never on has_text_alignment -- an image can
             # have has_text_alignment=True (text-finding already ran) and
             # has_annotation=False (YOLO just produced brand-new boxes in this
             # same iteration) at the same time, and those new boxes still need
-            # a staffline_detections row. Ordered before the has_text_alignment
+            # a staffline_detections row. Ordered before the has_text_alignmen
             # check below so its continue can never skip this block.
             if has_class(yolo_txt, STAFFLINE_CLASS_ID):
                 for sf_ev in run_staffline_detection(
-                    job_id, cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
+                    job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

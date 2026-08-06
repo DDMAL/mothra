@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paco-classifier-service
+  namespace: mothra
+  labels:
+    app: paco-classifier-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paco-classifier-service
+  template:
+    metadata:
+      labels:
+        app: paco-classifier-service
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: paco-classifier-service
+          image: ghcr.io/ddmal/mothra-paco-classifier-service:sha-0000000  # rewritten by CI's sed step on deploy
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8003
+          # No env required (port fixed in the image CMD). TensorFlow
+          # sliding-window inference over a full page makes this a
+          # memory-heavy container — requests/limits below are a starting
+          # point, not measured; tune after watching real usage (see
+          # text-service's own OOM-kill lesson in CLAUDE.md).
+          readinessProbe:
+            tcpSocket:
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8003
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 500m
+              memory: 3Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paco-classifier-service
+  namespace: mothra
+  labels:
+    app: paco-classifier-service
+spec:
+  selector:
+    app: paco-classifier-service
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003

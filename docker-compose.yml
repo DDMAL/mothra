@@ -34,6 +34,13 @@ services:
     ports:
       - "8002:8002"
 
+  paco-classifier-service:
+    build:
+      context: .
+      dockerfile: paco-classifier-service/Dockerfile
+    ports:
+      - "8003:8003"
+
   backend:
     build:
       context: ./landing-page
@@ -49,6 +56,7 @@ services:
       IC_API_URL: http://ic:8000
       IC_PUBLIC_URL: ${IC_PUBLIC_URL:-http://localhost:8000}
       TEXT_API_URL: http://text-service:8002
+      PACO_API_URL: http://paco-classifier-service:8003
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     depends_on:
       redis:
@@ -56,6 +64,8 @@ services:
       ic:
         condition: service_started
       text-service:
+        condition: service_started
+      paco-classifier-service:
         condition: service_started
       postgres:
         condition: service_healthy   # init_db()/_migrate_db() run at import; wait for DB
@@ -72,10 +82,13 @@ services:
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       TEXT_API_URL: http://text-service:8002
+      PACO_API_URL: http://paco-classifier-service:8003
     depends_on:
       redis:
         condition: service_started
       text-service:
+        condition: service_started
+      paco-classifier-service:
         condition: service_started
       postgres:
         condition: service_healthy

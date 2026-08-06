@@ -13,6 +13,7 @@ services:
   ic_api_url: http://localhost:8000
   ic_public_url: http://localhost:8000
   text_api_url: http://localhost:8002
+  paco_api_url: http://localhost:8003
 
 celery:
   broker_url: redis://localhost:6379/0

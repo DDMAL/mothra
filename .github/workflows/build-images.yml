@@ -1,7 +1,7 @@
 name: ci-cd
 
-# CI: builds the three Mothra service images and pushes them to this repo's
-# GitHub Container Registry (ghcr.io/<owner>/mothra-{backend,ic,text-service}).
+# CI: builds the Mothra service images and pushes them to this repo's
+# GitHub Container Registry (ghcr.io/<owner>/mothra-{backend,ic,text-service,paco-classifier-service}).
 # CD: after a successful build, applies the app manifests and rolls out the
 # deployments (all except redis and postgres).
 # The Celery `worker` reuses the `mothra-backend` image, so it is not built here.
@@ -42,6 +42,11 @@ jobs:
           - name: text-service
             context: .
             file: ./text-service/Dockerfile
+          # paco-classifier-service: build context is the repo root so the
+          # sibling paco-classifier/ submodule is available to COPY.
+          - name: paco-classifier-service
+            context: .
+            file: ./paco-classifier-service/Dockerfile
 
     steps:
       # Reclaim ~20-30GB on the runner: the CUDA-torch (backend/worker) and
@@ -56,9 +61,13 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      # submodules: neon (backend), mothra-text (text-service), ic (ic image).
-      # lfs: the medieval YOLO .pt weights the backend bakes in — without this
-      # they are checked out as pointer stubs and inference fails at runtime.
+      # submodules: neon (backend), mothra-text (text-service), ic (ic image),
+      # paco-classifier (paco-classifier-service — code AND weights: its
+      # models_v4/model_0.h5/model_1.h5 live inside the submodule itself, so
+      # `submodules: recursive` alone is enough for those, no LFS needed here).
+      # lfs: the medieval YOLO .pt weights, tracked in THIS repo's own
+      # .gitattributes — without this they're checked out as pointer stubs
+      # and inference fails at runtime.
       - name: Checkout (submodules + LFS)
         uses: actions/checkout@v4
         with:
@@ -131,9 +140,9 @@ jobs:
           TAG="sha-${GITHUB_SHA:0:7}"   # matches metadata-action type=sha,format=short
           echo "Deploying image tag: $TAG"
           sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" \
-            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml
+            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml k8s/paco-classifier-service.yaml
           grep -H 'image: ghcr.io' \
-            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml
+            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml k8s/paco-classifier-service.yaml
 
       - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
         run: |
@@ -144,12 +153,13 @@ jobs:
             -f k8s/worker.yaml \
             -f k8s/ic.yaml \
             -f k8s/text-service.yaml \
+            -f k8s/paco-classifier-service.yaml \
             -f k8s/ingress.yaml
 
       - name: Roll out deployments (all except redis & postgres)
         run: |
           set -euo pipefail
-          for d in backend worker ic text-service; do
+          for d in backend worker ic text-service paco-classifier-service; do
             kubectl -n mothra rollout status "deploy/$d" --timeout=300s
           done
           kubectl -n mothra get pods

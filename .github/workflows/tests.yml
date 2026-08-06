@@ -1,7 +1,7 @@
 name: tests
 
-# Runs the staff-finding algorithmic test suite and the new landing-page
-# staffline_adapter tests on every push, to any branch. A push-triggered
+# Runs the staff-finding algorithmic test suite and the landing-page
+# staffline_adapter / paco_api tests on every push, to any branch. A push-triggered
 # check still attaches to that commit's SHA, so it shows up on any pull
 # request built from those commits, same as a pull_request-triggered one
 # would -- the difference is this also runs on plain pushes with no open PR.
@@ -28,8 +28,11 @@ jobs:
 
       # Pillow: only thing staffline_adapter.py's own import chain
       # (encode_to_mei.py) needs beyond stdlib + the staff-finding package.
+      # PyYAML: paco_api.py imports config.py (for PACO_API_URL), which
+      # parses config.yaml -- numpy comes in transitively via staff-finding's
+      # diagnostics extras (scipy/scikit-image both depend on it).
       - name: Install dependencies
-        run: pip install -e "./staff-finding[diagnostics]" pytest Pillow
+        run: pip install -e "./staff-finding[diagnostics]" pytest Pillow PyYAML
 
       - name: staff-finding -- scripts/test_group_staves.py
         working-directory: staff-finding
@@ -62,3 +65,6 @@ jobs:
 
       - name: landing-page -- staffline_adapter tests
         run: python -m pytest landing-page/scripts/tests/test_staffline_adapter.py
+
+      - name: landing-page -- paco_api bridge tests
+        run: python -m pytest landing-page/scripts/tests/test_paco_api.py
