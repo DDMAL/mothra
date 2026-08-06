@@ -9,10 +9,14 @@ from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
 from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
-from paco_api import classify_stafflines, PacoClassifierError
+from paco_api import classify_stafflines, abort_classify_request, PacoClassifierError
+
+# How often the main thread polls check_cancelled() while waiting on the
+# background classifier thread (see _run_medieval_inference below).
+_CANCEL_POLL_INTERVAL_S = 0.5
 
 
-def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_name, publish):
+def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_name, publish, job_id=None):
     """Medieval-preset-only per-image inference: runs the text/music YOLO
     pass and a classifier-then-stave-YOLO pass concurrently, since the
     Paco-classifier call is the slow half of this and the two passes are
@@ -32,15 +36,31 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     YOLO lines, and whichever image array the stave boxes were actually
     detected against, so run_staffline_detection crops the SAME image the
     stave model saw (not always the raw page).
+
+    If `job_id` is given, waits on the background thread by polling
+    check_cancelled() every _CANCEL_POLL_INTERVAL_S instead of an
+    unconditional thread.join() — a cancel request seen mid-classifier-call
+    aborts the in-flight paco-classifier-service connection (via
+    abort_classify_request) so this raises JobCancelled within about a
+    second, instead of blocking for up to classify_stafflines's own
+    DEFAULT_TIMEOUT (180s) on a job nobody cares about anymore. This can't
+    stop the TensorFlow inference actually running server-side — paco-
+    classifier-service has no cancellation concept of its own (see
+    paco_api.py's module docstring) — it only frees up this worker thread
+    promptly; the abandoned call keeps running remotely and its result is
+    simply discarded when it eventually finishes.
     """
     import cv2
     import numpy as np
 
     stave_result = {}
+    conn_holder: dict = {}
 
     def _stave_pipeline():
         try:
-            stafflines_png, _background_png = classify_stafflines(image_bytes, mime_type)
+            stafflines_png, _background_png = classify_stafflines(
+                image_bytes, mime_type, conn_holder=conn_holder,
+            )
             arr = cv2.imdecode(np.frombuffer(stafflines_png, np.uint8), cv2.IMREAD_COLOR)
             if arr is None:
                 raise PacoClassifierError("could not decode stafflines PNG from paco-classifier-service")
@@ -54,7 +74,18 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     thread = threading.Thread(target=_stave_pipeline, daemon=True)
     thread.start()
     tm_txt = yolo_models.infer_text_music(img_arr)
-    thread.join()
+
+    if job_id is None:
+        thread.join()
+    else:
+        while thread.is_alive():
+            try:
+                check_cancelled(job_id)
+            except JobCancelled:
+                abort_classify_request(conn_holder)
+                thread.join(timeout=5)
+                raise
+            thread.join(timeout=_CANCEL_POLL_INTERVAL_S)
 
     if "error" in stave_result:
         publish({
@@ -192,6 +223,7 @@ def run_predict_task(job_id, project_id, body):
                 if yolo_models.medieval_models is not None:
                     yolo_txt, staffline_source_arr = _run_medieval_inference(
                         yolo_models, img_arr, bytes(image_data), mime_type, image_name, publish,
+                        job_id=job_id,
                     )
                 else:
                     yolo_txt = yolo_models.infer(img_arr)

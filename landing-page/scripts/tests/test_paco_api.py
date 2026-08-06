@@ -1,12 +1,12 @@
-"""Unit tests for paco_api.py's HTTP-bridge error handling and the
-alpha-drop/whiting-out contract it depends on. No network, no DB — mirrors
-test_staffline_adapter.py's style (plain pytest functions, sys.path insert).
+"""Unit tests for paco_api.py's HTTP-bridge error handling, the abort
+mechanism cancellation depends on, and the alpha-drop/whiting-out contract
+it depends on. No network, no DB — mirrors test_staffline_adapter.py's
+style (plain pytest functions, sys.path insert).
 """
-import io
 import json
 import base64
+import socket
 import sys
-import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -18,29 +18,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import paco_api  # noqa: E402
 
 
-def _fake_response(payload: dict):
-    body = json.dumps(payload).encode()
+def _fake_connection(status: int, body: bytes):
+    conn = MagicMock()
     resp = MagicMock()
+    resp.status = status
     resp.read.return_value = body
-    resp.__enter__.return_value = resp
-    return resp
+    conn.getresponse.return_value = resp
+    return conn
 
 
 def test_classify_stafflines_decodes_both_images():
     stafflines_b64 = base64.b64encode(b"stafflines-bytes").decode()
     background_b64 = base64.b64encode(b"background-bytes").decode()
-    with patch("urllib.request.urlopen", return_value=_fake_response({
+    body = json.dumps({
         "stafflines_png_base64": stafflines_b64,
         "background_png_base64": background_b64,
-    })):
+    }).encode()
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(200, body)):
         stafflines, background = paco_api.classify_stafflines(b"fake-image-bytes", "image/png")
     assert stafflines == b"stafflines-bytes"
     assert background == b"background-bytes"
 
 
 def test_classify_stafflines_wraps_http_error():
-    exc = urllib.error.HTTPError("url", 500, "boom", {}, io.BytesIO(b'{"detail": "model load failed"}'))
-    with patch("urllib.request.urlopen", side_effect=exc):
+    body = b'{"detail": "model load failed"}'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(500, body)):
         try:
             paco_api.classify_stafflines(b"x", "image/png")
             assert False, "expected PacoClassifierError"
@@ -49,12 +51,44 @@ def test_classify_stafflines_wraps_http_error():
 
 
 def test_classify_stafflines_wraps_url_error():
-    with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+    conn = MagicMock()
+    conn.request.side_effect = OSError("connection refused")
+    with patch("http.client.HTTPConnection", return_value=conn):
         try:
             paco_api.classify_stafflines(b"x", "image/png")
             assert False, "expected PacoClassifierError"
         except paco_api.PacoClassifierError as e:
             assert "unreachable" in str(e)
+
+
+def test_classify_stafflines_exposes_conn_via_conn_holder():
+    """conn_holder must be populated with the live connection BEFORE the
+    (blocking) request is made -- that's what lets another thread abort it
+    mid-flight. Verified indirectly: the connection returned to the caller
+    is the exact same object classify_stafflines used internally."""
+    body = json.dumps({
+        "stafflines_png_base64": base64.b64encode(b"a").decode(),
+        "background_png_base64": base64.b64encode(b"b").decode(),
+    }).encode()
+    fake_conn = _fake_connection(200, body)
+    conn_holder: dict = {}
+    with patch("http.client.HTTPConnection", return_value=fake_conn):
+        paco_api.classify_stafflines(b"x", "image/png", conn_holder=conn_holder)
+    assert conn_holder["conn"] is fake_conn
+
+
+def test_abort_classify_request_shuts_down_socket_and_closes():
+    fake_conn = MagicMock()
+    fake_sock = MagicMock()
+    fake_conn.sock = fake_sock
+    conn_holder = {"conn": fake_conn}
+    paco_api.abort_classify_request(conn_holder)
+    fake_sock.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+    fake_conn.close.assert_called_once()
+
+
+def test_abort_classify_request_is_a_noop_before_connection_exists():
+    paco_api.abort_classify_request({})  # must not raise
 
 
 def test_masked_out_pixels_are_pure_white_not_just_transparent():
