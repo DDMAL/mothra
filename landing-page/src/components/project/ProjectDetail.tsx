@@ -269,7 +269,7 @@ export default function ProjectDetail({
   );
 
   return (
-    <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48 relative">
+    <div className="animate-fade-in flex-1 bg-[#4AADAA] px-6 pt-10 pb-48 relative overflow-x-auto">
       <div
         className={`absolute inset-0 z-30 bg-black/30 transition-opacity pointer-events-none
           ${imgSection.uploadModal || !!imgSection.renameModal || mdlSection.uploadModal || !!mdlSection.renameModal ? "opacity-100" : "opacity-0"}`}
@@ -334,7 +334,7 @@ export default function ProjectDetail({
           </div>
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1">
           {/* header */}
           <div className="flex items-center gap-4 mb-3">
             <button

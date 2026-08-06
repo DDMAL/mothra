@@ -493,7 +493,9 @@ export default function MyProjects({
                   key={p.id}
                   className={`grid ${TRASH_COLS} px-6 py-4 border-b border-[#1D3335]/10 last:border-0 items-center text-[#1D3335] text-sm`}
                 >
-                  <span className="opacity-60">{p.name}</span>
+                  <span className="opacity-60 min-w-0">
+                    <TruncatedName name={p.name} />
+                  </span>
                   <span className="opacity-60">{p.user}</span>
                   <span className="opacity-60">{daysLeft}d</span>
                   <div className="flex justify-end gap-3">
