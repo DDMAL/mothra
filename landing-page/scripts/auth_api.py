@@ -20,6 +20,12 @@ _db_pool: Optional["_pg_pool.ThreadedConnectionPool"] = None
 def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
     global _db_pool
     if _db_pool is None:
+        # Bare os.environ[...] -- raises KeyError, not a friendly error, if
+        # landing-page/scripts/.env doesn't exist/doesn't set this yet.
+        # psycopg2 just needs a DSN, so any local Postgres works -- see
+        # ../README.md's "Prerequisites" section for the install
+        # (brew install postgresql@16 && createdb mothra_dev, then
+        # DATABASE_URL=postgresql://localhost/mothra_dev).
         _db_pool = _pg_pool.ThreadedConnectionPool(
             minconn=2, maxconn=15, dsn=os.environ["DATABASE_URL"]
         )
