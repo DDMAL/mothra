@@ -103,6 +103,8 @@ def run_predict_task(job_id, project_id, body):
 
         publish({"type": "stage", "name": "processing"})
         results = []
+        text_debug_mode = body.get("text_debug_mode", False)
+        text_debug_data: dict = {}
         for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment in images:
             check_cancelled(job_id)
             pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
@@ -179,13 +181,19 @@ def run_predict_task(job_id, project_id, body):
                 mask_json_override=mask_json_override,
                 source_id=body.get("text_source_id") if image_folio else None,
                 folio_override=image_folio,
+                debug_mode=text_debug_mode,
             ):
                 if text_ev.get("type") == "log":
                     publish(text_ev)
                 elif text_ev.get("type") == "error":
                     publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
+                elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
+                    text_debug_data[image_name] = text_ev["debug_data"]
         publish({"type": "stage_done", "name": "processing"})
-        publish({"type": "result", "annotations": results})
+        result_event: dict = {"type": "result", "annotations": results}
+        if text_debug_data:
+            result_event["text_debug_data"] = text_debug_data
+        publish(result_event)
         publish({"type": "done"})
     except JobCancelled:
         con.rollback()

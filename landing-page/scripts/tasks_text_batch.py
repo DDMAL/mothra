@@ -85,12 +85,14 @@ def run_text_batch_task(job_id, project_id, body):
         publish({"type": "stage_done", "name": "validating"})
 
         publish({"type": "stage", "name": "processing"})
+        text_debug_data: dict = {}
         fields = {
             "folios": json.dumps(folios), "source_id": str(body["source_id"]), "device": body["device"],
             "column_bimodal_threshold": str(body["column_bimodal_threshold"]),
             "masking_enabled": "true" if body["masking_enabled"] else "false",
             "mask_padding": str(body["mask_padding"]),
             "music_overlap_filter_enabled": "true" if body.get("music_overlap_filter_enabled", True) else "false",
+            "debug_mode": "true" if body.get("debug_mode", False) else "false",
             "music_boxes": json.dumps(music_boxes_by_index),
             "mask_json_list": json.dumps(mask_json_by_index),
         }
@@ -122,8 +124,13 @@ def run_text_batch_task(job_id, project_id, body):
                      alignment.get("median_line_spacing", 0.0), len(alignment.get("syl_boxes", [])), ""),
                 )
                 con.commit()
+                if ev.get("debug_data"):
+                    text_debug_data[image_name] = ev["debug_data"]
                 publish({"type": "log", "message": f"{image_name}: {len(alignment.get('syl_boxes', []))} syllable(s) aligned"})
                 continue
+            if ev.get("type") == "result":
+                if text_debug_data:
+                    ev = {**ev, "text_debug_data": text_debug_data}
             publish(ev)  # forwards "result" {batchId, fileCount} and "done" unchanged
     except JobCancelled:
         con.rollback()
