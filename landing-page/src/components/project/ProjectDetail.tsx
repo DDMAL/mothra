@@ -665,6 +665,12 @@ export default function ProjectDetail({
                     stafflines={project.stafflines}
                     images={project.images}
                     projectId={project.id}
+                    onAddStaffline={(newSet) =>
+                      onUpdateProject({
+                        ...project,
+                        stafflines: [...project.stafflines, newSet],
+                      })
+                    }
                   />
                 )}
                 {generatedSubTab === "mei files" && (
