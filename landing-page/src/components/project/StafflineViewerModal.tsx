@@ -14,7 +14,10 @@ type ViewState =
 // fixed palette" visual language consistent across viewer modals.
 const PALETTE = ["#4AADAA", "#FFA500", "#E87BF7", "#F76B6B", "#6BF7A5", "#F7E16B"];
 const UNASSIGNED_COLOR = "#888888";
-const ANOMALY_COLOR = "#FF3B30";
+// Blue rather than red -- red overlay lines were getting lost against the
+// red rubrics/staff-lines common in these manuscripts (see the pages this
+// viewer is actually used on).
+const ANOMALY_COLOR = "#2563EB";
 
 interface Props {
     detection: StafflineSet;
@@ -194,7 +197,7 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                         {detection.staveCount ?? 0} stave{detection.staveCount !== 1 ? "s" : ""}
                     </span>
                     {anomalousStaveIds.size > 0 && (
-                        <span className="text-xs font-semibold text-[#FF3B30]">
+                        <span className="text-xs font-semibold text-[#2563EB]">
                             {anomalousStaveIds.size} flagged for review
                         </span>
                     )}
@@ -273,7 +276,7 @@ export default function StafflineViewerModal({ detection, projectId, onClose, la
                                 />
                             </div>
                             <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
-                                dashed = interpolated · gray = unassigned · red = flagged for review
+                                dashed = interpolated · gray = unassigned · blue = flagged for review
                             </p>
                             {anomalyNotes.length > 0 && (
                                 <div className="mt-4 w-full">
