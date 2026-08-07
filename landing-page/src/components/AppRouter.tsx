@@ -233,7 +233,7 @@ export default function AppRouter({
             else if (step >= 3) setView("neon-editor");
             else if (step >= 1 || SKIP_PREDICT) setView("ic");
             else {
-              setBatchRunIds(computeBatchRun(selectedProject));
+              setBatchRunIds(textFindingSettings.ocrOnlyMode ? null : computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
             }
@@ -246,7 +246,7 @@ export default function AppRouter({
           onStepClick={(step) => {
             if (step === 0) {
               if (SKIP_PREDICT) { setView("ic"); return; }
-              setBatchRunIds(computeBatchRun(selectedProject));
+              setBatchRunIds(textFindingSettings.ocrOnlyMode ? null : computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
             }
@@ -365,6 +365,11 @@ export default function AppRouter({
           projectId={selectedProject.id}
           jobKind={batchRunIds ? "text_batch" : "predict"}
           streamRequest={(signal, onJobId) => {
+            const usedModelId =
+              selectedProject.models.find((m) =>
+                (selectedProject.usedModelNames ?? []).includes(m.name),
+              )?.id ?? "";
+            const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
             if (batchRunIds) {
               return apiFetchJobStream(`/api/projects/${selectedProject.id}/text-batch/run`, {
                 method: "POST",
@@ -382,8 +387,9 @@ export default function AppRouter({
                   mask_padding: textFindingSettings.maskPadding,
                   music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
                   debug_mode: textFindingSettings.debugMode,
+                  mask_model_id: textFindingSettings.maskModelId || null,
                   model_preset: inferenceSettings.modelPreset,
-                  model_id: inferenceSettings.modelPreset === "custom" ? (inferenceSettings.customModelId || null) : null,
+                  model_id: inferenceSettings.modelPreset === "custom" ? resolvedCustomModelId : null,
                   yolo_confidence_threshold: inferenceSettings.threshold,
                   yolo_device: inferenceSettings.device,
                   text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
@@ -393,14 +399,9 @@ export default function AppRouter({
                 }),
               }, signal, onJobId);
             }
-            const usedModelId =
-              selectedProject.models.find((m) =>
-                (selectedProject.usedModelNames ?? []).includes(m.name),
-              )?.id ?? "";
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
-            const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
             return apiFetchJobStream(`/api/projects/${selectedProject.id}/predict`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
