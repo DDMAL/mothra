@@ -78,6 +78,19 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     if job_id is None:
         thread.join()
     else:
+        # Heartbeat: the classifier call alone can legitimately run past the
+        # SSE stream's 90s stale-job timeout (jobs_api.py's
+        # STALE_JOB_TIMEOUT_SECONDS), which fires purely on "no new
+        # job_events row for 90s" — it can't tell a slow classifier call from
+        # a dead worker. Without a periodic publish() here, a page that takes
+        # >90s falsely reports "job appears to have stalled" to the client
+        # and flips jobs.status to 'failed', even though this thread is
+        # still running fine and will finish and publish its own real
+        # success events moments later. Piggybacking on the existing
+        # cancel-poll loop (rather than adding a second timer) keeps this
+        # cheap and resets the stream's idle counter well under the timeout.
+        _HEARTBEAT_INTERVAL_S = 20.0
+        elapsed_s = 0.0
         while thread.is_alive():
             try:
                 check_cancelled(job_id)
@@ -86,6 +99,10 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
                 thread.join(timeout=5)
                 raise
             thread.join(timeout=_CANCEL_POLL_INTERVAL_S)
+            elapsed_s += _CANCEL_POLL_INTERVAL_S
+            if elapsed_s >= _HEARTBEAT_INTERVAL_S:
+                elapsed_s = 0.0
+                publish({"type": "log", "message": f"{image_name}: staffline classifier still running..."})
 
     if "error" in stave_result:
         publish({
