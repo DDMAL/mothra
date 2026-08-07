@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<FolioReviewStatus, string> = {
     mismatch: "⚠ different position",
     "not-in-source": "⚠ not in Cantus source",
     duplicate: "⚠ duplicate folio",
+    "phantom-continuation": "◆ not in Cantus source — continuation (ok)",
 };
 
 const STATUS_COLOR: Record<FolioReviewStatus, string> = {
@@ -24,6 +25,7 @@ const STATUS_COLOR: Record<FolioReviewStatus, string> = {
   mismatch: "text-yellow-700",
   "not-in-source": "text-red-700",
   duplicate: "text-red-700",
+  "phantom-continuation": "text-[#4AADAA]",
 };
 
 export default function BatchFolioReviewModal({

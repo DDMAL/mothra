@@ -113,7 +113,15 @@ export default function ProjectDetail({
     if (!batchStartFolio || !batchEndFolio) return [];
     const startIdx = folios.indexOf(batchStartFolio);
     const endIdx = folios.indexOf(batchEndFolio);
-    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) return [];
+    // A manually-typed (off-canonical) start/end boundary - via FolioSelect's
+    // "custom folio..." entry - won't be found by indexOf. Manual entry
+    // doesn't need the adjacency gate auto-detection uses (the human already
+    // vouched for it), so trust it outright rather than collapsing the whole
+    // range to empty the way a genuine not-found value used to.
+    if (startIdx === -1 && endIdx === -1) return [batchStartFolio, batchEndFolio];
+    if (startIdx === -1) return endIdx === -1 ? [] : [batchStartFolio, ...folios.slice(0, endIdx + 1)];
+    if (endIdx === -1) return [...folios.slice(startIdx), batchEndFolio];
+    if (startIdx > endIdx) return [];
     return folios.slice(startIdx, endIdx + 1);
   }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
   const nextStep = useMemo(

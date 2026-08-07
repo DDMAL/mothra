@@ -36,6 +36,7 @@ for _f in BATCH_DIR.glob("*.zip"):
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
 from steps.gt_manifest import fetch_cantus_csv, make_output_stem
 from steps.nw_chant_allocator import _folio_sort_key, read_folio_state
+from run_chain import _are_contiguous
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -414,6 +415,27 @@ async def run_text_batch(
                 try:
                     for i, (image_path, folio, stem) in enumerate(zip(image_paths, folio_list, stems)):
                         logger.info("Folio %d/%d: %s", i + 1, len(folio_list), folio)
+                        # infer_continuation=True (build_flat_text_and_anchors' own
+                        # default) would otherwise let it independently scan the CSV
+                        # for "the nearest preceding folio with a 77 break" and
+                        # re-derive the same wrong continuation even after prev_state
+                        # is reset below - it has no idea this folio's true physical
+                        # predecessor was skipped in this batch, only that no explicit
+                        # prev_folio_state was passed. Must be suppressed in the same
+                        # branch, not just prev_state.
+                        infer_continuation = True
+                        if i > 0 and not _are_contiguous(folio_list[i - 1], folio):
+                            # e.g. a folio was intentionally skipped in this batch (or is
+                            # simply not the next physical page) - carrying the previous
+                            # folio's leftover continuation words into this one would
+                            # silently corrupt its alignment from the very first line.
+                            # Mirrors run_chain.py's identical reset for the CLI chain.
+                            logger.info(
+                                "folio %s: not contiguous with previous folio %s, resetting FolioState",
+                                folio, folio_list[i - 1],
+                            )
+                            prev_state = None
+                            infer_continuation = False
                         mask_json_tmp = None
                         folio_mask_json = parsed_mask_json[i] if i < len(parsed_mask_json) else None
                         mothra_json_path = None
@@ -438,6 +460,7 @@ async def run_text_batch(
                                 column_bimodal_threshold=column_bimodal_threshold,
                                 prev_folio_state=prev_state,
                                 folio_state_out=state_path,
+                                infer_continuation=infer_continuation,
                                 column_count=column_count,
                                 mothra_json_path=mothra_json_path,
                                 padding=mask_padding,

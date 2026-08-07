@@ -15,6 +15,9 @@ staff-finding/models/
 zzzz/
 staff-finding/addtl-gt/
 
+# Editable-install build artifacts (any package, anywhere in the repo)
+*.egg-info/
+
 # Downloaded pretrained weights
 yolov8*.pt
 *.pt
