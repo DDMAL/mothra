@@ -44,6 +44,8 @@ XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 STAVE_BUFFER_PX = 20
 SYLLABLE_GAP_MULTIPLIER = 1.5
 _SKIP_CLASS_FRAGMENTS = frozenset({"custos", "divline", "division"})
+STAFF_LINES = 4  # matches <staffDef lines="..."> below, and the stave zone's
+                 # assumed line count (see build_mei's stave-zone construction)
 
 _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
 _XML_MODEL_PI = (
@@ -181,6 +183,25 @@ def image_dimensions(header: bytes) -> Optional[tuple]:
             return w, h
     return None
 
+def _typical_line_spacing(staves: list[StaveBbox]) -> Optional[float]:
+    """Median intra-stave staff-line spacing across staves that carry real,
+    multi-point line_ys — i.e. genuinely detected line positions, not the
+    crude bbox-derived guess _cluster_glyphs_into_staves itself falls back
+    to when a row has no real line data at all (that guess has no place
+    contributing to an estimate of what "real" spacing looks like).
+
+    Used by assign_glyphs_to_staves's missed-stave recovery path to give a
+    reliable spacing figure to a row the detector missed entirely, instead
+    of that row deriving its own (unreliable) spacing from its own glyphs'
+    bounding box — see that function's docstring for why."""
+    spacings: list[float] = []
+    for stave in staves:
+        ys = stave.line_ys
+        if len(ys) >= 2:
+            diffs = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            spacings.append(median(diffs))
+    return median(spacings) if spacings else None
+
 def assign_glyphs_to_staves(
         glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int
 ) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
@@ -197,6 +218,18 @@ def assign_glyphs_to_staves(
     detected stave is assigned to it as before; a row that overlaps nothing
     is a system the detector missed, and gets a synthesized stave of its own.
 
+    That synthesized stave's line_ys (used for pitch computation — see
+    _step_from_y) would otherwise come purely from the missed row's own
+    glyphs' bounding box (_cluster_glyphs_into_staves's crude fallback),
+    which can be badly skewed by that row's own melodic range (a single
+    unusually high/low note inflates the guessed staff height) — confirmed
+    on a real page as a visible, per-row-only vertical rendering offset
+    (notes floating well above/below their real staff, since Neon/Verovio
+    renders pitch, not raw pixel position). Passing this page's OWN
+    already-reliable typical line spacing (from every OTHER, genuinely
+    detected stave) into that fallback anchors the recovered row's
+    estimated lines on real page geometry instead.
+
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
     <sb>/<clef> from the RETURNED staves list, not the one passed in.
@@ -206,8 +239,11 @@ def assign_glyphs_to_staves(
         result: dict[int, list[Glyph]] = {-1: list(glyphs)}
         return result, staves
 
+    typical_spacing = _typical_line_spacing(staves)
     result = {i: [] for i in range(len(staves))}
-    row_groups = _cluster_glyphs_into_staves(glyphs, page_w, page_h, id_prefix="row")
+    row_groups = _cluster_glyphs_into_staves(
+        glyphs, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing
+    )
 
     for row_stave, members in row_groups:
         best_idx, best_overlap = None, 0
@@ -523,12 +559,22 @@ def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveB
     return _staves_from_staff_lines(lines, img_w, img_h)
 
 def _cluster_glyphs_into_staves(
-        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto"
+        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto",
+        typical_line_spacing: Optional[float] = None,
 ) -> list[tuple[StaveBbox, list[Glyph]]]:
     """Cluster glyphs into stave-sized row groups by Y-center gap, pairing each
     synthesized StaveBbox with the exact glyphs that produced it. Shared by
     estimate_staves_from_glyphs's no-stave-data fallback and by
-    assign_glyphs_to_staves's missed-stave recovery (see there)."""
+    assign_glyphs_to_staves's missed-stave recovery (see there).
+
+    typical_line_spacing, when given (assign_glyphs_to_staves's caller
+    passes the page's own already-detected staves' real spacing — see
+    _typical_line_spacing), anchors each row's estimated line_ys on that
+    reliable figure instead of deriving spacing from the row's own glyphs'
+    bounding box, which a single unusually high/low note can badly skew.
+    Left None (estimate_staves_from_glyphs's whole-page-fallback caller,
+    where no real line data exists anywhere to borrow from) preserves the
+    old bbox-derived guess exactly, since there's nothing better to use."""
     if not glyphs:
         return []
     neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
@@ -554,13 +600,24 @@ def _cluster_glyphs_into_staves(
     for i, row in enumerate(rows):
         h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
         est_uly = max(0, min(g.uly for g in row) - pad)
+        if typical_line_spacing:
+            # Anchor on the row's own median note height (robust to a
+            # single outlier note) using the page's REAL spacing, rather
+            # than quartering this row's own bbox span — see docstring.
+            # clef_line's default (3rd of 4 lines, index len(line_ys)-3=1)
+            # sits just above center; a 4-point staff centered on j=1.5
+            # keeps that same convention while using reliable spacing.
+            center_y = median(g.cy for g in row)
+            line_ys = [center_y + typical_line_spacing * (j - 1.5) for j in range(4)]
+        else:
+            line_ys = [est_uly + h * j / 3 for j in range(4)]
         stave = StaveBbox(
             id=f"{id_prefix}-{i}",
             ulx=max(0, min(g.ulx for g in row) - pad),
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
-            line_ys=[est_uly + h * j / 3 for j in range(4)],
+            line_ys=line_ys,
         )
         groups.append((stave, row))
     return groups
@@ -682,20 +739,87 @@ def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tupl
     note_abs = clef_abs - step
     return _PITCH_NOTES[note_abs % 7], str(note_abs // 7)
 
+def _line_spacing(line_ys: list[float]) -> Optional[float]:
+    """Median gap between consecutive (sorted ascending) staff line
+    positions, or None when there are fewer than 2 points to compare, or
+    the points don't actually increase. Shared by _step_from_y (pitch
+    assignment) and _stave_zone_bounds (the stave's rendered facsimile
+    zone), so both always agree on what "one line-to-line spacing" means
+    for a given stave — see _stave_zone_bounds's docstring for why that
+    agreement matters."""
+    if len(line_ys) < 2:
+        return None
+    spacings = [line_ys[i + 1] - line_ys[i] for i in range(len(line_ys) - 1)]
+    spacing = median(spacings)
+    return spacing if spacing > 0 else None
+
 def _step_from_y(y: float, line_ys: list[float], clef_line: int = 3) -> Optional[int]:
     """Diatonic step (relative to the clef line) for a point at height y,
     given sorted ascending staff line Y positions. Returns None when there
     isn't enough line data to place it (len(line_ys) < 2) — callers fall
     back to a fixed default pitch in that case, same as this file's old
     per-component behaviour before @intm-chaining replaced the y_fraction
-    heuristic (see neume_mapping.py and mothra#137)."""
-    if len(line_ys) < 2:
+    heuristic (see neume_mapping.py and mothra#137).
+
+    clef_y is anchored from the BOTTOM detected line and extrapolated by
+    the (median) line spacing — clef_line follows MEI's @line convention
+    of counting lines from the bottom of the staff — rather than indexing
+    line_ys[len(line_ys) - clef_line] directly. That direct-index form
+    silently assumed len(line_ys) always equals the real total line count
+    for this stave; on a real page, per-stave detected line counts varied
+    (2 to 7 for a nominal 4-line stave, from a mix of under-detection and
+    duplicate left/right line-fragment sampling — see staffline_adapter's
+    _dedupe_line_ys for the latter), so that assumption broke — even
+    wrapping to the wrong end of the list via a negative index when a
+    stave had fewer real lines than clef_line. Extrapolating from the
+    bottom with the measured spacing degrades far more gracefully when a
+    stave's real line count doesn't match the nominal expectation.
+    Likewise, line_spacing uses the MEDIAN gap rather than the mean, so a
+    handful of remaining anomalous gaps can't drag the spacing estimate
+    (and therefore every note's diatonic step) off by a large margin."""
+    line_spacing = _line_spacing(line_ys)
+    if line_spacing is None:
         return None
-    spacings = [line_ys[i + 1] - line_ys[i] for i in range(len(line_ys) - 1)]
-    line_spacing = sum(spacings) / len(spacings)
-    clef_idx = len(line_ys) - clef_line
-    clef_y = line_ys[clef_idx]
+    clef_y = line_ys[-1] - line_spacing * (clef_line - 1)
     return round((y - clef_y) / (line_spacing / 2))
+
+def _stave_zone_bounds(stave: StaveBbox) -> tuple[int, int]:
+    """(uly, lry) to use for this stave's <sb>-referenced facsimile zone.
+
+    Verovio's own facsimile-transcription rendering (EditorToolkitNeume::
+    Resize / SyncFromFacsimileFunctor's VisitPageEnd — confirmed against
+    Verovio's own source; it isn't vendored in this repo) derives its
+    per-note PIXEL spacing from this zone's height alone:
+    zone_height / (STAFF_LINES - 1). That is a completely separate
+    computation from _step_from_y's pitch assignment, which uses the real
+    MEDIAN detected line-to-line gap — the two must agree, or a note's
+    assigned diatonic step (correct in the abstract) renders at the wrong
+    pixel distance from the clef. Confirmed on a real page: the union-of-
+    detected-line-bounding-boxes zone heights `staves_from_jsomr()` (and
+    the padded fallbacks elsewhere in this file) produce implied a
+    per-line spacing anywhere from 0.7x to 2.2x the real spacing,
+    visibly displacing every note on the affected staves — most visibly
+    once a stave's zone was manually realigned with the real page in
+    Neon (which only ever changes the zone's own geometry, never any
+    note's pname/oct — see EditorToolkitNeume::Resize), suddenly exposing
+    the mismatch that had been partly masked by the zone's prior,
+    also-off position.
+
+    When real line data is available (>=2 points), this returns a zone
+    spanning exactly (STAFF_LINES - 1) * real_spacing, anchored on the
+    bottommost detected line — matching _step_from_y's own bottom-
+    anchored convention exactly, so Verovio's per-step pixel unit and
+    _step_from_y's per-step diatonic assignment always agree. Falls back
+    to the stave's own (possibly padded/union) uly/lry when there's no
+    usable line data to anchor on — same case _step_from_y itself falls
+    back to a fixed default pitch for, since there's no real spacing
+    convention to reconcile with either way."""
+    spacing = _line_spacing(stave.line_ys)
+    if spacing is None:
+        return stave.uly, stave.lry
+    lry = stave.line_ys[-1]
+    uly = lry - spacing * (STAFF_LINES - 1)
+    return round(uly), round(lry)
 
 def _component_pitches(
     anchor_step: Optional[int],
@@ -782,25 +906,26 @@ def build_mei(
     stave_zone_ids: dict[int, str] = {}
     clef_zone_ids: dict[int, str] = {}
     for i, stave in enumerate(staves):
+        zone_uly, zone_lry = _stave_zone_bounds(stave)
         zone_id = f"sz-{stave.id}"
         ET.SubElement(surface, _tag("zone"), {
             XML_ID: zone_id,
             "type": "staff",
             "ulx": str(stave.ulx),
-            "uly": str(stave.uly),
+            "uly": str(zone_uly),
             "lrx": str(stave.lrx),
-            "lry": str(stave.lry),
+            "lry": str(zone_lry),
         })
         stave_zone_ids[i] = zone_id
         # Clef zone: left edge of stave, roughly square (height ≈ staff height)
         clef_zone_id = f"cz-{stave.id}"
-        stave_h = max(stave.lry - stave.uly, 1)
+        stave_h = max(zone_lry - zone_uly, 1)
         ET.SubElement(surface, _tag("zone"), {
             XML_ID: clef_zone_id,
             "ulx": str(stave.ulx),
-            "uly": str(stave.uly),
+            "uly": str(zone_uly),
             "lrx": str(stave.ulx + stave_h),
-            "lry": str(stave.lry),
+            "lry": str(zone_lry),
         })
         clef_zone_ids[i] = clef_zone_id
 
@@ -862,7 +987,7 @@ def build_mei(
     ET.SubElement(staff_grp, _tag("staffDef"), {
         XML_ID: f"staffdef-{staff_grp_id}",
         "n": "1",
-        "lines": "4",
+        "lines": str(STAFF_LINES),
         "notationtype": "neume",
         "clef.shape": clef_shape,
         "clef.line": str(clef_line),

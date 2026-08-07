@@ -26,8 +26,8 @@ import encode_to_mei as mei  # noqa: E402
 MEI_NS = "{http://www.music-encoding.org/ns/mei}"
 
 
-def _stave(sid, uly, lry, ulx=0, lrx=500):
-    return mei.StaveBbox(id=sid, ulx=ulx, uly=uly, lrx=lrx, lry=lry)
+def _stave(sid, uly, lry, ulx=0, lrx=500, line_ys=None):
+    return mei.StaveBbox(id=sid, ulx=ulx, uly=uly, lrx=lrx, lry=lry, line_ys=line_ys or [])
 
 
 def _glyph(gid, ulx, uly=110, ncols=20, nrows=20, class_name="punctum"):
@@ -37,6 +37,115 @@ def _glyph(gid, ulx, uly=110, ncols=20, nrows=20, class_name="punctum"):
 
 def _box(syl, ulx, lrx, uly, lry):
     return {"syl": syl, "ul": [ulx, uly], "lr": [lrx, lry]}
+
+
+# --- _typical_line_spacing / _cluster_glyphs_into_staves's reliable-spacing path ---
+
+def test_typical_line_spacing_ignores_staves_with_fewer_than_two_lines():
+    staves = [
+        _stave("real1", 100, 160, line_ys=[100, 120, 140, 160]),   # spacing 20
+        _stave("real2", 300, 372, line_ys=[300, 324, 348, 372]),   # spacing 24
+        _stave("crude", 500, 520, line_ys=[510]),                  # single point -- excluded
+        _stave("empty", 600, 620, line_ys=[]),                     # no data -- excluded
+    ]
+    # median of the two real per-stave spacings (20 and 24) -> 22
+    assert mei._typical_line_spacing(staves) == 22
+
+def test_typical_line_spacing_none_when_nothing_qualifies():
+    staves = [_stave("crude", 100, 120, line_ys=[110]), _stave("empty", 200, 220, line_ys=[])]
+    assert mei._typical_line_spacing(staves) is None
+
+def test_cluster_glyphs_into_staves_uses_reliable_spacing_over_bbox_guess():
+    """Regression test for the reported bug: a row with one unusually high
+    outlier note would badly inflate the OLD bbox-quartered line_ys guess
+    (skewing every note's computed pitch, since Neon/Verovio renders from
+    pitch, not raw pixel position -- see _step_from_y). Given the page's
+    own reliable typical_line_spacing, the estimated lines must use THAT
+    spacing, anchored on the row's median note height, not the row's own
+    skewed bounding box."""
+    # A smooth ascending run, each consecutive note within the row-gap
+    # threshold (avg_h * 1.5 = 30px here) of its neighbor -- so it stays
+    # ONE row-cluster -- but the row's total bbox span (cy 100 to 225) is
+    # still much taller than a real 20px-spaced staff, exactly like a
+    # melismatic run with genuine pitch range would produce.
+    row_glyphs = [
+        _glyph("g1", 10, uly=90),
+        _glyph("g2", 40, uly=115),
+        _glyph("g3", 70, uly=140),
+        _glyph("g4", 100, uly=165),
+        _glyph("g5", 130, uly=190),
+        _glyph("g6", 160, uly=215),
+    ]
+    groups_with_hint = mei._cluster_glyphs_into_staves(
+        row_glyphs, page_w=1000, page_h=1000, typical_line_spacing=20.0,
+    )
+    assert len(groups_with_hint) == 1
+    stave, _ = groups_with_hint[0]
+    spacings = [stave.line_ys[i + 1] - stave.line_ys[i] for i in range(len(stave.line_ys) - 1)]
+    assert all(abs(s - 20.0) < 1e-9 for s in spacings)
+
+    groups_without_hint = mei._cluster_glyphs_into_staves(row_glyphs, page_w=1000, page_h=1000)
+    assert len(groups_without_hint) == 1
+    stave_old, _ = groups_without_hint[0]
+    old_spacings = [stave_old.line_ys[i + 1] - stave_old.line_ys[i] for i in range(len(stave_old.line_ys) - 1)]
+    # Without the hint, spacing is still derived from the (outlier-inflated)
+    # bbox span, so it's nowhere near the real 20px spacing -- confirms the
+    # fix is actually doing something, not a no-op.
+    assert all(s > 40.0 for s in old_spacings)
+
+
+# --- _step_from_y ------------------------------------------------------------
+
+def test_step_from_y_matches_normal_indexing_for_a_full_four_line_stave():
+    """Sanity check: for the common case (exactly 4 real, evenly-spaced
+    lines), the new bottom-anchored/extrapolated formula must still land
+    on the same clef_y (and therefore the same step) the old direct-index
+    formula did -- this is a robustness fix for abnormal line counts, not
+    a change in behavior for the normal case."""
+    line_ys = [100.0, 120.0, 140.0, 160.0]
+    # Old formula: clef_idx = len(line_ys) - 3 = 1 -> clef_y = line_ys[1] = 120.
+    assert mei._step_from_y(120.0, line_ys, clef_line=3) == 0
+    assert mei._step_from_y(140.0, line_ys, clef_line=3) == 2  # 20px below clef, /10 half-spacing
+
+def test_step_from_y_real_page_regression_stave_no_longer_shifted():
+    """Reproduces the actual reported bug with real numbers from a live
+    page. Before this fix, the affected stave's raw (undeduplicated) 7
+    line_ys made clef_idx = 7 - 3 = 4 index into the wrong real line,
+    landing a note-height's worth away from the real clef position, and
+    the old mean-based spacing was itself dragged down by the near-zero
+    duplicate gaps -- compounding the error. After staffline_adapter's
+    dedup, this stave's 4 real line_ys must place a mid-staff point at
+    essentially the same diatonic step as a NORMAL sibling stave's
+    mid-staff point on the same page, instead of multiple steps higher."""
+    normal_stave_line_ys = [487.6, 513.9, 543.5, 572.6]     # jsomr-stave-2
+    fixed_stave_line_ys = [841.9, 870.6, 900.8, 931.6]      # jsomr-stave-4, post-dedup
+    normal_center = (487 + 588) / 2
+    fixed_center = (826 + 945) / 2
+    normal_step = mei._step_from_y(normal_center, normal_stave_line_ys, clef_line=3)
+    fixed_step = mei._step_from_y(fixed_center, fixed_stave_line_ys, clef_line=3)
+    assert abs(normal_step - fixed_step) <= 1
+
+def test_step_from_y_under_detected_stave_no_longer_wraps_negative_index():
+    """A stave with fewer real lines detected than clef_line (e.g. only 2
+    of a nominal 4) used to compute clef_idx = 2 - 3 = -1, silently
+    wrapping to line_ys[-1] via Python's negative indexing -- an
+    accident, not a deliberate choice, and wrong for clef_line=3 (which
+    should sit 2 spacings above the bottom line, not AT it). The
+    extrapolated formula must place clef_y strictly above the bottom
+    line by 2 spacings instead of exactly on it."""
+    line_ys = [302.6, 330.8]  # only 2 real lines detected, spacing ~28.2
+    spacing = line_ys[1] - line_ys[0]
+    expected_clef_y = line_ys[-1] - spacing * 2
+    # A point exactly at the expected clef_y must be step 0.
+    assert mei._step_from_y(expected_clef_y, line_ys, clef_line=3) == 0
+    # It must NOT be step 0 at the bottom line itself (the old wraparound
+    # bug's effective clef_y) -- confirms this isn't a no-op.
+    assert mei._step_from_y(line_ys[-1], line_ys, clef_line=3) != 0
+
+def test_step_from_y_none_for_too_few_or_degenerate_lines():
+    assert mei._step_from_y(100.0, []) is None
+    assert mei._step_from_y(100.0, [100.0]) is None
+    assert mei._step_from_y(100.0, [100.0, 100.0]) is None  # zero spacing -- can't quantize
 
 
 # --- _group_staves_by_row --------------------------------------------------
@@ -260,3 +369,43 @@ def test_isolated_stave_with_no_boxes_still_falls_back_to_dash():
         el.text for el in root.findall(f".//{MEI_NS}syllable/{MEI_NS}syl")
     ]
     assert syl_texts and all(t == "-" for t in syl_texts)
+
+
+# --- end-to-end: recovered/missed stave gets reliable, not bbox-skewed, line_ys ---
+
+def test_recovered_stave_uses_page_spacing_not_its_own_outlier_skewed_bbox():
+    """Reproduces the actual reported bug: a real detected stave elsewhere
+    on the page carries genuine line_ys; a second physical row's glyphs
+    don't overlap ANY detected stave (the detector missed that system
+    entirely) and include one outlier-high note, so
+    assign_glyphs_to_staves has to synthesize a stave for it via
+    _cluster_glyphs_into_staves. Before this fix, that synthesized stave's
+    line_ys came purely from the row's own (outlier-inflated) bounding
+    box -- wildly wrong spacing, which Neon/Verovio would render pitches
+    against (see _step_from_y), floating notes far from their real staff.
+    After this fix, the recovered stave's line_ys uses the page's own
+    real spacing instead."""
+    detected = _stave("real", 100, 160, line_ys=[100, 120, 140, 160])  # real, 20px spacing
+    # A smooth ascending run (see the _cluster_glyphs_into_staves test
+    # above for why it's shaped this way): stays one row-cluster, but its
+    # own bbox span is much taller than the real 20px staff spacing, and
+    # it's far below (500+) the detected stave so it doesn't overlap --
+    # exactly the "detector missed this whole system" scenario.
+    missed_row_glyphs = [
+        _glyph("m1", 10, uly=490),
+        _glyph("m2", 40, uly=515),
+        _glyph("m3", 70, uly=540),
+        _glyph("m4", 100, uly=565),
+        _glyph("m5", 130, uly=590),
+        _glyph("m6", 160, uly=615),
+    ]
+
+    glyphs_by_stave, staves = mei.assign_glyphs_to_staves(
+        missed_row_glyphs, [detected], page_w=1000, page_h=1000,
+    )
+
+    assert len(staves) == 2  # the real one, plus one recovered for the missed row
+    recovered = staves[1]
+    spacings = [recovered.line_ys[i + 1] - recovered.line_ys[i] for i in range(len(recovered.line_ys) - 1)]
+    # Must match the real stave's own 20px spacing, not an outlier-skewed guess.
+    assert all(abs(s - 20.0) < 1e-9 for s in spacings)

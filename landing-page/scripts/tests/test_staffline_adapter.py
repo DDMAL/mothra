@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from staffline_adapter import staves_from_jsomr, y_values_at  # noqa: E402
+from staffline_adapter import staves_from_jsomr, y_values_at, _dedupe_line_ys  # noqa: E402
 
 
 def _line(stave_id, within_stave_index, x_start, x_end, y_values,
@@ -126,6 +126,47 @@ def test_within_stave_index_none_does_not_crash_sort():
 
 def test_empty_input_produces_no_staves():
     assert staves_from_jsomr([]) == []
+
+
+# --- _dedupe_line_ys / the real-page duplicate-fragment regression --------
+
+def test_dedupe_line_ys_merges_close_pairs_keeps_real_gaps():
+    """Reproduces the actual reported bug directly against real numbers
+    pulled from a live page: one stave's 4 real ruled lines were each
+    split into a left-half/right-half JSOMR fragment pair by the
+    detector, sampled a couple px apart (see y_values_at's docstring for
+    why), inflating line_ys to 7 entries -- which then badly corrupted
+    encode_to_mei.py's clef-line lookup and rendered every note on that
+    stave at a wrong pitch."""
+    raw = [841.2, 842.6, 869.5, 871.7, 899.7, 901.9, 931.6]
+    deduped = _dedupe_line_ys(raw)
+    assert len(deduped) == 4
+    # Merged pairs collapse to their mean; the unpaired last line passes through.
+    assert deduped[0] == (841.2 + 842.6) / 2
+    assert deduped[-1] == 931.6
+
+def test_dedupe_line_ys_leaves_genuinely_spaced_lines_alone():
+    assert _dedupe_line_ys([100.0, 120.0, 140.0, 160.0]) == [100.0, 120.0, 140.0, 160.0]
+
+def test_dedupe_line_ys_short_lists_pass_through_unchanged():
+    assert _dedupe_line_ys([]) == []
+    assert _dedupe_line_ys([100.0]) == [100.0]
+    assert _dedupe_line_ys([100.0, 105.0]) == [100.0, 105.0]  # only 2 points -- nothing to compare
+
+def test_staves_from_jsomr_dedupes_left_right_fragment_pairs_end_to_end():
+    """Same scenario as above, but through the real staves_from_jsomr()
+    entry point -- a stave whose staff-line detector emitted separate
+    left-half and right-half records for each of 4 real lines."""
+    records = []
+    real_line_ys = [130.0, 160.0, 190.0, 220.0]
+    for i, y in enumerate(real_line_ys):
+        # Right half genuinely covers the stave's x_mid; left half doesn't,
+        # so it gets clamped to its own edge a couple px off from y.
+        records.append(_line(0, i * 2, 400, 900, [y] * 501, ulx=400, uly=int(y) - 5, lrx=900, lry=int(y) + 5))
+        records.append(_line(0, i * 2 + 1, 50, 350, [y + 1.5] * 301, ulx=50, uly=int(y) - 4, lrx=350, lry=int(y) + 6))
+    staves = staves_from_jsomr(records)
+    assert len(staves) == 1
+    assert len(staves[0].line_ys) == 4
 
 
 if __name__ == "__main__":
