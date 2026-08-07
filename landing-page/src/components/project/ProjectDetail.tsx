@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
@@ -18,6 +18,7 @@ import StafflinesTab from "./StafflinesTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
 import TruncatedName from "../shared/TruncatedName";
+import { subscribeActiveJobs, getActiveJobsSnapshot } from "../../lib/activeJobs";
 
 const STEPS = [
   "annotate",
@@ -91,6 +92,14 @@ export default function ProjectDetail({
     "annotations" | "text" | "stafflines" | "mei files"
   >("annotations");
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Client-side mirror of the backend's cross-kind "one active job per
+  // project" guard (job_store.py's get_active_job_for_project) — disables
+  // Continue before the user can even attempt a kickoff that the backend
+  // would reject with a 409, instead of them hitting an error. The backend
+  // check remains the actual source of truth (this registry is in-memory,
+  // reset on reload, not shared across tabs).
+  const activeJobsSnapshot = useSyncExternalStore(subscribeActiveJobs, getActiveJobsSnapshot);
+  const activeJobForProject = activeJobsSnapshot.find((j) => j.projectId === project.id) ?? null;
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
@@ -101,6 +110,7 @@ export default function ProjectDetail({
   const [batchStartFolio, setBatchStartFolio] = useState("");
   const [batchEndFolio, setBatchEndFolio] = useState("");
   const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
+
 
   useEffect(() => {
     setBatchStartFolio("");
@@ -705,8 +715,10 @@ export default function ProjectDetail({
               nextStep === 3 ? "continue: neon" :
               "continue: send";
             return (
+              <>
               <button
                 onClick={() => {
+                  if (activeJobForProject) return; // defensive; button is disabled below anyway
                   if (nextStep === 0) {
                     const hasUsableModel = 
                       inferenceSettings.modelPreset === "medieval" || 
@@ -739,10 +751,17 @@ export default function ProjectDetail({
                   }
                   onContinue();
                 }}
-                className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+                disabled={!!activeJobForProject}
+                className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {continueLabel} &rarr;
               </button>
+              {activeJobForProject && (
+                <p className="text-white/70 text-xs mt-1 text-center">
+                  a {activeJobForProject.kind} job is already running for this project — please wait for it to finish
+                </p>
+              )}
+              </>
             );
           })()}
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">

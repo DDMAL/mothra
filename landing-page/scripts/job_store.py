@@ -50,7 +50,39 @@ def create_job(job_id: str, kind: str, project_id: Optional[int], *,
         return job_id, True
     finally:
         release_db_conn(con)
-    
+
+def get_active_job_for_project(project_id: int) -> Optional[dict]:
+    """Returns {"job_id": ..., "kind": ...} for the most recent pending/running
+    job for this project, across ALL kinds, or None if there isn't one.
+
+    Unlike create_job's dedupe_seconds (scoped to kind+project_id, and only a
+    few-second window — meant to collapse an exact duplicate kickoff, e.g. a
+    React StrictMode double-invoke), this has no time window and isn't
+    scoped to one kind: it's a cross-kind guard used by predict/text-batch
+    kickoff endpoints to prevent a DIFFERENT kind of job from starting while
+    one is already running for the same project. Without it, a fast job
+    with no long-running step of its own (e.g. text_batch, which never
+    calls paco's classifier) can start and finish before a slow one (e.g.
+    predict, when paco's classifier is running inside it) that's still
+    genuinely in progress — and whichever job's own ProcessingPage mount
+    happens to see "done" first drives navigation, with no idea the other
+    job even exists.
+    """
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT job_id, kind FROM jobs WHERE project_id=%s"
+            " AND status IN ('pending','running')"
+            " ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return {"job_id": row[0], "kind": row[1]} if row else None
+    finally:
+        release_db_conn(con)
+
 def publish_event(job_id: str, event: dict) -> None:
     con = get_db_conn()
     try:

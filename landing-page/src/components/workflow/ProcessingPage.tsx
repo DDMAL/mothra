@@ -172,7 +172,15 @@ export default function ProcessingPage({
   const consumeStream = useCallback(async (resp: Response) => {
     const collectedLogs: string[] = [];
     if (!resp.ok || !resp.body) {
-      const msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
+      let msg = !resp.body ? "no response body" : `server error (HTTP ${resp.status})`;
+      if (resp.body) {
+        try {
+          const data = await resp.json();
+          if (data?.detail) msg = data.detail;
+        } catch {
+          // not JSON — keep the generic message
+        }
+      }
       setStreamError(msg);
       setRevealedLogs((prev) => [...prev, `error: ${msg}`]);
       return;

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import uuid as _uuid
 
 from auth_api import get_current_user, require_project_owner, db_cursor
-from job_store import create_job
+from job_store import create_job, get_active_job_for_project
 from tasks_predict import run_predict_task
 
 router = APIRouter()
@@ -41,8 +41,15 @@ async def run_predict(
 
     if body.model_preset == "printed":
         raise HTTPException(status_code=400, detail="printed text detection is not available yet!")
-    if body.model_preset == "custom" and not body.model_id: 
+    if body.model_preset == "custom" and not body.model_id:
         raise HTTPException(status_code=400, detail="model_id is required when model_preset is 'custom'")
+    active = get_active_job_for_project(project_id)
+    if active is not None and active["kind"] != "predict":
+        raise HTTPException(
+            status_code=409,
+            detail=f"a {active['kind']} job (job {active['job_id']}) is already running for this "
+            "project — wait for it to finish or cancel it before starting a predict job.",
+        )
     new_id = _uuid.uuid4().hex[:8]
     kwargs = {"job_id": new_id, "project_id": project_id, "body": body.model_dump()}
     job_id, is_new = create_job(new_id, "predict", project_id,

@@ -27,3 +27,8 @@ export function subscribeActiveJobs(listener: () => void): () => void {
 export function getActiveJobsSnapshot(): ActiveJob[] {
     return activeJobs;
 }
+
+export function getActiveJobForProject(projectId: number | null): ActiveJob | null {
+    if (projectId == null) return null;
+    return activeJobs.find((j) => j.projectId === projectId) ?? null;
+}
