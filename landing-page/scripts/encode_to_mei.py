@@ -359,7 +359,7 @@ def _build_syllable_units(
     stave, else a pure gap-based fallback with "-" text (this file's
     original pre-text-alignment behavior)."""
     if stave_boxes:
-        return list(zip((b["syl"] for b in stave_boxes), stave_boxes, glyph_groups))
+        return list(zip((b["syl"] for b in stave_boxes), stave_boxes, glyph_groups, strict=True))
     return [
         ("-", None, cluster)
         for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult)
@@ -492,7 +492,7 @@ def _stave_share_of_group(
 
     out_boxes: list[dict] = []
     out_glyph_groups: list[list[Glyph]] = []
-    for box, glyphs_for_box in zip(pooled_boxes, pooled_glyph_groups):
+    for box, glyphs_for_box in zip(pooled_boxes, pooled_glyph_groups, strict=True):
         own_share = [g for g in glyphs_for_box if g.id in own_ids]
         if own_share or (not glyphs_for_box and id(box) in native_box_ids):
             out_boxes.append(box)
@@ -605,12 +605,14 @@ def _cluster_glyphs_into_staves(
             # single outlier note) using the page's REAL spacing, rather
             # than quartering this row's own bbox span — see docstring.
             # clef_line's default (3rd of 4 lines, index len(line_ys)-3=1)
-            # sits just above center; a 4-point staff centered on j=1.5
-            # keeps that same convention while using reliable spacing.
+            # sits just above center; a STAFF_LINES-point staff centered on
+            # the middle offset keeps that same convention while using
+            # reliable spacing, and stays correct if STAFF_LINES changes.
             center_y = median(g.cy for g in row)
-            line_ys = [center_y + typical_line_spacing * (j - 1.5) for j in range(4)]
+            offset = (STAFF_LINES - 1) / 2
+            line_ys = [center_y + typical_line_spacing * (j - offset) for j in range(STAFF_LINES)]
         else:
-            line_ys = [est_uly + h * j / 3 for j in range(4)]
+            line_ys = [est_uly + h * j / (STAFF_LINES - 1) for j in range(STAFF_LINES)]
         stave = StaveBbox(
             id=f"{id_prefix}-{i}",
             ulx=max(0, min(g.ulx for g in row) - pad),
@@ -1107,7 +1109,7 @@ def build_mei(
                     missing_classes.add(glyph.class_name)
                 anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
                 pitches = _component_pitches(anchor_step, components)
-                for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches)):
+                for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
@@ -1428,6 +1430,45 @@ def verify_and_correct_syllables(
         stave_boxes = boxes_by_stave.get(stave_idx, [])
         glyph_groups = _assign_glyphs_to_boxes(neume_glyphs, stave_boxes) if stave_boxes else []
         new_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
+
+        # _reconstruct_mei_state's staves come from the WRITTEN <staffDef>
+        # zone -- _stave_zone_bounds()'s tighter, Verovio-spacing-matched
+        # band, not the raw stave bbox build_mei originally ran
+        # _assign_boxes_to_staves against (see that function's docstring).
+        # A real syl_box that landed correctly on this stave at encode time
+        # can therefore fall just outside the tighter reconstructed band
+        # here and get bucketed elsewhere, leaving this stave's own glyphs
+        # with no box -- i.e. _build_syllable_units's "-" no-text fallback,
+        # even though its row-mate had the real word right there and
+        # nothing about mothra-text's data actually changed. Guard against
+        # that specific regression: never let a "-" fallback overwrite an
+        # existing real syl_text for the exact same glyph grouping -- only
+        # a genuine glyph-membership change (row split/merge, reordering)
+        # or a genuine text change should ever get written.
+        old_units = current_syllables.get(stave_idx, [])
+        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
+        old_empty_texts = {syl_text for syl_text, glyph_ids in old_units if not glyph_ids}
+        reconciled_units = []
+        for syl_text, box, glyphs_in_syl in new_units:
+            glyph_ids = tuple(g.id for g in glyphs_in_syl)
+            if not glyph_ids:
+                # A box with no neumes assigned here is either a genuine
+                # "text with nothing under it" (build_mei can legitimately
+                # produce these for an isolated stave) or -- the same
+                # pooling gap as above -- a box a row-mate actually owns,
+                # miscounted as unclaimed only because pooling isn't
+                # redone here. Only keep it if this stave already had a
+                # matching empty-glyph unit; otherwise it's a phantom this
+                # unpooled recheck invents, not a real disagreement.
+                if syl_text not in old_empty_texts:
+                    continue
+            else:
+                old_text = old_text_by_glyphs.get(glyph_ids)
+                if syl_text == "-" and old_text not in (None, "-"):
+                    syl_text = old_text
+            reconciled_units.append((syl_text, box, glyphs_in_syl))
+        new_units = reconciled_units
+
         new_signature = [(syl_text, tuple(g.id for g in glyphs)) for syl_text, _, glyphs in new_units]
         if new_signature == current_syllables.get(stave_idx, []):
             continue # matches mothra-text

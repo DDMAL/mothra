@@ -104,6 +104,15 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
                 elapsed_s = 0.0
                 publish({"type": "log", "message": f"{image_name}: staffline classifier still running..."})
 
+        # The loop above only checks cancellation BETWEEN polls -- the
+        # thread can finish (is_alive() goes False) in the same instant a
+        # cancel request lands, right after the loop's own last
+        # check_cancelled() passed. Recheck once more here, before trusting
+        # stave_result/publishing anything from it, so a job cancelled in
+        # that exact window doesn't still write an annotation as if it
+        # completed normally.
+        check_cancelled(job_id)
+
     if "error" in stave_result:
         publish({
             "type": "log",

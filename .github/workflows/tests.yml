@@ -1,7 +1,7 @@
 name: tests
 
-# Runs the staff-finding algorithmic test suite and the landing-page
-# staffline_adapter / paco_api tests on every push, to any branch. A push-triggered
+# Runs the staff-finding algorithmic test suite and the full
+# landing-page/scripts/tests/ suite on every push, to any branch. A push-triggered
 # check still attaches to that commit's SHA, so it shows up on any pull
 # request built from those commits, same as a pull_request-triggered one
 # would -- the difference is this also runs on plain pushes with no open PR.
@@ -63,8 +63,9 @@ jobs:
         working-directory: staff-finding
         run: python -m pytest scripts/script_tests/test_run_pageOG.py
 
-      - name: landing-page -- staffline_adapter tests
-        run: python -m pytest landing-page/scripts/tests/test_staffline_adapter.py
-
-      - name: landing-page -- paco_api bridge tests
-        run: python -m pytest landing-page/scripts/tests/test_paco_api.py
+      # Runs every file under tests/ (test_staffline_adapter.py,
+      # test_paco_api.py, test_encode_to_mei.py, ...) in one step -- none of
+      # them need the test_run_page/OG-style isolation above, so there's no
+      # reason to run any of them again in a separate step.
+      - name: landing-page -- scripts tests
+        run: python -m pytest landing-page/scripts/tests/

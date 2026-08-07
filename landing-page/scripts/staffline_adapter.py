@@ -86,7 +86,7 @@ def _dedupe_line_ys(line_ys: list[float]) -> list[float]:
     jumps = [(sorted_gaps[i + 1] - sorted_gaps[i], i) for i in range(len(sorted_gaps) - 1)]
     biggest_jump, split_i = max(jumps, key=lambda t: t[0])
     small_side, large_side = sorted_gaps[split_i], sorted_gaps[split_i + 1]
-    if biggest_jump <= 0 or small_side <= 0 or large_side < small_side * 3:
+    if biggest_jump <= 0 or small_side < 0 or (small_side > 0 and large_side < small_side * 3):
         return line_ys  # no clear bimodal split -- treat every gap as real
     threshold = (small_side + large_side) / 2
 

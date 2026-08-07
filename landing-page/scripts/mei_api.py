@@ -141,9 +141,16 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
         # already corrected (see verify_and_correct_syllables's docstring
         # for what this can and can't fix).
         if not corrected and xml_content and image_bytes:
-            text_alignment = get_latest_text_alignment(cur, project_id, image_name)
-            if text_alignment:
-                dims = encode_to_mei.image_dimensions(image_bytes)
+            # The re-sync itself is an improvement, not a precondition for
+            # opening Neon -- encode_to_mei.image_dimensions can raise
+            # struct.error on a truncated/corrupt stored image, and
+            # verify_and_correct_syllables's ET.fromstring can raise
+            # ET.ParseError on XML that predates the current structure.
+            # Either must degrade to "skip the correction, open the file as-is"
+            # rather than 500 an edit session that opened fine before this.
+            try:
+                text_alignment = get_latest_text_alignment(cur, project_id, image_name)
+                dims = encode_to_mei.image_dimensions(image_bytes) if text_alignment else None
                 if dims:
                     image_w, image_h = dims
                     corrected_bytes, correction_logs = encode_to_mei.verify_and_correct_syllables(
@@ -156,6 +163,9 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
                         con.commit()
                         for line in correction_logs:
                             print(f"[mei-verify] mei_id={mei_id}: {line}", file=sys.stderr)
+            except Exception as e:
+                con.rollback()
+                print(f"[mei-verify] mei_id={mei_id}: skipped re-sync: {e!r}", file=sys.stderr)
 
     edit_token = _make_edit_token(project_id, mei_id)
     session_id = _uuid.uuid4().hex[:8]

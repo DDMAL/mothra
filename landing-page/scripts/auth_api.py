@@ -761,11 +761,20 @@ def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=De
 
 def get_latest_text_alignment(cur, project_id: int, image_name: str) -> Optional[dict]:
     """Return the most recently created text_alignments row's parsed
-    alignment_json for (project_id, image_name), or None on any lookup/
-    parse failure or missing row. Single source of truth for "what is
-    mothra-text's current syllable data for this image" -- shared by
+    alignment_json for (project_id, image_name), or None when there's no
+    row, or the stored JSON isn't a dict. Single source of truth for "what
+    is mothra-text's current syllable data for this image" -- shared by
     tasks_encode.py's _resolve_hints() (feeds a fresh encode) and
-    mei_api.py's create_edit_session (re-verifies an existing one)."""
+    mei_api.py's create_edit_session (re-verifies an existing one).
+
+    A real database failure is NOT one of those "no data" cases -- it's
+    distinguished from a missing row/malformed JSON and re-raised (after
+    rolling back the connection, since a failed query otherwise leaves the
+    pooled connection in "current transaction is aborted" state for
+    whatever runs next on it). Callers that want this function's old
+    swallow-everything behavior wrap the call in their own try/except, the
+    same way tasks_encode.py's _resolve_hints() already does for its two
+    neighboring lookups."""
     try:
         cur.execute(
             "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
@@ -773,8 +782,13 @@ def get_latest_text_alignment(cur, project_id: int, image_name: str) -> Optional
             (image_name, project_id),
         )
         row = cur.fetchone()
-        if row and row[0]:
-            return json.loads(row[0])
     except Exception:
-        pass
-    return None
+        cur.connection.rollback()
+        raise
+    if not row or not row[0]:
+        return None
+    try:
+        alignment = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    return alignment if isinstance(alignment, dict) else None

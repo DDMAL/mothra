@@ -15,12 +15,18 @@ spec:
       labels:
         app: paco-classifier-service
     spec:
+      securityContext:
+        runAsNonRoot: true
       imagePullSecrets:
         - name: ghcr-pull-secret
       containers:
         - name: paco-classifier-service
           image: ghcr.io/ddmal/mothra-paco-classifier-service:sha-0000000  # rewritten by CI's sed step on deploy
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8003
@@ -29,13 +35,22 @@ spec:
           # memory-heavy container — requests/limits below are a starting
           # point, not measured; tune after watching real usage (see
           # text-service's own OOM-kill lesson in CLAUDE.md).
+          #
+          # /health is a liveness/readiness signal only -- it does NOT
+          # exercise process_image_msae() itself (which reloads its Keras
+          # models fresh on every /classify call, so there's no persistent
+          # "warmed" state to probe for). It confirms the process is
+          # actually serving HTTP and that the weight files it validated at
+          # startup are still present -- see main.py's health() docstring.
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8003
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8003
             initialDelaySeconds: 30
             periodSeconds: 15

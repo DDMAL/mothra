@@ -276,7 +276,7 @@ def test_fragmented_row_shares_syllables_with_its_row_mate():
         syl_el = syllable.find(f"{MEI_NS}syl")
         syl_text = syl_el.text if syl_el is not None else None
         for neume in syllable.findall(f"{MEI_NS}neume"):
-            gid = neume.get(f"{{http://www.w3.org/XML/1998/namespace}}id").removeprefix("neume-")
+            gid = neume.get(mei.XML_ID).removeprefix("neume-")
             glyph_to_syl_text[gid] = syl_text
 
     # Main's glyphs (leftward, x 10-90) get the first real word.
@@ -345,7 +345,7 @@ def test_two_detected_adjacent_rows_never_cross_assign_syllables():
         syl_el = syllable.find(f"{MEI_NS}syl")
         syl_text = syl_el.text if syl_el is not None else None
         for neume in syllable.findall(f"{MEI_NS}neume"):
-            gid = neume.get(f"{{http://www.w3.org/XML/1998/namespace}}id").removeprefix("neume-")
+            gid = neume.get(mei.XML_ID).removeprefix("neume-")
             glyph_to_syl_text[gid] = syl_text
 
     assert glyph_to_syl_text["a1"] == "WordA"
@@ -400,7 +400,7 @@ def test_recovered_stave_uses_page_spacing_not_its_own_outlier_skewed_bbox():
         _glyph("m6", 160, uly=615),
     ]
 
-    glyphs_by_stave, staves = mei.assign_glyphs_to_staves(
+    _glyphs_by_stave, staves = mei.assign_glyphs_to_staves(
         missed_row_glyphs, [detected], page_w=1000, page_h=1000,
     )
 
@@ -409,3 +409,122 @@ def test_recovered_stave_uses_page_spacing_not_its_own_outlier_skewed_bbox():
     spacings = [recovered.line_ys[i + 1] - recovered.line_ys[i] for i in range(len(recovered.line_ys) - 1)]
     # Must match the real stave's own 20px spacing, not an outlier-skewed guess.
     assert all(abs(s - 20.0) < 1e-9 for s in spacings)
+
+
+# --- _stave_zone_bounds --------------------------------------------------
+
+def test_stave_zone_bounds_height_matches_measured_line_spacing():
+    stave = _stave("s", uly=100, lry=200, line_ys=[100.0, 120.0, 140.0, 160.0])
+    uly, lry = mei._stave_zone_bounds(stave)
+    spacing = mei._line_spacing(stave.line_ys)
+    assert lry == round(stave.line_ys[-1])
+    assert lry - uly == round(spacing * (mei.STAFF_LINES - 1))
+
+
+def test_stave_zone_bounds_falls_back_to_raw_bbox_with_fewer_than_two_lines():
+    # A single sampled line -- not enough points for _line_spacing -- must
+    # fall back to the stave's own raw bbox rather than divide-by-nothing.
+    one_line = _stave("s1", uly=100, lry=200, line_ys=[130.0])
+    assert mei._stave_zone_bounds(one_line) == (100, 200)
+    # No line_ys at all (e.g. a stave detected purely from its bbox).
+    no_lines = _stave("s2", uly=50, lry=90)
+    assert mei._stave_zone_bounds(no_lines) == (50, 90)
+
+
+# --- verify_and_correct_syllables -----------------------------------------
+
+def test_verify_and_correct_syllables_is_a_noop_when_already_matching():
+    """Re-verifying an MEI against the exact text_alignment it was built
+    from must change nothing -- the base case every other
+    verify_and_correct_syllables test builds on."""
+    staves = [_stave("main", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])]
+    glyphs_by_stave = {0: [_glyph("g1", 10), _glyph("g2", 40), _glyph("g3", 70)]}
+    text_alignment = {"syl_boxes": [_box("Alleluia", 5, 95, 128, 148)]}
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=1,
+    )
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, text_alignment, 2000, 2000)
+
+    assert logs == []
+    assert corrected_bytes == xml_bytes
+
+
+def test_verify_and_correct_syllables_never_erases_real_text_with_dash():
+    """Regression test for the bug this fix closes: verify_and_correct_syllables
+    deliberately does NOT redo _group_staves_by_row's cross-stave pooling
+    (see its own docstring's scope boundary), so re-running
+    _assign_boxes_to_staves/_build_syllable_units against the SAME
+    text_alignment a fragmented row was originally built from recomputes
+    the fragment stave's own syl_boxes as empty -- exactly the precondition
+    the pooling fix exists to route around. Before this fix, that empty
+    box list fell straight to the "-" fallback and clobbered the fragment's
+    real, already-correct syllable text. The fix must recognize that the
+    fragment's glyph grouping hasn't actually changed and keep its
+    existing real text instead."""
+    staves = [
+        _stave("main", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0]),
+        _stave("fragment", 95, 115, lrx=1000, line_ys=[95.0, 115.0]),
+    ]
+    glyphs_by_stave = {
+        0: [_glyph("m1", 10), _glyph("m2", 40), _glyph("m3", 70)],
+        1: [_glyph("f1", 100), _glyph("f2", 130), _glyph("f3", 160)],
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("Al-", 5, 95, 128, 148),
+            _box("-le-lu-ia", 98, 185, 128, 148),
+        ]
+    }
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=1,  # "fragment" (index 1) must be >= n_detected_staves
+                               # to be eligible for _group_staves_by_row's merge
+    )
+    # Sanity check on the precondition: build_mei's row-pooling really did
+    # give the fragment stave the real second word, not "-".
+    root_before = ET.fromstring(xml_bytes)
+    syllables_before = root_before.findall(f".//{MEI_NS}syllable")
+    fragment_text_before = next(
+        s.find(f"{MEI_NS}syl").text for s in syllables_before
+        if any(n.get(mei.XML_ID) == "neume-f1"
+               for n in s.findall(f"{MEI_NS}neume"))
+    )
+    assert fragment_text_before == "-le-lu-ia"
+
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, text_alignment, 2000, 2000)
+
+    # Nothing about mothra-text's data changed -- this must be a no-op,
+    # not a "correction" that erases the fragment's real text to "-".
+    assert logs == []
+    assert corrected_bytes == xml_bytes
+
+
+def test_verify_and_correct_syllables_applies_a_genuine_text_disagreement():
+    """When mothra-text's data genuinely changed (a different word for the
+    same glyphs), that's a real correction and must be applied -- the
+    text-preservation guard above must not make this function inert."""
+    staves = [_stave("main", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])]
+    glyphs_by_stave = {0: [_glyph("g1", 10), _glyph("g2", 40), _glyph("g3", 70)]}
+    original_alignment = {"syl_boxes": [_box("Alleluia", 5, 95, 128, 148)]}
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=original_alignment,
+        n_detected_staves=1,
+    )
+
+    corrected_alignment = {"syl_boxes": [_box("Kyrie", 5, 95, 128, 148)]}
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, corrected_alignment, 2000, 2000)
+
+    assert logs != []
+    root = ET.fromstring(corrected_bytes)
+    syl_texts = [s.find(f"{MEI_NS}syl").text for s in root.findall(f".//{MEI_NS}syllable")]
+    assert syl_texts == ["Kyrie"]

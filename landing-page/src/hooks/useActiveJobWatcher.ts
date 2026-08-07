@@ -19,8 +19,13 @@ export function useActiveJobWatcher(
         if (!r.ok) continue;
         const data = await r.json();
         if (["succeeded", "failed", "cancelled"].includes(data.status)) {
-          markJobSettled(job.jobId);
-          onJobDone(job, data.status);
+          // Only the poll cycle that actually removes this job (see
+          // markJobSettled's docstring) reports it done -- otherwise a
+          // slow-to-resolve fetch overlapping the next 5s tick can settle
+          // the same job twice and fire onJobDone twice for it.
+          if (markJobSettled(job.jobId)) {
+            onJobDone(job, data.status);
+          }
         }
       }
     }, 5000);

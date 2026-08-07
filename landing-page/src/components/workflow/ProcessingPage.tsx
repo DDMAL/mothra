@@ -348,6 +348,7 @@ export default function ProcessingPage({
       }
       const { job_id: newId } = await r.json();
       jobIdRef.current = newId;
+      registerActiveJobs(newId, projectId ?? null, jobKind ?? "unknown");
       completedRef.current = false;
       setProgress(0);
       setStages([
@@ -366,7 +367,7 @@ export default function ProcessingPage({
     } finally {
       setRetryingJob(false);
     }
-  }, [consumeStream]);
+  }, [consumeStream, projectId, jobKind]);
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">

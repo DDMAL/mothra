@@ -1,6 +1,10 @@
 fastapi>=0.110.0
 uvicorn>=0.29.0
-python-multipart>=0.0.9
+# python-multipart 0.0.9 and h11 <0.16.0 both have known DoS/parsing-
+# smuggling CVEs (h11's is CRITICAL -- malformed chunked-encoding bodies) in
+# the exact multipart-upload path /classify's `image: UploadFile` uses.
+python-multipart>=0.0.30
+h11>=0.16.0
 # tensorflow==2.15.1, not Paco_classifier's own newrequirements.txt's 2.13.1:
 # 2.13.1 hard-pins typing-extensions<4.6.0 on EVERY platform (base package,
 # tensorflow-cpu-aws, tensorflow-intel all carry the same bound -- confirmed

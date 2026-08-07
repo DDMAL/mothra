@@ -22,17 +22,19 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
 sys.path.insert(0, str(PACO_DIR))
 
 from Paco_classifier import recognition_engine  # noqa: E402
 
+# No CORS middleware: this service has no authentication of its own and is
+# only ever called server-to-server, from landing-page's backend/worker over
+# the Compose/k8s internal network (see paco_api.py) -- never directly from a
+# browser. Adding a permissive CORS policy here would let any web page that
+# can reach this port (e.g. if it were ever accidentally published, see
+# docker-compose.yml's `expose` vs `ports` note) post arbitrary images to it.
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
 
 def _resolve_staffline_models_dir() -> Path:
     """Priority order mirrors medieval_models.py's own
@@ -92,9 +94,31 @@ def _layer_to_rgba_png(image: np.ndarray, label_map: np.ndarray, id_label: int) 
         raise RuntimeError("PNG encode failed")
     return buf.tobytes()
 
+@app.get("/health")
+def health():
+    """Liveness/readiness signal for Compose's healthcheck and k8s's probes
+    (see docker-compose.yml / k8s/paco-classifier-service.yaml). Deliberately
+    does NOT exercise recognition_engine.process_image_msae() -- it calls
+    tensorflow.keras.models.load_model() fresh on every single request (no
+    caching in the vendored submodule), so there is no persistent "model
+    warmed" state to probe for; the meaningful, cheap thing to confirm
+    instead is that this process is actually serving HTTP (not just that the
+    OS has a listener on the port, which a bare TCP probe can't tell apart
+    from an app that bound the port and then crashed) and that the weight
+    files this process already validated at import time are still there."""
+    if not BACKGROUND_MODEL_PATH.exists() or not STAFFLINES_MODEL_PATH.exists():
+        raise HTTPException(status_code=503, detail="staffline classifier weights missing")
+    return {"status": "ok"}
+
+
 @app.post("/classify")
-async def classify(image: UploadFile = File(...)):
-    data = await image.read()
+def classify(image: UploadFile = File(...)):
+    # Plain `def`, not `async def`: FastAPI runs a sync endpoint in its
+    # threadpool automatically, so the blocking TensorFlow/OpenCV/PNG work
+    # below (process_image_msae, _layer_to_rgba_png) doesn't stall the event
+    # loop the way it would inside an `async def` with no `await` yield
+    # points. image.file is a SpooledTemporaryFile -- .read() is sync here.
+    data = image.file.read()
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=400, detail="could not decode uploaded image")

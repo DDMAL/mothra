@@ -148,6 +148,19 @@ def test_dedupe_line_ys_merges_close_pairs_keeps_real_gaps():
 def test_dedupe_line_ys_leaves_genuinely_spaced_lines_alone():
     assert _dedupe_line_ys([100.0, 120.0, 140.0, 160.0]) == [100.0, 120.0, 140.0, 160.0]
 
+def test_dedupe_line_ys_merges_exactly_coincident_samples():
+    """Two fragments of one ruled line can both clamp to the identical
+    fitted y (a 0.0 gap), not just a couple px apart. If that zero gap also
+    happens to be the smaller side at the biggest jump, small_side <= 0
+    used to bail out of the merge entirely (0 is not "clearly bimodal" by
+    the old guard's own math), leaving the duplicate line in line_ys -- the
+    same inflated-line-count bug this function exists to fix. A zero small
+    side is a valid (indeed the clearest possible) duplicate cluster, not
+    a reason to give up."""
+    raw = [100.0, 100.0, 130.0, 160.0]
+    deduped = _dedupe_line_ys(raw)
+    assert deduped == [100.0, 130.0, 160.0]
+
 def test_dedupe_line_ys_short_lists_pass_through_unchanged():
     assert _dedupe_line_ys([]) == []
     assert _dedupe_line_ys([100.0]) == [100.0]

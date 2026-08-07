@@ -38,8 +38,18 @@ services:
     build:
       context: .
       dockerfile: paco-classifier-service/Dockerfile
-    ports:
-      - "8003:8003"
+    # Internal-only: backend/worker reach it at http://paco-classifier-service:8003
+    # over the Compose network. /classify has no authentication, so it must
+    # never be published on the host -- `expose` documents the port without
+    # binding it to 0.0.0.0 on the host machine.
+    expose:
+      - "8003"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   backend:
     build:
@@ -66,7 +76,7 @@ services:
       text-service:
         condition: service_started
       paco-classifier-service:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy   # init_db()/_migrate_db() run at import; wait for DB
     volumes:
@@ -89,7 +99,7 @@ services:
       text-service:
         condition: service_started
       paco-classifier-service:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy
     command: celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2

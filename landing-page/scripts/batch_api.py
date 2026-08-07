@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from job_store import create_job, get_active_job_for_project
+from job_store import claim_project_job
 from tasks_text_batch import run_text_batch_task
 from auth_api import get_db_conn, get_current_user, release_db_conn, db_cursor, require_project_owner
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
@@ -89,18 +89,19 @@ def run_text_batch(project_id: int, body: BatchRunBody, user=Depends(get_current
         folios = [p[1] for p in pairs]
     skipped_count = len(body.image_ids) - len(image_ids)
 
-    active = get_active_job_for_project(project_id)
-    if active is not None and active["kind"] != "text_batch":
+    new_id = _uuid.uuid4().hex[:8]
+    task_body = {**body.model_dump(), "image_ids": image_ids, "folios": folios, "skipped_count": skipped_count}
+    job_id, is_new, active = claim_project_job(
+        project_id, "text_batch", job_id=new_id,
+        params={"project_id": project_id, "body": task_body},
+        dedupe_seconds=5,
+    )
+    if job_id is None:
         raise HTTPException(
             status_code=409,
             detail=f"a {active['kind']} job (job {active['job_id']}) is already running for this "
             "project — wait for it to finish or cancel it before starting a text-finding job.",
         )
-    new_id = _uuid.uuid4().hex[:8]
-    task_body = {**body.model_dump(), "image_ids": image_ids, "folios": folios, "skipped_count": skipped_count}
-    job_id, is_new = create_job(new_id, "text_batch", project_id,
-                                 params={"project_id": project_id, "body": task_body},
-                                 dedupe_seconds=5)
     if is_new:
         run_text_batch_task.apply_async(kwargs={"job_id": job_id, "project_id": project_id, "body": task_body}, task_id=job_id)
     return {"job_id": job_id}

@@ -20,11 +20,18 @@ export function registerActiveJobs(
   emitChange();
 }
 
-export function markJobSettled(jobId: string) {
+/** Removes jobId from the active set and reports whether it actually did
+ * so (false when some other caller already settled it first). Two
+ * concurrent watcher poll cycles can both see the same job as terminal
+ * (see useActiveJobWatcher.ts) -- the boolean return lets only the poll
+ * that "wins" the removal fire onJobDone, so a slow poll cycle can never
+ * cause a duplicate completion notification. */
+export function markJobSettled(jobId: string): boolean {
   const next = activeJobs.filter((j) => j.jobId !== jobId);
-  if (next.length === activeJobs.length) return;
+  if (next.length === activeJobs.length) return false;
   activeJobs = next;
   emitChange();
+  return true;
 }
 
 export function subscribeActiveJobs(listener: () => void): () => void {

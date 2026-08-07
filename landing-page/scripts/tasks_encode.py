@@ -58,7 +58,12 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
         con = get_db_conn()
         try:
             cur = con.cursor()
-            text_alignment = get_latest_text_alignment(cur, project_id, image_name)
+            try:
+                text_alignment = get_latest_text_alignment(cur, project_id, image_name)
+            except Exception:
+                pass  # a real DB failure here just means "no text alignment this
+                      # time" for this call site -- get_latest_text_alignment
+                      # itself already rolled back before re-raising
             try:
                 cur.execute(
                     "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"

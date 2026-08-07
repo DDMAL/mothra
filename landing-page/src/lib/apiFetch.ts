@@ -15,6 +15,43 @@ export function registerUnauthenticatedHandler(fn: () => void) {
   onUnauthenticated = fn;
 }
 
+// Refresh tokens rotate on every use (see auth_api.py) -- if two 401s land
+// at once, each holding the SAME (still-valid-for-now) refresh token, the
+// first request to actually hit /api/auth/refresh revokes that token; a
+// second, independent refresh call sent moments later with the
+// now-already-revoked token fails and clears the new token pair the first
+// call just wrote, logging out an otherwise-valid session. This module-level
+// in-flight promise serializes rotation: whichever 401 handler gets here
+// first performs the real network call, and any concurrent handler just
+// awaits and reuses ITS result instead of sending its own.
+let refreshInFlight: Promise<{
+  access_token: string;
+  refresh_token: string;
+} | null> | null = null;
+
+function refreshTokens(
+  rt: string,
+): Promise<{ access_token: string; refresh_token: string } | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "X-Refresh-Token": rt },
+    })
+      .then(async (refresh) => {
+        if (!refresh.ok) return null;
+        const data = await refresh.json();
+        setToken(data.access_token);
+        setRefreshToken(data.refresh_token);
+        return data;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 export async function apiFetch(
   input: RequestInfo,
   init?: RequestInit,
@@ -34,25 +71,20 @@ export async function apiFetch(
     return resp;
   }
 
-  // attempt a silent refresh
-  const refresh = await fetch("/api/auth/refresh", {
-    method: "POST",
-    headers: { "X-Refresh-Token": rt },
-  });
-  if (!refresh.ok) {
+  // attempt a silent refresh -- shared with any other concurrent 401
+  // handler currently in flight, see refreshTokens's docstring above
+  const refreshed = await refreshTokens(rt);
+  if (!refreshed) {
     clearToken();
     clearRefreshToken();
     toast.info("Your session has expired. Please log in again.");
     onUnauthenticated?.();
     return resp;
   }
-  const { access_token, refresh_token } = await refresh.json();
-  setToken(access_token);
-  setRefreshToken(refresh_token);
   return fetch(input, {
     ...init,
     headers: {
-      Authorization: `Bearer ${access_token}`,
+      Authorization: `Bearer ${refreshed.access_token}`,
       ...(init?.headers ?? {}),
     },
   });

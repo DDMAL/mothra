@@ -211,11 +211,17 @@ if [ -f "$ENV_FILE" ]; then
 fi
 [ -n "$IC_DB_URL" ] || echo "${C_DIM}note: no DATABASE_URL found — IC sessions won't persist across restarts${C_RST}"
 
+# config.yaml's paco_api_url default (http://localhost:8003) only matches
+# PACO_PORT's own default -- if a developer overrides PACO_PORT, the backend/
+# worker must be told the matching URL explicitly, or they'd keep pointing at
+# the stale default. Preserve an explicit PACO_API_URL override, if set.
+PACO_API_URL="${PACO_API_URL:-http://localhost:$PACO_PORT}"
+
 start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start paco "$C_PACO" "$PACO_BIN" main:app --app-dir "$ROOT/paco-classifier-service" --port "$PACO_PORT"
-start backend "$C_API" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
-start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
+start backend "$C_API" env PACO_API_URL="$PACO_API_URL" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
+start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort
 
 echo "${C_DIM}→ open http://localhost:$WEB_PORT${C_RST}"
