@@ -131,7 +131,7 @@ def test_stale_staffline_detection_is_ignored_in_favor_of_current_annotation(mon
     monkeypatch.setattr(tasks_encode, "release_db_conn", lambda con: None)
     monkeypatch.setattr(FakeConnection, "cursor", lambda self: cursor, raising=False)
 
-    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, _yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
     )
 
@@ -170,12 +170,12 @@ def test_current_staffline_detection_still_wins_when_it_matches():
         monkeypatch.setattr(tasks_encode, "release_db_conn", lambda con: None)
         monkeypatch.setattr(FakeConnection, "cursor", lambda self: cursor, raising=False)
 
-        _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        _text_alignment, _yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
             project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
         )
 
         assert stave_source == "staffline_detection"
-        assert len(yolo_stave_hints) == 1
+        assert len(_yolo_stave_hints) == 1
     finally:
         monkeypatch.undo()
 
