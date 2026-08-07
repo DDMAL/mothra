@@ -13,6 +13,7 @@ export interface TextFindingSettings {
   sourceId: string;
   folio: string;
   musicOverlapFilterEnabled: boolean;
+  debugMode: boolean;
 }
 
 export function useTextFindingSettings() {
@@ -33,6 +34,10 @@ export function useTextFindingSettings() {
 
   const [musicOverlapFilterEnabled, setMusicOverlapFilterEnabled] =
     useState(true);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugDataByImage, setDebugDataByImage] = useState<
+    Record<string, unknown>
+  >({});
 
   const patch = (p: Partial<TextFindingSettings>) => {
     if (p.columnCount !== undefined) setColumnCount(p.columnCount);
@@ -51,6 +56,7 @@ export function useTextFindingSettings() {
     if (p.folio !== undefined) setFolio(p.folio);
     if (p.musicOverlapFilterEnabled !== undefined)
       setMusicOverlapFilterEnabled(p.musicOverlapFilterEnabled);
+    if (p.debugMode !== undefined) setDebugMode(p.debugMode);
   };
 
   return {
@@ -66,6 +72,9 @@ export function useTextFindingSettings() {
     ocrOnlyMode,
     sourceId,
     folio,
+    debugMode,
+    debugDataByImage,
+    setDebugDataByImage,
     patch,
   };
 }

@@ -3,7 +3,7 @@ token-authed raw-content endpoints the embedded Neon editor iframe uses."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 import base64
 import json
 import uuid as _uuid
@@ -17,12 +17,24 @@ import encode_to_mei
 
 router = APIRouter()
 
+# Matches types.ts's StaveSource union and the tags tasks_encode.py's
+# 3-tier fallback actually produces (see auth_api.py's mei_files.stave_source
+# migration comment) -- a Literal here keeps this column's contents aligned
+# with what the frontend badge (MeiViewerModal.tsx) knows how to render,
+# instead of accepting any string a client sends.
+StaveSource = Literal[
+    "staffline_detection", "yolo_annotation", "glyph_estimate",
+    "glyph_estimate_unresolved_lines", "glyph_estimate_synthetic_lines",
+    "placeholder_no_glyphs",
+]
+
 
 class AddMeiBody(BaseModel):
     name: str
     xmlContent: str
     imageName: Optional[str] = None
     logs: Optional[list[str]] = None
+    staveSource: Optional[StaveSource] = None
 
 @router.post("/projects/{project_id}/mei")
 def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
@@ -30,8 +42,8 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
         require_project_owner(cur, project_id, user["id"])
         mei_id = _uuid.uuid4().hex
         cur.execute(
-            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name) VALUES (%s,%s,%s,%s,%s)",
-            (mei_id, project_id, body.name, body.xmlContent, body.imageName))
+            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name, stave_source) VALUES (%s,%s,%s,%s,%s,%s)",
+            (mei_id, project_id, body.name, body.xmlContent, body.imageName, body.staveSource))
         if body.logs:
             content = "\n".join(body.logs)
             cur.execute(

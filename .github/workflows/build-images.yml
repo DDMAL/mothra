@@ -21,6 +21,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A cold (cache-miss) backend build runs ~5-10 min. Anything past 45 is a
+    # stuck runner or a hung registry pull, not a slow build -- release the
+    # runner instead of letting it sit for the 6h default.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +117,9 @@ jobs:
     # images are guaranteed to exist before we roll the deployments.
     needs: build
     runs-on: ubuntu-latest
+    # Bounds the job as a whole; the rollout loop below already caps itself at
+    # 300s per deployment (4 deployments = 20 min worst case).
+    timeout-minutes: 30
     # Serialize deploys per branch; don't cancel an in-flight rollout.
     concurrency:
       group: deploy-${{ github.ref }}

@@ -28,6 +28,7 @@ interface Props {
   projectId: number;
   onClose: () => void;
   label?: string;
+  debugData?: unknown;
 }
 
 interface PlainTextToken {
@@ -85,10 +86,12 @@ export default function TextAlignmentViewerModal({
   projectId,
   onClose,
   label,
+  debugData,
 }: Props) {
   const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
   const [activeTab, setActiveTab] = useState<"image" | "json">("image");
   const [logsOpen, setLogsOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const [textPanelOpen, setTextPanelOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -443,6 +446,35 @@ export default function TextAlignmentViewerModal({
                       </div>
                     )}
                   </div>
+                  {debugData != null && (
+                    <div className="mt-2 w-full">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setDebugOpen((o) => !o)}
+                          className="text-[#1D3335]/60 text-sm hover:text-[#1D3335] cursor-pointer select-none"
+                        >
+                          {debugOpen ? "v" : ">"} debug data
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleDownload(
+                              JSON.stringify(debugData, null, 2),
+                              "debug.json",
+                              "application/json",
+                            )
+                          }
+                          className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                        >
+                          download
+                        </button>
+                      </div>
+                      {debugOpen && (
+                        <pre className="mt-2 bg-[#1D3335] text-white/80 text-xs font-mono rounded-xl p-3 h-48 w-full overflow-auto whitespace-pre">
+                          {JSON.stringify(debugData, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="shrink-0 flex h-[min(65vh,650px)]">

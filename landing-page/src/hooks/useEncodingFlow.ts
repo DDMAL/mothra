@@ -39,6 +39,8 @@ export function useEncodingFlow(
     manifest: Record<string, unknown> | null;
     image_name?: string;
     stem?: string;
+    stave_source?: string | null;
+    logs?: string[];
   }) => {
     const pair = pendingBatchPairs[ev.item];
     const stem =
@@ -57,6 +59,7 @@ export function useEncodingFlow(
       xmlContent: xmlText,
       corrected: false,
       imageName,
+      staveSource: (ev.stave_source as MeiFile["staveSource"]) ?? null,
     };
     if (selectedProjectId) {
       const r = await apiFetch(`/api/projects/${selectedProjectId}/mei`, {
@@ -66,7 +69,8 @@ export function useEncodingFlow(
           name: newMeiFile.name,
           xmlContent: xmlText,
           imageName: imageName ?? null,
-          logs: [],
+          logs: ev.logs ?? [],
+          staveSource: ev.stave_source ?? null,
         }),
       });
       const saved = await r.json();
@@ -89,6 +93,8 @@ export function useEncodingFlow(
     session_id: string;
     mei_base64: string;
     manifest: Record<string, unknown> | null;
+    stave_source?: string | null;
+    logs?: string[];
   }) => {
     setNeonManifest(ev.manifest ?? null);
     const stem =
@@ -106,6 +112,7 @@ export function useEncodingFlow(
       xmlContent: xmlText,
       corrected: false,
       imageName: pendingImageFile?.name ?? undefined,
+      staveSource: (ev.stave_source as MeiFile["staveSource"]) ?? null,
     };
     if (selectedProjectId) {
       const r = await apiFetch(`/api/projects/${selectedProjectId}/mei`, {
@@ -115,7 +122,8 @@ export function useEncodingFlow(
           name: newMeiFile.name,
           xmlContent: xmlText,
           imageName: pendingImageFile?.name ?? null,
-          logs: [],
+          logs: ev.logs ?? [],
+          staveSource: ev.stave_source ?? null,
         }),
       });
       const saved = await r.json();

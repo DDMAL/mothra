@@ -9,12 +9,14 @@ interface TextAlignmentsTabProps {
   textAlignments: TextAlignment[];
   images: ProjectImage[];
   projectId: number;
+  debugDataByImage?: Record<string, unknown>;
 }
 
 export default function TextAlignmentsTab({
   textAlignments,
   images,
   projectId,
+  debugDataByImage,
 }: TextAlignmentsTabProps) {
   const [viewSet, setViewSet] = useState<TextAlignment | null>(null);
   if (textAlignments.length === 0) {
@@ -47,6 +49,7 @@ export default function TextAlignmentsTab({
           projectId={projectId}
           onClose={() => setViewSet(null)}
           label={labelById.get(viewSet.id)}
+          debugData={debugDataByImage?.[viewSet.imageName]}
         />
       )}
       <div className="mt-6 grid grid-cols-5 gap-4">

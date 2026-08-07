@@ -14,23 +14,39 @@ on:
   push:
   workflow_dispatch:
 
+# Only the newest push per branch needs testing. Superseded runs are cancelled
+# rather than left to queue -- during the 2026-08-06 Actions incident, branches
+# with rapid successive pushes had several redundant runs each competing for
+# scarce hosted runners, which made the backlog worse for everyone.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The whole suite finishes in ~2 min. A job sitting far past that is stuck
+    # on infrastructure, not working -- fail fast instead of holding a runner.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Pillow: only thing staffline_adapter.py's own import chain
-      # (encode_to_mei.py) needs beyond stdlib + the staff-finding package.
-      # PyYAML: paco_api.py imports config.py (for PACO_API_URL), which
-      # parses config.yaml -- numpy comes in transitively via staff-finding's
-      # diagnostics extras (scipy/scikit-image both depend on it).
+      # Pillow: staffline_adapter.py's own import chain (encode_to_mei.py)
+      # needs it beyond stdlib + the staff-finding package. PyYAML: pulled
+      # in transitively both by test_bbox_pipeline_integrity.py's
+      # medieval_models import (medieval_models.py -> config.py) and by
+      # paco_api.py's own config.py import (for PACO_API_URL) -- either
+      # way it's config.py loading config.yaml. numpy comes in transitively
+      # via staff-finding's diagnostics extras (scipy/scikit-image both
+      # depend on it).
       - name: Install dependencies
         run: pip install -e "./staff-finding[diagnostics]" pytest Pillow PyYAML
 
@@ -64,8 +80,51 @@ jobs:
         run: python -m pytest scripts/script_tests/test_run_pageOG.py
 
       # Runs every file under tests/ (test_staffline_adapter.py,
-      # test_paco_api.py, test_encode_to_mei.py, ...) in one step -- none of
-      # them need the test_run_page/OG-style isolation above, so there's no
-      # reason to run any of them again in a separate step.
-      - name: landing-page -- scripts tests
+      # test_paco_api.py, test_encode_to_mei.py, test_bbox_pipeline_integrity.py,
+      # test_resolve_hints_staleness.py, ...) in one step -- none of them need
+      # the test_run_page/OG-style isolation above, so there's no reason to
+      # run any of them again in a separate step.
+      - name: landing-page -- DB-independent scripts tests
         run: python -m pytest landing-page/scripts/tests/
+
+  # Type-checks the landing-page frontend on every branch push. Before this
+  # job existed, nothing compiled TypeScript until `npm run build` ran inside
+  # landing-page/Dockerfile -- which only happens in the ci-cd workflow, which
+  # only runs on main. So a type error was invisible until *after* it had been
+  # merged, and it surfaced as a failed deploy rather than a failed test. That
+  # is exactly how `error TS6133: 'StafflinesTab' is declared but its value is
+  # never read` broke the ci-cd builds for two consecutive merges to main on
+  # 2026-08-04 (runs 30931964838 and 30940199845).
+  #
+  # This runs `tsc -b` only -- not the full `npm run build`. tsconfig.app.json
+  # sets "noEmit": true and includes just `src`, so `tsc -b` is a pure
+  # type-check that needs neither the neon submodule nor `build:neon`'s yarn
+  # step. It catches the same errors in ~5s that the Docker build takes ~5min
+  # to reach.
+  #
+  # `npm run lint` is deliberately NOT run here: eslint currently reports ~197
+  # pre-existing errors across the codebase, so adding it would fail every run
+  # until that backlog is cleared. Worth adding once it is green.
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        working-directory: landing-page
+        run: npm ci
+
+      - name: Type-check (tsc -b)
+        working-directory: landing-page
+        run: npx tsc -b

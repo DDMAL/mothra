@@ -15,7 +15,7 @@ from auth_api import get_db_conn, release_db_conn, get_latest_text_alignment
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
-    image_dimensions, scale_facsimile,
+    image_dimensions, scale_facsimile, trace_stave_zone_parity,
 )
 import staffline_adapter
 
@@ -38,7 +38,7 @@ def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) 
     finally:
         release_db_conn(con)
 
-def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h):
+def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h, ev=None):
     """Looks up saved text-alignment + stave annotations for one image.
     Falls back to None/[]/None on any lookup failure or missing
     project_id/image_name, mirroring the try/except-pass behavior of the
@@ -50,7 +50,28 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     staffline_detections data (tier 1, when a project has it) wins over the
     coarser yolo_txt-geometry heuristic in parse_yolo_stave_hints (tier 2,
     today's only source, still the fallback for projects/images that predate
-    this feature or whose staffline detection failed/was skipped)."""
+    this feature or whose staffline detection failed/was skipped).
+
+    Tier 1 is deliberately scoped to the image's CURRENT annotation, not
+    just "the newest succeeded staffline_detections row" -- staffline_detections
+    accumulates forever (never overwritten, unlike annotations' delete-then-
+    insert on re-predict; see documentation_allons-y/STAFFLINE_INTEGRATION_FOLLOWUPS.md),
+    so a project that's been re-annotated/re-predicted since its last
+    staffline detection would otherwise still match on created_at DESC and
+    silently encode against geometrically stale stave data. Same class of
+    staleness inference_api.py's _load_image_and_yolo_for_detection() already
+    guards against for the interpolate-preview/confirm routes (there, by
+    re-resolving the current annotation via image_id); here, since this
+    function is only ever called with image_name (not image_id), the
+    equivalent guard is: look up the current annotation_id for this image
+    first, then require tier 1's staffline_detections row to match it.
+
+    ev, if given, is _encode_one's own event-publishing closure -- used here
+    only to emit [trace] lines confirming staves_from_jsomr()'s input/output
+    record counts (and whether any stave fell back to its centerline-derived
+    bbox instead of a real detected one), so a silent drop between the
+    stored JSOMR and the StaveBbox list handed to build_mei() is directly
+    visible in the job log, not just inferred from code review."""
     text_alignment = None
     yolo_stave_hints = []
     stave_source = None
@@ -64,34 +85,42 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                 pass  # a real DB failure here just means "no text alignment this
                       # time" for this call site -- get_latest_text_alignment
                       # itself already rolled back before re-raising
+            current_annotation_id = None
+            current_yolo_txt = None
             try:
                 cur.execute(
-                    "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
-                    " AND status='succeeded' ORDER BY created_at DESC, id DESC LIMIT 1",
+                    "SELECT id, yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                    "ORDER BY created_at DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()
-                if row and row[0]:
-                    jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
-                    yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
-                    if yolo_stave_hints:
-                        stave_source = "staffline_detection"
+                if row:
+                    current_annotation_id, current_yolo_txt = row
             except Exception:
                 pass
-            if not yolo_stave_hints:
+            if current_annotation_id is not None:
                 try:
                     cur.execute(
-                        "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        (image_name, project_id),
+                        "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
+                        " AND status='succeeded' AND annotation_id=%s ORDER BY created_at DESC, id DESC LIMIT 1",
+                        (image_name, project_id, current_annotation_id),
                     )
                     row = cur.fetchone()
                     if row and row[0]:
-                        yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                        jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
+                        yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
                         if yolo_stave_hints:
-                            stave_source = "yolo_annotation"
+                            stave_source = "staffline_detection"
+                        if ev:
+                            ev({"type": "log", "message":
+                                f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
+                                f" -> {len(yolo_stave_hints)} stave(s) out"})
                 except Exception:
                     pass
+            if not yolo_stave_hints and current_yolo_txt:
+                yolo_stave_hints = parse_yolo_stave_hints(current_yolo_txt, page_w, page_h)
+                if yolo_stave_hints:
+                    stave_source = "yolo_annotation"
             cur.close()
         finally:
             release_db_conn(con)
@@ -99,7 +128,7 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
 
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
-                include_name_fields=False):
+                include_name_fields=False, allow_synthetic_lines=False):
     """Runs the checking/validating/processing pipeline for one XML+image
     pair, publishing the same event sequence the old synchronous generator
     yielded. Returns (session_id, result_payload)."""
@@ -136,7 +165,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h)
+        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h, ev=ev)
         if text_alignment:
             ev({"type": "log", "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
         if yolo_stave_hints:
@@ -144,10 +173,23 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             label = "staffline detection" if stave_source == "staffline_detection" else "YOLO annotations"
             ev({"type": "log", "message": f" {len(staves)} stave(s) from {label}"})
         else:
-            staves = estimate_staves_from_glyphs(glyphs, page_w, page_h)
-            ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
+            staves, stave_source = estimate_staves_from_glyphs(
+                glyphs, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+            )
+            if stave_source == "placeholder_no_glyphs":
+                ev({"type": "log", "message":
+                    " [warn] no glyphs at all -- stave geometry is a full-page placeholder, not a real detection"})
+            elif stave_source == "glyph_estimate_unresolved_lines":
+                ev({"type": "log", "message":
+                    f" [warn] estimated {len(staves)} stave(s) from glyph positions, but too few real staff-line"
+                    " glyphs to resolve pitch -- notes on these staves default to unresolved pitch (a3)."
+                    " Pass allow_synthetic_lines to fabricate plausible-looking lines instead."})
+            else:
+                ev({"type": "log", "message": f" estimated {len(staves)} stave(s) from glyph positions"})
         n_input_staves = len(staves)
-        glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, page_w, page_h)
+        glyphs_by_stave, staves = assign_glyphs_to_staves(
+            glyphs, staves, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+        )
         if len(staves) > n_input_staves:
             ev({"type": "log", "message":
                 f" recovered {len(staves) - n_input_staves} stave(s) the detector missed"})
@@ -165,6 +207,8 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             text_alignment=text_alignment,
             n_detected_staves=n_input_staves,
         )
+        for msg in trace_stave_zone_parity(staves, mei_bytes_out):
+            ev({"type": "log", "message": msg})
         original_bytes = _fetch_original_bytes(project_id, image_name)
         if original_bytes and page_w:
             try:
@@ -183,7 +227,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
         session_put(session_id, mei_bytes_out, stem, manifest)
 
-        result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest}
+        result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest, "stave_source": stave_source}
         if include_name_fields:
             result["image_name"] = image_filename
             result["stem"] = stem
@@ -195,7 +239,8 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
 
 @celery_app.task(name="encode.upload")
 def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
-                           image_filename, project_id, image_name, clef_shape, clef_line):
+                           image_filename, project_id, image_name, clef_shape, clef_line,
+                           allow_synthetic_lines=False):
     def publish(obj):
         publish_event(job_id, obj)
 
@@ -203,7 +248,8 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     image_bytes = fetch_upload(image_upload_id) if image_upload_id else None
     try:
         _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
-                    project_id, image_name, clef_shape, clef_line, include_name_fields=False)
+                    project_id, image_name, clef_shape, clef_line, include_name_fields=False,
+                    allow_synthetic_lines=allow_synthetic_lines)
         publish({"type": "done"})
         drop_upload(xml_upload_id)
         if image_upload_id:
@@ -213,10 +259,11 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
         # leave the upload rows in place so a retry can still fetch them
 
 @celery_app.task(name="encode.batch")
-def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
+def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
+                           allow_synthetic_lines=False):
     def publish(obj):
         publish_event(job_id, obj)
-    
+
     succeeded, failed = [], []
     for i, item in enumerate(items):
         check_cancelled(job_id)
@@ -228,7 +275,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line):
             session_id, _ = _encode_one(
                 publish, xml_bytes, item["xml_filename"], image_bytes, item["image_filename"],
                 project_id, item["image_name"], clef_shape, clef_line,
-                item=i, include_name_fields=True,
+                item=i, include_name_fields=True, allow_synthetic_lines=allow_synthetic_lines,
             )
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})

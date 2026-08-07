@@ -34,7 +34,14 @@ const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
 // straight to the Interactive Classifier (which falls back to placeholder
 // bboxes server-side when no YOLO annotations exist). Pair with MOTHRA_SKIP_YOLO
 // on the backend so model uploads skip checkpoint inspection too.
-const SKIP_PREDICT = Boolean(import.meta.env.VITE_SKIP_PREDICT);
+// Parsed the same way as the backend's MOTHRA_SKIP_YOLO rather than with a bare
+// Boolean(), which treats *any* non-empty string as true — including the
+// "VITE_SKIP_PREDICT=0" someone writes to turn the bypass back off.
+const SKIP_PREDICT = ["1", "true", "yes"].includes(
+  String(import.meta.env.VITE_SKIP_PREDICT ?? "")
+    .trim()
+    .toLowerCase(),
+);
 
 // A project's used images are eligible for the batch (cross-folio-aware)
 // text-finding pipeline only when every one of them was tagged with a folio
@@ -88,6 +95,8 @@ interface AppRouterProps {
     session_id: string;
     mei_base64: string;
     manifest: Record<string, unknown> | null;
+    stave_source?: string | null;
+    logs?: string[];
   }) => void;
   pendingBatchPairs: { xmlFile: File; imageFile: File }[];
   setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
@@ -98,6 +107,8 @@ interface AppRouterProps {
     manifest: Record<string, unknown> | null;
     image_name?: string;
     stem?: string;
+    stave_source?: string | null;
+    logs?: string[];
   }) => void;
 }
 
@@ -423,6 +434,12 @@ export default function AppRouter({
           projectId={selectedProject.id}
           jobKind={batchRunIds ? "text_batch" : "predict"}
           streamRequest={(signal, onJobId) => {
+            const usedModelId =
+              selectedProject.models.find((m) =>
+                (selectedProject.usedModelNames ?? []).includes(m.name),
+              )?.id ?? "";
+            const resolvedCustomModelId =
+              inferenceSettings.customModelId || usedModelId;
             if (batchRunIds) {
               return apiFetchJobStream(
                 `/api/projects/${selectedProject.id}/text-batch/run`,
@@ -448,10 +465,12 @@ export default function AppRouter({
                     mask_padding: textFindingSettings.maskPadding,
                     music_overlap_filter_enabled:
                       textFindingSettings.musicOverlapFilterEnabled,
+                    debug_mode: textFindingSettings.debugMode,
+                    mask_model_id: textFindingSettings.maskModelId || null,
                     model_preset: inferenceSettings.modelPreset,
                     model_id:
                       inferenceSettings.modelPreset === "custom"
-                        ? inferenceSettings.customModelId || null
+                        ? resolvedCustomModelId
                         : null,
                     yolo_confidence_threshold: inferenceSettings.threshold,
                     yolo_device: inferenceSettings.device,
@@ -476,15 +495,9 @@ export default function AppRouter({
                 onJobId,
               );
             }
-            const usedModelId =
-              selectedProject.models.find((m) =>
-                (selectedProject.usedModelNames ?? []).includes(m.name),
-              )?.id ?? "";
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
-            const resolvedCustomModelId =
-              inferenceSettings.customModelId || usedModelId;
             return apiFetchJobStream(
               `/api/projects/${selectedProject.id}/predict`,
               {
@@ -528,6 +541,7 @@ export default function AppRouter({
                   text_mask_padding: textFindingSettings.maskPadding,
                   text_music_overlap_filter_enabled:
                     textFindingSettings.musicOverlapFilterEnabled,
+                  text_debug_mode: textFindingSettings.debugMode,
                   text_mask_model_id: textFindingSettings.maskModelId || null,
                   text_source_id:
                     !textFindingSettings.ocrOnlyMode &&
@@ -542,6 +556,15 @@ export default function AppRouter({
           }}
           onResult={(ev) => {
             if (batchRunIds) {
+              const { text_debug_data: batchDebugData } = ev as {
+                text_debug_data?: Record<string, unknown>;
+              };
+              if (batchDebugData) {
+                textFindingSettings.setDebugDataByImage((prev) => ({
+                  ...prev,
+                  ...batchDebugData,
+                }));
+              }
               setBatchResult(ev as { batchId: string; fileCount: number });
               apiFetch(`/api/projects/${selectedProject.id}`)
                 .then((r) => r.json())
@@ -562,7 +585,16 @@ export default function AppRouter({
                 .catch(() => {});
               return;
             }
-            const { annotations } = ev as { annotations: AnnotationSet[] };
+            const { annotations, text_debug_data } = ev as {
+              annotations: AnnotationSet[];
+              text_debug_data?: Record<string, unknown>;
+            };
+            if (text_debug_data) {
+              textFindingSettings.setDebugDataByImage((prev) => ({
+                ...prev,
+                ...text_debug_data,
+              }));
+            }
             setProjects((prev) =>
               prev.map((p) =>
                 p.id === selectedProject.id

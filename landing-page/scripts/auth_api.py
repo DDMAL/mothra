@@ -331,6 +331,23 @@ def _migrate_db():
         cur.close()
         release_db_conn(con)
 
+    # Records which of tasks_encode.py's 3-tier stave-source fallback actually
+    # produced this MEI's zones ("staffline_detection" / "yolo_annotation" /
+    # "glyph_estimate" / "glyph_estimate_unresolved_lines" /
+    # "glyph_estimate_synthetic_lines" / "placeholder_no_glyphs") -- see
+    # CLAUDE.md's "Staffline detection" section. NULL for MEI files encoded
+    # before this column existed.
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE mei_files ADD COLUMN stave_source TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
     con = get_db_conn()
     cur = con.cursor()
     try:

@@ -482,258 +482,266 @@ export default function ModelTab({
           )}
         </div>
 
-        {usedNames.models.length > 0 && (
-          <div className="mt-2">
-            <button
-              onClick={() => setTextSettingsOpen((o) => !o)}
-              className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
-            >
-              {textSettingsOpen ? "▾" : "▸"} text-finding settings
-            </button>
-            {textSettingsOpen && (
-              <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-4 text-sm text-white">
-                <div className="flex flex-col gap-1">
-                  <span className="text-white/70 text-xs">column count</span>
-                  <div className="flex gap-3">
-                    {(["auto", "1", "2"] as const).map((c) => (
-                      <label
-                        key={c}
-                        className="flex items-center gap-1 cursor-pointer"
-                      >
-                        <input
-                          type="radio"
-                          name="text-column-count"
-                          value={c}
-                          checked={textFindingSettings.columnCount === c}
-                          onChange={() =>
-                            textFindingSettings.patch({ columnCount: c })
-                          }
-                          className="accent-[#1D3335]"
-                        />
-                        {c === "auto" ? "auto-detect" : c}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-white/70 text-xs">
-                    custom segmentation model
-                  </span>
-                  <select
-                    value={textFindingSettings.segmentationModelId}
-                    onChange={(e) =>
-                      textFindingSettings.patch({
-                        segmentationModelId: e.target.value,
-                      })
-                    }
-                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
-                  >
-                    <option value="">
-                      default: Kraken's built-in BLLA model
-                    </option>
-                    {segmentationModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                  {segmentationModels.length === 0 && (
-                    <span className="text-white/40 text-xs italic">
-                      no segmentation models uploaded yet — upload one above
-                      (type: text segmentation model)
-                    </span>
-                  )}
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-white/70 text-xs">
-                    custom OCR model
-                  </span>
-                  <select
-                    value={textFindingSettings.recognitionModelId}
-                    onChange={(e) =>
-                      textFindingSettings.patch({
-                        recognitionModelId: e.target.value,
-                      })
-                    }
-                    className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
-                  >
-                    <option value="">
-                      default: auto-detected Tridis model (or stub if not
-                      installed)
-                    </option>
-                    {recognitionModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                  {recognitionModels.length === 0 && (
-                    <span className="text-white/40 text-xs italic">
-                      no OCR models uploaded yet — upload one above (type: OCR /
-                      recognition model)
-                    </span>
-                  )}
-                </label>
-
-                <div>
-                  <button
-                    onClick={() => setTextAdvancedOpen((o) => !o)}
-                    className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
-                  >
-                    {textAdvancedOpen ? "▾" : "▸"} advanced
-                  </button>
-                  {textAdvancedOpen && (
-                    <div className="mt-2 flex flex-col gap-4 pl-3 border-l border-white/20">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-white/70 text-xs">device</span>
-                        <div className="flex gap-3">
-                          {(["cpu", "cuda"] as const).map((d) => (
-                            <label
-                              key={d}
-                              className="flex items-center gap-1 cursor-pointer"
-                            >
-                              <input
-                                type="radio"
-                                name="text-device"
-                                value={d}
-                                checked={textFindingSettings.device === d}
-                                onChange={() =>
-                                  textFindingSettings.patch({ device: d })
-                                }
-                                className="accent-[#1D3335]"
-                              />
-                              {d}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-white/70 text-xs">
-                          column-split sensitivity:{" "}
-                          {textFindingSettings.columnBimodalThreshold.toFixed(
-                            2,
-                          )}
-                          {textFindingSettings.columnCount === "1" &&
-                            " (ignored — column count forced to 1)"}
-                        </span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={textFindingSettings.columnBimodalThreshold}
-                          disabled={textFindingSettings.columnCount === "1"}
-                          onChange={(e) =>
-                            textFindingSettings.patch({
-                              columnBimodalThreshold: Number(e.target.value),
-                            })
-                          }
-                          className="accent-[#1D3335] disabled:opacity-40"
-                        />
-                      </label>
-
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={textFindingSettings.maskingEnabled}
-                          onChange={(e) =>
-                            textFindingSettings.patch({
-                              maskingEnabled: e.target.checked,
-                            })
-                          }
-                          className="accent-[#1D3335]"
-                        />
-                        <span className="text-white/70 text-xs">
-                          enable text-region masking (blacks out neume/music
-                          regions before Kraken segmentation to reduce
-                          over-segmentation artifacts)
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={
-                            textFindingSettings.musicOverlapFilterEnabled
-                          }
-                          onChange={(e) =>
-                            textFindingSettings.patch({
-                              musicOverlapFilterEnabled: e.target.checked,
-                            })
-                          }
-                          className="accent-[#1D3335]"
-                        />
-                        <span className="text-white/70 text-xs">
-                          drop text lines that mostly overlap detected music
-                          (helps on pages with music-notation artifacts; can
-                          hide real text on pages with interleaved text/music —
-                          check the run log for dropped lines)
-                        </span>
-                      </label>
-
-                      <label className="flex flex-col gap-1">
-                        <span className="text-white/70 text-xs">
-                          mask padding: {textFindingSettings.maskPadding}px
-                          {!textFindingSettings.maskingEnabled &&
-                            " (ignored — masking disabled)"}
-                        </span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={50}
-                          step={1}
-                          value={textFindingSettings.maskPadding}
-                          disabled={!textFindingSettings.maskingEnabled}
-                          onChange={(e) =>
-                            textFindingSettings.patch({
-                              maskPadding: Number(e.target.value),
-                            })
-                          }
-                          className="accent-[#1D3335] disabled:opacity-40"
-                        />
-                      </label>
-
-                      <label className="flex flex-col gap-1">
-                        <span className="text-white/70 text-xs">
-                          custom mask JSON
-                          {!textFindingSettings.maskingEnabled &&
-                            " (ignored — masking disabled)"}
-                        </span>
-                        <select
-                          value={textFindingSettings.maskModelId}
-                          disabled={!textFindingSettings.maskingEnabled}
-                          onChange={(e) =>
-                            textFindingSettings.patch({
-                              maskModelId: e.target.value,
-                            })
-                          }
-                          className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none disabled:opacity-40"
-                        >
-                          <option value="">
-                            default: auto-derive from this image's own YOLO text
-                            detections
-                          </option>
-                          {maskModels.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
-                        {maskModels.length === 0 && (
-                          <span className="text-white/40 text-xs italic">
-                            no mask JSON files uploaded yet — upload one above
-                            (type: text-region mask JSON)
-                          </span>
-                        )}
-                      </label>
-                    </div>
-                  )}
+        <div className="mt-2">
+          <button
+            onClick={() => setTextSettingsOpen((o) => !o)}
+            className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+          >
+            {textSettingsOpen ? "▾" : "▸"} text-finding settings
+          </button>
+          {textSettingsOpen && (
+            <div className="mt-2 bg-white/10 rounded-xl p-4 flex flex-col gap-4 text-sm text-white">
+              <div className="flex flex-col gap-1">
+                <span className="text-white/70 text-xs">column count</span>
+                <div className="flex gap-3">
+                  {(["auto", "1", "2"] as const).map((c) => (
+                    <label
+                      key={c}
+                      className="flex items-center gap-1 cursor-pointer"
+                    >
+                      <input
+                        type="radio"
+                        name="text-column-count"
+                        value={c}
+                        checked={textFindingSettings.columnCount === c}
+                        onChange={() =>
+                          textFindingSettings.patch({ columnCount: c })
+                        }
+                        className="accent-[#1D3335]"
+                      />
+                      {c === "auto" ? "auto-detect" : c}
+                    </label>
+                  ))}
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              <label className="flex flex-col gap-1">
+                <span className="text-white/70 text-xs">
+                  custom segmentation model
+                </span>
+                <select
+                  value={textFindingSettings.segmentationModelId}
+                  onChange={(e) =>
+                    textFindingSettings.patch({
+                      segmentationModelId: e.target.value,
+                    })
+                  }
+                  className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                >
+                  <option value="">
+                    default: Kraken's built-in BLLA model
+                  </option>
+                  {segmentationModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                {segmentationModels.length === 0 && (
+                  <span className="text-white/40 text-xs italic">
+                    no segmentation models uploaded yet — upload one above
+                    (type: text segmentation model)
+                  </span>
+                )}
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-white/70 text-xs">custom OCR model</span>
+                <select
+                  value={textFindingSettings.recognitionModelId}
+                  onChange={(e) =>
+                    textFindingSettings.patch({
+                      recognitionModelId: e.target.value,
+                    })
+                  }
+                  className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none"
+                >
+                  <option value="">
+                    default: auto-detected Tridis model (or stub if not
+                    installed)
+                  </option>
+                  {recognitionModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                {recognitionModels.length === 0 && (
+                  <span className="text-white/40 text-xs italic">
+                    no OCR models uploaded yet — upload one above (type: OCR /
+                    recognition model)
+                  </span>
+                )}
+              </label>
+
+              <div>
+                <button
+                  onClick={() => setTextAdvancedOpen((o) => !o)}
+                  className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
+                >
+                  {textAdvancedOpen ? "▾" : "▸"} advanced
+                </button>
+                {textAdvancedOpen && (
+                  <div className="mt-2 flex flex-col gap-4 pl-3 border-l border-white/20">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-white/70 text-xs">device</span>
+                      <div className="flex gap-3">
+                        {(["cpu", "cuda"] as const).map((d) => (
+                          <label
+                            key={d}
+                            className="flex items-center gap-1 cursor-pointer"
+                          >
+                            <input
+                              type="radio"
+                              name="text-device"
+                              value={d}
+                              checked={textFindingSettings.device === d}
+                              onChange={() =>
+                                textFindingSettings.patch({ device: d })
+                              }
+                              className="accent-[#1D3335]"
+                            />
+                            {d}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-white/70 text-xs">
+                        column-split sensitivity:{" "}
+                        {textFindingSettings.columnBimodalThreshold.toFixed(2)}
+                        {textFindingSettings.columnCount === "1" &&
+                          " (ignored — column count forced to 1)"}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={textFindingSettings.columnBimodalThreshold}
+                        disabled={textFindingSettings.columnCount === "1"}
+                        onChange={(e) =>
+                          textFindingSettings.patch({
+                            columnBimodalThreshold: Number(e.target.value),
+                          })
+                        }
+                        className="accent-[#1D3335] disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={textFindingSettings.maskingEnabled}
+                        onChange={(e) =>
+                          textFindingSettings.patch({
+                            maskingEnabled: e.target.checked,
+                          })
+                        }
+                        className="accent-[#1D3335]"
+                      />
+                      <span className="text-white/70 text-xs">
+                        enable text-region masking (blacks out neume/music
+                        regions before Kraken segmentation to reduce
+                        over-segmentation artifacts)
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={textFindingSettings.musicOverlapFilterEnabled}
+                        onChange={(e) =>
+                          textFindingSettings.patch({
+                            musicOverlapFilterEnabled: e.target.checked,
+                          })
+                        }
+                        className="accent-[#1D3335]"
+                      />
+                      <span className="text-white/70 text-xs">
+                        drop text lines that mostly overlap detected music
+                        (helps on pages with music-notation artifacts; can hide
+                        real text on pages with interleaved text/music — check
+                        the run log for dropped lines)
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-white/70 text-xs">
+                        mask padding: {textFindingSettings.maskPadding}px
+                        {!textFindingSettings.maskingEnabled &&
+                          " (ignored — masking disabled)"}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={50}
+                        step={1}
+                        value={textFindingSettings.maskPadding}
+                        disabled={!textFindingSettings.maskingEnabled}
+                        onChange={(e) =>
+                          textFindingSettings.patch({
+                            maskPadding: Number(e.target.value),
+                          })
+                        }
+                        className="accent-[#1D3335] disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-white/70 text-xs">
+                        custom mask JSON
+                        {!textFindingSettings.maskingEnabled &&
+                          " (ignored — masking disabled)"}
+                      </span>
+                      <select
+                        value={textFindingSettings.maskModelId}
+                        disabled={!textFindingSettings.maskingEnabled}
+                        onChange={(e) =>
+                          textFindingSettings.patch({
+                            maskModelId: e.target.value,
+                          })
+                        }
+                        className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none disabled:opacity-40"
+                      >
+                        <option value="">
+                          default: auto-derive from this image's own YOLO text
+                          detections
+                        </option>
+                        {maskModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                      {maskModels.length === 0 && (
+                        <span className="text-white/40 text-xs italic">
+                          no mask JSON files uploaded yet — upload one above
+                          (type: text-region mask JSON)
+                        </span>
+                      )}
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="mt-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={textFindingSettings.debugMode}
+              onChange={(e) =>
+                textFindingSettings.patch({ debugMode: e.target.checked })
+              }
+              className="accent-[#1D3335]"
+            />
+            <span className="text-white/70 text-xs">
+              debug mode — attach pipeline internals (mask boxes, OCR lines,
+              filter drops) to each result for inspection in the text alignment
+              viewer
+            </span>
+          </label>
+        </div>
       </div>
 
       {section.menu && (

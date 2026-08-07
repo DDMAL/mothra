@@ -66,6 +66,8 @@ class BatchRunBody(BaseModel):
     text_music_device: Optional[str] = None
     stave_confidence_threshold: Optional[float] = None
     stave_device: Optional[str] = None
+    debug_mode: bool = False
+    mask_model_id: Optional[str] = None
 
 
 @router.post("/projects/{project_id}/text-batch/run")

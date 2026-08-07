@@ -4,6 +4,7 @@ import { apiFetchOrThrow } from "../../lib/apiFetch";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
 import { findFolioConflict, compareFolios } from "../../utils/folio";
 import { downloadBlob } from "../../utils/download";
+import FolioSelect from "../shared/FolioSelect";
 
 // Persists across CantusSourcePanel unmount/remount (e.g. navigating to the
 // processing/IC view and back) so a slow or failed background revalidation
@@ -225,24 +226,15 @@ export default function CantusSourcePanel({
               )}
               {imageSubTab === "grid" ? (
                 <>
-                  <select
+                  <FolioSelect
                     value={folio}
-                    onChange={(e) => {
-                      patch({ folio: e.target.value });
-                      setConflict(
-                        findFolioConflict(project.images, e.target.value) ??
-                          null,
-                      );
+                    options={loadedSource.folios}
+                    onChange={(v) => {
+                      patch({ folio: v });
+                      setConflict(findFolioConflict(project.images, v) ?? null);
                     }}
                     className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-40"
-                  >
-                    <option value="">select folio...</option>
-                    {loadedSource.folios.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   {conflict && (
                     <p className="text-yellow-200 text-xs">
                       ⚠ folio "{folio}" is already used by {conflict.name}
@@ -266,35 +258,21 @@ export default function CantusSourcePanel({
                   <div className="flex gap-4">
                     <label className="flex flex-col gap-1">
                       <span className="text-xs text-white/70">start folio</span>
-                      <select
+                      <FolioSelect
                         value={batchStartFolio}
-                        onChange={(e) =>
-                          onBatchStartFolioChange(e.target.value)
-                        }
+                        options={loadedSource.folios}
+                        onChange={onBatchStartFolioChange}
                         className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-32"
-                      >
-                        <option value="">select...</option>
-                        {loadedSource.folios.map((f) => (
-                          <option key={f} value={f}>
-                            {f}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </label>
                     <label className="flex flex-col gap-1">
                       <span className="text-xs text-white/70">end folio</span>
-                      <select
+                      <FolioSelect
                         value={batchEndFolio}
-                        onChange={(e) => onBatchEndFolioChange(e.target.value)}
+                        options={loadedSource.folios}
+                        onChange={onBatchEndFolioChange}
                         className="bg-[#1D3335] border border-white/30 rounded px-2 py-1 text-sm text-white outline-none w-32"
-                      >
-                        <option value="">select...</option>
-                        {loadedSource.folios.map((f) => (
-                          <option key={f} value={f}>
-                            {f}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </label>
                   </div>
                   {batchFolioSequence.length > 0 ? (

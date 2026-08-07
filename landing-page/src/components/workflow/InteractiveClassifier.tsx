@@ -178,10 +178,13 @@ export default function InteractiveClassifier({
       .catch(() => setAvailablePresets([]));
   }, []);
 
+  // Presets are mutually exclusive here for the same reason they are in the
+  // IC iframe's own picker: checking one unchecks the rest. Kept as an array
+  // because the batch prefill and the API both take a list, and an uploaded
+  // set can still be combined with a preset — only preset-vs-preset is
+  // exclusive.
   const togglePreset = (name: string, checked: boolean) => {
-    setTrainingPresets((prev) =>
-      checked ? [...prev, name] : prev.filter((n) => n !== name),
-    );
+    setTrainingPresets(checked ? [name] : []);
     reloadOpenCreateSession();
   };
 

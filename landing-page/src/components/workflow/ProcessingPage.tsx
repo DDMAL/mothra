@@ -259,7 +259,21 @@ export default function ProcessingPage({
             collectedLogs.push(line);
             setRevealedLogs((prev) => [...prev, line]);
           }
-          if (ev.type === "result" && onResult) onResult(ev);
+          if (ev.type === "result" && onResult) {
+            // collectedLogs is complete for this item by the time its "result"
+            // fires -- _encode_one (tasks_encode.py) always emits its "log"
+            // events before "result", and nothing logs after "result" for that
+            // same item. For a batch job collectedLogs accumulates across ALL
+            // items processed so far (they run sequentially, each tagged with
+            // its own `[item+1/total]` prefix -- see the "log" branch above),
+            // so filter down to just this item's lines rather than attaching
+            // every earlier item's logs to each one's own add_mei call too.
+            const logs =
+              typeof ev.item === "number"
+                ? collectedLogs.filter((l) => l.startsWith(`[${ev.item + 1}/`))
+                : [...collectedLogs];
+            onResult({ ...ev, logs });
+          }
           if (ev.type === "error") {
             setStreamError(ev.message);
             setRevealedLogs((prev) => [...prev, `error: ${ev.message}`]);

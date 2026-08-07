@@ -15,7 +15,9 @@ const PALETTE = [
   "#6BF7A5",
   "#F7E16B",
 ];
-const ANOMALY_COLOR = "#FF3B30";
+// Matches StafflineViewerModal's own ANOMALY_COLOR -- blue rather than red,
+// which read as noise against these manuscripts' red rubrics/staff-lines.
+const ANOMALY_COLOR = "#2563EB";
 const NOISE_FLOOR_COLOR = "#1D3335";
 const CUT_THRESHOLD_COLOR = "#FF3B30";
 const MAX_INTERP_COLOR = "#FFA500";
@@ -163,7 +165,7 @@ export default function RhythmChart({ summary }: Props) {
           {maxInterpGapPx.toFixed(1)}px)
         </span>
         <span>
-          <span className="text-[#FF3B30]">■</span> flagged stave
+          <span className="text-[#2563EB]">■</span> flagged stave
         </span>
       </div>
       <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
