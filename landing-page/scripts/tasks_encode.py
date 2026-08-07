@@ -52,6 +52,20 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     today's only source, still the fallback for projects/images that predate
     this feature or whose staffline detection failed/was skipped).
 
+    Tier 1 is deliberately scoped to the image's CURRENT annotation, not
+    just "the newest succeeded staffline_detections row" -- staffline_detections
+    accumulates forever (never overwritten, unlike annotations' delete-then-
+    insert on re-predict; see documentation_allons-y/STAFFLINE_INTEGRATION_FOLLOWUPS.md),
+    so a project that's been re-annotated/re-predicted since its last
+    staffline detection would otherwise still match on created_at DESC and
+    silently encode against geometrically stale stave data. Same class of
+    staleness inference_api.py's _load_image_and_yolo_for_detection() already
+    guards against for the interpolate-preview/confirm routes (there, by
+    re-resolving the current annotation via image_id); here, since this
+    function is only ever called with image_name (not image_id), the
+    equivalent guard is: look up the current annotation_id for this image
+    first, then require tier 1's staffline_detections row to match it.
+
     ev, if given, is _encode_one's own event-publishing closure -- used here
     only to emit [trace] lines confirming staves_from_jsomr()'s input/output
     record counts (and whether any stave fell back to its centerline-derived
@@ -76,38 +90,42 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                     text_alignment = json.loads(row[0])
             except Exception:
                 pass
+            current_annotation_id = None
+            current_yolo_txt = None
             try:
                 cur.execute(
-                    "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
-                    " AND status='succeeded' ORDER BY created_at DESC, id DESC LIMIT 1",
+                    "SELECT id, yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                    "ORDER BY created_at DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()
-                if row and row[0]:
-                    jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
-                    yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
-                    if yolo_stave_hints:
-                        stave_source = "staffline_detection"
-                    if ev:
-                        ev({"type": "log", "message":
-                            f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
-                            f" -> {len(yolo_stave_hints)} stave(s) out"})
+                if row:
+                    current_annotation_id, current_yolo_txt = row
             except Exception:
                 pass
-            if not yolo_stave_hints:
+            if current_annotation_id is not None:
                 try:
                     cur.execute(
-                        "SELECT yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        (image_name, project_id),
+                        "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
+                        " AND status='succeeded' AND annotation_id=%s ORDER BY created_at DESC, id DESC LIMIT 1",
+                        (image_name, project_id, current_annotation_id),
                     )
                     row = cur.fetchone()
                     if row and row[0]:
-                        yolo_stave_hints = parse_yolo_stave_hints(row[0], page_w, page_h)
+                        jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
+                        yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
                         if yolo_stave_hints:
-                            stave_source = "yolo_annotation"
+                            stave_source = "staffline_detection"
+                        if ev:
+                            ev({"type": "log", "message":
+                                f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
+                                f" -> {len(yolo_stave_hints)} stave(s) out"})
                 except Exception:
                     pass
+            if not yolo_stave_hints and current_yolo_txt:
+                yolo_stave_hints = parse_yolo_stave_hints(current_yolo_txt, page_w, page_h)
+                if yolo_stave_hints:
+                    stave_source = "yolo_annotation"
             cur.close()
         finally:
             release_db_conn(con)

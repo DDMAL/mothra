@@ -266,6 +266,122 @@ behavior, not just a passing compile):
   editable to normal, since the whole source tree is already baked into
   the image regardless.
 
+## Diagnosed this session (kyrie/staffline-landing-audit)
+
+Kyrie reported the same manuscript page (`Plimpton041_167v`) producing
+visibly worse staffline-detection results through mothra-landing (the
+deployed k8s instance) than through a local `staff-finding` pipeline run,
+with a direct local-vs-deployed comparison as evidence: the local run
+grouped 5 staves cleanly at mode 4 lines/stave (correct for this chant
+manuscript); the deployed run's `staffline_detections` JSOMR showed
+`lines_expected: 2` (a computed statistic — `group_staves.py`'s own
+`mode_lines_per_stave`, not a config knob) — i.e. a real quality gap, not a
+different reading of the same data.
+
+- **Root cause 1 — git version drift, not an algorithm bug.**
+  `kyrie/staff-finding` was 50 commits behind `origin/main` (what's actually
+  deployed). `git diff --stat` confirmed `staff-finding/`'s own algorithmic
+  package hadn't drifted at all — the divergence was entirely in
+  landing-page's integration layer, which had picked up several relevant
+  fixes since the last merge: `916f465` (staffline detection now also runs
+  in the text-batch path), `1b2ea4d` (interpolate preview/confirm flow),
+  `7c80858` (flips tier-3's synthetic-line fabrication to off by default,
+  tags every MEI's `stave_source`). Bundled `.pt` model weights were
+  byte-identical between local and deployed, ruling out a model-retrain
+  explanation. Branched fresh from `origin/main`
+  (`kyrie/staffline-landing-audit`) to re-diagnose on current code rather
+  than chasing an already-fixed gap.
+- **Root cause 2 — real, independent staleness bug, fixed this session.**
+  `tasks_encode.py`'s `_resolve_hints()` tier-1 query picked the newest
+  `succeeded` `staffline_detections` row by `created_at`, with no check that
+  it matched the image's *current* annotation. Since `staffline_detections`
+  accumulates forever (see the retention note above) while `annotations` is
+  delete-then-insert on re-predict, a project re-annotated/re-predicted
+  since its last staffline detection would still match on `created_at DESC`
+  and silently encode against geometrically stale stave data — exactly the
+  scenario a fresh local DB never hits, but a long-running deployed DB
+  eventually does. `inference_api.py`'s interpolate-preview/confirm routes
+  already guarded against this exact class of staleness (resolving the
+  current annotation via `image_id` before trusting a detection row); the
+  same guard was missing from `_resolve_hints` itself. Fixed: `_resolve_hints`
+  now looks up the image's current annotation first, then requires tier 1's
+  `staffline_detections` row to match that annotation's id — falling
+  through to tier 2 (using the current annotation's own `yolo_txt`) when no
+  detection matches, instead of trusting the newest timestamp alone. Test:
+  `landing-page/scripts/tests/test_resolve_hints_staleness.py` (hand-rolled
+  fake cursor + `sys.modules` stubs for `auth_api`/`job_store`/`celery_app`,
+  since importing `tasks_encode` for real would need a live Postgres/Redis —
+  same DB-at-import-time constraint `test_bbox_pipeline_integrity.py`'s own
+  docstring already documents).
+- **Live end-to-end re-verification against the actual reported page could
+  not be completed in this session** — the sandbox this diagnosis ran in
+  has neither `ic/api/.venv` nor `text-service/.venv` set up, and no Redis
+  broker reachable, so `./dev.sh`'s full 5-service stack (needed for a real
+  predict-job re-run) couldn't be started. Whoever picks this up next should
+  re-run `Plimpton041_167v` through a real `POST /projects/{id}/predict` on
+  `kyrie/staffline-landing-audit` (or `main`) and confirm the resulting
+  `staffline_detections.mode_lines_per_stave` now matches the local e2e
+  baseline (mode 4) instead of the originally-reported `lines_expected: 2`.
+  If it still doesn't match after root causes 1 and 2 above are accounted
+  for, the next suspects (in order, per this session's process of
+  elimination — model weights and `staff-finding/` code already ruled out):
+  1. Fewer/worse stave-class (YOLO class id 2) boxes in the deployed
+     project's actual `annotations.yolo_txt` for this image than the local
+     e2e fixture's `yolo_txt/Plimpton041_167v copy.txt` — check which model
+     that specific project actually uses (medieval preset vs. a custom
+     uploaded model row in `project_models`).
+  2. `landing-page/src/utils/imageResize.ts`'s client-side resize (uploads
+     over 5MB) landing the deployed project's source image at different
+     pixel dimensions than the local e2e fixture's raw file — this changes
+     `scale_unit` (median stave-box pixel height) and therefore the Sauvola
+     binarization window size and downstream fit/grouping thresholds even
+     with identical code and models.
+  3. Only if both check out clean: this may be a real instance of the
+     already-documented, unfixed `group_staves.py` dense-stave
+     reconciliation gap (see "Three checked-in e2e baselines show genuinely
+     fragmented grouping" above) rather than an integration bug — a real
+     algorithmic limitation, not a quick fix.
+
+## Watching for calvo-integration merge
+
+`gianna/calvo-integration` (not yet merged; reviewed via `gh api` this
+session, not a local checkout) is an **ink-separation front-end**, not a
+bounding-box detector in its own right — exactly the "ink-separation (BGR)"
+deferral already flagged in `staff-finding/dox/STATUS.md` and above, just
+implemented via DDMAL's own `Paco_classifier` submodule instead of the
+unvendored `muscrat/layer_sep` repo. `paco_api.py`/`paco-classifier-service`
+wrap `Paco_classifier.recognition_engine.process_image_msae()` (a TensorFlow
+pixel classifier) to split a page into background/stafflines RGBA layers;
+`tasks_predict.py`'s `_run_medieval_inference` on that branch then runs the
+*existing* stave YOLO model against the classified "stafflines" layer
+instead of the raw page crop, still producing ordinary YOLO-txt boxes at
+`STAFFLINE_CLASS_ID = 2` (confirmed unchanged: `CATEGORY_TO_SLOT["staves"] =
+2` in `yolo_inference.py` on both branches).
+
+No format-level blocker for `staff-finding/` when this merges. Two things
+worth validating at merge time rather than assuming they hold:
+- `component_filter.py`'s Sauvola binarization is tuned against raw
+  grayscale crops; once ink-separation actually lands, it'll instead see a
+  pre-segmented layer with background forced to pure white (per
+  `_layer_to_rgba_png`'s masking). Worth a validation pass against a few
+  e2e fixtures — the tuning that was an "interim mitigation for faint ink"
+  may behave differently (better or worse) against an already-cleaner
+  input than it was tuned for.
+- `run_staffline_detection` on that branch crops `staffline_source_arr` (the
+  same classified image the stave YOLO model scored), not the raw page.
+  `process_image_msae` restores full input resolution internally, so
+  `scale_unit` (median stave-box pixel height) should still resolve in the
+  correct coordinate frame — but this is a "should," not yet an assertion;
+  add an explicit test for it once this merges rather than assuming it
+  holds.
+
+Also noted for later, out of scope here: the eventual pitch-finding consumer
+of this staffline geometry is
+[DDMAL/Standalone-Pitch-Finder](https://github.com/DDMAL/Standalone-Pitch-Finder)
+(in progress, not yet integrated) — its JSOMR/stave-geometry output contract
+needs to satisfy that project too, not just today's MEI-encoding consumer
+(`staffline_adapter.py`/`encode_to_mei.py`).
+
 ## Needs a manual step, not a code change
 
 - **Branch protection**: `.github/workflows/tests.yml` runs on every push,
