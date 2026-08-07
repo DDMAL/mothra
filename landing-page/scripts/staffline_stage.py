@@ -269,6 +269,73 @@ def preview_interpolation(image_name: str, image_arr: np.ndarray, yolo_txt: str)
     return result["records"]
 
 
+def compute_staffline_interpolation(image_name: str, image_arr: np.ndarray, yolo_txt: str) -> Optional[dict]:
+    """Like preview_interpolation(), but returns everything
+    persist_staffline_detection() needs to write a full row -- not just the
+    JSOMR records -- so a caller can run this CPU-bound computation without
+    holding a database connection open, then reacquire one just for the
+    (cheap) persist step. This is what inference_api.py's interpolate-confirm
+    route uses instead of run_staffline_detection() directly, precisely to
+    avoid tying up a pooled connection for the duration of component
+    filtering/centerline fitting -- run_staffline_detection() itself is fine
+    holding one, since its callers (tasks_predict.py/tasks_text_batch.py)
+    already own that connection for the whole per-image loop regardless.
+
+    Returns None under the same conditions as preview_interpolation()."""
+    from yolo_io import parse_yolo_lines, filter_to_class
+
+    detections = filter_to_class(
+        parse_yolo_lines(yolo_txt.splitlines(), source=f"{image_name} annotation"),
+        STAFFLINE_CLASS_ID,
+    )
+    if not detections:
+        return None
+
+    h, w = image_arr.shape[:2]
+    scale_unit = _compute_page_scale_unit(detections, w, h)
+    result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing=True)
+    if result["degenerate"]:
+        return None
+
+    return {
+        "records": result["records"],
+        "stave_ids": result["stave_ids"],
+        "grouping_result": result["grouping_result"],
+        "scale_unit": scale_unit,
+        "settings": {
+            "interpolate_missing": True,
+            "binarization": "sauvola",
+            "bgr_enabled": False,  # ink-separation deferred this pass, see module docstring
+            "package_version": _package_version(),
+        },
+    }
+
+
+def persist_staffline_detection(cur, con, project_id: str, image_id: str, image_name: str,
+                                 annotation_id: str, computed: dict) -> str:
+    """INSERT-and-commit a succeeded detection result using an already-open
+    cursor/connection -- the shared write side for both
+    run_staffline_detection() (computes and persists on the same connection)
+    and inference_api.py's interpolate-confirm route (computes via
+    compute_staffline_interpolation() with no connection held, then calls
+    this against a freshly reacquired one). Returns the new row's id."""
+    new_id = _uuid.uuid4().hex
+    records = computed["records"]
+    cur.execute(
+        "INSERT INTO staffline_detections"
+        " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
+        "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
+        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
+        (
+            new_id, project_id, image_id, image_name, annotation_id,
+            json.dumps(records), computed["scale_unit"], len(computed["stave_ids"]),
+            computed["grouping_result"].mode_lines_per_stave, json.dumps(computed["settings"]),
+        ),
+    )
+    con.commit()
+    return new_id
+
+
 def run_staffline_detection(
     job_id: str, cur, con,
     project_id: int, image_id: str, image_name: str, annotation_id: str,
@@ -328,19 +395,14 @@ def run_staffline_detection(
             "package_version": _package_version(),
         }
 
-        new_id = _uuid.uuid4().hex
-        cur.execute(
-            "INSERT INTO staffline_detections"
-            " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
-            "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
-            (
-                new_id, project_id, image_id, image_name, annotation_id,
-                json.dumps(records), scale_unit, len(stave_ids),
-                grouping_result.mode_lines_per_stave, json.dumps(settings),
-            ),
+        new_id = persist_staffline_detection(
+            cur, con, project_id, image_id, image_name, annotation_id,
+            {
+                "records": records, "stave_ids": stave_ids,
+                "grouping_result": grouping_result, "scale_unit": scale_unit,
+                "settings": settings,
+            },
         )
-        con.commit()
 
         # Callers that need to look this row back up right after (e.g.
         # inference_api.py's interpolate-confirm route) should key off this

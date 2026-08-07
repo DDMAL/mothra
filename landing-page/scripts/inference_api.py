@@ -216,37 +216,32 @@ def confirm_staffline_interpolation(
     this avoids trusting/re-validating a client-supplied JSOMR payload for
     something that writes to the DB.
 
-    Uses a fresh, never-registered job id purely so run_staffline_detection's
-    existing check_cancelled(job_id) calls have something to look up --
-    job_store.get_job_status() returns None for an unknown id, which
-    check_cancelled treats as "not cancelled", so this never actually
-    behaves like a trackable/cancellable job (there isn't one).
-
     Plain `def`, not `async def` -- same reason as interpolate-preview
-    above, and this one additionally holds a pooled DB connection open for
-    the whole detection run, so it especially shouldn't sit on the event
-    loop."""
+    above. Also, unlike run_staffline_detection() (which bundles compute and
+    persist under one connection its own callers already hold for an entire
+    per-image loop regardless), this route deliberately does NOT hold a
+    database connection during the CPU-bound detection step: component
+    filtering/centerline fitting on a real manuscript page can take real
+    time, and several concurrent confirmations each pinning a pooled
+    connection for that whole duration could exhaust the pool and block
+    unrelated requests. So: load inputs (connection released before
+    returning from the `with`), compute via compute_staffline_interpolation()
+    with no connection held at all, then reacquire one just for the cheap
+    persist_staffline_detection() write."""
     with db_cursor() as (con, cur):
         image_id, image_name, annotation_id, image_arr, yolo_txt = _load_image_and_yolo_for_detection(
             cur, project_id, detection_id, user["id"],
         )
-        throwaway_job_id = _uuid.uuid4().hex
-        new_detection_id = None
-        error_message = None
-        for ev in staffline_stage.run_staffline_detection(
-            throwaway_job_id, cur, con, project_id, image_id, image_name, annotation_id,
-            image_arr, yolo_txt, interpolate_missing=True,
-        ):
-            if ev.get("type") == "error":
-                error_message = ev.get("message", "staffline detection failed")
-            elif ev.get("type") == "detection_id":
-                new_detection_id = ev.get("id")
-        if error_message:
-            raise HTTPException(status_code=500, detail=error_message)
-        if not new_detection_id:
-            raise HTTPException(status_code=500, detail="interpolation did not produce a new detection")
 
-        # Look up by the id run_staffline_detection itself just generated and
+    computed = staffline_stage.compute_staffline_interpolation(image_name, image_arr, yolo_txt)
+    if computed is None:
+        raise HTTPException(status_code=422, detail="nothing to interpolate for this image")
+
+    with db_cursor() as (con, cur):
+        new_detection_id = staffline_stage.persist_staffline_detection(
+            cur, con, project_id, image_id, image_name, annotation_id, computed,
+        )
+        # Look up by the id persist_staffline_detection just generated and
         # inserted, not "the latest row for this image" -- created_at uses
         # DEFAULT NOW() (transaction-start time, so same-transaction inserts
         # can share an identical value) and id is a random uuid4, so neither
