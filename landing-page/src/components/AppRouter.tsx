@@ -233,7 +233,7 @@ export default function AppRouter({
             else if (step >= 3) setView("neon-editor");
             else if (step >= 1 || SKIP_PREDICT) setView("ic");
             else {
-              setBatchRunIds(textFindingSettings.ocrOnlyMode ? null : computeBatchRun(selectedProject));
+              setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
             }
@@ -246,7 +246,7 @@ export default function AppRouter({
           onStepClick={(step) => {
             if (step === 0) {
               if (SKIP_PREDICT) { setView("ic"); return; }
-              setBatchRunIds(textFindingSettings.ocrOnlyMode ? null : computeBatchRun(selectedProject));
+              setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
             }
