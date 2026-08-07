@@ -657,6 +657,7 @@ export default function ProjectDetail({
                     textAlignments={project.textAlignments}
                     images={project.images}
                     projectId={project.id}
+                    debugDataByImage={textFindingSettings.debugDataByImage}
                   />
                 )}
                 {generatedSubTab === "stafflines" && (

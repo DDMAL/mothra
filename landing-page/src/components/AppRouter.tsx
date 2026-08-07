@@ -381,6 +381,7 @@ export default function AppRouter({
                   masking_enabled: textFindingSettings.maskingEnabled,
                   mask_padding: textFindingSettings.maskPadding,
                   music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
+                  debug_mode: textFindingSettings.debugMode,
                   model_preset: inferenceSettings.modelPreset,
                   model_id: inferenceSettings.modelPreset === "custom" ? (inferenceSettings.customModelId || null) : null,
                   yolo_confidence_threshold: inferenceSettings.threshold,
@@ -421,6 +422,7 @@ export default function AppRouter({
                 text_masking_enabled: textFindingSettings.maskingEnabled,
                 text_mask_padding: textFindingSettings.maskPadding,
                 text_music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
+                text_debug_mode: textFindingSettings.debugMode,
                 text_mask_model_id: textFindingSettings.maskModelId || null,
                 text_source_id: !textFindingSettings.ocrOnlyMode && textFindingSettings.sourceId
                   ? Number(textFindingSettings.sourceId)
@@ -430,6 +432,10 @@ export default function AppRouter({
           }}
           onResult={(ev) => {
             if (batchRunIds) {
+              const { text_debug_data: batchDebugData } = ev as { text_debug_data?: Record<string, unknown> };
+              if (batchDebugData) {
+                textFindingSettings.setDebugDataByImage((prev) => ({ ...prev, ...batchDebugData }));
+              }
               setBatchResult(ev as { batchId: string; fileCount: number });
               apiFetch(`/api/projects/${selectedProject.id}`)
                 .then((r) => r.json())
@@ -450,7 +456,13 @@ export default function AppRouter({
                 .catch(() => {});
               return;
             }
-            const { annotations } = ev as { annotations: AnnotationSet[] };
+            const { annotations, text_debug_data } = ev as {
+              annotations: AnnotationSet[];
+              text_debug_data?: Record<string, unknown>;
+            };
+            if (text_debug_data) {
+              textFindingSettings.setDebugDataByImage((prev) => ({ ...prev, ...text_debug_data }));
+            }
             setProjects((prev) =>
               prev.map((p) =>
                 p.id === selectedProject.id

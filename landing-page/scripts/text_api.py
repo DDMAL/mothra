@@ -176,6 +176,7 @@ def stream_text_finding(
         mask_json_override: Optional[str] = None,
         source_id: Optional[int] = None,
         folio_override: Optional[str] = None,
+        debug_mode: bool = False,
     ):
     """Run text-finding for one image, yielding raw event dicts (not
     SSE-formatted) and persisting the result to text_alignments on completion.
@@ -199,6 +200,7 @@ def stream_text_finding(
         "masking_enabled": "true" if masking_enabled else "false",
         "mask_padding": str(mask_padding),
         "music_overlap_filter_enabled": "true" if music_overlap_filter_enabled else "false",
+        "debug_mode": "true" if debug_mode else "false",
     }
     if source_id is not None:
         fields["source_id"] = str(source_id)

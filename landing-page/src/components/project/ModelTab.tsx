@@ -490,7 +490,6 @@ export default function ModelTab({
                           drop text lines that mostly overlap detected music (helps on pages with music-notation artifacts; can hide real text on pages with interleaved text/music — check the run log for dropped lines)
                         </span>
                       </label>
-
                       <label className="flex flex-col gap-1">
                         <span className="text-white/70 text-xs">
                           mask padding: {textFindingSettings.maskPadding}px
@@ -538,6 +537,19 @@ export default function ModelTab({
             )}
           </div>
         )}
+        <div className="mt-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={textFindingSettings.debugMode}
+              onChange={(e) => textFindingSettings.patch({ debugMode: e.target.checked })}
+              className="accent-[#1D3335]"
+            />
+            <span className="text-white/70 text-xs">
+              debug mode — attach pipeline internals (mask boxes, OCR lines, filter drops) to each result for inspection in the text alignment viewer
+            </span>
+          </label>
+        </div>
       </div>
 
       {section.menu && (
