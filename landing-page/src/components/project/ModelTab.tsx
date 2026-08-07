@@ -355,8 +355,7 @@ export default function ModelTab({
             )}
           </div>
 
-        {usedNames.models.length > 0 && (
-          <div className="mt-2">
+        <div className="mt-2">
             <button
               onClick={() => setTextSettingsOpen((o) => !o)}
               className="text-white/60 text-xs hover:text-white cursor-pointer select-none flex items-center gap-1"
@@ -536,7 +535,6 @@ export default function ModelTab({
               </div>
             )}
           </div>
-        )}
         <div className="mt-2">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
