@@ -10,11 +10,14 @@ interface BatchImage {
 interface BatchTabProps {
   batchImages: BatchImage[];
   folioSequence: string[];
+  cantusFolios?: string[];
   onUseBatch: (names: string[]) => void;
   onDiscardBatch: (imageIds: string[]) => void;
 }
 
-export default function BatchTab({ batchImages, folioSequence, onUseBatch, onDiscardBatch }: BatchTabProps) {
+export default function BatchTab({ batchImages, folioSequence, cantusFolios = [], onUseBatch, onDiscardBatch }: BatchTabProps) {
+  const isPhantom = (folio: string | undefined): boolean =>
+    !!folio && cantusFolios.length > 0 && !cantusFolios.includes(folio);
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -56,8 +59,11 @@ export default function BatchTab({ batchImages, folioSequence, onUseBatch, onDis
             className="w-48 h-64 object-cover rounded-lg border border-white/20"
           />
         </button>
-        <span className="absolute bottom-1 left-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-          {index + 1}/{batchImages.length} — {folioSequence[index] ?? "—"}
+        <span
+          className="absolute bottom-1 left-1 bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded"
+          title={isPhantom(folioSequence[index]) ? "not in Cantus source — continuation" : undefined}
+        >
+          {index + 1}/{batchImages.length} — {folioSequence[index] ?? "—"}{isPhantom(folioSequence[index]) && " ◆"}
         </span>
       </div>
 
@@ -121,7 +127,8 @@ export default function BatchTab({ batchImages, folioSequence, onUseBatch, onDis
                 className="max-h-[70vh] max-w-full object-contain rounded-lg"
               />
               <p className="text-white/70 text-xs">
-                {index + 1} / {batchImages.length} — folio {folioSequence[index] ?? "—"} — {current.name}
+                {index + 1} / {batchImages.length} — folio {folioSequence[index] ?? "—"}
+                {isPhantom(folioSequence[index]) && " ◆ (not in Cantus source — continuation)"} — {current.name}
               </p>
             </div>
             <button

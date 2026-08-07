@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "../../lib/toast";
-import { compareFolios, extractFolioFromFilename, matchCanonicalFolio } from "../../utils/folio";
+import { compareFolios, extractFolioFromFilename, matchCanonicalFolio, buildEffectiveFolioSequence } from "../../utils/folio";
 import type { FolioReviewRow } from "../../utils/folio";
 import BatchFolioReviewModal from "./BatchFolioReviewModal";
 import type { Project, ProjectImage } from "../../types";
@@ -204,8 +204,26 @@ export default function ImageTab({
     return results;
   };
 
-  const folioAt = (seq: number): string | undefined => 
-    imageSubTab === "batch" ? batchFolioSequence[batchImages.length + seq] : activeFolio;
+  // Working copy of batchFolioSequence that can grow when a phantom-continuation
+  // folio (e.g. "003r", not in Cantus DB's list but recognized as a genuine
+  // single-step gap - see buildEffectiveFolioSequence) is spliced in for this
+  // batch session. Reset whenever the upstream canonical sequence changes
+  // (new range picked, or reset after "use batch"/"discard batch").
+  const [effectiveFolioSequence, setEffectiveFolioSequence] = useState<string[]>(batchFolioSequence);
+  useEffect(() => {
+    setEffectiveFolioSequence(batchFolioSequence);
+  }, [batchFolioSequence]);
+
+  // True when an image's folio was accepted despite not being in Cantus DB's
+  // list for the currently-loaded source (a phantom-continuation folio like
+  // "003r", or a manually-typed custom folio) - no persisted flag needed,
+  // this is just list membership checked at render time. Guarded on
+  // sourceId so an image from a different/unloaded source never false-positives.
+  const isPhantomFolio = (img: ProjectImage): boolean =>
+    !!img.folio && img.sourceId === cantusSourceId && cantusFolios.length > 0 && !cantusFolios.includes(img.folio);
+
+  const folioAt = (seq: number): string | undefined =>
+    imageSubTab === "batch" ? effectiveFolioSequence[batchImages.length + seq] : activeFolio;
 
   const [pendingBatchReview, setPendingBatchReview] = useState<{
     imageFiles: File[];
@@ -218,6 +236,7 @@ export default function ImageTab({
     pdfPageFiles: File[];
     oversized: File[];
     folioOverride?: Map<string, string>;
+    batchPositionalFolios?: (string | undefined)[];
   } | null>(null);
   const [resizing, setResizing] = useState(false);
 
@@ -227,13 +246,23 @@ export default function ImageTab({
   }
 
   const computeFolioReviewRows = (imageFiles: File[]): FolioReviewRow[] => {
+    // Reconcile against a phantom-continuation folio (e.g. "003r") the same
+    // way the actual upload will (see runBatchUpload) - computed fresh here
+    // rather than read from folioAt/effectiveFolioSequence, since that state
+    // hasn't been committed for THIS set of files yet at review time.
+    const remaining = imageSubTab === "batch" ? effectiveFolioSequence.slice(batchImages.length) : [];
+    const { sequence: reconciled, isPhantom } =
+      imageSubTab === "batch"
+        ? buildEffectiveFolioSequence(remaining, imageFiles.map((f) => extractFolioFromFilename(f.name)))
+        : { sequence: imageFiles.map((_, i) => folioAt(i)), isPhantom: imageFiles.map(() => false) };
+
     const parsed = imageFiles.map((f, i) => {
-      const positionalFolio = folioAt(i);
+      const positionalFolio = reconciled[i];
       const detectedRaw = extractFolioFromFilename(f.name);
-      const detectedCanonical = 
+      const detectedCanonical =
         detectedRaw === undefined ? undefined : matchCanonicalFolio(cantusFolios, detectedRaw);
       const notInSource = detectedRaw !== undefined && cantusFolios.length > 0 && detectedCanonical === undefined;
-      return { fileName: f.name, positionalFolio, detectedRaw, detectedCanonical, notInSource};
+      return { fileName: f.name, positionalFolio, detectedRaw, detectedCanonical, notInSource, isPhantom: isPhantom[i] };
     });
 
     // only group folios that actually resolved to a canonical value - never
@@ -243,11 +272,20 @@ export default function ImageTab({
       if (p.detectedCanonical) counts.set(p.detectedCanonical, (counts.get(p.detectedCanonical) ?? 0) + 1);
     }
 
-    // precedence: duplicate > not-in-source > mismatch > no-detection > match
+    // precedence: duplicate > phantom-continuation > not-in-source > mismatch > no-detection > match
     return parsed.map((p): FolioReviewRow => {
       const isDuplicate = !!p.detectedCanonical && (counts.get(p.detectedCanonical) ?? 0) > 1;
       if (isDuplicate) {
         return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio: p.detectedCanonical, status: "duplicate" };
+      }
+      // a recognized phantom-continuation folio also satisfies notInSource
+      // below (it's genuinely not in Cantus DB's list) - must be checked
+      // first so it's surfaced as an accepted case, not a warning.
+      if (p.isPhantom) {
+        // positionalFolio here IS the phantom folio, already re-padded to
+        // match its siblings (see buildEffectiveFolioSequence) - show that,
+        // not the raw filename guess, which may have stripped leading zeros.
+        return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio: p.positionalFolio, status: "phantom-continuation" };
       }
       if (p.notInSource) {
         return { fileName: p.fileName, positionalFolio: p.positionalFolio, detectedFolio: p.detectedRaw, status: "not-in-source" };
@@ -272,6 +310,12 @@ export default function ImageTab({
     imageUploads: PendingUpload[],
     pdfUploads: PendingUpload[],
     folioOverride?: Map<string, string>,
+    // Freshly-reconciled per-file folios for this batch call (image uploads
+    // first, then pdf uploads, matching the shared `seq` counter below) -
+    // takes precedence over folioAt()'s plain positional lookup so a
+    // phantom-continuation folio spliced in by runBatchUpload actually gets
+    // assigned instead of the too-short canonical sequence's next entry.
+    batchPositionalFolios?: (string | undefined)[],
   ) => {
     type UploadEntry = {
       id: string;
@@ -295,7 +339,8 @@ export default function ImageTab({
       // already succeeded - a retry would otherwise re-upload the same file
       const imageSettled = await Promise.allSettled(
         imageUploads.map(async ({ file: f, originalFile }): Promise<UploadEntry> => {
-          const folio = folioOverride?.get(f.name) ?? folioAt(seq++);
+          const idx = seq++;
+          const folio = folioOverride?.get(f.name) ?? batchPositionalFolios?.[idx] ?? folioAt(idx);
           // only associate with the loaded Cantus source when this upload is
           // actually being tagged with a folio - otherwise a source loaded
           // for an earlier batch/folio pick silently leaks onto unrelated
@@ -320,7 +365,8 @@ export default function ImageTab({
 
       const pdfSettled = await Promise.allSettled(
         pdfUploads.map(async ({ file: f, originalFile }): Promise<UploadEntry> => {
-          const pdfFolio = folioAt(seq++);
+          const idx = seq++;
+          const pdfFolio = batchPositionalFolios?.[idx] ?? folioAt(idx);
           const result = await onUploadImage(
             f, pdfFolio, pdfFolio ? cantusSourceId : undefined, pdfFolio ? cantusSourceName : undefined,
             originalFile,
@@ -422,10 +468,30 @@ export default function ImageTab({
 
       const combined = [...imageFiles, ...pdfPageFiles];
       const oversized = getOversizedFiles(combined);
+
+      // Reconcile a phantom-continuation folio (e.g. "003r") into this
+      // batch's remaining folio slots, then commit the extension so later
+      // uploads within the same batch session index correctly. Only image
+      // filenames carry a decodable folio guess - pdf page filenames never
+      // do, so they always fall back to plain positional assignment here,
+      // same as before.
+      let batchPositionalFolios: (string | undefined)[] | undefined;
+      if (imageSubTab === "batch") {
+        const remaining = effectiveFolioSequence.slice(batchImages.length);
+        const guesses = combined.map((f) => extractFolioFromFilename(f.name));
+        const { sequence, canonicalConsumed } = buildEffectiveFolioSequence(remaining, guesses);
+        batchPositionalFolios = sequence;
+        setEffectiveFolioSequence((prev) => [
+          ...prev.slice(0, batchImages.length),
+          ...sequence.filter((f): f is string => f !== undefined),
+          ...remaining.slice(canonicalConsumed),
+        ]);
+      }
+
       if (oversized.length > 0) {
         setConverting(false);
         section.setUploadModal(false);
-        setPendingSizeWarning({ imageFiles, pdfPageFiles, oversized, folioOverride });
+        setPendingSizeWarning({ imageFiles, pdfPageFiles, oversized, folioOverride, batchPositionalFolios });
         return;
       }
 
@@ -433,6 +499,7 @@ export default function ImageTab({
         imageFiles.map((file) => ({ file })),
         pdfPageFiles.map((file) => ({ file })),
         folioOverride,
+        batchPositionalFolios,
       );
 
     } catch (err) {
@@ -444,7 +511,7 @@ export default function ImageTab({
 
   const resolveSizeWarning = async (action: "resize" | "asis" | "cancel") => {
     if (!pendingSizeWarning) return;
-    const { imageFiles, pdfPageFiles, oversized, folioOverride } = pendingSizeWarning;
+    const { imageFiles, pdfPageFiles, oversized, folioOverride, batchPositionalFolios } = pendingSizeWarning;
 
     if (action === "cancel") {
       setPendingSizeWarning(null);
@@ -459,6 +526,7 @@ export default function ImageTab({
         imageFiles.map((file) => ({ file })),
         pdfPageFiles.map((file) => ({ file })),
         folioOverride,
+        batchPositionalFolios,
       );
       return;
     }
@@ -478,7 +546,7 @@ export default function ImageTab({
     ]);
     setResizing(false);
     setPendingSizeWarning(null);
-    await finishUpload(imageUploads, pdfUploads, folioOverride);
+    await finishUpload(imageUploads, pdfUploads, folioOverride, batchPositionalFolios);
   }
 
   const handleFiles = async (files: FileList | File[]) => {
@@ -526,7 +594,7 @@ export default function ImageTab({
     const override = useDetected
       ? new Map(
         rows
-          .filter((r) => (r.status === "match" || r.status === "mismatch") && r.detectedFolio)
+          .filter((r) => (r.status === "match" || r.status === "mismatch" || r.status === "phantom-continuation") && r.detectedFolio)
           .map((r) => [r.fileName, r.detectedFolio!] as const),
       )
       : undefined;
@@ -599,7 +667,8 @@ export default function ImageTab({
         {imageSubTab === "batch" ? (
           <BatchTab
             batchImages={batchImages}
-            folioSequence={batchFolioSequence}
+            folioSequence={effectiveFolioSequence}
+            cantusFolios={cantusFolios}
             onUseBatch={handleUseBatch}
             onDiscardBatch={handleDiscardBatch}
           />
@@ -624,8 +693,11 @@ export default function ImageTab({
             }
             topLeftBadge={(img) =>
               img.folio ? (
-                <span className="bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-                  {img.folio}
+                <span
+                  className="bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded"
+                  title={isPhantomFolio(img) ? "not in Cantus source — continuation" : undefined}
+                >
+                  {img.folio}{isPhantomFolio(img) && " ◆"}
                 </span>
               ) : null
             }
@@ -788,8 +860,11 @@ export default function ImageTab({
                     <TruncatedName name={img.name} className="text-white" />
                   </div>
                   {img.folio && (
-                    <span className="self-end bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">
-                      {img.folio}
+                    <span
+                      className="self-end bg-[#1D3335]/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded"
+                      title={isPhantomFolio(img) ? "not in Cantus source — continuation" : undefined}
+                    >
+                      {img.folio}{isPhantomFolio(img) && " ◆"}
                     </span>
                   )}
                   <div className="flex justify-between gap-4">
