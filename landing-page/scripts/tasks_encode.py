@@ -11,7 +11,7 @@ from typing import Optional
 
 from celery_app import celery_app
 from job_store import publish_event, fetch_upload, drop_upload, session_put, check_cancelled, JobCancelled
-from auth_api import get_db_conn, release_db_conn
+from auth_api import get_db_conn, release_db_conn, get_latest_text_alignment
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
@@ -58,17 +58,7 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
         con = get_db_conn()
         try:
             cur = con.cursor()
-            try:
-                cur.execute(
-                    "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
-                    " ORDER BY created_at DESC LIMIT 1",
-                    (image_name, project_id),
-                )
-                row = cur.fetchone()
-                if row and row[0]:
-                    text_alignment = json.loads(row[0])
-            except Exception:
-                pass
+            text_alignment = get_latest_text_alignment(cur, project_id, image_name)
             try:
                 cur.execute(
                     "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"

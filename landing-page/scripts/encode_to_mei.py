@@ -45,6 +45,22 @@ STAVE_BUFFER_PX = 20
 SYLLABLE_GAP_MULTIPLIER = 1.5
 _SKIP_CLASS_FRAGMENTS = frozenset({"custos", "divline", "division"})
 
+_XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
+_XML_MODEL_PI = (
+    '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+    ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
+    '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+    ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
+)
+
+def _serialize_mei(root: ET.Element) -> bytes:
+    """Shared serialization tail for anything that produces/mutates a full
+    MEI document (build_mei, scale_facsimile, verify_and_correct_syllables)."""
+    ET.register_namespace("", MEI_NS)
+    ET.indent(root, space=" ")
+    xml_str = _XML_DECLARATION + _XML_MODEL_PI + ET.tostring(root, encoding="unicode")
+    return xml_str.encode("utf-8")
+
 @dataclass
 class Glyph:
     id: str
@@ -293,7 +309,27 @@ def _assign_glyphs_to_boxes(glyphs: list[Glyph], boxes: list[dict]) -> list[list
                 best_idx, best_dist = i, dist
         result[best_idx].append(glyph)
     return result
+def _build_syllable_units(
+        neume_glyphs: list[Glyph],
+        stave_boxes: list[dict],
+        glyph_groups: list[list[Glyph]],
+        syllable_gap_mult: float,
+) -> list[tuple[str, Optional[dict], list[Glyph]]]:
+    """Decide the final (syl_text, box, glyphs) triples for one stave, given
+    its (possibly row-group-pooled-then-narrowed, see _stave_share_of_group)
+    stave_boxes/glyph_groups. Extracted from build_mei's per-stave loop so
+    build_mei and verify_and_correct_syllables compute this identically --
+    one <syllable> per real syl_box when mothra-text supplied any for this
+    stave, else a pure gap-based fallback with "-" text (this file's
+    original pre-text-alignment behavior)."""
+    if stave_boxes:
+        return list(zip((b["syl"] for b in stave_boxes), stave_boxes, glyph_groups))
+    return [
+        ("-", None, cluster)
+        for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult)
+    ]
 
+    
 def _group_staves_by_row(staves: list[StaveBbox], n_detected_staves: int) -> list[set[int]]:
     """Connected components of stave indices that are fragments of one
     physical manuscript row. Exists ONLY so build_mei's syllable-matching
@@ -916,24 +952,7 @@ def build_mei(
             stave_boxes = boxes_by_stave.get(stave_idx, [])
             glyph_groups = _assign_glyphs_to_boxes(neume_glyphs, stave_boxes) if stave_boxes else []
 
-        if stave_boxes:
-            # Trust mothra-text's own syllable boxes as the authoritative
-            # <syllable> grouping — one <syllable> per syl_box, always,
-            # with whichever neume glyphs land nearest to it (see
-            # _assign_glyphs_to_boxes). No gap-heuristic clustering, no
-            # after-the-fact splitting/reconciliation, so nothing here can
-            # under- or over-merge relative to what mothra-text detected.
-            syllable_units = list(zip(
-                (b["syl"] for b in stave_boxes), stave_boxes, glyph_groups
-            ))
-        else:
-            # No text alignment for this stave at all — fall back to pure
-            # gap-based neume clustering with no syllable text, same as
-            # this file's original pre-text-alignment behavior.
-            syllable_units = [
-                ("-", None, cluster)
-                for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult)
-            ]
+        syllable_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
 
         for syl_text, box, glyphs_in_syl in syllable_units:
             syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
@@ -983,16 +1002,7 @@ def build_mei(
             file=sys.stderr,
         )
 
-    _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    _XML_MODEL_PI = (
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
-    )
-    ET.indent(mei, space=" ")
-    xml_str = _XML_DECLARATION + _XML_MODEL_PI + ET.tostring(mei, encoding="unicode")
-    return xml_str.encode("utf-8")
+    return _serialize_mei(mei)
 
 def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
     """Scale every facsimile zone coordinate by factor (port of Rodan mei_resize.py)."""
@@ -1014,17 +1024,7 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
                     el.set(attr, f"{round(int(val[:-2]) * factor)}px")
                 except (ValueError, TypeError):
                     pass
-    ET.register_namespace("", MEI_NS)
-    ET.indent(root, space=" ")
-    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    xml_model_pi = (
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
-    )
-    xml_str = xml_declaration + xml_model_pi + ET.tostring(root, encoding="unicode")
-    return xml_str.encode("utf-8")
+    return _serialize_mei(root)
     
 REQUIRED_MEI_VERSION = "5.0.0-dev"
 
@@ -1171,6 +1171,203 @@ def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
             }
         ],
     }
+
+def _reconstruct_mei_state(
+    root: ET.Element,
+) -> tuple[list[StaveBbox], dict[int, list[Glyph]], dict[str, ET.Element],
+           dict[int, list[tuple[Optional[str], tuple[str, ...]]]]]:
+    """Reverse of what build_mei writes: walks an already-built MEI document
+    back into (staves, glyphs_by_stave) -- the same shape build_mei
+    originally took as input -- plus a glyph_id -> <neume> element map (so
+    verify_and_correct_syllables can re-parent an existing, already
+    pitch-computed <neume> element under a corrected <syllable> without
+    recomputing pitch at all) and, per stave_idx, the CURRENT sequence of
+    (syl_text, glyph_ids) actually encoded, for comparison against a
+    freshly recomputed one.
+
+    Trusts the existing <sb>-delimited stave groupings as-is -- see
+    verify_and_correct_syllables's docstring for why this does not redo
+    _group_staves_by_row's cross-stave repair."""
+    ns = f"{{{MEI_NS}}}"
+    surface = root.find(f".//{ns}surface")
+    zones: dict[str, ET.Element] = {}
+    if surface is not None:
+        for zone in surface.findall(f"{ns}zone"):
+            zid = zone.get(XML_ID)
+            if zid:
+                zones[zid] = zone
+
+    def _box(zone: ET.Element) -> tuple[int, int, int, int]:
+        return (int(zone.get("ulx", 0)), int(zone.get("uly", 0)),
+                int(zone.get("lrx", 0)), int(zone.get("lry", 0)))
+
+    # dict preserves insertion order, and build_mei writes zones in
+    # document order -- so this is already stave_idx order.
+
+    staff_zone_ids = [zid for zid, z in zones.items() if z.get("type") == "staff"]
+    staves: list[StaveBbox] = []
+    zone_id_to_stave_idx: dict[str, int] = {}
+    for i, zid in enumerate(staff_zone_ids):
+        ulx, uly, lrx, lry = _box(zones[zid])
+        staves.append(StaveBbox(id=zid.removeprefix("sz-"), ulx=ulx, uly=uly, lrx=lrx, lry=lry))
+        zone_id_to_stave_idx[zid] = i
+
+    layer = root.find(f".//{ns}layer")
+    glyphs_by_stave: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+    neume_elements: dict[str, ET.Element] = {}
+    current_syllables: dict[int, list[tuple[Optional[str], tuple[str, ...]]]] = {
+        i: [] for i in range(len(staves))
+    }
+    current_stave_idx: Optional[int] = None
+    if layer is not None:
+        for child in layer:
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "sb":
+                facs = (child.get("facs") or "").lstrip("#")
+                current_stave_idx = zone_id_to_stave_idx.get(facs)
+            elif tag == "syllable" and current_stave_idx is not None:
+                syl_el = child.find(f"{ns}syl")
+                syl_text = syl_el.text if syl_el is not None else None
+                glyph_ids: list[str] = []
+                for neume in child.findall(f"{ns}neume"):
+                    facs = (neume.get("facs") or "").lstrip("#")
+                    zone = zones.get(facs)
+                    if zone is None or not facs.startswith("z-"):
+                        continue
+                    glyph_id = facs[len("z-"):]
+                    ulx, uly, lrx, lry = _box(zone)
+                    glyphs_by_stave[current_stave_idx].append(Glyph(
+                        id=glyph_id, ulx=ulx, uly=uly,
+                        ncols=max(lrx - ulx, 1), nrows=max(lry - uly, 1),
+                        class_name="", confidence=1.0, state="AUTOMATIC",
+                    ))
+                    neume_elements[glyph_id] = neume
+                    glyph_ids.append(glyph_id)
+                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids)))
+    return staves, glyphs_by_stave, neume_elements, current_syllables
+
+def verify_and_correct_syllables(
+        mei_bytes: bytes,
+        text_alignment: Optional[dict],
+        image_w: int,
+        image_h: int,
+        syllable_gap_mult: float = SYLLABLE_GAP_MULTIPLIER,
+) -> tuple[bytes, list[str]]:
+    """Re-verify an already-built MEI's <syllable> text+order against
+    mothra-text's CURRENT text_alignment for the same image, correcting it
+    in place when they disagree (mothra-text wins). Called from
+    mei_api.py's create_edit_session, right before Neon opens a
+    not-yet-human-corrected MEI.
+
+    Reuses _assign_boxes_to_staves/_assign_glyphs_to_boxes/
+    _build_syllable_units -- the exact same logic build_mei itself uses --
+    against glyph/stave geometry reconstructed straight out of the
+    existing MEI (_reconstruct_mei_state), so a "correction" here can
+    never disagree with what a fresh build_mei call would have produced
+    for the same inputs.
+
+    Scope boundary: does NOT re-run _group_staves_by_row's row-
+    fragmentation repair -- see _reconstruct_mei_state's docstring; which
+    staves were originally detected vs. synthesized isn't recoverable
+    from a finished MEI. A glyph already in the wrong stave bucket is out
+    of scope; a glyph in the RIGHT stave bucket with the wrong/misordered
+    syllable text is exactly what this fixes.
+
+    Returns (possibly-unchanged mei_bytes, list of human-readable
+    correction log lines -- empty when nothing needed fixing)."""
+    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
+    if not syl_boxes:
+        return mei_bytes, []
+
+    # Same stale/mismatched-resolution guard build_mei itself uses -- if
+    # most boxes fall outside this page, don't risk a correction built on
+    # bad coordinates.
+    invalid = sum(1 for b in syl_boxes if not _text_box_valid(b, image_w, image_h))
+    if invalid > len(syl_boxes) / 2:
+        return mei_bytes, []
+
+    root = ET.fromstring(mei_bytes)
+    ns = f"{{{MEI_NS}}}"
+    staves, glyphs_by_stave, neume_elements, current_syllables = _reconstruct_mei_state(root)
+    surface = root.find(f".//{ns}surface")
+    layer = root.find(f".//{ns}layer")
+    if not staves or surface is None or layer is None:
+        return mei_bytes, []
+
+    boxes_by_stave = _assign_boxes_to_staves(staves, syl_boxes)
+    staff_zone_id_by_idx = {i: f"sz-{stave.id}" for i, stave in enumerate(staves)}
+    logs: list[str] = []
+
+    for stave_idx in range(len(staves)):
+        neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
+        stave_boxes = boxes_by_stave.get(stave_idx, [])
+        glyph_groups = _assign_glyphs_to_boxes(neume_glyphs, stave_boxes) if stave_boxes else []
+        new_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
+        new_signature = [(syl_text, tuple(g.id for g in glyphs)) for syl_text, _, glyphs in new_units]
+        if new_signature == current_syllables.get(stave_idx, []):
+            continue # matches mothra-text
+
+        children = list(layer)
+        zone_id = staff_zone_id_by_idx[stave_idx]
+        sb_idx = next(
+            (i for i, c in enumerate(children)
+             if c.tag == f"{ns}sb" and (c.get("facs") or "").lstrip("#") == zone_id),
+             None,
+        )
+        if sb_idx is None:
+            continue
+        section_end = next(
+            (i for i in range(sb_idx + 1, len(children)) if children[i].tag == f"{ns}sb"),
+            len(children),
+        )
+        insert_at = sb_idx + 2 # right after <sb>, <clef>
+
+        # Remove this section's existing <syllable> elements and their
+        # syl-zone <zone> children, to avoid leaving orphaned zones behind.
+        old_zone_ids: set[str] = set()
+        for c in children[insert_at:section_end]:
+            if c.tag == f"{ns}syllable":
+                syl_el = c.find(f"{ns}syl")
+                facs = (syl_el.get("facs") if syl_el is not None else None) or ""
+                if facs.startswith("#"):
+                    old_zone_ids.add(facs[1:])
+                layer.remove(c)
+        if old_zone_ids:
+            for zone_el in list(surface.findall(f"{ns}zone")):
+                if zone_el.get(XML_ID) in old_zone_ids:
+                    surface.remove(zone_el)
+
+        # Build fresh <syllable> elements, re-parenting the EXISTING
+        # <neume> element for each glyph (already correctly pitched --
+        # untouched) rather than recomputing anything about it.
+        for offset, (syl_text, box, glyphs_in_syl) in enumerate(new_units):
+            syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
+            syllable = ET.Element(_tag("syllable"), {XML_ID: f"syllable-{syllable_id}"})
+            syl_attrs: dict[str, str] = {XML_ID: f"syl-{str(uuid.uuid4()).replace('-', '')[:12]}"}
+            if box is not None and _text_box_valid(box, image_w, image_h):
+                syl_zone_id = f"zone-syl-{str(uuid.uuid4()).replace('-', '')[:12]}"
+                ulx, uly = box["ul"]
+                lrx, lry = box["lr"]
+                ET.SubElement(surface, _tag("zone"), {
+                    XML_ID: syl_zone_id,
+                    "ulx": str(int(ulx)), "uly": str(int(uly)),
+                    "lrx": str(int(lrx)), "lry": str(int(lry)),
+                })
+                syl_attrs["facs"] = f"#{syl_zone_id}"
+            syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
+            syl.text = syl_text
+            for glyph in glyphs_in_syl:
+                neume_el = neume_elements.get(glyph.id)
+                if neume_el is not None:
+                    syllable.append(neume_el)
+            layer.insert(insert_at + offset, syllable)
+
+        logs.append(f" [verify-syllables] stave {stave_idx}: corrected "
+                    f"{len(new_units)} syllable(s) to match text-finding")
+    if not logs:
+        return mei_bytes, []
+    return _serialize_mei(root), logs
+
 
 def main():
     parser = argparse.ArgumentParser(

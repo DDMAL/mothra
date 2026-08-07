@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from contextlib import contextmanager
 import bcrypt
+import json
 
 limiter = Limiter(key_func=get_remote_address)
 # connection pooling
@@ -757,3 +758,23 @@ def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=De
             )
             con.commit()
     return {"ok": True}
+
+def get_latest_text_alignment(cur, project_id: int, image_name: str) -> Optional[dict]:
+    """Return the most recently created text_alignments row's parsed
+    alignment_json for (project_id, image_name), or None on any lookup/
+    parse failure or missing row. Single source of truth for "what is
+    mothra-text's current syllable data for this image" -- shared by
+    tasks_encode.py's _resolve_hints() (feeds a fresh encode) and
+    mei_api.py's create_edit_session (re-verifies an existing one)."""
+    try:
+        cur.execute(
+            "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+            " ORDER BY created_at DESC LIMIT 1",
+            (image_name, project_id),
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+    except Exception:
+        pass
+    return None
