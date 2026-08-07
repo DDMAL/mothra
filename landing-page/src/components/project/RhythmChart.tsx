@@ -7,7 +7,14 @@ import { type RhythmGapSummary } from "../../lib/rhythmGaps";
 // chart, consistent with the rest of the codebase avoiding new heavy deps
 // for a single visual.
 
-const PALETTE = ["#4AADAA", "#FFA500", "#E87BF7", "#F76B6B", "#6BF7A5", "#F7E16B"];
+const PALETTE = [
+  "#4AADAA",
+  "#FFA500",
+  "#E87BF7",
+  "#F76B6B",
+  "#6BF7A5",
+  "#F7E16B",
+];
 const ANOMALY_COLOR = "#FF3B30";
 const NOISE_FLOOR_COLOR = "#1D3335";
 const CUT_THRESHOLD_COLOR = "#FF3B30";
@@ -27,7 +34,8 @@ interface Props {
 
 export default function RhythmChart({ summary }: Props) {
   const { bars, noiseFloorPx, cutThresholdPx, maxInterpGapPx } = summary;
-  const yMax = Math.max(maxInterpGapPx, ...bars.map((b) => b.gapPx)) * 1.08 || 1;
+  const yMax =
+    Math.max(maxInterpGapPx, ...bars.map((b) => b.gapPx)) * 1.08 || 1;
   const barW = Math.max(MIN_BAR_W, 12);
   const chartW = PAD_L + PAD_R + bars.length * (barW + BAR_GAP);
   const plotH = CHART_H - PAD_T - PAD_B;
@@ -55,7 +63,14 @@ export default function RhythmChart({ summary }: Props) {
         <title id="rhythm-chart-title">Staffline rhythm gap distribution</title>
         <desc id="rhythm-chart-desc">{description}</desc>
         {/* axes */}
-        <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T + plotH} stroke="#1D3335" strokeWidth={1} />
+        <line
+          x1={PAD_L}
+          y1={PAD_T}
+          x2={PAD_L}
+          y2={PAD_T + plotH}
+          stroke="#1D3335"
+          strokeWidth={1}
+        />
         <line
           x1={PAD_L}
           y1={PAD_T + plotH}
@@ -112,7 +127,9 @@ export default function RhythmChart({ summary }: Props) {
           const x = PAD_L + i * (barW + BAR_GAP);
           const y = yToPx(b.gapPx);
           const h = PAD_T + plotH - y;
-          const color = b.isAnomalous ? ANOMALY_COLOR : PALETTE[b.staveId % PALETTE.length];
+          const color = b.isAnomalous
+            ? ANOMALY_COLOR
+            : PALETTE[b.staveId % PALETTE.length];
           return (
             <rect
               key={i}
@@ -134,21 +151,25 @@ export default function RhythmChart({ summary }: Props) {
       </svg>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] font-mono text-[#1D3335]/70">
         <span>
-          <span className="text-[#1D3335]">┅</span> noise floor ({noiseFloorPx.toFixed(1)}px)
+          <span className="text-[#1D3335]">┅</span> noise floor (
+          {noiseFloorPx.toFixed(1)}px)
         </span>
         <span>
-          <span className="text-[#FF3B30]">┅</span> cut threshold ({cutThresholdPx.toFixed(1)}px)
+          <span className="text-[#FF3B30]">┅</span> cut threshold (
+          {cutThresholdPx.toFixed(1)}px)
         </span>
         <span>
-          <span className="text-[#FFA500]">┅</span> max interp. gap ({maxInterpGapPx.toFixed(1)}px)
+          <span className="text-[#FFA500]">┅</span> max interp. gap (
+          {maxInterpGapPx.toFixed(1)}px)
         </span>
         <span>
           <span className="text-[#FF3B30]">■</span> flagged stave
         </span>
       </div>
       <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
-        approximated client-side from stored per-line fit data — thresholds mirror
-        group_staves.py's own multipliers, not its exact valley-detection pass
+        approximated client-side from stored per-line fit data — thresholds
+        mirror group_staves.py's own multipliers, not its exact valley-detection
+        pass
       </p>
     </div>
   );

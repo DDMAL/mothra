@@ -46,7 +46,9 @@ function median(values: number[]): number {
  * the reference thresholds group_staves.py would have used to group those
  * same lines -- null if there isn't enough data to compute anything
  * (fewer than two lines with a known stave assignment). */
-export function computeRhythmGaps(records: JsomrLineRecord[]): RhythmGapSummary | null {
+export function computeRhythmGaps(
+  records: JsomrLineRecord[],
+): RhythmGapSummary | null {
   const byStave = new Map<number, JsomrLineRecord[]>();
   for (const r of records) {
     if (r.stave_id === null) continue;
@@ -76,7 +78,10 @@ export function computeRhythmGaps(records: JsomrLineRecord[]): RhythmGapSummary 
 
   const medianGap = median(allGaps);
   const noiseFloorPx = scaleUnit * MIN_GAP_MULTIPLIER;
-  const cutThresholdPx = Math.max(medianGap * CUT_THRESHOLD_MULTIPLIER, scaleUnit);
+  const cutThresholdPx = Math.max(
+    medianGap * CUT_THRESHOLD_MULTIPLIER,
+    scaleUnit,
+  );
   const maxInterpGapPx = Math.max(...allGaps, cutThresholdPx);
 
   return { bars, scaleUnit, noiseFloorPx, cutThresholdPx, maxInterpGapPx };

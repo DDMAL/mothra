@@ -196,11 +196,14 @@ export default function MeiTab({
                           ? "Mark as Corrected"
                           : "Mark as Uncorrected",
                         onClick: () => {
-                          apiFetch(`/api/projects/${project.id}/mei/${file.id}`, {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ corrected: newCorrected }),
-                          });
+                          apiFetch(
+                            `/api/projects/${project.id}/mei/${file.id}`,
+                            {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ corrected: newCorrected }),
+                            },
+                          );
                           onUpdateProject({
                             ...project,
                             meiFiles: project.meiFiles.map((f) =>

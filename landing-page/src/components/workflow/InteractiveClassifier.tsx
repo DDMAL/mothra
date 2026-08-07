@@ -22,7 +22,7 @@ export default function InteractiveClassifier({
   clefShape,
   onClefShapeChange,
   clefLine,
-  onClefLineChange
+  onClefLineChange,
 }: InteractiveClassifierProps) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [icUrl, setIcUrl] = useState<string | null>(null);
@@ -48,9 +48,10 @@ export default function InteractiveClassifier({
   const [trainingFiles, setTrainingFiles] = useState<File[]>([]);
   const [showTrainingPanel, setShowTrainingPanel] = useState(false);
   // Progress of a "queue all available" run: null when idle.
-  const [queueAll, setQueueAll] = useState<{ done: number; total: number } | null>(
-    null,
-  );
+  const [queueAll, setQueueAll] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   // Bumped to force the IC iframe to remount (and re-run its ic:ready
   // handshake) when the batch training set changes while a create-session page
   // is open — see the reload effect below.
@@ -70,7 +71,10 @@ export default function InteractiveClassifier({
 
   // Latest batch training selection, readable from the message handler below
   // without re-subscribing the listener whenever the selection changes.
-  const trainingRef = useRef({ presets: trainingPresets, files: trainingFiles });
+  const trainingRef = useRef({
+    presets: trainingPresets,
+    files: trainingFiles,
+  });
   useEffect(() => {
     trainingRef.current = { presets: trainingPresets, files: trainingFiles };
   }, [trainingPresets, trainingFiles]);
@@ -102,7 +106,8 @@ export default function InteractiveClassifier({
       body: JSON.stringify({ imageName: img.name }),
     })
       .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
+        if (!r.ok)
+          throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
         return r.json();
       })
       .then((data) => {
@@ -142,14 +147,20 @@ export default function InteractiveClassifier({
         }
         return;
       }
-      if (data?.type === "ic:session-created" && typeof data.sessionId === "string") {
+      if (
+        data?.type === "ic:session-created" &&
+        typeof data.sessionId === "string"
+      ) {
         setSessionId(data.sessionId);
       }
       // "Trust the classifier" path: IC ran classify + skipped the interactive
       // step. Adopt the session and flag it for auto-queuing (handled by the
       // effect below, not here, to avoid a not-yet-flushed sessionId and a
       // stale handleQueuePage closure).
-      if (data?.type === "ic:auto-export" && typeof data.sessionId === "string") {
+      if (
+        data?.type === "ic:auto-export" &&
+        typeof data.sessionId === "string"
+      ) {
         setSessionId(data.sessionId);
         setAutoQueueRequested(true);
       }
@@ -184,7 +195,8 @@ export default function InteractiveClassifier({
         type: "application/xml",
       });
       const imgResp = await apiFetch(`/api/images/${image.id}`);
-      if (!imgResp.ok) throw new Error(`image fetch failed (${imgResp.status})`);
+      if (!imgResp.ok)
+        throw new Error(`image fetch failed (${imgResp.status})`);
       const blob = await imgResp.blob();
       const imageFile = new File([blob], image.name, {
         type: blob.type || "image/png",
@@ -203,14 +215,17 @@ export default function InteractiveClassifier({
       const r = await apiFetch(`/api/ic/${sessionId}/complete`, {
         method: "POST",
       });
-      if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
+      if (!r.ok)
+        throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
       const data = await r.json();
 
       // 2. Build the pair and hand it to the encode flow; advance to the next
       //    un-queued page.
       const pair = await buildPair(img, data.xml_base64);
       setQueue((prev) => [...prev, pair]);
-      const nextIdx = images.findIndex((im, idx) => idx > currentIdx && !queuedNames.has(im.name));
+      const nextIdx = images.findIndex(
+        (im, idx) => idx > currentIdx && !queuedNames.has(im.name),
+      );
       if (nextIdx !== -1) setCurrentIdx(nextIdx);
     } catch (err) {
       setError(String((err as Error).message ?? err));
@@ -241,7 +256,8 @@ export default function InteractiveClassifier({
           method: "POST",
           body: form,
         });
-        if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
+        if (!r.ok)
+          throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
         const data = await r.json();
         const pair = await buildPair(image, data.xml_base64);
         setQueue((prev) =>
@@ -256,7 +272,15 @@ export default function InteractiveClassifier({
     } finally {
       setQueueAll(null);
     }
-  }, [projectId, totalTrainingSets, images, queuedNames, trainingPresets, trainingFiles, buildPair]);
+  }, [
+    projectId,
+    totalTrainingSets,
+    images,
+    queuedNames,
+    trainingPresets,
+    trainingFiles,
+    buildPair,
+  ]);
 
   // Run the queue path for an auto-exported page once the session id and
   // current page have settled. Gated on the flag (reset immediately) so it
@@ -298,15 +322,18 @@ export default function InteractiveClassifier({
           <span className="text-white/50 text-xs">clef</span>
           <select
             value={clefShape}
-            onChange={e => onClefShapeChange(e.target.value as "C" | "F")}
+            onChange={(e) => onClefShapeChange(e.target.value as "C" | "F")}
             className="bg-transparent border border-white/30 rounded px-1 text-sm cursor-pointer text-white"
           >
             <option value="C">C</option>
             <option value="F">F</option>
           </select>
           <input
-            type="number" min={1} max={5} value={clefLine}
-            onChange={e => onClefLineChange(Number(e.target.value))}
+            type="number"
+            min={1}
+            max={5}
+            value={clefLine}
+            onChange={(e) => onClefLineChange(Number(e.target.value))}
             className="w-10 bg-transparent border border-white/30 rounded px-1 text-sm text-center text-white"
           />
         </div>
@@ -355,7 +382,9 @@ export default function InteractiveClassifier({
                           <input
                             type="checkbox"
                             checked={trainingPresets.includes(name)}
-                            onChange={(e) => togglePreset(name, e.target.checked)}
+                            onChange={(e) =>
+                              togglePreset(name, e.target.checked)
+                            }
                           />
                           <span className="truncate">{name}</span>
                         </label>
@@ -399,10 +428,11 @@ export default function InteractiveClassifier({
         <div className="flex-1" />
         {status === "ready" && !sessionId && (
           <span className="text-white/80 text-sm">
-            queue the page from the classifier, or start a session to correct it first
+            queue the page from the classifier, or start a session to correct it
+            first
           </span>
         )}
-        { queue.length > 0 && (
+        {queue.length > 0 && (
           <span className="text-white/80 text-sm">
             {queue.length} page{queue.length > 1 ? "s" : ""} queued
           </span>
@@ -416,7 +446,11 @@ export default function InteractiveClassifier({
             disabled={encoding || queuedNames.has(img?.name ?? "")}
             className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {encoding ? "queuing..." : queuedNames.has(img?.name ?? "") ? "queued" : "queue page"}
+            {encoding
+              ? "queuing..."
+              : queuedNames.has(img?.name ?? "")
+                ? "queued"
+                : "queue page"}
           </button>
         )}
         <button
@@ -512,7 +546,9 @@ export default function InteractiveClassifier({
               <button
                 onClick={handleQueueAll}
                 disabled={
-                  queueAll !== null || totalTrainingSets === 0 || unqueuedCount === 0
+                  queueAll !== null ||
+                  totalTrainingSets === 0 ||
+                  unqueuedCount === 0
                 }
                 title={
                   totalTrainingSets === 0

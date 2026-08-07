@@ -78,7 +78,7 @@ export default function NeonBatchEditor({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, corrected]);
 
   const currentFile = meiFiles[currentIndex];
@@ -167,7 +167,10 @@ export default function NeonBatchEditor({
             if (prev !== -1) setCurrentIndex(prev);
           }}
           disabled={nearestUncorrected(currentIndex, -1) === -1}
-          style={{ ...btn, opacity: nearestUncorrected(currentIndex, -1) === -1 ? 0.4 : 1 }}
+          style={{
+            ...btn,
+            opacity: nearestUncorrected(currentIndex, -1) === -1 ? 0.4 : 1,
+          }}
         >
           ← Prev
         </button>
@@ -186,7 +189,9 @@ export default function NeonBatchEditor({
             return (
               <button
                 key={f.id}
-                onClick={() => { if (!done) setCurrentIndex(i); }}
+                onClick={() => {
+                  if (!done) setCurrentIndex(i);
+                }}
                 disabled={done}
                 style={{
                   ...btn,
@@ -202,7 +207,8 @@ export default function NeonBatchEditor({
                   cursor: done ? "not-allowed" : "pointer",
                 }}
               >
-                {done ? "✓ " : ""}{f.name}
+                {done ? "✓ " : ""}
+                {f.name}
               </button>
             );
           })}

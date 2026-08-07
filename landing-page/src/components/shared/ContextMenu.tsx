@@ -24,7 +24,10 @@ export default function ContextMenu({
   // page (document) coordinates, not viewport coordinates, so the menu
   // scrolls together with the 3-dot button that opened it instead of
   // staying glued to a fixed spot on screen.
-  const [pos, setPos] = useState({ top: y + window.scrollY + 8, left: x + window.scrollX - 80 });
+  const [pos, setPos] = useState({
+    top: y + window.scrollY + 8,
+    left: x + window.scrollX - 80,
+  });
 
   useLayoutEffect(() => {
     const el = menuRef.current;
@@ -38,10 +41,16 @@ export default function ContextMenu({
     if (top + height > window.innerHeight - MARGIN) {
       top = y - height - 8;
     }
-    top = Math.min(Math.max(top, MARGIN), Math.max(MARGIN, window.innerHeight - height - MARGIN));
+    top = Math.min(
+      Math.max(top, MARGIN),
+      Math.max(MARGIN, window.innerHeight - height - MARGIN),
+    );
 
     let left = x - 80;
-    left = Math.min(Math.max(left, MARGIN), Math.max(MARGIN, window.innerWidth - width - MARGIN));
+    left = Math.min(
+      Math.max(left, MARGIN),
+      Math.max(MARGIN, window.innerWidth - width - MARGIN),
+    );
 
     setPos({ top: top + window.scrollY, left: left + window.scrollX });
   }, [x, y]);

@@ -3,22 +3,30 @@ import type { ProjectImage } from "../../types";
 import { findFolioConflict } from "../../utils/folio";
 
 interface EditFolioModalProps {
-    image: ProjectImage;
-    images: ProjectImage[];
-    folioOptions: string[];
-    value: string;
-    onChange: (v: string) => void;
-    onSubmit: () => void;
-    onClose: () => void;
+  image: ProjectImage;
+  images: ProjectImage[];
+  folioOptions: string[];
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
 }
 
 export default function EditFolioModal({
-    image, images, folioOptions, value, onChange, onSubmit, onClose,
+  image,
+  images,
+  folioOptions,
+  value,
+  onChange,
+  onSubmit,
+  onClose,
 }: EditFolioModalProps) {
-    const conflict = findFolioConflict(images, value, image.id);
+  const conflict = findFolioConflict(images, value, image.id);
   return (
     <Modal onClose={onClose}>
-      <h2 className="text-xl text-[#1D3335] text-center">edit folio — {image.name}</h2>
+      <h2 className="text-xl text-[#1D3335] text-center">
+        edit folio — {image.name}
+      </h2>
       <select
         autoFocus
         value={value}
@@ -27,7 +35,9 @@ export default function EditFolioModal({
       >
         <option value="">no folio</option>
         {folioOptions.map((f) => (
-          <option key={f} value={f}>{f}</option>
+          <option key={f} value={f}>
+            {f}
+          </option>
         ))}
       </select>
       {conflict && (

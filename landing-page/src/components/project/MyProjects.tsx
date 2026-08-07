@@ -1,7 +1,11 @@
 import { useRef, useState } from "react";
 import { apiFetchOrThrow } from "../../lib/apiFetch";
 import { suggestProjectNameFromFilename } from "../../utils/folio";
-import { getOversizedFiles, resizeImageFile, TARGET_RESIZE_BYTES } from "../../utils/imageResize";
+import {
+  getOversizedFiles,
+  resizeImageFile,
+  TARGET_RESIZE_BYTES,
+} from "../../utils/imageResize";
 import { AuthImage } from "../shared/AuthImage";
 import type { Project, MeiFile, CantusSource } from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
@@ -104,10 +108,14 @@ export default function MyProjects({
   const [showSourceLookup, setShowSourceLookup] = useState(false);
   const [sourceIdInput, setSourceIdInput] = useState("");
   const [sourceLookupLoading, setSourceLookupLoading] = useState(false);
-  const [sourceLookupError, setSourceLookupError] = useState<string | null>(null);
-  const [pickedImageFile, setPickedImageFile] = useState<File | null>(null)
+  const [sourceLookupError, setSourceLookupError] = useState<string | null>(
+    null,
+  );
+  const [pickedImageFile, setPickedImageFile] = useState<File | null>(null);
   const [pickedFileError, setPickedFileError] = useState<string | null>(null);
-  const [pendingSizeWarning, setPendingSizeWarning] = useState<File | null>(null);
+  const [pendingSizeWarning, setPendingSizeWarning] = useState<File | null>(
+    null,
+  );
   const [resizingCreateImage, setResizingCreateImage] = useState(false);
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [deleteConfirmProject, setDeleteConfirmProject] = useState<
@@ -128,14 +136,16 @@ export default function MyProjects({
   // skip writing its result into whatever new create session followed it.
   const createSessionId = useRef(0);
 
-  const handleSourceLookup = async() => {
+  const handleSourceLookup = async () => {
     const id = sourceIdInput.trim();
     if (!id) return;
     const sessionId = createSessionId.current;
     setSourceLookupLoading(true);
     setSourceLookupError(null);
     try {
-      const source: CantusSource = await apiFetchOrThrow(`/api/cantus/source/${id}`).then((r) => r.json());
+      const source: CantusSource = await apiFetchOrThrow(
+        `/api/cantus/source/${id}`,
+      ).then((r) => r.json());
       if (createSessionId.current !== sessionId) return;
       setNewName(source.name);
     } catch (e) {
@@ -171,7 +181,9 @@ export default function MyProjects({
     finalizeCreate(pickedImageFile ?? undefined);
   };
 
-  const resolveCreateSizeWarning = async (action: "resize" | "asis" | "cancel") => {
+  const resolveCreateSizeWarning = async (
+    action: "resize" | "asis" | "cancel",
+  ) => {
     if (!pendingSizeWarning) return;
     if (action === "cancel") {
       setPendingSizeWarning(null);
@@ -183,7 +195,10 @@ export default function MyProjects({
     }
     setResizingCreateImage(true);
     try {
-      const resized = await resizeImageFile(pendingSizeWarning, TARGET_RESIZE_BYTES);
+      const resized = await resizeImageFile(
+        pendingSizeWarning,
+        TARGET_RESIZE_BYTES,
+      );
       finalizeCreate(resized);
     } finally {
       // Always clear the flag, even on failure — `finalizeCreate` (which also
@@ -333,8 +348,12 @@ export default function MyProjects({
                           </span>
                         </div>
                         <MeiProgress meiFiles={p.meiFiles} />
-                        <span className="text-xs text-[#1D3335]/50">{p.images.length} img</span>
-                        <span className="text-xs text-[#1D3335]/50">{p.annotations?.length ?? 0} ann</span>
+                        <span className="text-xs text-[#1D3335]/50">
+                          {p.images.length} img
+                        </span>
+                        <span className="text-xs text-[#1D3335]/50">
+                          {p.annotations?.length ?? 0} ann
+                        </span>
                       </div>
                     )}
                     <span>{p.user}</span>
@@ -418,8 +437,12 @@ export default function MyProjects({
                             {formatLastOpened(p.lastOpenedAt)}
                           </span>
                           <MeiProgress meiFiles={p.meiFiles} />
-                          <span className="text-xs text-[#1D3335]/50">{p.images.length} img</span>
-<span className="text-xs text-[#1D3335]/50">{p.annotations?.length ?? 0} ann</span>
+                          <span className="text-xs text-[#1D3335]/50">
+                            {p.images.length} img
+                          </span>
+                          <span className="text-xs text-[#1D3335]/50">
+                            {p.annotations?.length ?? 0} ann
+                          </span>
                         </div>
                         {hoveredRow === p.id && (
                           <div
@@ -551,74 +574,78 @@ export default function MyProjects({
 
           <div className="flex flex-col items-center gap-2 -mt-2">
             <div className="flex items-center justify-center gap-2 text-xs">
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
-                >
-                    name from a file
-                </button>
-                <span className="text-[#1D3335]/30">|</span>
-                <button
-                    onClick={() => setShowSourceLookup((v) => !v)}
-                    className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
-                >
-                    name from a Cantus source
-                </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+              >
+                name from a file
+              </button>
+              <span className="text-[#1D3335]/30">|</span>
+              <button
+                onClick={() => setShowSourceLookup((v) => !v)}
+                className="text-[#1D3335]/60 hover:text-[#1D3335] underline cursor-pointer"
+              >
+                name from a Cantus source
+              </button>
             </div>
             <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      if (!file.type.startsWith("image/")) {
-                        setPickedFileError("please choose an image file");
-                        e.target.value = "";
-                        return;
-                      }
-                      setPickedFileError(null);
-                      setNewName(suggestProjectNameFromFilename(file.name));
-                      setPickedImageFile(file);
-                    }
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  if (!file.type.startsWith("image/")) {
+                    setPickedFileError("please choose an image file");
                     e.target.value = "";
-                }}
+                    return;
+                  }
+                  setPickedFileError(null);
+                  setNewName(suggestProjectNameFromFilename(file.name));
+                  setPickedImageFile(file);
+                }
+                e.target.value = "";
+              }}
             />
             {pickedImageFile && (
-                <p className="text-[#1D3335]/50 text-[11px] flex items-center gap-1.5">
-                    will upload "{pickedImageFile.name}" to this project
-                    <button
-                        onClick={() => setPickedImageFile(null)}
-                        title="don't upload this file"
-                        className="text-[#1D3335]/40 hover:text-[#1D3335] cursor-pointer"
-                    >
-                        ✕
-                    </button>
-                </p>
+              <p className="text-[#1D3335]/50 text-[11px] flex items-center gap-1.5">
+                will upload "{pickedImageFile.name}" to this project
+                <button
+                  onClick={() => setPickedImageFile(null)}
+                  title="don't upload this file"
+                  className="text-[#1D3335]/40 hover:text-[#1D3335] cursor-pointer"
+                >
+                  ✕
+                </button>
+              </p>
             )}
-            {pickedFileError && <p className="text-red-600 text-[11px]">{pickedFileError}</p>}
+            {pickedFileError && (
+              <p className="text-red-600 text-[11px]">{pickedFileError}</p>
+            )}
             {showSourceLookup && (
-                <div className="flex flex-col items-center gap-2">
-                    <div className="flex items-center gap-2">
-                        <input
-                            value={sourceIdInput}
-                            onChange={(e) => setSourceIdInput(e.target.value)}
-                            placeholder="CantusDB source ID"
-                            className="bg-white rounded-xl px-3 py-1.5 text-center text-[#1D3335] outline-none text-xs placeholder:text-[#1D3335]/60 w-36"
-                        />
-                        <button
-                            onClick={handleSourceLookup}
-                            disabled={sourceLookupLoading || !sourceIdInput.trim()}
-                            className="px-3 py-1.5 border border-[#1D3335]/40 text-[#1D3335] text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {sourceLookupLoading ? "loading..." : "look up"}
-                        </button>
-                    </div>
-                    {sourceLookupError && <p className="text-red-600 text-xs">{sourceLookupError}</p>}
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={sourceIdInput}
+                    onChange={(e) => setSourceIdInput(e.target.value)}
+                    placeholder="CantusDB source ID"
+                    className="bg-white rounded-xl px-3 py-1.5 text-center text-[#1D3335] outline-none text-xs placeholder:text-[#1D3335]/60 w-36"
+                  />
+                  <button
+                    onClick={handleSourceLookup}
+                    disabled={sourceLookupLoading || !sourceIdInput.trim()}
+                    className="px-3 py-1.5 border border-[#1D3335]/40 text-[#1D3335] text-xs rounded-lg hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {sourceLookupLoading ? "loading..." : "look up"}
+                  </button>
                 </div>
+                {sourceLookupError && (
+                  <p className="text-red-600 text-xs">{sourceLookupError}</p>
+                )}
+              </div>
             )}
-        </div>
+          </div>
           <button
             onClick={handleCreateClick}
             className="bg-[#1D3335] text-white rounded-xl px-6 py-3 text-sm font-bold self-center hover:opacity-90 transition-opacity cursor-pointer"
