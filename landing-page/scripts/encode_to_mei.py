@@ -164,7 +164,8 @@ def image_dimensions(header: bytes) -> Optional[tuple]:
     return None
 
 def assign_glyphs_to_staves(
-        glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int
+        glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int,
+        allow_synthetic_lines: bool = False,
 ) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
     """Assign each glyph to a stave.
 
@@ -179,6 +180,13 @@ def assign_glyphs_to_staves(
     detected stave is assigned to it as before; a row that overlaps nothing
     is a system the detector missed, and gets a synthesized stave of its own.
 
+    allow_synthetic_lines is forwarded to that recovery clustering
+    (_cluster_glyphs_into_staves) so a recovered stave's line_ys follows the
+    same opt-in-fabrication rule as tier-3's own estimate_staves_from_glyphs
+    fallback -- without this, a page could end up with tier-3 staves carrying
+    synthetic pitch geometry while recovered staves silently didn't, even
+    though the caller asked for synthetic lines everywhere.
+
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
     <sb>/<clef> from the RETURNED staves list, not the one passed in.
@@ -189,7 +197,9 @@ def assign_glyphs_to_staves(
         return result, staves
 
     result = {i: [] for i in range(len(staves))}
-    row_groups = _cluster_glyphs_into_staves(glyphs, page_w, page_h, id_prefix="row")
+    row_groups = _cluster_glyphs_into_staves(
+        glyphs, page_w, page_h, id_prefix="row", allow_synthetic_lines=allow_synthetic_lines,
+    )
 
     for row_stave, members in row_groups:
         best_idx, best_overlap = None, 0
@@ -293,12 +303,23 @@ def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveB
     return _staves_from_staff_lines(lines, img_w, img_h)
 
 def _cluster_glyphs_into_staves(
-        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto"
+        glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto",
+        allow_synthetic_lines: bool = False,
 ) -> list[tuple[StaveBbox, list[Glyph]]]:
     """Cluster glyphs into stave-sized row groups by Y-center gap, pairing each
     synthesized StaveBbox with the exact glyphs that produced it. Shared by
     estimate_staves_from_glyphs's no-stave-data fallback and by
-    assign_glyphs_to_staves's missed-stave recovery (see there)."""
+    assign_glyphs_to_staves's missed-stave recovery (see there).
+
+    The resulting StaveBbox's bounding box is always real (derived from the
+    glyph cluster itself), but its internal `line_ys` -- used only for pitch
+    computation, via _nc_pitch -- has no real measured staff-line data behind
+    it in this fallback. allow_synthetic_lines controls whether to fabricate
+    plausible-looking, perfectly evenly-spaced line_ys anyway (the old,
+    always-on behavior) or leave line_ys empty so _nc_pitch's own <2-entry
+    guard degrades to an explicit unresolved default ("a", "3") instead of a
+    confident-looking but invented pitch. Default False -- see
+    estimate_staves_from_glyphs's own docstring for why."""
     if not glyphs:
         return []
     neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
@@ -330,28 +351,42 @@ def _cluster_glyphs_into_staves(
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
-            line_ys=[est_uly + h * j / 3 for j in range(4)],
+            line_ys=[est_uly + h * j / 3 for j in range(4)] if allow_synthetic_lines else [],
         )
         groups.append((stave, row))
     return groups
 
 
 def estimate_staves_from_glyphs(
-    glyphs: list[Glyph], page_w: int, page_h: int
-) -> list[StaveBbox]:
-    """Estimate stave bounding boxes from GameraXML glyphs.
+    glyphs: list[Glyph], page_w: int, page_h: int, allow_synthetic_lines: bool = False,
+) -> tuple[list[StaveBbox], str]:
+    """Estimate stave bounding boxes from GameraXML glyphs. This is tier 3 of
+    tasks_encode.py's 3-tier stave-source fallback (staffline_detection ->
+    yolo_annotation -> this) -- the caller uses the returned tag as that
+    tier's `stave_source` value.
 
     Primary strategy: cluster the detected staff lines (wide, flat glyphs with
     aspect ratio ≥ 8 spanning >20% of page width).  These are highly reliable
     stave anchors and are unaffected by text characters that fill inter-stave
     gaps and cause the neume-Y-clustering approach to collapse all staves into
-    one.
+    one. Tagged "glyph_estimate" -- real, page-specific geometry.
 
     Fallback: if too few staff lines are available, cluster neume-like glyphs
-    by Y-center gap (original approach with tighter outlier filtering).
+    by Y-center gap (original approach with tighter outlier filtering). The
+    stave bounding box here is still real (from the glyph cluster), but its
+    internal line positions are not measured -- see _cluster_glyphs_into_staves's
+    own docstring for allow_synthetic_lines. Tagged "glyph_estimate_synthetic_lines"
+    when allow_synthetic_lines fabricated plausible-looking line_ys, or
+    "glyph_estimate_unresolved_lines" (default) when it didn't -- either way,
+    distinct from "glyph_estimate" so this weaker case is never conflated with
+    strategy 1's real per-page staff-line geometry.
+
+    Zero-glyph case: no real geometry exists at all. Returns one hardcoded
+    full-page StaveBbox tagged "placeholder_no_glyphs" -- callers should treat
+    this as a warning-worthy result, not silent success.
     """
     if not glyphs:
-        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)]
+        return [StaveBbox(id="synth-0", ulx=0, uly=0, lrx=page_w, lry=page_h)], "placeholder_no_glyphs"
 
     # ── Strategy 1: use staff line glyphs ──────────────────────────────────
     # Staff lines span most of the page width and have ncols >> nrows.
@@ -364,10 +399,16 @@ def estimate_staves_from_glyphs(
     if len(staff_lines) >= 4:
         staves = _staves_from_staff_lines(staff_lines, page_w, page_h)
         if staves:
-            return staves
+            return staves, "glyph_estimate"
 
     # ── Strategy 2: neume Y-gap clustering (fallback) ──────────────────────
-    return [stave for stave, _ in _cluster_glyphs_into_staves(glyphs, page_w, page_h)]
+    staves = [
+        stave for stave, _ in _cluster_glyphs_into_staves(
+            glyphs, page_w, page_h, allow_synthetic_lines=allow_synthetic_lines,
+        )
+    ]
+    detail = "glyph_estimate_synthetic_lines" if allow_synthetic_lines else "glyph_estimate_unresolved_lines"
+    return staves, detail
 
 
 def _staves_from_staff_lines(
@@ -899,6 +940,64 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
                 warnings.append(f"nc {ncid or '?'}: missing @{attr}")
 
     return warnings
+
+
+def trace_stave_zone_parity(staves: list[StaveBbox], mei_bytes: bytes) -> list[str]:
+    """Parse a just-built MEI's actual <zone type="staff"> elements back out
+    and confirm they match the StaveBbox list build_mei() was handed for it
+    -- same count, same coordinates. build_mei() writes each zone's
+    ulx/uly/lrx/lry straight from the corresponding StaveBbox (zone id
+    convention: `sz-{stave.id}`, see build_mei() itself), so any mismatch
+    here would mean something between stave resolution and encoding silently
+    altered the geometry Neon ends up displaying -- not something that
+    should ever legitimately happen, hence a "[warn]"-prefixed message
+    rather than a quiet one when it does.
+
+    Returns a list of "[trace] ..." message strings for the caller to
+    publish however it likes (a job-log event, a print, a test assertion --
+    kept DB/Celery-independent on purpose so it's testable like the rest of
+    this module, unlike tasks_encode.py which connects to Postgres at
+    import time)."""
+    try:
+        root = ET.fromstring(mei_bytes)
+        zones = {
+            z.get(XML_ID): z
+            for z in root.iter(_tag("zone"))
+            if z.get("type") == "staff"
+        }
+    except ET.ParseError as e:
+        return [f"[trace] [warn] could not parse MEI back out to verify zones: {e}"]
+
+    if len(zones) != len(staves):
+        return [
+            f"[trace] [warn] stave/zone count mismatch: {len(staves)} StaveBbox(es) handed to"
+            f" build_mei(), {len(zones)} type=\"staff\" zone(s) actually written"
+        ]
+
+    mismatches = []
+    for stave in staves:
+        zone = zones.get(f"sz-{stave.id}")
+        if zone is None:
+            mismatches.append(f"stave {stave.id}: no matching zone written")
+            continue
+        # float(), not int(): build_mei() writes str(stave.ulx) etc. verbatim,
+        # and StaveBbox's own type hints (int) aren't enforced at runtime --
+        # a fractional coordinate reaching here would otherwise raise
+        # ValueError and abort the whole encode job over what's meant to be a
+        # tracing-only check.
+        try:
+            written = tuple(float(zone.get(k)) for k in ("ulx", "uly", "lrx", "lry"))
+        except (TypeError, ValueError):
+            mismatches.append(f"stave {stave.id}: zone has unparsable coordinates")
+            continue
+        expected = tuple(float(v) for v in (stave.ulx, stave.uly, stave.lrx, stave.lry))
+        if written != expected:
+            mismatches.append(f"stave {stave.id}: expected {expected}, zone has {written}")
+
+    if mismatches:
+        return [f"[trace] [warn] {len(mismatches)} stave zone(s) diverged from input: " + "; ".join(mismatches)]
+    return [f"[trace] {len(staves)} stave zone(s) verified identical to build_mei()'s input"]
+
 
 def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
     mei_b64 = base64.b64encode(mei_bytes).decode()

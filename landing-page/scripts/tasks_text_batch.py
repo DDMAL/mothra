@@ -118,6 +118,9 @@ def run_text_batch_task(job_id, project_id, body):
             # documentation_allons-y/STAFFLINE_INTEGRATION_FOLLOWUPS.md's
             # "batch_api.py's text-batch-run path" bullet).
             if has_class(yolo_txt, STAFFLINE_CLASS_ID):
+                publish({"type": "log", "message":
+                    f"[trace] {name}: stave-class boxes came from model"
+                    f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, name, ann_id, img_arr, yolo_txt,
                 ):

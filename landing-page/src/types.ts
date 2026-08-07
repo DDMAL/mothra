@@ -83,12 +83,24 @@ export interface AnnotationSet {
   modelLabel?: string | null;
 }
 
+// Which of tasks_encode.py's 3-tier stave-source fallback produced this
+// file's zones -- see auth_api.py's mei_files migration comment for the
+// full tier list. Undefined for MEI files encoded before this was tracked.
+export type StaveSource =
+  | "staffline_detection"
+  | "yolo_annotation"
+  | "glyph_estimate"
+  | "glyph_estimate_unresolved_lines"
+  | "glyph_estimate_synthetic_lines"
+  | "placeholder_no_glyphs";
+
 export interface MeiFile {
   id: string;
   name: string;
   xmlContent?: string;
   corrected?: boolean;
   imageName?: string;
+  staveSource?: StaveSource | null;
 }
 
 export type View =

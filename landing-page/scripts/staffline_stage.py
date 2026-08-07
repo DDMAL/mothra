@@ -181,6 +181,161 @@ def _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, sca
     return records
 
 
+def _fit_and_group(
+    image_name: str, image_arr: np.ndarray, w: int, h: int, detections, scale_unit: float,
+    interpolate_missing: bool, job_id: Optional[str] = None,
+) -> dict:
+    """Per-box centerline fit + stave grouping -- shared by
+    run_staffline_detection (persisted, tied to a Celery job) and
+    preview_interpolation (unpersisted, synchronous API call, see below).
+
+    job_id is optional: only used to check_cancelled per box when running
+    inside a Celery task (tasks_predict.py's own per-image check_cancelled
+    call only runs once per image; a page with many stave boxes can spend
+    real time in this loop with no cancellation observed in between).
+    Omit it for the preview path, which has no job to cancel.
+
+    Returns a dict with "trace" (already-formatted [trace] message strings,
+    so both callers report identical box-count tracing) always present, and
+    "degenerate": True when every crop was degenerate (mirrors
+    run_staffline_detection's own former early-return -- the caller decides
+    how to report that), else "records"/"stave_ids"/"grouping_result" too.
+    """
+    from component_filter import filter_components
+    from fit_centerline import fit_centerline
+    from group_staves import group_staves
+
+    fit_results = []
+    boxes = []
+    for det in detections:
+        if job_id is not None:
+            check_cancelled(job_id)
+        box = det.to_pixel_box(w, h)
+        crop, actual_box = _crop_with_padding(image_arr, box, CROP_PADDING_PX)
+        if crop.size == 0:
+            continue
+        filter_result = filter_components(crop, scale_unit=scale_unit)
+        fit_result = fit_centerline(filter_result, scale_unit=scale_unit)
+        fit_result.x_page_offset = float(actual_box[0])
+        fit_result.y_page_offset = float(actual_box[1])
+        fit_results.append(fit_result)
+        boxes.append(actual_box)
+
+    trace = [
+        f"[trace] {image_name}: {len(fit_results)}/{len(detections)} box(es) survived crop+fit"
+        f" (non-degenerate)"
+    ]
+    if not fit_results:
+        return {"degenerate": True, "trace": trace}
+
+    grouping_result = group_staves(
+        fit_results, scale_unit=scale_unit, interpolate_missing=interpolate_missing,
+    )
+    records = _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, scale_unit)
+    stave_ids = {r["stave_id"] for r in records if r["stave_id"] is not None}
+    return {
+        "degenerate": False, "trace": trace,
+        "records": records, "stave_ids": stave_ids, "grouping_result": grouping_result,
+    }
+
+
+def preview_interpolation(image_name: str, image_arr: np.ndarray, yolo_txt: str) -> Optional[list[dict]]:
+    """Synchronous, unpersisted variant for the interpolate-preview API
+    endpoint (inference_api.py's POST .../stafflines/{id}/interpolate-preview).
+    Always runs with interpolate_missing=True, never touches
+    staffline_detections, and has no job to cancel.
+
+    Returns None if there's nothing to preview (no stave-class boxes, or
+    every crop was degenerate) -- callers should treat that as "nothing to
+    interpolate", not an error. Otherwise returns the JSOMR records exactly
+    as run_staffline_detection would have persisted them, for the frontend
+    to render as a preview before the user chooses to accept it (see
+    inference_api.py's interpolate-confirm route, which re-runs and
+    persists for real once accepted)."""
+    from yolo_io import parse_yolo_lines, filter_to_class
+
+    detections = filter_to_class(
+        parse_yolo_lines(yolo_txt.splitlines(), source=f"{image_name} annotation"),
+        STAFFLINE_CLASS_ID,
+    )
+    if not detections:
+        return None
+
+    h, w = image_arr.shape[:2]
+    scale_unit = _compute_page_scale_unit(detections, w, h)
+    result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing=True)
+    if result["degenerate"]:
+        return None
+    return result["records"]
+
+
+def compute_staffline_interpolation(image_name: str, image_arr: np.ndarray, yolo_txt: str) -> Optional[dict]:
+    """Like preview_interpolation(), but returns everything
+    persist_staffline_detection() needs to write a full row -- not just the
+    JSOMR records -- so a caller can run this CPU-bound computation without
+    holding a database connection open, then reacquire one just for the
+    (cheap) persist step. This is what inference_api.py's interpolate-confirm
+    route uses instead of run_staffline_detection() directly, precisely to
+    avoid tying up a pooled connection for the duration of component
+    filtering/centerline fitting -- run_staffline_detection() itself is fine
+    holding one, since its callers (tasks_predict.py/tasks_text_batch.py)
+    already own that connection for the whole per-image loop regardless.
+
+    Returns None under the same conditions as preview_interpolation()."""
+    from yolo_io import parse_yolo_lines, filter_to_class
+
+    detections = filter_to_class(
+        parse_yolo_lines(yolo_txt.splitlines(), source=f"{image_name} annotation"),
+        STAFFLINE_CLASS_ID,
+    )
+    if not detections:
+        return None
+
+    h, w = image_arr.shape[:2]
+    scale_unit = _compute_page_scale_unit(detections, w, h)
+    result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing=True)
+    if result["degenerate"]:
+        return None
+
+    return {
+        "records": result["records"],
+        "stave_ids": result["stave_ids"],
+        "grouping_result": result["grouping_result"],
+        "scale_unit": scale_unit,
+        "settings": {
+            "interpolate_missing": True,
+            "binarization": "sauvola",
+            "bgr_enabled": False,  # ink-separation deferred this pass, see module docstring
+            "package_version": _package_version(),
+        },
+    }
+
+
+def persist_staffline_detection(cur, con, project_id: str, image_id: str, image_name: str,
+                                 annotation_id: str, computed: dict) -> str:
+    """INSERT-and-commit a succeeded detection result using an already-open
+    cursor/connection -- the shared write side for both
+    run_staffline_detection() (computes and persists on the same connection)
+    and inference_api.py's interpolate-confirm route (computes via
+    compute_staffline_interpolation() with no connection held, then calls
+    this against a freshly reacquired one). Returns the new row's id."""
+    new_id = _uuid.uuid4().hex
+    records = computed["records"]
+    cur.execute(
+        "INSERT INTO staffline_detections"
+        " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
+        "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
+        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
+        (
+            new_id, project_id, image_id, image_name, annotation_id,
+            json.dumps(records), computed["scale_unit"], len(computed["stave_ids"]),
+            computed["grouping_result"].mode_lines_per_stave, json.dumps(computed["settings"]),
+        ),
+    )
+    con.commit()
+    return new_id
+
+
 def run_staffline_detection(
     job_id: str, cur, con,
     project_id: int, image_id: str, image_name: str, annotation_id: str,
@@ -195,19 +350,15 @@ def run_staffline_detection(
     interpolate_missing is plumbed through, default off, matching
     staff-finding/dox/STATUS.md's "not yet validated across the corpus"
     caveat -- flipping it later is a default change, not a re-plumbing job.
+    (See preview_interpolation() above for the opt-in, review-before-persist
+    path the frontend actually uses to turn this on per-image.)
 
-    tasks_predict.py's own per-image check_cancelled(job_id) call only runs
-    once per image; a page with many stave boxes can spend real time in the
-    per-box loop below with no cancellation observed in between, so this
-    checks again on every box. JobCancelled is deliberately re-raised, not
-    swallowed by the broad except below -- a cancelled job must actually
-    stop, not be recorded as one failed staffline-detection attempt among
-    many while the outer per-image loop keeps going.
+    JobCancelled is deliberately re-raised, not swallowed by the broad
+    except below -- a cancelled job must actually stop, not be recorded as
+    one failed staffline-detection attempt among many while the outer
+    per-image loop keeps going.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
-    from component_filter import filter_components
-    from fit_centerline import fit_centerline
-    from group_staves import group_staves
 
     detections = filter_to_class(
         parse_yolo_lines(yolo_txt.splitlines(), source=f"{image_name} annotation"),
@@ -216,37 +367,27 @@ def run_staffline_detection(
     if not detections:
         return
 
+    yield {"type": "log", "message":
+           f"[trace] {image_name}: {len(detections)} raw stave-class box(es) parsed from YOLO annotation"}
+
     h, w = image_arr.shape[:2]
     scale_unit = _compute_page_scale_unit(detections, w, h)
 
     try:
-        fit_results = []
-        boxes = []
-        for det in detections:
-            check_cancelled(job_id)
-            box = det.to_pixel_box(w, h)
-            crop, actual_box = _crop_with_padding(image_arr, box, CROP_PADDING_PX)
-            if crop.size == 0:
-                continue
-            filter_result = filter_components(crop, scale_unit=scale_unit)
-            fit_result = fit_centerline(filter_result, scale_unit=scale_unit)
-            fit_result.x_page_offset = float(actual_box[0])
-            fit_result.y_page_offset = float(actual_box[1])
-            fit_results.append(fit_result)
-            boxes.append(actual_box)
+        result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing, job_id=job_id)
+        for msg in result["trace"]:
+            yield {"type": "log", "message": msg}
 
-        if not fit_results:
+        if result["degenerate"]:
             yield {
                 "type": "log",
                 "message": f"{image_name}: {len(detections)} stave box(es) found but all crops were degenerate; skipping staffline detection",
             }
             return
 
-        grouping_result = group_staves(
-            fit_results, scale_unit=scale_unit, interpolate_missing=interpolate_missing,
-        )
-        records = _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, scale_unit)
-        stave_ids = {r["stave_id"] for r in records if r["stave_id"] is not None}
+        records = result["records"]
+        stave_ids = result["stave_ids"]
+        grouping_result = result["grouping_result"]
         settings = {
             "interpolate_missing": interpolate_missing,
             "binarization": "sauvola",
@@ -254,18 +395,23 @@ def run_staffline_detection(
             "package_version": _package_version(),
         }
 
-        cur.execute(
-            "INSERT INTO staffline_detections"
-            " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
-            "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
-            (
-                _uuid.uuid4().hex, project_id, image_id, image_name, annotation_id,
-                json.dumps(records), scale_unit, len(stave_ids),
-                grouping_result.mode_lines_per_stave, json.dumps(settings),
-            ),
+        new_id = persist_staffline_detection(
+            cur, con, project_id, image_id, image_name, annotation_id,
+            {
+                "records": records, "stave_ids": stave_ids,
+                "grouping_result": grouping_result, "scale_unit": scale_unit,
+                "settings": settings,
+            },
         )
-        con.commit()
+
+        # Callers that need to look this row back up right after (e.g.
+        # inference_api.py's interpolate-confirm route) should key off this
+        # id directly, not re-query "the latest row for this image" --
+        # created_at uses DEFAULT NOW() (transaction-start time, so rows
+        # inserted in the same transaction can share an identical value) and
+        # id is a random uuid4, so neither is a reliable insertion-order
+        # tiebreak on its own.
+        yield {"type": "detection_id", "id": new_id}
 
         message = (
             f"{image_name}: staffline detection found {len(records)} line(s) across "
