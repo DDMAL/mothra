@@ -28,7 +28,14 @@ const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
 // straight to the Interactive Classifier (which falls back to placeholder
 // bboxes server-side when no YOLO annotations exist). Pair with MOTHRA_SKIP_YOLO
 // on the backend so model uploads skip checkpoint inspection too.
-const SKIP_PREDICT = Boolean(import.meta.env.VITE_SKIP_PREDICT);
+// Parsed the same way as the backend's MOTHRA_SKIP_YOLO rather than with a bare
+// Boolean(), which treats *any* non-empty string as true — including the
+// "VITE_SKIP_PREDICT=0" someone writes to turn the bypass back off.
+const SKIP_PREDICT = ["1", "true", "yes"].includes(
+  String(import.meta.env.VITE_SKIP_PREDICT ?? "")
+    .trim()
+    .toLowerCase(),
+);
 
 // A project's used images are eligible for the batch (cross-folio-aware)
 // text-finding pipeline only when every one of them was tagged with a folio

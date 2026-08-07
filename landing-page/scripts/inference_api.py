@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import uuid as _uuid
 
 from auth_api import get_current_user, require_project_owner, db_cursor
+from config import SKIP_YOLO
 from job_store import create_job
 from tasks_predict import run_predict_task
 
@@ -39,6 +40,20 @@ async def run_predict(
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
 
+    # MOTHRA_SKIP_YOLO means this box can't run ultralytics, so refuse here
+    # rather than enqueueing a job that can only die in the worker — the caller
+    # gets a reason instead of a failed row. Only covers this endpoint; a retry
+    # of an older job replays params straight to the task, which is why
+    # resolve_yolo_models() carries its own guard.
+    if SKIP_YOLO:
+        raise HTTPException(
+            status_code=503,
+            detail="YOLO inference is disabled on this server (MOTHRA_SKIP_YOLO is "
+                   "set, normally because ultralytics isn't installed). Set "
+                   "VITE_SKIP_PREDICT=1 in landing-page/.env.local so the UI skips "
+                   "this step, or unset MOTHRA_SKIP_YOLO once ultralytics is "
+                   "installed.",
+        )
     if body.model_preset == "printed":
         raise HTTPException(status_code=400, detail="printed text detection is not available yet!")
     if body.model_preset == "custom" and not body.model_id: 

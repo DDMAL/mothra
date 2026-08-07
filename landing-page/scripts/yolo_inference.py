@@ -90,7 +90,21 @@ def resolve_yolo_models(
     Raises RuntimeError (medieval preset unavailable) or ValueError (custom
     model not found) - callers decide how to surface that as an SSE error.
     """
-    from ultralytics import YOLO
+    # Raised as RuntimeError, not left as the bare ModuleNotFoundError: callers
+    # (tasks_predict, batch_api) catch RuntimeError/ValueError and surface the
+    # text as an SSE error, whereas an ImportError escapes those handlers and
+    # kills the job with an opaque traceback instead of an actionable message.
+    try:
+        from ultralytics import YOLO
+    except ImportError as exc:
+        raise RuntimeError(
+            "YOLO inference needs the 'ultralytics' package, which isn't installed "
+            "in this environment. Either install it "
+            "(pip install -r landing-page/scripts/requirements.txt), or skip the "
+            "predict step: set MOTHRA_SKIP_YOLO=1 in landing-page/scripts/.env and "
+            "VITE_SKIP_PREDICT=1 in landing-page/.env.local, then restart the "
+            "backend, the Celery worker, and the Vite dev server."
+        ) from exc
 
     tm_threshold = text_music_confidence_threshold if text_music_confidence_threshold is not None else confidence_threshold
     st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else confidence_threshold
