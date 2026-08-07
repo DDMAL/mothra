@@ -168,6 +168,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             clef_shape=clef_shape or "C",
             clef_line=clef_line or 3,
             text_alignment=text_alignment,
+            n_detected_staves=n_input_staves,
         )
         original_bytes = _fetch_original_bytes(project_id, image_name)
         if original_bytes and page_w:

@@ -42,20 +42,79 @@ def _box(syl, ulx, lrx, uly, lry):
 # --- _group_staves_by_row --------------------------------------------------
 
 def test_group_staves_by_row_transitive_chain_and_isolated_control():
+    """s0 is the only originally-detected stave (n_detected_staves=1); s1-s3
+    are all synthetic (assign_glyphs_to_staves-recovered) indices. A chain
+    of synthetic-involving adjacent pairs (s0-s1, s1-s2) merges
+    transitively even though s0-s2 aren't directly adjacent; s3 has no
+    adjacent neighbor at all and stays isolated."""
     staves = [
-        _stave("s0", 100, 160),   # main
-        _stave("s1", 155, 170),   # adjacent to s0 and s2 -> chains them together
-        _stave("s2", 168, 200),   # only adjacent to s1 directly
-        _stave("s3", 500, 560),   # genuinely separate -- far below, own row
+        _stave("s0", 100, 160),   # the only originally-detected stave
+        _stave("s1", 155, 170),   # synthetic; adjacent to s0 and s2 -> chains them together
+        _stave("s2", 168, 200),   # synthetic; only adjacent to s1 directly
+        _stave("s3", 500, 560),   # synthetic but genuinely separate -- far below, own row
     ]
-    groups = mei._group_staves_by_row(staves)
+    groups = mei._group_staves_by_row(staves, n_detected_staves=1)
     assert {frozenset(g) for g in groups} == {frozenset({0, 1, 2}), frozenset({3})}
 
 
 def test_group_staves_by_row_no_staves_close_together_stays_singletons():
     staves = [_stave("s0", 100, 160), _stave("s1", 400, 460)]
-    groups = mei._group_staves_by_row(staves)
+    groups = mei._group_staves_by_row(staves, n_detected_staves=1)
     assert {frozenset(g) for g in groups} == {frozenset({0}), frozenset({1})}
+
+
+def test_group_staves_by_row_never_merges_two_originally_detected_staves():
+    """Regression guard for the actual reported bug: two originally
+    DETECTED, independent staves (both indices < n_detected_staves) must
+    NEVER merge, no matter how close together or similar in size. A prior
+    version of this function tried to infer "fragment-ness" purely from
+    Y-adjacency plus bbox-height lopsidedness; that was empirically
+    insufficient -- on a real page, two genuinely distinct, independently
+    detected rows were both Y-adjacent AND similar/lopsided enough in
+    height to satisfy that old check, and merging them pooled their real
+    syl_boxes together and reassigned them by raw X-position with no Y
+    discrimination -- the resulting syllable sequence alternated between
+    the two unrelated rows one-for-one (e.g. 'mi cum nus dum sal pro...'
+    was really 'mi'[row A] 'cum'[row B] 'nus'[row A] 'dum'[row B] ...
+    zippered together by the shared X-sort). Gating strictly on
+    assign_glyphs_to_staves's own synthetic-stave signal instead --
+    neither index here is >= n_detected_staves -- prevents this
+    unconditionally, regardless of proximity or height."""
+    staves = [
+        _stave("row1", 100, 160),   # originally detected, full-height
+        _stave("row2", 165, 225),   # also originally detected, only 5px away
+    ]
+    groups = mei._group_staves_by_row(staves, n_detected_staves=2)
+    assert {frozenset(g) for g in groups} == {frozenset({0}), frozenset({1})}
+
+
+# --- _assign_boxes_to_staves ------------------------------------------------
+
+def test_assign_boxes_to_staves_prefers_stave_above_over_raw_nearest():
+    """A syl_box sitting between two staves must go to the stave ABOVE it
+    (whose own text it visually is) even when it happens to sit
+    geometrically closer to the stave below -- e.g. because the scribe left
+    more space above the text than below it. Regression coverage for
+    syllables getting attached to the neumes in the wrong (next) staff."""
+    staves = [_stave("above", 100, 160), _stave("below", 250, 310)]
+    # Box center at y=220: 60px below 'above' (lry=160), only 30px above
+    # 'below' (uly=250) -- deliberately CLOSER to 'below' in raw distance
+    # (the exact "scribe left more space above the text than below it"
+    # case), to prove this isn't just accidentally correct by proximity.
+    boxes = [_box("word", 10, 90, 210, 230)]
+    result = mei._assign_boxes_to_staves(staves, boxes)
+    assert result[0] == boxes
+    assert result[1] == []
+
+
+def test_assign_boxes_to_staves_box_above_everything_falls_back_to_nearest():
+    """A box sitting above every stave (e.g. a rubric before the first
+    system) has no stave above it to prefer -- falls back to nearest by
+    raw distance, same as the pre-fix behavior for this edge case."""
+    staves = [_stave("only", 300, 360)]
+    boxes = [{"syl": "Incipit", "ul": [10, 10], "lr": [90, 30]}]
+    result = mei._assign_boxes_to_staves(staves, boxes)
+    assert result[0] == boxes
 
 
 # --- end-to-end: fragmented row shares its row-mate's real syllables ------
@@ -68,16 +127,22 @@ def test_fragmented_row_shares_syllables_with_its_row_mate():
     shared Y-band, so _assign_boxes_to_staves (unchanged) buckets both onto
     the main stave only -- reproducing the bug precondition that a naive
     per-stave_idx lookup would leave the fragment's boxes_by_stave entry
-    empty."""
+    empty.
+
+    The fragment is placed LAST (index 2) and n_detected_staves=2 passed,
+    matching real usage: assign_glyphs_to_staves always appends any
+    synthesized/recovered stave after every originally-detected one, and
+    only a stave at or beyond that boundary is ever eligible to merge (see
+    _group_staves_by_row)."""
     staves = [
         _stave("main", 100, 160, lrx=1000),
-        _stave("fragment", 95, 115, lrx=1000),
         _stave("control", 500, 560, lrx=1000),
+        _stave("fragment", 95, 115, lrx=1000),
     ]
     glyphs_by_stave = {
         0: [_glyph("m1", 10), _glyph("m2", 40), _glyph("m3", 70)],
-        1: [_glyph("f1", 100), _glyph("f2", 130), _glyph("f3", 160)],
-        2: [_glyph("c1", 10, uly=520), _glyph("c2", 40, uly=520)],
+        1: [_glyph("c1", 10, uly=520), _glyph("c2", 40, uly=520)],
+        2: [_glyph("f1", 100), _glyph("f2", 130), _glyph("f3", 160)],
     }
     text_alignment = {
         "syl_boxes": [
@@ -90,6 +155,7 @@ def test_fragmented_row_shares_syllables_with_its_row_mate():
         glyphs_by_stave, staves,
         image_path=Path("page.jpg"), image_w=2000, image_h=2000,
         manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=2,
     )
     root = ET.fromstring(xml_bytes)
 
@@ -128,6 +194,53 @@ def test_fragmented_row_shares_syllables_with_its_row_mate():
     assert len(lulia_syllables) == 1
     assert len(al_syllables[0].findall(f"{MEI_NS}neume")) == 3
     assert len(lulia_syllables[0].findall(f"{MEI_NS}neume")) == 3
+
+
+def test_two_detected_adjacent_rows_never_cross_assign_syllables():
+    """End-to-end regression test for the actual reported bug: two
+    originally-detected, Y-adjacent, height-LOPSIDED rows (row B is much
+    shorter than row A -- exactly the profile that would have satisfied
+    the old, geometry-only merge heuristic) each get their own real
+    syl_boxes at the SAME x-range on purpose, so that if they were ever
+    incorrectly pooled together (as the old heuristic would have done
+    here), _assign_glyphs_to_boxes's x-tie-breaking would deterministically
+    misroute row B's glyph onto row A's word. With n_detected_staves=2
+    (both rows are originally detected, neither synthetic), they must
+    never merge, so each row's glyph independently and correctly finds
+    only its own row's word."""
+    staves = [
+        _stave("rowA", 100, 160, lrx=1000),   # tall, originally detected
+        _stave("rowB", 165, 190, lrx=1000),   # short, originally detected, 5px away
+    ]
+    glyphs_by_stave = {
+        0: [_glyph("a1", 20, uly=130)],
+        1: [_glyph("b1", 25, uly=175)],
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("WordA", 10, 90, 128, 148),   # sits in rowA's own band
+            _box("WordB", 10, 90, 170, 185),   # sits in rowB's own band, SAME x-range
+        ]
+    }
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=2,
+    )
+    root = ET.fromstring(xml_bytes)
+    syllables = root.findall(f".//{MEI_NS}syllable")
+    glyph_to_syl_text = {}
+    for syllable in syllables:
+        syl_el = syllable.find(f"{MEI_NS}syl")
+        syl_text = syl_el.text if syl_el is not None else None
+        for neume in syllable.findall(f"{MEI_NS}neume"):
+            gid = neume.get(f"{{http://www.w3.org/XML/1998/namespace}}id").removeprefix("neume-")
+            glyph_to_syl_text[gid] = syl_text
+
+    assert glyph_to_syl_text["a1"] == "WordA"
+    assert glyph_to_syl_text["b1"] == "WordB"
 
 
 def test_isolated_stave_with_no_boxes_still_falls_back_to_dash():

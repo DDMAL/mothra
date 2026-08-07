@@ -223,21 +223,40 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
     return clusters
 
 def _assign_boxes_to_staves(staves: list[StaveBbox], boxes: list[dict]) -> dict[int, list[dict]]:
-    """Assign each syl_box to whichever stave's Y-range it's nearest to — a
-    box strictly inside a stave's [uly, lry] band goes there; anything else
-    goes to the closest stave by Y-distance. Every box is placed exactly
-    once, deterministically — no 'best single match, everything else
-    dropped' step here."""
+    """Assign each syl_box to a stave — a box strictly inside a stave's
+    [uly, lry] band goes there; otherwise it goes to the nearest stave
+    ABOVE it, never the nearest by raw symmetric distance. This matches
+    this pipeline's manuscript convention: a stave's syllable text is
+    always written directly below that same stave, with the next stave
+    beginning below the text (stave1 -> text1 -> stave2 -> text2 -> ...) —
+    so a box sitting between stave N and stave N+1 always belongs to
+    stave N, even on the (real, observed) pages where the scribe left more
+    space above the text than below it, which would otherwise put the box
+    geometrically closer to stave N+1's top edge than to stave N's bottom
+    edge. Only a box sitting above every stave (e.g. a rubric before the
+    first system) falls back to nearest-by-distance. Every box is placed
+    exactly once, deterministically — no 'best single match, everything
+    else dropped' step here."""
     result: dict[int, list[dict]] = {i: [] for i in range(len(staves))}
     if not staves:
         return result
+    order = sorted(range(len(staves)), key=lambda i: staves[i].uly)
     for box in boxes:
         cy = (box["ul"][1] + box["lr"][1]) / 2
-        best_idx, best_dist = 0, float("inf")
-        for i, stave in enumerate(staves):
-            dist = 0 if stave.uly <= cy <= stave.lry else min(abs(cy - stave.uly), abs(cy - stave.lry))
+        inside = next((idx for idx in order if staves[idx].uly <= cy <= staves[idx].lry), None)
+        if inside is not None:
+            result[inside].append(box)
+            continue
+        above = [idx for idx in order if staves[idx].lry <= cy]
+        if above:
+            result[above[-1]].append(box)
+            continue
+        best_idx, best_dist = order[0], float("inf")
+        for idx in order:
+            stave = staves[idx]
+            dist = min(abs(cy - stave.uly), abs(cy - stave.lry))
             if dist < best_dist:
-                best_idx, best_dist = i, dist
+                best_idx, best_dist = idx, dist
         result[best_idx].append(box)
     for group in result.values():
         group.sort(key=lambda b: b["ul"][0])
@@ -275,23 +294,44 @@ def _assign_glyphs_to_boxes(glyphs: list[Glyph], boxes: list[dict]) -> list[list
         result[best_idx].append(glyph)
     return result
 
-def _group_staves_by_row(staves: list[StaveBbox]) -> list[set[int]]:
-    """Connected components of stave indices whose Y-ranges are adjacent
-    within STAVE_BUFFER_PX — the exact overlap test assign_glyphs_to_staves
-    already uses (row_stave-vs-detected-stave overlap) to decide whether a
-    row_group "belongs" to a detected stave, generalized here to
-    stave-vs-stave. Exists ONLY so build_mei's syllable-matching prepass
-    can recognize that N stave_idx buckets are fragments of one physical
-    manuscript row (assign_glyphs_to_staves's Y-gap glyph clustering can
-    split one row's glyphs across multiple stave_idx values) — it must NOT
-    be used for zone/clef/pitch building, which keeps keying off the
-    un-grouped stave_idx exactly as before.
+def _group_staves_by_row(staves: list[StaveBbox], n_detected_staves: int) -> list[set[int]]:
+    """Connected components of stave indices that are fragments of one
+    physical manuscript row. Exists ONLY so build_mei's syllable-matching
+    prepass can recognize that N stave_idx buckets belong to the same row
+    (assign_glyphs_to_staves's Y-gap glyph clustering can split one row's
+    glyphs across multiple stave_idx values) — it must NOT be used for
+    zone/clef/pitch building, which keeps keying off the un-grouped
+    stave_idx exactly as before.
 
-    Real chant-page inter-stave gaps include a full text line's worth of
-    vertical space, far more than 2*STAVE_BUFFER_PX, so two genuinely
-    distinct staves essentially never satisfy this adjacency test — it
-    only fires for a fragment whose tight bbox (built from a strict subset
-    of one row's own glyphs) sits inside or touching its row-mate's band."""
+    A pair is only ever merged if AT LEAST ONE of the two indices is a
+    stave assign_glyphs_to_staves itself synthesized — i.e. index >=
+    n_detected_staves, a row_group whose Y-band didn't overlap ANY
+    originally-detected stave (see that function's docstring: "a row that
+    overlaps nothing is a system the detector missed, and gets a
+    synthesized stave of its own"). Two originally-detected staves (both
+    indices < n_detected_staves) are NEVER merged with each other, no
+    matter how close together or similar in size — those are staff-line-
+    detector-confirmed, independent physical systems, and pooling two of
+    them (see _pool_group_syllable_data) reassigns their real syl_boxes by
+    raw X-position with no Y discrimination at all, which can visibly
+    interleave two unrelated manuscript lines' text.
+
+    This function previously tried to infer "fragment-ness" purely from
+    geometry (Y-adjacency plus bbox-height lopsidedness). That was
+    empirically insufficient: confirmed on a real page where two
+    genuinely distinct, independently detected rows were BOTH Y-adjacent
+    within STAVE_BUFFER_PX AND lopsided in height, so the old check merged
+    them — the resulting syllable sequence alternated between the two
+    unrelated rows one-for-one (e.g. "mi cum nus dum sal pro..." was
+    really "mi[row A] cum[row B] nus[row A] dum[row B] ..." zippered
+    together by the shared X-sort). Tying the check to
+    assign_glyphs_to_staves's own synthetic-stave signal instead of
+    inferring "fragment-ness" from geometry is a strictly narrower, safer
+    rescue: it may not catch every fragmentation case the geometric
+    heuristic did (a fragment that DID overlap some other real detected
+    stave, rather than getting promoted to synthetic, is not repaired
+    here and falls back to "-" same as before this whole fix), but it can
+    never merge two staves the detector itself vouched for independently."""
     n = len(staves)
     parent = list(range(n))
 
@@ -311,7 +351,8 @@ def _group_staves_by_row(staves: list[StaveBbox]) -> list[set[int]]:
 
     for i in range(n):
         for j in range(i + 1, n):
-            if _adjacent(staves[i], staves[j]):
+            involves_synthetic = i >= n_detected_staves or j >= n_detected_staves
+            if involves_synthetic and _adjacent(staves[i], staves[j]):
                 union(i, j)
 
     groups: dict[int, set[int]] = {}
@@ -667,6 +708,7 @@ def build_mei(
     clef_shape: str = "C",
     clef_line: int = 3,
     notation_type: str = "square",
+    n_detected_staves: Optional[int] = None,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
@@ -817,7 +859,16 @@ def build_mei(
     # the "-" no-text-alignment fallback below even though its row-mate has
     # real text. Grouping fragments' boxes+glyphs before assignment lets a
     # fragment share its row-mate's real syl_boxes instead.
-    row_groups = _group_staves_by_row(staves)
+    #
+    # n_detected_staves gates this to ONLY ever rescue a stave
+    # assign_glyphs_to_staves itself synthesized (see _group_staves_by_row's
+    # docstring for why two originally-detected staves must never merge).
+    # Callers that don't know this (n_detected_staves=None) get the safest
+    # possible default: len(staves), i.e. "trust every stave as originally
+    # detected" — no merging happens at all, same as if this whole fix
+    # didn't exist for that call.
+    effective_n_detected = n_detected_staves if n_detected_staves is not None else len(staves)
+    row_groups = _group_staves_by_row(staves, effective_n_detected)
     stave_to_group: dict[int, set[int]] = {i: g for g in row_groups for i in g}
     neume_glyphs_by_stave: dict[int, list[Glyph]] = {
         stave_idx: _filter_neume_glyphs(glyphs_by_stave[stave_idx], stave_idx)
@@ -1167,12 +1218,14 @@ def main():
         print (f"Scaling facsimile coordinates by {scale:.4g} times ({source})")
     print(f"{len(staves)} staves found")
 
+    n_detected_staves = len(staves)
     glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, image_w, image_h)
     assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
-    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, 
-                          syllable_gap_mult=args.syllable_gap_mult, notation_type=args.notation_type)
+    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name,
+                          syllable_gap_mult=args.syllable_gap_mult, notation_type=args.notation_type,
+                          n_detected_staves=n_detected_staves)
     if scale != 1.0:
         mei_bytes = scale_facsimile(mei_bytes, scale)
     for w in validate_mei(mei_bytes):
