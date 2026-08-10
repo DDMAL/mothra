@@ -47,6 +47,26 @@ spec:
           # /health) keeps this pod out of rotation instead of silently
           # failing every /classify call -- see main.py's health()/ready()
           # docstrings.
+          #
+          # startupProbe: main.py loads TensorFlow and both Keras models
+          # synchronously at MODULE IMPORT time, before uvicorn ever binds
+          # this port -- so nothing answers /health or /ready at all until
+          # that cold import finishes. Without this, livenessProbe's own
+          # schedule (30s initial delay + 3 failures 15s apart) would kill
+          # the container for "not up yet" at ~60s post-start, which a cold
+          # TF import under this pod's 500m CPU request could plausibly
+          # exceed -- restarting it before it ever finishes booting, over
+          # and over. A startupProbe suspends both liveness and readiness
+          # checks until it succeeds once, so a slow-but-eventually-fine
+          # boot isn't mistaken for a hang. failureThreshold * periodSeconds
+          # = 5 minutes of grace, generous for a cold TF+Keras import but
+          # still bounded -- a genuinely hung container still gets killed.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /ready
