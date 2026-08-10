@@ -50,6 +50,11 @@ app.include_router(jobs_router, prefix="/api")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Runs once per process start, not on a schedule -- there's no Celery beat
+# job for this. Rides the deploy cadence as a low-effort mitigation rather
+# than true periodic cleanup: good enough since deploys happen often enough
+# in practice, but a backend that stays up for a long stretch without
+# restarting won't get either table swept in the meantime.
 cleanup_stale_uplaods()
 cleanup_stale_sessions()
 

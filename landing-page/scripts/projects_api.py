@@ -348,6 +348,15 @@ def export_project(project_id: int, user=Depends(get_current_user)):
 
 @router.post("/projects/{project_id}/duplicate")
 def duplicate_project(project_id: int, current_user=Depends(get_current_user)):
+    """Clone a project's raw inputs (images, custom models) as a fresh,
+    unstarted project -- not a full snapshot.
+
+    steps_unlocked resets to 0 deliberately: also cloning annotations/
+    mei_files/text_alignments/staffline_detections would leave those rows
+    orphaned and unreachable (nothing would re-point the UI at them once
+    steps_unlocked says "nothing done yet"). A duplicate is a clean rerun
+    starting point, not a copy of pipeline progress.
+    """
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT name FROM projects WHERE id = %s AND user_id = %s AND deleted_at IS NULL",

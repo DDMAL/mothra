@@ -284,6 +284,14 @@ def ic_complete(session_id: str, user=Depends(get_current_user)):
 
     The frontend turns this into a ``File`` and feeds it to the existing
     ``/api/encode-upload`` flow.
+
+    Note: unlike ic_start/ic_manage_url/ic_auto_queue (all resolve through
+    require_project_owner first), this only checks that *some* user is
+    logged in, not that they own the project session_id belongs to -- IC's
+    own session store is the real authority here, but within mothra's own
+    trust model any authenticated user who learns another user's session_id
+    could finalise it. Inconsistent with the rest of this file; revisit if
+    session_id ever becomes guessable/discoverable in practice.
     """
     try:
         status, raw, _headers = _post_empty(
