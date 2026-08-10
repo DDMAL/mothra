@@ -259,141 +259,82 @@ def init_db():
 
 init_db()
 
-# migrate existing DBs that predate used_model_names
-def _migrate_db():
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN used_model_names TEXT DEFAULT '[]'")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()  # column already exists
-    finally:
-        cur.close()
-        release_db_conn(con)
+# Columns added to tables that predate them, as (table, column, definition).
+#
+# _migrate_db() runs at import time in BOTH the backend and the Celery worker
+# (see k8s/README.md's "Known follow-ups"), so every entry re-executes on every
+# pod start and has to be idempotent *without raising*. These used to be bare
+# `ALTER TABLE ... ADD COLUMN` statements using `except DuplicateColumn` as
+# control flow. The application handled that fine, but Postgres logs a
+# server-side ERROR for a failed statement before the client ever sees it
+# (log_min_error_statement = error), so each pod start wrote ~26 false ERRORs
+# into the production database log — ~1900 accumulated lines in which a real
+# error would have been invisible. `ADD COLUMN IF NOT EXISTS` reaches the same
+# end state silently.
+#
+# Identifiers here are hardcoded literals, never user input.
+_ADDED_COLUMNS = [
+    ("projects",        "used_model_names",      "TEXT DEFAULT '[]'"),
+    ("projects",        "last_opened_at",        "TIMESTAMPTZ"),
+    ("projects",        "is_pinned",             "BOOLEAN DEFAULT FALSE"),
+    ("projects",        "created_at",            "TIMESTAMPTZ DEFAULT NOW()"),
+    ("projects",        "used_annotation_names", "TEXT DEFAULT '[]'"),
+    ("projects",        "cantus_source_id",      "TEXT"),
 
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN last_opened_at TIMESTAMPTZ")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
+    ("project_images",  "created_at",            "TIMESTAMPTZ DEFAULT NOW()"),
+    ("project_images",  "folio",                 "TEXT"),
+    ("project_images",  "source_id",             "TEXT"),
+    ("project_images",  "source_name",           "TEXT"),
+    ("project_images",  "original_data",         "BYTEA"),
+    # The working-copy `mime_type` column can't be reused for original_data:
+    # a client-side resize (imageResize.ts) always re-encodes the working
+    # copy as JPEG, while original_data keeps whatever format the source
+    # file actually was (PNG, TIFF, ...) — serving/embedding original_data
+    # under the working copy's mime_type mislabels it.
+    ("project_images",  "original_mime_type",    "TEXT"),
 
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN folio TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
+    ("mei_files",       "image_name",            "TEXT"),
     # Records which of tasks_encode.py's 3-tier stave-source fallback actually
     # produced this MEI's zones ("staffline_detection" / "yolo_annotation" /
     # "glyph_estimate" / "glyph_estimate_unresolved_lines" /
     # "glyph_estimate_synthetic_lines" / "placeholder_no_glyphs") -- see
     # CLAUDE.md's "Staffline detection" section. NULL for MEI files encoded
     # before this column existed.
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE mei_files ADD COLUMN stave_source TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
+    ("mei_files",       "stave_source",          "TEXT"),
 
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_models ADD COLUMN file_path TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
+    ("project_models",  "file_path",             "TEXT"),
+    ("project_models",  "kind",                  "TEXT DEFAULT 'yolo'"),
+    ("project_models",  "class_map",             "TEXT"),
+    ("project_models",  "file_hash",             "TEXT"),
 
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_models ADD COLUMN kind TEXT DEFAULT 'yolo'")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
+    ("annotations",     "model_label",           "TEXT"),
+    ("annotations",     "model_hash",            "TEXT"),
 
+    ("text_alignments", "log_text",              "TEXT"),
+
+    # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
+    ("jobs",            "params",                "JSONB"),
+    ("jobs",            "retry_of",              "TEXT REFERENCES jobs(job_id)"),
+    ("jobs",            "attempt",               "INTEGER NOT NULL DEFAULT 1"),
+]
+
+
+# migrate existing DBs that predate the columns above
+def _migrate_db():
     con = get_db_conn()
     cur = con.cursor()
     try:
-        cur.execute("ALTER TABLE project_models ADD COLUMN class_map TEXT")
+        for _table, _column, _definition in _ADDED_COLUMNS:
+            cur.execute(
+                f"ALTER TABLE {_table} ADD COLUMN IF NOT EXISTS {_column} {_definition}"
+            )
         con.commit()
     except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-    
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_models ADD COLUMN file_hash TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
+        # `IF NOT EXISTS` isn't atomic across concurrent sessions — the same
+        # race init_db() documents above (backend and worker migrating at
+        # once) can still surface a duplicate here. Harmless: the other
+        # process added the identical column. This is a safety net only; it
+        # should never fire in steady state.
         con.rollback()
     finally:
         cur.close()
@@ -406,155 +347,12 @@ def _migrate_db():
     cur.close()
     release_db_conn(con)
 
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN used_annotation_names TEXT DEFAULT '[]'")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE text_alignments ADD COLUMN log_text TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN folio TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE projects ADD COLUMN cantus_source_id TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE annotations ADD COLUMN model_label TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE annotations ADD COLUMN model_hash TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN source_id TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN source_name TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE project_images ADD COLUMN original_data BYTEA")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-
-    con = get_db_conn()
-    cur = con.cursor()
-    try:
-        # The working-copy `mime_type` column can't be reused for original_data:
-        # a client-side resize (imageResize.ts) always re-encodes the working
-        # copy as JPEG, while original_data keeps whatever format the source
-        # file actually was (PNG, TIFF, ...) — serving/embedding original_data
-        # under the working copy's mime_type mislabels it.
-        cur.execute("ALTER TABLE project_images ADD COLUMN original_mime_type TEXT")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close()
-        release_db_conn(con)
-        
-    # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
-    con = get_db_conn(); cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE jobs ADD COLUMN params JSONB")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close(); release_db_conn(con)
-
-    con = get_db_conn(); cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE jobs ADD COLUMN retry_of TEXT REFERENCES jobs(job_id)")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close(); release_db_conn(con)
-
-    con = get_db_conn(); cur = con.cursor()
-    try:
-        cur.execute("ALTER TABLE jobs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1")
-        con.commit()
-    except psycopg2.errors.DuplicateColumn:
-        con.rollback()
-    finally:
-        cur.close(); release_db_conn(con)
-
     # mei_files: needed so the cantus-bundle export (section 8) can pick the
     # latest revision per image_name, mirroring how annotations/text_alignments
     # already do `ORDER BY created_at DESC LIMIT 1`.
     con = get_db_conn(); cur = con.cursor()
     try:
-        cur.execute("ALTER TABLE mei_files ADD COLUMN created_at TIMESTAMPTZ")
+        cur.execute("ALTER TABLE mei_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ")
         # mei_files is append-only (add_mei always INSERTs a new row; existing
         # rows are only ever UPDATEd in place afterwards), so a manuscript
         # corrected/re-encoded more than once before this migration already has
@@ -566,14 +364,27 @@ def _migrate_db():
         # revision. ctid approximates insertion order for this append-only
         # table, so use it to hand legacy rows distinct, order-preserving
         # timestamps before defaulting new inserts to NOW().
+        #
+        # The `created_at IS NULL` guard is load-bearing, not a micro-
+        # optimisation. Before this function was made idempotent, the bare
+        # `ADD COLUMN` above raised DuplicateColumn on every run after the
+        # first, and that raise — aborting the transaction — was the only
+        # thing stopping this backfill from re-running. Now that the ALTER
+        # succeeds silently, an unqualified UPDATE would re-stamp EVERY row
+        # with epoch+N on every backend/worker start, destroying the real
+        # timestamps of rows inserted since and breaking the very MAX
+        # (created_at) lookup this column exists to serve. Restricted to
+        # never-backfilled rows it is a no-op on an already-migrated database
+        # and still correct on one that predates the column.
         cur.execute("""
             WITH ordered AS (
-                SELECT id, ROW_NUMBER() OVER (ORDER BY ctid) AS rn FROM mei_files
+                SELECT id, ROW_NUMBER() OVER (ORDER BY ctid) AS rn
+                FROM mei_files WHERE created_at IS NULL
             )
             UPDATE mei_files m
             SET created_at = TIMESTAMPTZ 'epoch' + (ordered.rn * INTERVAL '1 second')
             FROM ordered
-            WHERE m.id = ordered.id
+            WHERE m.id = ordered.id AND m.created_at IS NULL
         """)
         cur.execute("ALTER TABLE mei_files ALTER COLUMN created_at SET DEFAULT NOW()")
         con.commit()

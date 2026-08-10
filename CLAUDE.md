@@ -52,7 +52,23 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `job_sessions` | encode-job output (`mei_bytes`, `stem`, `manifest`) — replaces the old in-memory `_sessions` dict + `MANIFEST_DIR` tempfiles |
 | `refresh_tokens` | `user_id`, `token_hash` (SHA-256 of the raw token), `expires_at`, `revoked_at` — backs the real JWT refresh flow, see **Backend** above |
 
-Schema is migrated forward via `_migrate_db()` in `auth_api.py` — new columns are `ALTER TABLE ADD COLUMN IF NOT EXISTS` guarded with `DuplicateColumn` catch.
+Schema is migrated forward via `_migrate_db()` in `auth_api.py`. New columns go in the
+`_ADDED_COLUMNS` list — `(table, column, definition)` tuples replayed as
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on a single pooled connection, with a
+`DuplicateColumn` catch kept only as a race safety net (`IF NOT EXISTS` isn't atomic across
+concurrent sessions, and backend + worker migrate independently at import).
+
+**`IF NOT EXISTS` is load-bearing, not cosmetic.** These were once bare `ADD COLUMN`s using
+`except DuplicateColumn` as control flow. Postgres logs a server-side `ERROR` for a failed
+statement *before* the client's exception handler ever sees it, so every pod start wrote ~26
+false `ERROR`s into the database log — ~1,900 accumulated lines in production, enough that a
+real error would have gone unnoticed. Anything added here must be idempotent *without raising*.
+
+That has a sharp edge for any migration that **backfills data**: `mei_files.created_at`'s
+`ADD COLUMN` used to raise on every run after the first, and that raise — aborting the
+transaction — was the only thing stopping its backfill from re-running. It now carries an
+explicit `created_at IS NULL` guard. A backfill added without such a guard will silently
+re-run on every backend and worker start and overwrite live data.
 
 ---
 
