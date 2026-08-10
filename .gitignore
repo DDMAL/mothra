@@ -1,5 +1,5 @@
 # Adjust this as necessary while project evolves
-
+staff-finding/config.yaml
 # macOS metadata — never track these
 .DS_Store
 **/.DS_Store
