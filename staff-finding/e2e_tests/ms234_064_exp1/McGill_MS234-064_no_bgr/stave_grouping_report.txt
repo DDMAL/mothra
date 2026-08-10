@@ -1,0 +1,93 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: McGill_MS234-064
+Mode lines per stave: 4
+Line count distribution: {4: 8}
+Cut threshold (px): 64.2
+Flags: none
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 47.7 px  
+  Gap 1: 32.3 px  
+  Gap 2: 44.7 px  
+  Gap 3: 123.2 px  >>> INTER-STAVE <<<
+  Gap 4: 42.7 px  
+  Gap 5: 40.5 px  
+  Gap 6: 42.8 px  
+  Gap 7: 125.3 px  >>> INTER-STAVE <<<
+  Gap 8: 41.7 px  
+  Gap 9: 39.6 px  
+  Gap 10: 44.1 px  
+  Gap 11: 127.6 px  >>> INTER-STAVE <<<
+  Gap 12: 42.0 px  
+  Gap 13: 39.6 px  
+  Gap 14: 45.4 px  
+  Gap 15: 134.4 px  >>> INTER-STAVE <<<
+  Gap 16: 38.2 px  
+  Gap 17: 39.0 px  
+  Gap 18: 44.7 px  
+  Gap 19: 125.5 px  >>> INTER-STAVE <<<
+  Gap 20: 41.7 px  
+  Gap 21: 39.4 px  
+  Gap 22: 43.0 px  
+  Gap 23: 124.8 px  >>> INTER-STAVE <<<
+  Gap 24: 44.9 px  
+  Gap 25: 34.8 px  
+  Gap 26: 45.8 px  
+  Gap 27: 129.4 px  >>> INTER-STAVE <<<
+  Gap 28: 40.1 px  
+  Gap 29: 39.0 px  
+  Gap 30: 42.7 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 0: line 0, y=283.3px
+  Fit 1: line 1, y=331.0px
+  Fit 2: line 2, y=363.3px
+  Fit 3: line 3, y=408.0px
+
+Stave 1:
+  Fit 4: line 0, y=531.2px
+  Fit 5: line 1, y=573.9px
+  Fit 6: line 2, y=614.4px
+  Fit 7: line 3, y=657.2px
+
+Stave 2:
+  Fit 8: line 0, y=782.5px
+  Fit 9: line 1, y=824.2px
+  Fit 10: line 2, y=863.8px
+  Fit 11: line 3, y=907.9px
+
+Stave 3:
+  Fit 12: line 0, y=1035.5px
+  Fit 13: line 1, y=1077.5px
+  Fit 14: line 2, y=1117.1px
+  Fit 15: line 3, y=1162.5px
+
+Stave 4:
+  Fit 16: line 0, y=1296.9px
+  Fit 17: line 1, y=1335.1px
+  Fit 18: line 2, y=1374.1px
+  Fit 19: line 3, y=1418.8px
+
+Stave 5:
+  Fit 20: line 0, y=1544.3px
+  Fit 21: line 1, y=1586.0px
+  Fit 22: line 2, y=1625.4px
+  Fit 23: line 3, y=1668.4px
+
+Stave 6:
+  Fit 24: line 0, y=1793.2px
+  Fit 25: line 1, y=1838.1px
+  Fit 26: line 2, y=1872.9px
+  Fit 27: line 3, y=1918.7px
+
+Stave 7:
+  Fit 28: line 0, y=2048.1px
+  Fit 29: line 1, y=2088.2px
+  Fit 30: line 2, y=2127.2px
+  Fit 31: line 3, y=2169.9px

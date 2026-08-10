@@ -1,0 +1,6 @@
+page,variant,gt_source,timestamp,n_gt,n_pred,n_matched,n_unmatched_pred,n_unmatched_gt,precision,recall,f1,split_ratio,mean_y_mae_px,match_threshold_px,scale_unit_px
+McGill_MS234-064,no_bgr,corrected_ms234,2026-07-16T15:40:15Z,32,32,32,0,0,1.0,1.0,1.0,1.0,2.34,12.5,25.0
+McGill_MS234-064,bgr,corrected_ms234,2026-07-16T15:40:15Z,32,15,15,0,17,1.0,0.4688,0.6383,0.4688,3.51,12.5,25.0
+McGill_MS234-064,glyphmask_baseline,corrected_ms234,2026-07-16T15:40:15Z,32,32,32,0,0,1.0,1.0,1.0,1.0,2.34,12.5,25.0
+McGill_MS234-064,glyphmask_naive,corrected_ms234,2026-07-16T15:40:15Z,32,32,32,0,0,1.0,1.0,1.0,1.0,2.5,12.5,25.0
+McGill_MS234-064,glyphmask_band,corrected_ms234,2026-07-16T15:40:15Z,32,32,32,0,0,1.0,1.0,1.0,1.0,2.34,12.5,25.0
