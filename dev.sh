@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Mothra local dev launcher — starts all five web-app servers together and
+# Mothra local dev launcher — starts all six web-app servers together and
 # tears them all down on Ctrl-C. See CLAUDE.md for the architecture.
 #
 #   :5173  landing-page frontend  (Vite)      — open this in the browser
@@ -8,12 +8,17 @@
 #   :8000  Interactive Classifier (ic-api)    — IC REST API + IC SPA (iframe)
 #   :8002  text-finding service   (uvicorn)   — mothra-text wrapper; reached
 #                                                server-to-server from :8001
+#   :8003  paco-classifier-service (uvicorn)   — staffline/background layer
+#                                                separation; called server-
+#                                                to-server from :8001's
+#                                                worker — see CLAUDE.md's
+#                                                Staffline detection section
 #   —      celery worker (predict/encode jobs) — no port; job state lives in
 #                                                Postgres, Redis is only the
 #                                                task broker/transport
 #
 # Usage:
-#   ./dev.sh              start all five
+#   ./dev.sh              start all six
 #   ./dev.sh -b           rebuild the IC frontend bundle first (do this when
 #                         the IC submodule's frontend changed; otherwise the
 #                         iframe serves a stale build — see the binarize bug)
@@ -33,6 +38,7 @@ WEB_PORT="${WEB_PORT:-5173}"
 API_PORT="${API_PORT:-8001}"
 IC_PORT="${IC_PORT:-8000}"
 TEXT_PORT="${TEXT_PORT:-8002}"
+PACO_PORT="${PACO_PORT:-8003}"
 CELERY_BROKER_URL="${CELERY_BROKER_URL:-redis://localhost:6379/0}"
 
 BUILD_IC=0
@@ -40,10 +46,10 @@ FORCE=0
 
 # --- colours (skipped when not a tty) --------------------------------------
 if [ -t 1 ]; then
-  C_IC=$'\033[36m'; C_API=$'\033[33m'; C_WEB=$'\033[35m'; C_TEXT=$'\033[34m'; C_WORKER=$'\033[92m'
+  C_IC=$'\033[36m'; C_API=$'\033[33m'; C_WEB=$'\033[35m'; C_TEXT=$'\033[34m'; C_WORKER=$'\033[92m'; C_PACO=$'\033[91m'
   C_OK=$'\033[32m'; C_ERR=$'\033[31m'; C_DIM=$'\033[2m'; C_RST=$'\033[0m'
 else
-  C_IC=''; C_API=''; C_WEB=''; C_TEXT=''; C_WORKER=''; C_OK=''; C_ERR=''; C_DIM=''; C_RST=''
+  C_IC=''; C_API=''; C_WEB=''; C_TEXT=''; C_WORKER=''; C_PACO=''; C_OK=''; C_ERR=''; C_DIM=''; C_RST=''
 fi
 
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
@@ -86,6 +92,7 @@ free_port() {
 IC_BIN="$ROOT/ic/api/.venv/bin/ic-api"
 API_UVICORN="$ROOT/landing-page/scripts/.venv/bin/uvicorn"
 TEXT_BIN="$ROOT/text-service/.venv/bin/uvicorn"
+PACO_BIN="$ROOT/paco-classifier-service/.venv/bin/uvicorn"
 WORKER_BIN="$ROOT/landing-page/scripts/.venv/bin/celery"
 
 [ -x "$IC_BIN" ]      || die "missing IC venv: $IC_BIN
@@ -100,6 +107,9 @@ WORKER_BIN="$ROOT/landing-page/scripts/.venv/bin/celery"
 [ -x "$TEXT_BIN" ] || die "missing text-finding venv: $TEXT_BIN
     → cd text-service && python3.10 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt \
       && pip install git+https://github.com/DDMAL/volpiano-display-utilities.git"
+[ -x "$PACO_BIN" ] || die "missing paco-classifier-service venv: $PACO_BIN
+    → cd paco-classifier-service && python3.10 -m venv .venv && source .venv/bin/activate \
+      && pip install -r requirements.txt"
 
 if command -v redis-cli >/dev/null 2>&1; then
   redis-cli -u "$CELERY_BROKER_URL" ping >/dev/null 2>&1 || echo "${C_ERR}warning:${C_RST} Redis (Celery broker) not reachable at $CELERY_BROKER_URL — predict/encode jobs will fail to enqueue" >&2
@@ -108,7 +118,7 @@ else
 fi
 
 # --- preflight: ports ------------------------------------------------------
-for pair in "web:$WEB_PORT" "backend:$API_PORT" "ic:$IC_PORT" "text:$TEXT_PORT"; do
+for pair in "web:$WEB_PORT" "backend:$API_PORT" "ic:$IC_PORT" "text:$TEXT_PORT" "paco:$PACO_PORT"; do
   name=${pair%%:*}; port=${pair##*:}
   if port_busy "$port"; then
     if [ "$FORCE" -eq 1 ]; then
@@ -187,7 +197,7 @@ start() {
   PIDS+=($!)
 }
 
-echo "${C_OK}Mothra dev${C_RST}  web:${C_WEB}$WEB_PORT${C_RST}  backend:${C_API}$API_PORT${C_RST}  ic:${C_IC}$IC_PORT${C_RST}  text:${C_TEXT}$TEXT_PORT${C_RST}   ${C_DIM}(Ctrl-C to stop all)${C_RST}"
+echo "${C_OK}Mothra dev${C_RST}  web:${C_WEB}$WEB_PORT${C_RST}  backend:${C_API}$API_PORT${C_RST}  ic:${C_IC}$IC_PORT${C_RST}  text:${C_TEXT}$TEXT_PORT${C_RST}  paco:${C_PACO}$PACO_PORT${C_RST}   ${C_DIM}(Ctrl-C to stop all)${C_RST}"
 
 # Share the landing-page's Neon DATABASE_URL with the IC process so IC
 # sessions are persisted with the mothra project (see ic/api db_store.py).
@@ -201,10 +211,17 @@ if [ -f "$ENV_FILE" ]; then
 fi
 [ -n "$IC_DB_URL" ] || echo "${C_DIM}note: no DATABASE_URL found — IC sessions won't persist across restarts${C_RST}"
 
+# config.yaml's paco_api_url default (http://localhost:8003) only matches
+# PACO_PORT's own default -- if a developer overrides PACO_PORT, the backend/
+# worker must be told the matching URL explicitly, or they'd keep pointing at
+# the stale default. Preserve an explicit PACO_API_URL override, if set.
+PACO_API_URL="${PACO_API_URL:-http://localhost:$PACO_PORT}"
+
 start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
-start backend "$C_API" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
-start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
+start paco "$C_PACO" "$PACO_BIN" main:app --app-dir "$ROOT/paco-classifier-service" --port "$PACO_PORT"
+start backend "$C_API" env PACO_API_URL="$PACO_API_URL" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
+start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort
 
 echo "${C_DIM}→ open http://localhost:$WEB_PORT${C_RST}"

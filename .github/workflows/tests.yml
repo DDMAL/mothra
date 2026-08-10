@@ -1,7 +1,7 @@
 name: tests
 
-# Runs the staff-finding algorithmic test suite and the new landing-page
-# staffline_adapter tests on every push, to any branch. A push-triggered
+# Runs the staff-finding algorithmic test suite and the full
+# landing-page/scripts/tests/ suite on every push, to any branch. A push-triggered
 # check still attaches to that commit's SHA, so it shows up on any pull
 # request built from those commits, same as a pull_request-triggered one
 # would -- the difference is this also runs on plain pushes with no open PR.
@@ -41,8 +41,12 @@ jobs:
 
       # Pillow: staffline_adapter.py's own import chain (encode_to_mei.py)
       # needs it beyond stdlib + the staff-finding package. PyYAML: pulled
-      # in transitively by test_bbox_pipeline_integrity.py's medieval_models
-      # import (medieval_models.py -> config.py, which loads config.yaml).
+      # in transitively both by test_bbox_pipeline_integrity.py's
+      # medieval_models import (medieval_models.py -> config.py) and by
+      # paco_api.py's own config.py import (for PACO_API_URL) -- either
+      # way it's config.py loading config.yaml. numpy comes in transitively
+      # via staff-finding's diagnostics extras (scipy/scikit-image both
+      # depend on it).
       - name: Install dependencies
         run: pip install -e "./staff-finding[diagnostics]" pytest Pillow PyYAML
 
@@ -75,6 +79,11 @@ jobs:
         working-directory: staff-finding
         run: python -m pytest scripts/script_tests/test_run_pageOG.py
 
+      # Runs every file under tests/ (test_staffline_adapter.py,
+      # test_paco_api.py, test_encode_to_mei.py, test_bbox_pipeline_integrity.py,
+      # test_resolve_hints_staleness.py, ...) in one step -- none of them need
+      # the test_run_page/OG-style isolation above, so there's no reason to
+      # run any of them again in a separate step.
       - name: landing-page -- DB-independent scripts tests
         run: python -m pytest landing-page/scripts/tests/
 

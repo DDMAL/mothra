@@ -29,6 +29,8 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 import sys
 
+from neume_mapping import NcTemplate, resolve_neume_mapping
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
     from extract_ms_id import extract_manuscript_id
@@ -42,6 +44,24 @@ XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 STAVE_BUFFER_PX = 20
 SYLLABLE_GAP_MULTIPLIER = 1.5
 _SKIP_CLASS_FRAGMENTS = frozenset({"custos", "divline", "division"})
+STAFF_LINES = 4  # matches <staffDef lines="..."> below, and the stave zone's
+                 # assumed line count (see build_mei's stave-zone construction)
+
+_XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
+_XML_MODEL_PI = (
+    '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+    ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
+    '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
+    ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
+)
+
+def _serialize_mei(root: ET.Element) -> bytes:
+    """Shared serialization tail for anything that produces/mutates a full
+    MEI document (build_mei, scale_facsimile, verify_and_correct_syllables)."""
+    ET.register_namespace("", MEI_NS)
+    ET.indent(root, space=" ")
+    xml_str = _XML_DECLARATION + _XML_MODEL_PI + ET.tostring(root, encoding="unicode")
+    return xml_str.encode("utf-8")
 
 @dataclass
 class Glyph:
@@ -163,6 +183,25 @@ def image_dimensions(header: bytes) -> Optional[tuple]:
             return w, h
     return None
 
+def _typical_line_spacing(staves: list[StaveBbox]) -> Optional[float]:
+    """Median intra-stave staff-line spacing across staves that carry real,
+    multi-point line_ys — i.e. genuinely detected line positions, not the
+    crude bbox-derived guess _cluster_glyphs_into_staves itself falls back
+    to when a row has no real line data at all (that guess has no place
+    contributing to an estimate of what "real" spacing looks like).
+
+    Used by assign_glyphs_to_staves's missed-stave recovery path to give a
+    reliable spacing figure to a row the detector missed entirely, instead
+    of that row deriving its own (unreliable) spacing from its own glyphs'
+    bounding box — see that function's docstring for why."""
+    spacings: list[float] = []
+    for stave in staves:
+        ys = stave.line_ys
+        if len(ys) >= 2:
+            diffs = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+            spacings.append(median(diffs))
+    return median(spacings) if spacings else None
+
 def assign_glyphs_to_staves(
         glyphs: list[Glyph], staves: list[StaveBbox], page_w: int, page_h: int,
         allow_synthetic_lines: bool = False,
@@ -180,12 +219,27 @@ def assign_glyphs_to_staves(
     detected stave is assigned to it as before; a row that overlaps nothing
     is a system the detector missed, and gets a synthesized stave of its own.
 
+    That synthesized stave's line_ys (used for pitch computation — see
+    _step_from_y) would otherwise come purely from the missed row's own
+    glyphs' bounding box (_cluster_glyphs_into_staves's crude fallback),
+    which can be badly skewed by that row's own melodic range (a single
+    unusually high/low note inflates the guessed staff height) — confirmed
+    on a real page as a visible, per-row-only vertical rendering offset
+    (notes floating well above/below their real staff, since Neon/Verovio
+    renders pitch, not raw pixel position). Passing this page's OWN
+    already-reliable typical line spacing (from every OTHER, genuinely
+    detected stave) into that fallback anchors the recovered row's
+    estimated lines on real page geometry instead.
+
     allow_synthetic_lines is forwarded to that recovery clustering
     (_cluster_glyphs_into_staves) so a recovered stave's line_ys follows the
     same opt-in-fabrication rule as tier-3's own estimate_staves_from_glyphs
     fallback -- without this, a page could end up with tier-3 staves carrying
     synthetic pitch geometry while recovered staves silently didn't, even
-    though the caller asked for synthetic lines everywhere.
+    though the caller asked for synthetic lines everywhere. The two knobs
+    compose: allow_synthetic_lines gates whether a recovered stave gets any
+    line_ys at all, and typical_line_spacing (when synthesis is allowed)
+    decides how reliable that synthesis is.
 
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
@@ -196,9 +250,11 @@ def assign_glyphs_to_staves(
         result: dict[int, list[Glyph]] = {-1: list(glyphs)}
         return result, staves
 
+    typical_spacing = _typical_line_spacing(staves)
     result = {i: [] for i in range(len(staves))}
     row_groups = _cluster_glyphs_into_staves(
-        glyphs, page_w, page_h, id_prefix="row", allow_synthetic_lines=allow_synthetic_lines,
+        glyphs, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing,
+        allow_synthetic_lines=allow_synthetic_lines,
     )
 
     for row_stave, members in row_groups:
@@ -230,36 +286,232 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
             clusters[-1].append(glyph)
     return clusters
 
-def find_best_syllable_match(
-        cluster: list[Glyph], syl_boxes: list[dict], used: set[int]
-) -> Optional[int]:
-    """Match a neume cluster to the syl_boxes entry (by index) with the largest
-    x-overlap on the same row (both segmentations read the stave L-to-R).
-    Entries already claimed by an earlier cluster (via `used`) are skipped —
-    Neon's resize action mutates the one zone all referencing elements share,
-    so two syllables pointing at the same zone would silently move together.
-    Returns None when nothing overlaps, no alignment was supplied, or every
-    candidate on this row is already used."""
-    if not syl_boxes or not cluster:
-        return None
-    c_ulx = min(g.ulx for g in cluster)
-    c_lrx = max(g.lrx for g in cluster)
-    c_cy = sum(g.cy for g in cluster) / len(cluster)
-    best_idx, best_overlap = None, 0
-    for i, box in enumerate(syl_boxes):
-        if i in used:
+def _assign_boxes_to_staves(staves: list[StaveBbox], boxes: list[dict]) -> dict[int, list[dict]]:
+    """Assign each syl_box to a stave — a box strictly inside a stave's
+    [uly, lry] band goes there; otherwise it goes to the nearest stave
+    ABOVE it, never the nearest by raw symmetric distance. This matches
+    this pipeline's manuscript convention: a stave's syllable text is
+    always written directly below that same stave, with the next stave
+    beginning below the text (stave1 -> text1 -> stave2 -> text2 -> ...) —
+    so a box sitting between stave N and stave N+1 always belongs to
+    stave N, even on the (real, observed) pages where the scribe left more
+    space above the text than below it, which would otherwise put the box
+    geometrically closer to stave N+1's top edge than to stave N's bottom
+    edge. Only a box sitting above every stave (e.g. a rubric before the
+    first system) falls back to nearest-by-distance. Every box is placed
+    exactly once, deterministically — no 'best single match, everything
+    else dropped' step here."""
+    result: dict[int, list[dict]] = {i: [] for i in range(len(staves))}
+    if not staves:
+        return result
+    order = sorted(range(len(staves)), key=lambda i: staves[i].uly)
+    for box in boxes:
+        cy = (box["ul"][1] + box["lr"][1]) / 2
+        inside = next((idx for idx in order if staves[idx].uly <= cy <= staves[idx].lry), None)
+        if inside is not None:
+            result[inside].append(box)
             continue
-        b_ulx, b_uly = box["ul"]
-        b_lrx, b_lry = box["lr"]
-        b_cy = (b_uly + b_lry) / 2
-        if abs(b_cy - c_cy) > (b_lry - b_uly) * 4:
-            continue  # different row band
-        overlap = min(c_lrx, b_lrx) - max(c_ulx, b_ulx)
-        if overlap > best_overlap:
-            best_idx, best_overlap = i, overlap
-    return best_idx
+        above = [idx for idx in order if staves[idx].lry <= cy]
+        if above:
+            result[above[-1]].append(box)
+            continue
+        best_idx, best_dist = order[0], float("inf")
+        for idx in order:
+            stave = staves[idx]
+            dist = min(abs(cy - stave.uly), abs(cy - stave.lry))
+            if dist < best_dist:
+                best_idx, best_dist = idx, dist
+        result[best_idx].append(box)
+    for group in result.values():
+        group.sort(key=lambda b: b["ul"][0])
+    return result
 
-def _syl_box_valid(box: dict, image_w: int, image_h: int) -> bool:
+def _assign_glyphs_to_boxes(glyphs: list[Glyph], boxes: list[dict]) -> list[list[Glyph]]:
+    """Assign each of one stave's neume glyphs to whichever syl_box (already
+    sorted left to right) it's horizontally nearest to.
+
+    This trusts mothra-text's own syllable segmentation as the authoritative
+    syllable grouping, instead of independently re-deriving syllable
+    boundaries from cluster_into_syllables's generic note-gap heuristic and
+    then trying to reconcile the two after the fact (an earlier version of
+    this fix did that, and on real melismatic pages either dropped every
+    syl_box beyond a single best-overlap one, or — after that was fixed —
+    still couldn't cleanly split a gap-clustered run into as many
+    <syllable>s as there were real syl_boxes, and fell back to one big
+    space-joined blob per cluster instead of one box each).
+
+    A glyph whose center falls inside a box's own x-range goes there;
+    anything else goes to the nearest box by X-distance. Every glyph lands
+    in exactly one box's bucket — some buckets may end up empty (a syllable
+    with no note under it), which is fine; see the caller."""
+    if not boxes:
+        return []
+    result: list[list[Glyph]] = [[] for _ in boxes]
+    ranges = [(b["ul"][0], b["lr"][0]) for b in boxes]
+    for glyph in sorted(glyphs, key=lambda g: g.ulx):
+        cx = (glyph.ulx + glyph.lrx) / 2
+        best_idx, best_dist = 0, float("inf")
+        for i, (lo, hi) in enumerate(ranges):
+            dist = 0 if lo <= cx <= hi else min(abs(cx - lo), abs(cx - hi))
+            if dist < best_dist:
+                best_idx, best_dist = i, dist
+        result[best_idx].append(glyph)
+    return result
+def _build_syllable_units(
+        neume_glyphs: list[Glyph],
+        stave_boxes: list[dict],
+        glyph_groups: list[list[Glyph]],
+        syllable_gap_mult: float,
+) -> list[tuple[str, Optional[dict], list[Glyph]]]:
+    """Decide the final (syl_text, box, glyphs) triples for one stave, given
+    its (possibly row-group-pooled-then-narrowed, see _stave_share_of_group)
+    stave_boxes/glyph_groups. Extracted from build_mei's per-stave loop so
+    build_mei and verify_and_correct_syllables compute this identically --
+    one <syllable> per real syl_box when mothra-text supplied any for this
+    stave, else a pure gap-based fallback with "-" text (this file's
+    original pre-text-alignment behavior)."""
+    if stave_boxes:
+        return list(zip((b["syl"] for b in stave_boxes), stave_boxes, glyph_groups, strict=True))
+    return [
+        ("-", None, cluster)
+        for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult)
+    ]
+
+    
+def _group_staves_by_row(staves: list[StaveBbox], n_detected_staves: int) -> list[set[int]]:
+    """Connected components of stave indices that are fragments of one
+    physical manuscript row. Exists ONLY so build_mei's syllable-matching
+    prepass can recognize that N stave_idx buckets belong to the same row
+    (assign_glyphs_to_staves's Y-gap glyph clustering can split one row's
+    glyphs across multiple stave_idx values) — it must NOT be used for
+    zone/clef/pitch building, which keeps keying off the un-grouped
+    stave_idx exactly as before.
+
+    A pair is only ever merged if AT LEAST ONE of the two indices is a
+    stave assign_glyphs_to_staves itself synthesized — i.e. index >=
+    n_detected_staves, a row_group whose Y-band didn't overlap ANY
+    originally-detected stave (see that function's docstring: "a row that
+    overlaps nothing is a system the detector missed, and gets a
+    synthesized stave of its own"). Two originally-detected staves (both
+    indices < n_detected_staves) are NEVER merged with each other, no
+    matter how close together or similar in size — those are staff-line-
+    detector-confirmed, independent physical systems, and pooling two of
+    them (see _pool_group_syllable_data) reassigns their real syl_boxes by
+    raw X-position with no Y discrimination at all, which can visibly
+    interleave two unrelated manuscript lines' text.
+
+    This function previously tried to infer "fragment-ness" purely from
+    geometry (Y-adjacency plus bbox-height lopsidedness). That was
+    empirically insufficient: confirmed on a real page where two
+    genuinely distinct, independently detected rows were BOTH Y-adjacent
+    within STAVE_BUFFER_PX AND lopsided in height, so the old check merged
+    them — the resulting syllable sequence alternated between the two
+    unrelated rows one-for-one (e.g. "mi cum nus dum sal pro..." was
+    really "mi[row A] cum[row B] nus[row A] dum[row B] ..." zippered
+    together by the shared X-sort). Tying the check to
+    assign_glyphs_to_staves's own synthetic-stave signal instead of
+    inferring "fragment-ness" from geometry is a strictly narrower, safer
+    rescue: it may not catch every fragmentation case the geometric
+    heuristic did (a fragment that DID overlap some other real detected
+    stave, rather than getting promoted to synthetic, is not repaired
+    here and falls back to "-" same as before this whole fix), but it can
+    never merge two staves the detector itself vouched for independently."""
+    n = len(staves)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    def _adjacent(a: StaveBbox, b: StaveBbox) -> bool:
+        lo, hi = a.uly - STAVE_BUFFER_PX, a.lry + STAVE_BUFFER_PX
+        return min(b.lry, hi) - max(b.uly, lo) > 0
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            involves_synthetic = i >= n_detected_staves or j >= n_detected_staves
+            if involves_synthetic and _adjacent(staves[i], staves[j]):
+                union(i, j)
+
+    groups: dict[int, set[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), set()).add(i)
+    return list(groups.values())
+
+def _pool_group_syllable_data(
+        group: set[int],
+        boxes_by_stave: dict[int, list[dict]],
+        neume_glyphs_by_stave: dict[int, list[Glyph]],
+) -> tuple[list[dict], list[list[Glyph]]]:
+    """For one row-group of 2+ stave_idx fragments of the same physical row
+    (see _group_staves_by_row), pool every member's real syl_boxes (deduped
+    by identity — _assign_boxes_to_staves already put each box in exactly
+    one member's bucket) and every member's own neume glyphs, then run
+    _assign_glyphs_to_boxes ONCE over the pooled sets so a fragment's
+    glyphs can be matched against its row-mate's real syl_boxes instead of
+    falling to the "-" no-text-alignment fallback. _assign_glyphs_to_boxes
+    re-sorts glyphs by ulx internally, so pooling members' glyphs in any
+    order and letting it re-sort keeps reading order correct for free.
+
+    Returns (pooled_boxes, glyph_groups), x-sorted and index-aligned — same
+    shape _assign_glyphs_to_boxes always returns."""
+    pooled_boxes: list[dict] = []
+    seen_ids: set[int] = set()
+    for idx in sorted(group):
+        for b in boxes_by_stave.get(idx, []):
+            if id(b) not in seen_ids:
+                seen_ids.add(id(b))
+                pooled_boxes.append(b)
+    pooled_boxes.sort(key=lambda b: b["ul"][0])
+    pooled_glyphs = [g for idx in group for g in neume_glyphs_by_stave.get(idx, [])]
+    return pooled_boxes, _assign_glyphs_to_boxes(pooled_glyphs, pooled_boxes)
+
+def _stave_share_of_group(
+        stave_idx: int,
+        pooled_boxes: list[dict],
+        pooled_glyph_groups: list[list[Glyph]],
+        boxes_by_stave: dict[int, list[dict]],
+        neume_glyphs_by_stave: dict[int, list[Glyph]],
+) -> tuple[list[dict], list[list[Glyph]]]:
+    """Cut a row-group's pooled (boxes, glyph_groups) down to just
+    stave_idx's own share, so its glyphs still surface under ITS OWN
+    <sb>/<clef> position in build_mei's layer — only the TEXT reachable
+    across the fragment boundary changes, not where in the document each
+    glyph's <syllable> lands.
+
+    A pooled box with none of stave_idx's own glyphs is dropped, UNLESS the
+    box is genuinely glyph-less across the WHOLE pooled group (a syllable
+    with no note under it — legitimate, see _assign_glyphs_to_boxes's own
+    docstring) AND stave_idx was that box's original (pre-grouping)
+    boxes_by_stave owner. That second condition matters: _assign_boxes_to_
+    staves places a box by pure Y-distance, so a box can be "native" to
+    stave_idx while its glyphs (assigned by X-distance, within the group)
+    actually belong to a *different* member. Re-including it for stave_idx
+    whenever THAT stave merely has none of its glyphs — instead of only
+    when NO member does — would emit the same real syllable twice: once
+    correctly on the member that owns its glyphs, once as a spurious empty
+    duplicate on the native stave. Gating on "glyph-less everywhere" keeps
+    exactly one emission per real syl_box, total, exactly as happens today
+    for an un-grouped stave."""
+    own_ids = {g.id for g in neume_glyphs_by_stave.get(stave_idx, [])}
+    native_box_ids = {id(b) for b in boxes_by_stave.get(stave_idx, [])}
+
+    out_boxes: list[dict] = []
+    out_glyph_groups: list[list[Glyph]] = []
+    for box, glyphs_for_box in zip(pooled_boxes, pooled_glyph_groups, strict=True):
+        own_share = [g for g in glyphs_for_box if g.id in own_ids]
+        if own_share or (not glyphs_for_box and id(box) in native_box_ids):
+            out_boxes.append(box)
+            out_glyph_groups.append(own_share)
+    return out_boxes, out_glyph_groups
+
+def _text_box_valid(box: dict, image_w: int, image_h: int) -> bool:
     """A syl_boxes entry is only usable as a zone if it's a well-formed box
     that actually falls within the page — guards against a stale/mismatched-
     resolution text_alignment row (see _resolve_hints in tasks_encode.py,
@@ -271,6 +523,22 @@ def _syl_box_valid(box: dict, image_w: int, image_h: int) -> bool:
         return False
     return 0 <= ulx < lrx <= image_w and 0 <= uly < lry <= image_h
 
+def _filter_neume_glyphs(staff_glyphs: list[Glyph], stave_idx: int) -> list[Glyph]:
+    """Drop staff-line and custos/divline/division glyphs from one stave's
+    glyph list before syllable-building — extracted from build_mei's
+    per-stave loop so the syllable-row-grouping prepass (see
+    _group_staves_by_row) and the main loop share one skip-glyph
+    definition instead of two copies drifting apart."""
+    skip_ids = {
+        g.id for g in staff_glyphs
+        if (g.nrows > 0 and g.ncols / g.nrows >= 8)
+        or any(frag in g.class_name.lower() for frag in _SKIP_CLASS_FRAGMENTS)
+    }
+    if skip_ids:
+        skipped = [g for g in staff_glyphs if g.id in skip_ids]
+        skip_types = ", ".join(sorted({g.class_name for g in skipped}))
+        print(f" [stave {stave_idx}] skipping {len(skip_ids)} glyph(s): {skip_types}")
+    return [g for g in staff_glyphs if g.id not in skip_ids]
 
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
     """Parse YOLO annotation text into staff-line glyphs, then cluster them
@@ -305,6 +573,7 @@ def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveB
 def _cluster_glyphs_into_staves(
         glyphs: list[Glyph], page_w: int, page_h: int, id_prefix: str = "auto",
         allow_synthetic_lines: bool = False,
+        typical_line_spacing: Optional[float] = None,
 ) -> list[tuple[StaveBbox, list[Glyph]]]:
     """Cluster glyphs into stave-sized row groups by Y-center gap, pairing each
     synthesized StaveBbox with the exact glyphs that produced it. Shared by
@@ -315,11 +584,21 @@ def _cluster_glyphs_into_staves(
     glyph cluster itself), but its internal `line_ys` -- used only for pitch
     computation, via _nc_pitch -- has no real measured staff-line data behind
     it in this fallback. allow_synthetic_lines controls whether to fabricate
-    plausible-looking, perfectly evenly-spaced line_ys anyway (the old,
-    always-on behavior) or leave line_ys empty so _nc_pitch's own <2-entry
-    guard degrades to an explicit unresolved default ("a", "3") instead of a
-    confident-looking but invented pitch. Default False -- see
-    estimate_staves_from_glyphs's own docstring for why."""
+    plausible-looking line_ys anyway (the old, always-on behavior) or leave
+    line_ys empty so _nc_pitch's own <2-entry guard degrades to an explicit
+    unresolved default ("a", "3") instead of a confident-looking but invented
+    pitch. Default False -- see estimate_staves_from_glyphs's own docstring
+    for why.
+
+    When allow_synthetic_lines is True, typical_line_spacing (assign_glyphs_
+    to_staves's caller passes the page's own already-detected staves' real
+    spacing — see _typical_line_spacing) further anchors each row's
+    estimated line_ys on that reliable figure instead of deriving spacing
+    from the row's own glyphs' bounding box, which a single unusually
+    high/low note can badly skew. Left None (estimate_staves_from_glyphs's
+    whole-page-fallback caller, where no real line data exists anywhere to
+    borrow from) preserves the old bbox-derived guess exactly, since there's
+    nothing better to use."""
     if not glyphs:
         return []
     neume_like = [g for g in glyphs if g.nrows > 0 and g.ncols / g.nrows < 8]
@@ -345,13 +624,28 @@ def _cluster_glyphs_into_staves(
     for i, row in enumerate(rows):
         h = max(g.lry for g in row) + pad - max(0, min(g.uly for g in row) - pad)
         est_uly = max(0, min(g.uly for g in row) - pad)
+        if not allow_synthetic_lines:
+            line_ys = []
+        elif typical_line_spacing:
+            # Anchor on the row's own median note height (robust to a
+            # single outlier note) using the page's REAL spacing, rather
+            # than quartering this row's own bbox span — see docstring.
+            # clef_line's default (3rd of 4 lines, index len(line_ys)-3=1)
+            # sits just above center; a STAFF_LINES-point staff centered on
+            # the middle offset keeps that same convention while using
+            # reliable spacing, and stays correct if STAFF_LINES changes.
+            center_y = median(g.cy for g in row)
+            offset = (STAFF_LINES - 1) / 2
+            line_ys = [center_y + typical_line_spacing * (j - offset) for j in range(STAFF_LINES)]
+        else:
+            line_ys = [est_uly + h * j / (STAFF_LINES - 1) for j in range(STAFF_LINES)]
         stave = StaveBbox(
             id=f"{id_prefix}-{i}",
             ulx=max(0, min(g.ulx for g in row) - pad),
             uly=max(0, min(g.uly for g in row) - pad),
             lrx=min(page_w, max(g.lrx for g in row) + pad),
             lry=min(page_h, max(g.lry for g in row) + pad),
-            line_ys=[est_uly + h * j / 3 for j in range(4)] if allow_synthetic_lines else [],
+            line_ys=line_ys,
         )
         groups.append((stave, row))
     return groups
@@ -483,58 +777,6 @@ def _staves_from_staff_lines(
         ))
     return staves
 
-@dataclass
-class _NcSpec:
-    tilt: str = ""       # "" plain | "n" virga stem | "se" inclinatum diamond
-    quilisma: bool = False
-    y_fraction: float = 0.5
-
-# Ordered nc specs per neume type (one entry = one note component).
-# Ichiro appends variant codes (e.g. "clivis2a") — _nc_specs_for strips them.
-_NEUME_NC_MAP: dict[str, list[_NcSpec]] = {
-    # ── single-note ────────────────────────────────────────────────────────
-    "punctum":              [_NcSpec(y_fraction=0.5)],
-    "virga":                [_NcSpec(tilt="n", y_fraction=0.5)],
-    "quilisma":             [_NcSpec(quilisma=True, y_fraction=0.5)],
-    "inclinatum":           [_NcSpec(tilt="se", y_fraction=0.5)],
-    "oriscus":              [_NcSpec(y_fraction=0.5)],
-    # ── two-note ───────────────────────────────────────────────────────────
-    "podatus":              [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],          # ascending (= pes)
-    "pes":                  [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "clivis":               [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],          # descending
-    "distropha":            [_NcSpec(y_fraction=0.4), _NcSpec(y_fraction=0.6)],
-    "bivirga":              [_NcSpec(tilt="n", y_fraction=0.4), _NcSpec(tilt="n", y_fraction=0.6)],
-    # ── three-note ─────────────────────────────────────────────────────────
-    "torculus":             [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
-    "porrectus":            [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "scandicus":            [_NcSpec(y_fraction=0.83), _NcSpec(y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.17)],
-    "climacus":             [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83)],
-    "tristropha":           [_NcSpec(y_fraction=0.33), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.67)],
-    "trivirga":             [_NcSpec(tilt="n", y_fraction=0.33), _NcSpec(tilt="n", y_fraction=0.5), _NcSpec(tilt="n", y_fraction=0.67)],
-    # ── four-note ──────────────────────────────────────────────────────────
-    "torculusresupinus":    [_NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25)],
-    "porrectusflexus":      [_NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75), _NcSpec(y_fraction=0.25), _NcSpec(y_fraction=0.75)],
-    "scandicusflexus":      [_NcSpec(y_fraction=0.8), _NcSpec(y_fraction=0.5), _NcSpec(y_fraction=0.2), _NcSpec(y_fraction=0.5)],
-    "climacusresupinus":    [_NcSpec(y_fraction=0.17), _NcSpec(tilt="se", y_fraction=0.5), _NcSpec(tilt="se", y_fraction=0.83), _NcSpec(y_fraction=0.5)],
-}
-
-_NEUME_PREFIXES = ("neume--", "neume.", "neume_", "neume/")
-
-def _nc_specs_for(class_name: str) -> list[_NcSpec]:
-    """Map an Ichiro class name to an ordered list of nc specs.
-
-    Handles prefixes ("neume.", "neume--") and variant suffixes ("clivis2a" → "clivis").
-    Falls back to a single plain nc for unknown types.
-    """
-    name = class_name.lower().strip()
-    for prefix in _NEUME_PREFIXES:
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    # Strip trailing variant code: digits + optional letter ("2a", "3b", "1")
-    base = re.sub(r"\d+[a-z]?$", "", name).strip("_.-")
-    return _NEUME_NC_MAP.get(name) or _NEUME_NC_MAP.get(base) or [_NcSpec()]
-
 _PITCH_NOTES = ["c", "d", "e", "f", "g", "a", "b"]
 
 def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tuple[str, str]:
@@ -545,20 +787,119 @@ def _pitch_from_step(step: int, clef_note: str = "c", clef_oct: int = 4) -> tupl
     note_abs = clef_abs - step
     return _PITCH_NOTES[note_abs % 7], str(note_abs // 7)
 
-def _nc_pitch(nc_cy: float, line_ys: list[float], clef_line: int = 3) -> tuple[str, str]:
-    """Return (pname, oct) for a note at nc_cy given staff line Y positions.
-
-    line_ys must be sorted ascending (smallest Y = top of image = highest pitch).
-    Falls back to ("a", "3") when line data is unavailable.
-    """
+def _line_spacing(line_ys: list[float]) -> Optional[float]:
+    """Median gap between consecutive (sorted ascending) staff line
+    positions, or None when there are fewer than 2 points to compare, or
+    the points don't actually increase. Shared by _step_from_y (pitch
+    assignment) and _stave_zone_bounds (the stave's rendered facsimile
+    zone), so both always agree on what "one line-to-line spacing" means
+    for a given stave — see _stave_zone_bounds's docstring for why that
+    agreement matters."""
     if len(line_ys) < 2:
-        return "a", "3"
-    spacings = [line_ys[i+1] - line_ys[i] for i in range(len(line_ys) - 1)]
-    line_spacing = sum(spacings) / len(spacings)
-    clef_idx = len(line_ys) - clef_line
-    clef_y = line_ys[clef_idx]
-    step = round((nc_cy - clef_y) / (line_spacing / 2))
-    return _pitch_from_step(step)
+        return None
+    spacings = [line_ys[i + 1] - line_ys[i] for i in range(len(line_ys) - 1)]
+    spacing = median(spacings)
+    return spacing if spacing > 0 else None
+
+def _step_from_y(y: float, line_ys: list[float], clef_line: int = 3) -> Optional[int]:
+    """Diatonic step (relative to the clef line) for a point at height y,
+    given sorted ascending staff line Y positions. Returns None when there
+    isn't enough line data to place it (len(line_ys) < 2) — callers fall
+    back to a fixed default pitch in that case, same as this file's old
+    per-component behaviour before @intm-chaining replaced the y_fraction
+    heuristic (see neume_mapping.py and mothra#137).
+
+    clef_y is anchored from the BOTTOM detected line and extrapolated by
+    the (median) line spacing — clef_line follows MEI's @line convention
+    of counting lines from the bottom of the staff — rather than indexing
+    line_ys[len(line_ys) - clef_line] directly. That direct-index form
+    silently assumed len(line_ys) always equals the real total line count
+    for this stave; on a real page, per-stave detected line counts varied
+    (2 to 7 for a nominal 4-line stave, from a mix of under-detection and
+    duplicate left/right line-fragment sampling — see staffline_adapter's
+    _dedupe_line_ys for the latter), so that assumption broke — even
+    wrapping to the wrong end of the list via a negative index when a
+    stave had fewer real lines than clef_line. Extrapolating from the
+    bottom with the measured spacing degrades far more gracefully when a
+    stave's real line count doesn't match the nominal expectation.
+    Likewise, line_spacing uses the MEDIAN gap rather than the mean, so a
+    handful of remaining anomalous gaps can't drag the spacing estimate
+    (and therefore every note's diatonic step) off by a large margin."""
+    line_spacing = _line_spacing(line_ys)
+    if line_spacing is None:
+        return None
+    clef_y = line_ys[-1] - line_spacing * (clef_line - 1)
+    return round((y - clef_y) / (line_spacing / 2))
+
+def _stave_zone_bounds(stave: StaveBbox) -> tuple[int, int]:
+    """(uly, lry) to use for this stave's <sb>-referenced facsimile zone.
+
+    Verovio's own facsimile-transcription rendering (EditorToolkitNeume::
+    Resize / SyncFromFacsimileFunctor's VisitPageEnd — confirmed against
+    Verovio's own source; it isn't vendored in this repo) derives its
+    per-note PIXEL spacing from this zone's height alone:
+    zone_height / (STAFF_LINES - 1). That is a completely separate
+    computation from _step_from_y's pitch assignment, which uses the real
+    MEDIAN detected line-to-line gap — the two must agree, or a note's
+    assigned diatonic step (correct in the abstract) renders at the wrong
+    pixel distance from the clef. Confirmed on a real page: the union-of-
+    detected-line-bounding-boxes zone heights `staves_from_jsomr()` (and
+    the padded fallbacks elsewhere in this file) produce implied a
+    per-line spacing anywhere from 0.7x to 2.2x the real spacing,
+    visibly displacing every note on the affected staves — most visibly
+    once a stave's zone was manually realigned with the real page in
+    Neon (which only ever changes the zone's own geometry, never any
+    note's pname/oct — see EditorToolkitNeume::Resize), suddenly exposing
+    the mismatch that had been partly masked by the zone's prior,
+    also-off position.
+
+    When real line data is available (>=2 points), this returns a zone
+    spanning exactly (STAFF_LINES - 1) * real_spacing, anchored on the
+    bottommost detected line — matching _step_from_y's own bottom-
+    anchored convention exactly, so Verovio's per-step pixel unit and
+    _step_from_y's per-step diatonic assignment always agree. Falls back
+    to the stave's own (possibly padded/union) uly/lry when there's no
+    usable line data to anchor on — same case _step_from_y itself falls
+    back to a fixed default pitch for, since there's no real spacing
+    convention to reconcile with either way."""
+    spacing = _line_spacing(stave.line_ys)
+    if spacing is None:
+        return stave.uly, stave.lry
+    lry = stave.line_ys[-1]
+    uly = lry - spacing * (STAFF_LINES - 1)
+    return round(uly), round(lry)
+
+def _component_pitches(
+    anchor_step: Optional[int],
+    components: list[NcTemplate],
+    clef_note: str = "c",
+    clef_oct: int = 4,
+) -> list[tuple[str, str]]:
+    """(pname, oct) for each component of one neume glyph.
+
+    The FIRST component's pitch comes from anchor_step (the glyph's own
+    position on the stave — see _step_from_y, called with the glyph's bbox
+    center, matching the old default y_fraction=0.5 anchor). Every later
+    component's pitch is the previous one's step minus its own @intm delta:
+    @intm is positive when that note sits a step ABOVE the previous one
+    (higher pitch), while _pitch_from_step's own convention is the
+    opposite — positive step = LOWER pitch (see its docstring) — hence the
+    subtraction. Verified against the CSVs' own ascending/descending
+    neumes: podatus's second <nc intm="1S"/> must end up higher than its
+    first; clivis's second <nc intm="-1S"/> must end up lower.
+
+    Falls back to a fixed ("a", "3") for every component (matching this
+    file's pre-existing fallback) when anchor_step is None.
+    """
+    if anchor_step is None:
+        return [("a", "3")] * len(components)
+    pitches = []
+    step = anchor_step
+    for j, comp in enumerate(components):
+        if j > 0:
+            step -= comp.intm
+        pitches.append(_pitch_from_step(step, clef_note, clef_oct))
+    return pitches
 
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
@@ -574,9 +915,13 @@ def build_mei(
     text_alignment: dict | None = None,
     clef_shape: str = "C",
     clef_line: int = 3,
+    notation_type: str = "square",
+    n_detected_staves: Optional[int] = None,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
+    neume_mapping = resolve_neume_mapping(notation_type)
+    missing_classes: set[str] = set()
 
     # meiHead
 
@@ -609,25 +954,26 @@ def build_mei(
     stave_zone_ids: dict[int, str] = {}
     clef_zone_ids: dict[int, str] = {}
     for i, stave in enumerate(staves):
+        zone_uly, zone_lry = _stave_zone_bounds(stave)
         zone_id = f"sz-{stave.id}"
         ET.SubElement(surface, _tag("zone"), {
             XML_ID: zone_id,
             "type": "staff",
             "ulx": str(stave.ulx),
-            "uly": str(stave.uly),
+            "uly": str(zone_uly),
             "lrx": str(stave.lrx),
-            "lry": str(stave.lry),
+            "lry": str(zone_lry),
         })
         stave_zone_ids[i] = zone_id
         # Clef zone: left edge of stave, roughly square (height ≈ staff height)
         clef_zone_id = f"cz-{stave.id}"
-        stave_h = max(stave.lry - stave.uly, 1)
+        stave_h = max(zone_lry - zone_uly, 1)
         ET.SubElement(surface, _tag("zone"), {
             XML_ID: clef_zone_id,
             "ulx": str(stave.ulx),
-            "uly": str(stave.uly),
+            "uly": str(zone_uly),
             "lrx": str(stave.ulx + stave_h),
-            "lry": str(stave.lry),
+            "lry": str(zone_lry),
         })
         clef_zone_ids[i] = clef_zone_id
 
@@ -640,37 +986,42 @@ def build_mei(
             "lrx": str(glyph.lrx),
             "lry": str(glyph.lry),
         })
-    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
 
-    syl_zone_ids: dict[int, str] = {}
+    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
+    boxes_by_stave = _assign_boxes_to_staves(staves, syl_boxes) if syl_boxes else {}
+
+    skip_zones = False
     if syl_boxes:
-        invalid_idx = {
-            i for i, box in enumerate(syl_boxes)
-            if not _syl_box_valid(box, image_w, image_h)
-        }
-        if len(invalid_idx) > len(syl_boxes) / 2:
+        invalid = sum(1 for b in syl_boxes if not _text_box_valid(b, image_w, image_h))
+        if invalid > len(syl_boxes) / 2:
+            skip_zones = True
             print(
-                f" [text-alignment] {len(invalid_idx)}/{len(syl_boxes)} syl_boxes "
-                f"fall outside the {image_w}x{image_h} page (likely a stale or "
-                "mismatched-resolution text-finding result) — syllable text will "
-                "still be used, but without bounding boxes",
+                f" [text-alignment] {invalid}/{len(syl_boxes)} syl_boxes fall outside the "
+                f"{image_w}x{image_h} page (likely a stale or mismatched-resolution "
+                "text-finding result) — syllable text will still be used, but without "
+                "bounding boxes",
                 file=sys.stderr,
             )
-        else:
-            for i, box in enumerate(syl_boxes):
-                if i in invalid_idx:
-                    continue
-                ulx, uly = box["ul"]
-                lrx, lry = box["lr"]
-                zone_id = f"zone-syl-{i}"
-                ET.SubElement(surface, _tag("zone"), {
-                    XML_ID: zone_id,
-                    "ulx": str(int(ulx)),
-                    "uly": str(int(uly)),
-                    "lrx": str(int(lrx)),
-                    "lry": str(int(lry)),
-                })
-                syl_zone_ids[i] = zone_id
+
+    def _syl_zone(box: dict) -> Optional[str]:
+        """Create a <zone> for one syl_box (or a synthesized union box, for
+        the multi-box-no-clean-split fallback), unless zones are globally
+        disabled for this page (see skip_zones above) or the box itself is
+        out of bounds. Every call makes a fresh zone, so every <syl> gets
+        its own — never shared across <syllable>s (Neon's resize action
+        mutates the one zone all referencing elements share, so two
+        syllables pointing at the same zone would silently move together)."""
+        if skip_zones or not _text_box_valid(box, image_w, image_h):
+            return None
+        zone_id = f"zone-syl-{str(uuid.uuid4()).replace('-', '')[:12]}"
+        ulx, uly = box["ul"]
+        lrx, lry = box["lr"]
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: zone_id,
+            "ulx": str(int(ulx)), "uly": str(int(uly)),
+            "lrx": str(int(lrx)), "lry": str(int(lry)),
+        })
+        return zone_id 
 
     # body
     body = ET.SubElement(music, _tag("body"))
@@ -684,7 +1035,7 @@ def build_mei(
     ET.SubElement(staff_grp, _tag("staffDef"), {
         XML_ID: f"staffdef-{staff_grp_id}",
         "n": "1",
-        "lines": "4",
+        "lines": str(STAFF_LINES),
         "notationtype": "neume",
         "clef.shape": clef_shape,
         "clef.line": str(clef_line),
@@ -707,7 +1058,36 @@ def build_mei(
         "facs": "#surface-0001",
     })
 
-    used_syl_boxes: set[int] = set()
+    # Syllable-matching prepass: one physical manuscript row's glyphs can
+    # end up split across multiple stave_idx buckets (assign_glyphs_to_staves's
+    # Y-gap glyph clustering can fragment a row — see _group_staves_by_row's
+    # docstring). When that happens, the row's real syl_boxes land on
+    # whichever stave_idx got most of the row's glyphs via
+    # _assign_boxes_to_staves's pure Y-distance test, leaving a fragment's
+    # bucket with none — so without this, the fragment falls straight to
+    # the "-" no-text-alignment fallback below even though its row-mate has
+    # real text. Grouping fragments' boxes+glyphs before assignment lets a
+    # fragment share its row-mate's real syl_boxes instead.
+    #
+    # n_detected_staves gates this to ONLY ever rescue a stave
+    # assign_glyphs_to_staves itself synthesized (see _group_staves_by_row's
+    # docstring for why two originally-detected staves must never merge).
+    # Callers that don't know this (n_detected_staves=None) get the safest
+    # possible default: len(staves), i.e. "trust every stave as originally
+    # detected" — no merging happens at all, same as if this whole fix
+    # didn't exist for that call.
+    effective_n_detected = n_detected_staves if n_detected_staves is not None else len(staves)
+    row_groups = _group_staves_by_row(staves, effective_n_detected)
+    stave_to_group: dict[int, set[int]] = {i: g for g in row_groups for i in g}
+    neume_glyphs_by_stave: dict[int, list[Glyph]] = {
+        stave_idx: _filter_neume_glyphs(glyphs_by_stave[stave_idx], stave_idx)
+        for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0)
+    }
+    group_pool: dict[frozenset, tuple[list[dict], list[list[Glyph]]]] = {
+        frozenset(g): _pool_group_syllable_data(g, boxes_by_stave, neume_glyphs_by_stave)
+        for g in row_groups if len(g) > 1
+    }
+
     for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
         staff_glyphs = glyphs_by_stave[stave_idx]
         if not staff_glyphs:
@@ -729,66 +1109,73 @@ def build_mei(
             clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
         ET.SubElement(layer, _tag("clef"), clef_attrs)
         
-        skip_ids = {
-            g.id for g in staff_glyphs
-            if (g.nrows > 0 and g.ncols / g.nrows >= 8)
-            or any(frag in g.class_name.lower() for frag in _SKIP_CLASS_FRAGMENTS)
-        }
-        if skip_ids:
-            skipped = [g for g in staff_glyphs if g.id in skip_ids]
-            skip_types = ", ".join(sorted({g.class_name for g in skipped}))
-            print(f" [stave {stave_idx}] skipping {len(skip_ids)} glyph(s): {skip_types}")
-        neume_glyphs = [g for g in staff_glyphs if g.id not in skip_ids]
-        for cluster in cluster_into_syllables(neume_glyphs, gap_mult=syllable_gap_mult):
-            syllable_id = cluster[0].id
+        neume_glyphs = neume_glyphs_by_stave[stave_idx]
+        group = stave_to_group.get(stave_idx, {stave_idx})
+        if len(group) > 1:
+            # This stave_idx is a fragment (or the main bucket) of a row
+            # split across multiple stave_idx values — pull its share of
+            # the row-group's pooled boxes/glyphs instead of just its own
+            # (likely-empty) boxes_by_stave entry. See the prepass above.
+            pooled_boxes, pooled_glyph_groups = group_pool[frozenset(group)]
+            stave_boxes, glyph_groups = _stave_share_of_group(
+                stave_idx, pooled_boxes, pooled_glyph_groups,
+                boxes_by_stave, neume_glyphs_by_stave,
+            )
+        else:
+            stave_boxes = boxes_by_stave.get(stave_idx, [])
+            glyph_groups = _assign_glyphs_to_boxes(neume_glyphs, stave_boxes) if stave_boxes else []
+
+        syllable_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
+
+        for syl_text, box, glyphs_in_syl in syllable_units:
+            syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
             syllable = ET.SubElement(layer, _tag("syllable"), {
                 XML_ID: f"syllable-{syllable_id}",
             })
             syl_id = str(uuid.uuid4()).replace("-", "")[:12]
             syl_attrs: dict[str, str] = {XML_ID: f"syl-{syl_id}"}
-            match_idx = find_best_syllable_match(cluster, syl_boxes, used_syl_boxes)
-            if match_idx is not None:
-                used_syl_boxes.add(match_idx)
-                syl_text = syl_boxes[match_idx]["syl"]
-                if match_idx in syl_zone_ids:
-                    syl_attrs["facs"] = f"#{syl_zone_ids[match_idx]}"
-            else:
-                syl_text = "-"
+            if box is not None:
+                zone_id = _syl_zone(box)
+                if zone_id is not None:
+                    syl_attrs["facs"] = f"#{zone_id}"
             syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
             syl.text = syl_text
-            for glyph in cluster:
+            for glyph in glyphs_in_syl:
                 neume = ET.SubElement(syllable, _tag("neume"), {
                     XML_ID: f"neume-{glyph.id}",
                     "facs": f"#z-{glyph.id}",
                 })
                 stave = staves[stave_idx] if stave_idx < len(staves) else None
                 line_ys = stave.line_ys if stave else []
-                for j, spec in enumerate(_nc_specs_for(glyph.class_name)):
+                entry = neume_mapping.get(glyph.class_name.lower().strip())
+                if entry is not None:
+                    components = entry.components
+                else:
+                    components = [NcTemplate()]
+                    missing_classes.add(glyph.class_name)
+                anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
+                pitches = _component_pitches(anchor_step, components)
+                for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
-                    nc_cy = glyph.uly + spec.y_fraction * glyph.nrows
-                    pname, oct_str = _nc_pitch(nc_cy, line_ys, clef_line)
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
                         "facs": f"#z-{glyph.id}",
                         "pname": pname,
                         "oct": oct_str,
                     }
-                    if spec.tilt:
-                        nc_attrs["tilt"] = spec.tilt
-                    if spec.quilisma:
-                        nc_attrs["quilisma"] = "true"
-                    ET.SubElement(neume, _tag("nc"), nc_attrs)
-    
-    _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    _XML_MODEL_PI = (
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
-    )
-    ET.indent(mei, space=" ")
-    xml_str = _XML_DECLARATION + _XML_MODEL_PI + ET.tostring(mei, encoding="unicode")
-    return xml_str.encode("utf-8")
+                    nc_attrs.update(comp.attrs)
+                    nc_el = ET.SubElement(neume, _tag("nc"), nc_attrs)
+                    if comp.liquescent:
+                        ET.SubElement(nc_el, _tag("liquescent"))
+
+    if missing_classes:
+        print(
+            f" [neume-mapping:{notation_type}] {len(missing_classes)} classification(s) not found in "
+            f"the mapping — encoded as a single plain <nc>: {', '.join(sorted(missing_classes))}",
+            file=sys.stderr,
+        )
+
+    return _serialize_mei(mei)
 
 def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
     """Scale every facsimile zone coordinate by factor (port of Rodan mei_resize.py)."""
@@ -810,17 +1197,7 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
                     el.set(attr, f"{round(int(val[:-2]) * factor)}px")
                 except (ValueError, TypeError):
                     pass
-    ET.register_namespace("", MEI_NS)
-    ET.indent(root, space=" ")
-    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    xml_model_pi = (
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>\n'
-        '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
-        ' type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>\n'
-    )
-    xml_str = xml_declaration + xml_model_pi + ET.tostring(root, encoding="unicode")
-    return xml_str.encode("utf-8")
+    return _serialize_mei(root)
     
 REQUIRED_MEI_VERSION = "5.0.0-dev"
 
@@ -990,7 +1367,19 @@ def trace_stave_zone_parity(staves: list[StaveBbox], mei_bytes: bytes) -> list[s
         except (TypeError, ValueError):
             mismatches.append(f"stave {stave.id}: zone has unparsable coordinates")
             continue
-        expected = tuple(float(v) for v in (stave.ulx, stave.uly, stave.lrx, stave.lry))
+        # Compare against _stave_zone_bounds(stave)'s (uly, lry), not the
+        # raw stave.uly/stave.lry -- build_mei() deliberately writes the
+        # zone's vertical bounds from _stave_zone_bounds (Verovio derives
+        # its rendered note spacing from the zone's height, which needs to
+        # match the stave's REAL measured line spacing, not its raw padded
+        # bbox -- see _stave_zone_bounds's own docstring), so a real,
+        # correct encode is EXPECTED to diverge here for exactly that one
+        # dimension. This check still catches every other kind of silent
+        # zone corruption (wrong ulx/lrx, a stale/mismatched stave.id, etc.)
+        zone_uly, zone_lry = _stave_zone_bounds(stave)
+        expected = tuple(
+            float(v) for v in (stave.ulx, zone_uly, stave.lrx, zone_lry)
+        )
         if written != expected:
             mismatches.append(f"stave {stave.id}: expected {expected}, zone has {written}")
 
@@ -1026,6 +1415,242 @@ def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
         ],
     }
 
+def _reconstruct_mei_state(
+    root: ET.Element,
+) -> tuple[list[StaveBbox], dict[int, list[Glyph]], dict[str, ET.Element],
+           dict[int, list[tuple[Optional[str], tuple[str, ...]]]]]:
+    """Reverse of what build_mei writes: walks an already-built MEI document
+    back into (staves, glyphs_by_stave) -- the same shape build_mei
+    originally took as input -- plus a glyph_id -> <neume> element map (so
+    verify_and_correct_syllables can re-parent an existing, already
+    pitch-computed <neume> element under a corrected <syllable> without
+    recomputing pitch at all) and, per stave_idx, the CURRENT sequence of
+    (syl_text, glyph_ids) actually encoded, for comparison against a
+    freshly recomputed one.
+
+    Trusts the existing <sb>-delimited stave groupings as-is -- see
+    verify_and_correct_syllables's docstring for why this does not redo
+    _group_staves_by_row's cross-stave repair."""
+    ns = f"{{{MEI_NS}}}"
+    surface = root.find(f".//{ns}surface")
+    zones: dict[str, ET.Element] = {}
+    if surface is not None:
+        for zone in surface.findall(f"{ns}zone"):
+            zid = zone.get(XML_ID)
+            if zid:
+                zones[zid] = zone
+
+    def _box(zone: ET.Element) -> tuple[int, int, int, int]:
+        return (int(zone.get("ulx", 0)), int(zone.get("uly", 0)),
+                int(zone.get("lrx", 0)), int(zone.get("lry", 0)))
+
+    # dict preserves insertion order, and build_mei writes zones in
+    # document order -- so this is already stave_idx order.
+
+    staff_zone_ids = [zid for zid, z in zones.items() if z.get("type") == "staff"]
+    staves: list[StaveBbox] = []
+    zone_id_to_stave_idx: dict[str, int] = {}
+    for i, zid in enumerate(staff_zone_ids):
+        ulx, uly, lrx, lry = _box(zones[zid])
+        staves.append(StaveBbox(id=zid.removeprefix("sz-"), ulx=ulx, uly=uly, lrx=lrx, lry=lry))
+        zone_id_to_stave_idx[zid] = i
+
+    layer = root.find(f".//{ns}layer")
+    glyphs_by_stave: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+    neume_elements: dict[str, ET.Element] = {}
+    current_syllables: dict[int, list[tuple[Optional[str], tuple[str, ...]]]] = {
+        i: [] for i in range(len(staves))
+    }
+    current_stave_idx: Optional[int] = None
+    if layer is not None:
+        for child in layer:
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "sb":
+                facs = (child.get("facs") or "").lstrip("#")
+                current_stave_idx = zone_id_to_stave_idx.get(facs)
+            elif tag == "syllable" and current_stave_idx is not None:
+                syl_el = child.find(f"{ns}syl")
+                syl_text = syl_el.text if syl_el is not None else None
+                glyph_ids: list[str] = []
+                for neume in child.findall(f"{ns}neume"):
+                    facs = (neume.get("facs") or "").lstrip("#")
+                    zone = zones.get(facs)
+                    if zone is None or not facs.startswith("z-"):
+                        continue
+                    glyph_id = facs[len("z-"):]
+                    ulx, uly, lrx, lry = _box(zone)
+                    glyphs_by_stave[current_stave_idx].append(Glyph(
+                        id=glyph_id, ulx=ulx, uly=uly,
+                        ncols=max(lrx - ulx, 1), nrows=max(lry - uly, 1),
+                        class_name="", confidence=1.0, state="AUTOMATIC",
+                    ))
+                    neume_elements[glyph_id] = neume
+                    glyph_ids.append(glyph_id)
+                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids)))
+    return staves, glyphs_by_stave, neume_elements, current_syllables
+
+def verify_and_correct_syllables(
+        mei_bytes: bytes,
+        text_alignment: Optional[dict],
+        image_w: int,
+        image_h: int,
+        syllable_gap_mult: float = SYLLABLE_GAP_MULTIPLIER,
+) -> tuple[bytes, list[str]]:
+    """Re-verify an already-built MEI's <syllable> text+order against
+    mothra-text's CURRENT text_alignment for the same image, correcting it
+    in place when they disagree (mothra-text wins). Called from
+    mei_api.py's create_edit_session, right before Neon opens a
+    not-yet-human-corrected MEI.
+
+    Reuses _assign_boxes_to_staves/_assign_glyphs_to_boxes/
+    _build_syllable_units -- the exact same logic build_mei itself uses --
+    against glyph/stave geometry reconstructed straight out of the
+    existing MEI (_reconstruct_mei_state), so a "correction" here can
+    never disagree with what a fresh build_mei call would have produced
+    for the same inputs.
+
+    Scope boundary: does NOT re-run _group_staves_by_row's row-
+    fragmentation repair -- see _reconstruct_mei_state's docstring; which
+    staves were originally detected vs. synthesized isn't recoverable
+    from a finished MEI. A glyph already in the wrong stave bucket is out
+    of scope; a glyph in the RIGHT stave bucket with the wrong/misordered
+    syllable text is exactly what this fixes.
+
+    Returns (possibly-unchanged mei_bytes, list of human-readable
+    correction log lines -- empty when nothing needed fixing)."""
+    syl_boxes = text_alignment.get("syl_boxes", []) if text_alignment else []
+    if not syl_boxes:
+        return mei_bytes, []
+
+    # Same stale/mismatched-resolution guard build_mei itself uses -- if
+    # most boxes fall outside this page, don't risk a correction built on
+    # bad coordinates.
+    invalid = sum(1 for b in syl_boxes if not _text_box_valid(b, image_w, image_h))
+    if invalid > len(syl_boxes) / 2:
+        return mei_bytes, []
+
+    root = ET.fromstring(mei_bytes)
+    ns = f"{{{MEI_NS}}}"
+    staves, glyphs_by_stave, neume_elements, current_syllables = _reconstruct_mei_state(root)
+    surface = root.find(f".//{ns}surface")
+    layer = root.find(f".//{ns}layer")
+    if not staves or surface is None or layer is None:
+        return mei_bytes, []
+
+    boxes_by_stave = _assign_boxes_to_staves(staves, syl_boxes)
+    staff_zone_id_by_idx = {i: f"sz-{stave.id}" for i, stave in enumerate(staves)}
+    logs: list[str] = []
+
+    for stave_idx in range(len(staves)):
+        neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
+        stave_boxes = boxes_by_stave.get(stave_idx, [])
+        glyph_groups = _assign_glyphs_to_boxes(neume_glyphs, stave_boxes) if stave_boxes else []
+        new_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
+
+        # _reconstruct_mei_state's staves come from the WRITTEN <staffDef>
+        # zone -- _stave_zone_bounds()'s tighter, Verovio-spacing-matched
+        # band, not the raw stave bbox build_mei originally ran
+        # _assign_boxes_to_staves against (see that function's docstring).
+        # A real syl_box that landed correctly on this stave at encode time
+        # can therefore fall just outside the tighter reconstructed band
+        # here and get bucketed elsewhere, leaving this stave's own glyphs
+        # with no box -- i.e. _build_syllable_units's "-" no-text fallback,
+        # even though its row-mate had the real word right there and
+        # nothing about mothra-text's data actually changed. Guard against
+        # that specific regression: never let a "-" fallback overwrite an
+        # existing real syl_text for the exact same glyph grouping -- only
+        # a genuine glyph-membership change (row split/merge, reordering)
+        # or a genuine text change should ever get written.
+        old_units = current_syllables.get(stave_idx, [])
+        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
+        old_empty_texts = {syl_text for syl_text, glyph_ids in old_units if not glyph_ids}
+        reconciled_units = []
+        for syl_text, box, glyphs_in_syl in new_units:
+            glyph_ids = tuple(g.id for g in glyphs_in_syl)
+            if not glyph_ids:
+                # A box with no neumes assigned here is either a genuine
+                # "text with nothing under it" (build_mei can legitimately
+                # produce these for an isolated stave) or -- the same
+                # pooling gap as above -- a box a row-mate actually owns,
+                # miscounted as unclaimed only because pooling isn't
+                # redone here. Only keep it if this stave already had a
+                # matching empty-glyph unit; otherwise it's a phantom this
+                # unpooled recheck invents, not a real disagreement.
+                if syl_text not in old_empty_texts:
+                    continue
+            else:
+                old_text = old_text_by_glyphs.get(glyph_ids)
+                if syl_text == "-" and old_text not in (None, "-"):
+                    syl_text = old_text
+            reconciled_units.append((syl_text, box, glyphs_in_syl))
+        new_units = reconciled_units
+
+        new_signature = [(syl_text, tuple(g.id for g in glyphs)) for syl_text, _, glyphs in new_units]
+        if new_signature == current_syllables.get(stave_idx, []):
+            continue # matches mothra-text
+
+        children = list(layer)
+        zone_id = staff_zone_id_by_idx[stave_idx]
+        sb_idx = next(
+            (i for i, c in enumerate(children)
+             if c.tag == f"{ns}sb" and (c.get("facs") or "").lstrip("#") == zone_id),
+             None,
+        )
+        if sb_idx is None:
+            continue
+        section_end = next(
+            (i for i in range(sb_idx + 1, len(children)) if children[i].tag == f"{ns}sb"),
+            len(children),
+        )
+        insert_at = sb_idx + 2 # right after <sb>, <clef>
+
+        # Remove this section's existing <syllable> elements and their
+        # syl-zone <zone> children, to avoid leaving orphaned zones behind.
+        old_zone_ids: set[str] = set()
+        for c in children[insert_at:section_end]:
+            if c.tag == f"{ns}syllable":
+                syl_el = c.find(f"{ns}syl")
+                facs = (syl_el.get("facs") if syl_el is not None else None) or ""
+                if facs.startswith("#"):
+                    old_zone_ids.add(facs[1:])
+                layer.remove(c)
+        if old_zone_ids:
+            for zone_el in list(surface.findall(f"{ns}zone")):
+                if zone_el.get(XML_ID) in old_zone_ids:
+                    surface.remove(zone_el)
+
+        # Build fresh <syllable> elements, re-parenting the EXISTING
+        # <neume> element for each glyph (already correctly pitched --
+        # untouched) rather than recomputing anything about it.
+        for offset, (syl_text, box, glyphs_in_syl) in enumerate(new_units):
+            syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
+            syllable = ET.Element(_tag("syllable"), {XML_ID: f"syllable-{syllable_id}"})
+            syl_attrs: dict[str, str] = {XML_ID: f"syl-{str(uuid.uuid4()).replace('-', '')[:12]}"}
+            if box is not None and _text_box_valid(box, image_w, image_h):
+                syl_zone_id = f"zone-syl-{str(uuid.uuid4()).replace('-', '')[:12]}"
+                ulx, uly = box["ul"]
+                lrx, lry = box["lr"]
+                ET.SubElement(surface, _tag("zone"), {
+                    XML_ID: syl_zone_id,
+                    "ulx": str(int(ulx)), "uly": str(int(uly)),
+                    "lrx": str(int(lrx)), "lry": str(int(lry)),
+                })
+                syl_attrs["facs"] = f"#{syl_zone_id}"
+            syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
+            syl.text = syl_text
+            for glyph in glyphs_in_syl:
+                neume_el = neume_elements.get(glyph.id)
+                if neume_el is not None:
+                    syllable.append(neume_el)
+            layer.insert(insert_at + offset, syllable)
+
+        logs.append(f" [verify-syllables] stave {stave_idx}: corrected "
+                    f"{len(new_units)} syllable(s) to match text-finding")
+    if not logs:
+        return mei_bytes, []
+    return _serialize_mei(root), logs
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="GameraXML + Mothra inference JSON -> pitch-less MEI + Neon manifest."
@@ -1039,6 +1664,8 @@ def main():
                         help="multiply all facsimile zone coordinates by this factor ")
     parser.add_argument("--syllable-gap-mult", type=float, default=SYLLABLE_GAP_MULTIPLIER,
                         metavar="FLOAT", help="gap-to-median-glyph-width ratio for syllable clustering (default: 1.5)",)
+    parser.add_argument("--notation-type", type=str, default="square", choices=["square", "hufnagel"],
+                        help="which bundled neume-to-MEI mapping CSV to use (default: square)")
     args = parser.parse_args()
 
     stem = args.image.stem
@@ -1070,11 +1697,14 @@ def main():
         print (f"Scaling facsimile coordinates by {scale:.4g} times ({source})")
     print(f"{len(staves)} staves found")
 
+    n_detected_staves = len(staves)
     glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, image_w, image_h)
     assigned = sum(len(v) for k, v in glyphs_by_stave.items() if k >= 0)
     print(f" {assigned} glyphs assigned across {len([k for k in glyphs_by_stave if k >= 0])} staves")
 
-    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name, syllable_gap_mult=args.syllable_gap_mult,)
+    mei_bytes = build_mei(glyphs_by_stave, staves, args.image.resolve(), image_w, image_h, ms_name,
+                          syllable_gap_mult=args.syllable_gap_mult, notation_type=args.notation_type,
+                          n_detected_staves=n_detected_staves)
     if scale != 1.0:
         mei_bytes = scale_facsimile(mei_bytes, scale)
     for w in validate_mei(mei_bytes):

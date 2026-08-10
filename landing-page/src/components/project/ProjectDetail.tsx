@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Project, ModelKind, CantusSource } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
@@ -18,6 +18,10 @@ import StafflinesTab from "./StafflinesTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
 import TruncatedName from "../shared/TruncatedName";
+import {
+  subscribeActiveJobs,
+  getActiveJobsSnapshot,
+} from "../../lib/activeJobs";
 
 const STEPS = [
   "annotate",
@@ -33,7 +37,11 @@ interface ProjectDetailProps {
   onContinue: () => void;
   onUpdateProject: (updated: Project) => void;
   usedNames: { images: string[]; models: string[]; annotations: string[] };
-  onUsedNamesChange: (names: { images: string[]; models: string[]; annotations: string[] }) => void;
+  onUsedNamesChange: (names: {
+    images: string[];
+    models: string[];
+    annotations: string[];
+  }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   onSendToCantus: () => void;
@@ -46,12 +54,24 @@ interface ProjectDetailProps {
     sourceId?: string,
     sourceName?: string,
     originalFile?: File,
-  ) => Promise<{ id: string; name: string; folio?: string; sourceId?: string; sourceName?: string }>;
-  onUploadModel: (file: File, kind: ModelKind) => Promise<{ id: string; name: string; kind: ModelKind }>;
+  ) => Promise<{
+    id: string;
+    name: string;
+    folio?: string;
+    sourceId?: string;
+    sourceName?: string;
+  }>;
+  onUploadModel: (
+    file: File,
+    kind: ModelKind,
+  ) => Promise<{ id: string; name: string; kind: ModelKind }>;
   onDeleteImage: (imageId: string) => Promise<void>;
   onDeleteModel: (modelId: string) => Promise<void>;
   onDeleteAnnotation: (annotationId: string) => Promise<void>;
-  onDownloadAnnotation: (annotationId: string, format: "txt" | "json") => Promise<void>;
+  onDownloadAnnotation: (
+    annotationId: string,
+    format: "txt" | "json",
+  ) => Promise<void>;
   onDeleteMei: (meiId: string) => Promise<void>;
   onDeleteProject: () => void;
   onUpdateCantusSourceId: (sourceId: string) => void;
@@ -84,30 +104,45 @@ export default function ProjectDetail({
   inferenceSettings,
   textFindingSettings,
 }: ProjectDetailProps) {
-  const [activeTab, setActiveTab] = useState<
-    "images" | "models" | "generated"
-  >("images");
+  const [activeTab, setActiveTab] = useState<"images" | "models" | "generated">(
+    "images",
+  );
   const [generatedSubTab, setGeneratedSubTab] = useState<
     "annotations" | "text" | "stafflines" | "mei files"
   >("annotations");
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Client-side mirror of the backend's cross-kind "one active job per
+  // project" guard (job_store.py's get_active_job_for_project) — disables
+  // Continue before the user can even attempt a kickoff that the backend
+  // would reject with a 409, instead of them hitting an error. The backend
+  // check remains the actual source of truth (this registry is in-memory,
+  // reset on reload, not shared across tabs).
+  const activeJobsSnapshot = useSyncExternalStore(
+    subscribeActiveJobs,
+    getActiveJobsSnapshot,
+  );
+  const activeJobForProject =
+    activeJobsSnapshot.find((j) => j.projectId === project.id) ?? null;
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [icSessionsModal, setIcSessionsModal] = useState(false);
-  const [loadedCantusSource, setLoadedCantusSource] = useState<CantusSource | null>(null);
+  const [loadedCantusSource, setLoadedCantusSource] =
+    useState<CantusSource | null>(null);
   const [imageSubTab, setImageSubTab] = useState<"grid" | "batch">("grid");
   const [batchStartFolio, setBatchStartFolio] = useState("");
   const [batchEndFolio, setBatchEndFolio] = useState("");
-  const [batchImages, setBatchImages] = useState<{ id: string; name: string }[]>([]);
+  const [batchImages, setBatchImages] = useState<
+    { id: string; name: string }[]
+  >([]);
 
   useEffect(() => {
     setBatchStartFolio("");
     setBatchEndFolio("");
     setBatchImages([]);
   }, [project.id]);
-  
+
   const batchFolioSequence = useMemo(() => {
     const folios = loadedCantusSource?.folios ?? [];
     if (!batchStartFolio || !batchEndFolio) return [];
@@ -118,14 +153,24 @@ export default function ProjectDetail({
     // doesn't need the adjacency gate auto-detection uses (the human already
     // vouched for it), so trust it outright rather than collapsing the whole
     // range to empty the way a genuine not-found value used to.
-    if (startIdx === -1 && endIdx === -1) return [batchStartFolio, batchEndFolio];
-    if (startIdx === -1) return endIdx === -1 ? [] : [batchStartFolio, ...folios.slice(0, endIdx + 1)];
+    if (startIdx === -1 && endIdx === -1)
+      return [batchStartFolio, batchEndFolio];
+    if (startIdx === -1)
+      return endIdx === -1
+        ? []
+        : [batchStartFolio, ...folios.slice(0, endIdx + 1)];
     if (endIdx === -1) return [...folios.slice(startIdx), batchEndFolio];
     if (startIdx > endIdx) return [];
     return folios.slice(startIdx, endIdx + 1);
   }, [loadedCantusSource, batchStartFolio, batchEndFolio]);
   const nextStep = useMemo(
-    () => minNextStep(usedNames.images, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked),
+    () =>
+      minNextStep(
+        usedNames.images,
+        project.annotations ?? [],
+        project.meiFiles ?? [],
+        stepsUnlocked,
+      ),
     [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
   );
   const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
@@ -146,7 +191,9 @@ export default function ProjectDetail({
     annSection.setPage(0);
   };
 
-  const switchGeneratedSubTab = (tab: "annotations" | "text" | "stafflines" | "mei files") => {
+  const switchGeneratedSubTab = (
+    tab: "annotations" | "text" | "stafflines" | "mei files",
+  ) => {
     setGeneratedSubTab(tab);
     meiSection.clearSelection();
     annSection.clearSelection();
@@ -158,18 +205,23 @@ export default function ProjectDetail({
     images: "Images",
     models: "Models",
     generated: "Generated files",
-  }
+  };
 
   const GENERATED_SUBTAB_LABELS: Record<string, string> = {
     annotations: "Detected layers",
     text: "Detected text",
     stafflines: "Stafflines",
     "mei files": "MEI files",
-  }
+  };
 
   const tabs = ["images", "models", "generated"] as const;
 
-  const generatedSubTabs = ["annotations", "text", "stafflines", "mei files"] as const;
+  const generatedSubTabs = [
+    "annotations",
+    "text",
+    "stafflines",
+    "mei files",
+  ] as const;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -214,18 +266,28 @@ export default function ProjectDetail({
             });
           });
         }
-        if (activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0) {
+        if (
+          activeTab === "generated" &&
+          generatedSubTab === "annotations" &&
+          annSection.selectedIds.size > 0
+        ) {
           const ids = [...annSection.selectedIds];
           const deleted = new Set(ids);
           annSection.clearSelection();
           Promise.all(ids.map((id) => onDeleteAnnotation(id))).then(() => {
             onUpdateProject({
               ...project,
-              annotations: project.annotations.filter((a) => !deleted.has(a.id)),
+              annotations: project.annotations.filter(
+                (a) => !deleted.has(a.id),
+              ),
             });
           });
         }
-        if (activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0) {
+        if (
+          activeTab === "generated" &&
+          generatedSubTab === "mei files" &&
+          meiSection.selectedIds.size > 0
+        ) {
           const ids = [...meiSection.selectedIds];
           const deleted = new Set(ids);
           meiSection.clearSelection();
@@ -310,7 +372,9 @@ export default function ProjectDetail({
             })}
             <button
               onClick={async () => {
-                const res = await apiFetch(`/api/projects/${project.id}/export`);
+                const res = await apiFetch(
+                  `/api/projects/${project.id}/export`,
+                );
                 downloadBlob(await res.blob(), `${project.name}.zip`);
               }}
               className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
@@ -472,7 +536,9 @@ export default function ProjectDetail({
                   mdlSection.clearSelection();
                 },
               )}
-              {activeTab === "generated" && generatedSubTab === "annotations" && annSection.selectedIds.size > 0 && (
+            {activeTab === "generated" &&
+              generatedSubTab === "annotations" &&
+              annSection.selectedIds.size > 0 && (
                 <>
                   {selectionButtons(
                     "annotation",
@@ -485,7 +551,9 @@ export default function ProjectDetail({
                         ...usedNames,
                         annotations: [
                           ...usedNames.annotations,
-                          ...names.filter((n) => !usedNames.annotations.includes(n)),
+                          ...names.filter(
+                            (n) => !usedNames.annotations.includes(n),
+                          ),
                         ],
                       });
                       annSection.clearSelection();
@@ -495,10 +563,14 @@ export default function ProjectDetail({
                       const ids = [...annSection.selectedIds];
                       const deleted = new Set(ids);
                       annSection.clearSelection();
-                      await Promise.all(ids.map((id) => onDeleteAnnotation(id)));
+                      await Promise.all(
+                        ids.map((id) => onDeleteAnnotation(id)),
+                      );
                       onUpdateProject({
                         ...project,
-                        annotations: project.annotations.filter((a) => !deleted.has(a.id)),
+                        annotations: project.annotations.filter(
+                          (a) => !deleted.has(a.id),
+                        ),
                       });
                     },
                   )}
@@ -510,7 +582,12 @@ export default function ProjectDetail({
                     }
                     className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
-                    download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.txt)
+                    download{" "}
+                    {annSection.selectedIds.size > 1
+                      ? `${annSection.selectedIds.size} `
+                      : ""}
+                    annotation{annSection.selectedIds.size > 1 ? "s" : ""}{" "}
+                    (.txt)
                   </button>
                   <button
                     onClick={() =>
@@ -520,11 +597,18 @@ export default function ProjectDetail({
                     }
                     className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
-                    download {annSection.selectedIds.size > 1 ? `${annSection.selectedIds.size} ` : ""}annotation{annSection.selectedIds.size > 1 ? "s" : ""} (.json)
+                    download{" "}
+                    {annSection.selectedIds.size > 1
+                      ? `${annSection.selectedIds.size} `
+                      : ""}
+                    annotation{annSection.selectedIds.size > 1 ? "s" : ""}{" "}
+                    (.json)
                   </button>
                 </>
               )}
-              {activeTab === "generated" && generatedSubTab === "mei files" && meiSection.selectedIds.size > 0 && (
+            {activeTab === "generated" &&
+              generatedSubTab === "mei files" &&
+              meiSection.selectedIds.size > 0 && (
                 <>
                   <button
                     onClick={() =>
@@ -532,14 +616,17 @@ export default function ProjectDetail({
                         .filter((f) => meiSection.selectedIds.has(f.id))
                         .forEach((f) =>
                           downloadBlob(
-                            new Blob([f.xmlContent ?? ""], { type: "application/xml" }),
+                            new Blob([f.xmlContent ?? ""], {
+                              type: "application/xml",
+                            }),
                             f.name,
                           ),
                         )
                     }
                     className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
-                    download {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                    download {meiSection.selectedIds.size} mei file
+                    {meiSection.selectedIds.size > 1 ? "s" : ""}
                   </button>
                   <button
                     onClick={async () => {
@@ -549,12 +636,15 @@ export default function ProjectDetail({
                       await Promise.all(ids.map((id) => onDeleteMei(id)));
                       onUpdateProject({
                         ...project,
-                        meiFiles: project.meiFiles.filter((f) => !deleted.has(f.id)),
+                        meiFiles: project.meiFiles.filter(
+                          (f) => !deleted.has(f.id),
+                        ),
                       });
                     }}
                     className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
                   >
-                    delete {meiSection.selectedIds.size} mei file{meiSection.selectedIds.size > 1 ? "s" : ""}
+                    delete {meiSection.selectedIds.size} mei file
+                    {meiSection.selectedIds.size > 1 ? "s" : ""}
                   </button>
                 </>
               )}
@@ -579,7 +669,9 @@ export default function ProjectDetail({
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
-                  onClick={() => switchTab(tab as "images" | "models" | "generated")}
+                  onClick={() =>
+                    switchTab(tab as "images" | "models" | "generated")
+                  }
                   className={`relative px-8 pt-3 pb-2 text-2xl font-bold italic rounded-t-xl cursor-pointer transition-colors
                     ${
                       activeTab === tab
@@ -594,7 +686,6 @@ export default function ProjectDetail({
               <div className="flex-1 border-b border-white/50" />
             </div>
 
-
             {activeTab === "images" && (
               <ImageTab
                 project={project}
@@ -605,7 +696,11 @@ export default function ProjectDetail({
                 onUploadImage={onUploadImage}
                 onDeleteImage={onDeleteImage}
                 setValidationError={setValidationError}
-                activeFolio={!textFindingSettings.ocrOnlyMode ? textFindingSettings.folio || undefined : undefined}
+                activeFolio={
+                  !textFindingSettings.ocrOnlyMode
+                    ? textFindingSettings.folio || undefined
+                    : undefined
+                }
                 onFolioConsumed={() => textFindingSettings.patch({ folio: "" })}
                 cantusFolios={loadedCantusSource?.folios ?? []}
                 cantusSourceId={loadedCantusSource?.sourceId}
@@ -615,7 +710,9 @@ export default function ProjectDetail({
                 onImageSubTabChange={setImageSubTab}
                 batchImages={batchImages}
                 batchFolioSequence={batchFolioSequence}
-                onBatchImageUploaded={(img) => setBatchImages((prev) => [...prev, img])}
+                onBatchImageUploaded={(img) =>
+                  setBatchImages((prev) => [...prev, img])
+                }
                 onBatchUsed={() => {
                   setBatchImages([]);
                   setBatchStartFolio("");
@@ -707,59 +804,86 @@ export default function ProjectDetail({
               disabled={sendingBundle}
               className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-default"
             >
-              {sendingBundle ? "preparing bundle..." : (<>send to cantus ultimus &rarr;</>)}
+              {sendingBundle ? (
+                "preparing bundle..."
+              ) : (
+                <>send to cantus ultimus &rarr;</>
+              )}
             </button>
           ) : null}
           {sendBundleError && (
-            <p className="text-red-200 text-xs text-center">{sendBundleError}</p>
+            <p className="text-red-200 text-xs text-center">
+              {sendBundleError}
+            </p>
           )}
-          {meiSection.selectedIds.size === 0 && (() => {
-            const continueLabel =
-              usedNames.images.length === 0 || nextStep === 0 ? "begin" :
-              nextStep === 1 ? "continue: ic" :
-              nextStep === 3 ? "continue: neon" :
-              "continue: send";
-            return (
-              <button
-                onClick={() => {
-                  if (nextStep === 0) {
-                    const hasUsableModel = 
-                      inferenceSettings.modelPreset === "medieval" || 
-                      (inferenceSettings.modelPreset === "custom" &&
-                        (inferenceSettings.customModelId || usedNames.models.length > 0)
-                      );
-                    if (!hasUsableModel) {
-                      setValidationError(
-                        inferenceSettings.modelPreset === "custom"
-                          ? "must select a custom YOLO model!"
-                          : "must select at least one model!",
-                      );
-                      return;
-                    }
-                    if (usedNames.images.length === 0) {
-                      setValidationError("must select at least one image!");
-                      return;
-                    }
-                    setValidationError(null);
-                  } else if (nextStep === 1 && stepsUnlocked <= 1) {
-                    if (usedNames.annotations.length === 0) {
-                      setValidationError("must select at least one annotation!");
-                      return;
-                    }
-                    if (usedNames.annotations.length !== usedNames.images.length) {
-                      setValidationError("number of annotations must match number of images!");
-                      return;
-                    }
-                    setValidationError(null);
-                  }
-                  onContinue();
-                }}
-                className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
-              >
-                {continueLabel} &rarr;
-              </button>
-            );
-          })()}
+          {meiSection.selectedIds.size === 0 &&
+            (() => {
+              const continueLabel =
+                usedNames.images.length === 0 || nextStep === 0
+                  ? "begin"
+                  : nextStep === 1
+                    ? "continue: ic"
+                    : nextStep === 3
+                      ? "continue: neon"
+                      : "continue: send";
+              return (
+                <>
+                  <button
+                    onClick={() => {
+                      if (activeJobForProject) return; // defensive; button is disabled below anyway
+                      if (nextStep === 0) {
+                        const hasUsableModel =
+                          inferenceSettings.modelPreset === "medieval" ||
+                          (inferenceSettings.modelPreset === "custom" &&
+                            (inferenceSettings.customModelId ||
+                              usedNames.models.length > 0));
+                        if (!hasUsableModel) {
+                          setValidationError(
+                            inferenceSettings.modelPreset === "custom"
+                              ? "must select a custom YOLO model!"
+                              : "must select at least one model!",
+                          );
+                          return;
+                        }
+                        if (usedNames.images.length === 0) {
+                          setValidationError("must select at least one image!");
+                          return;
+                        }
+                        setValidationError(null);
+                      } else if (nextStep === 1 && stepsUnlocked <= 1) {
+                        if (usedNames.annotations.length === 0) {
+                          setValidationError(
+                            "must select at least one annotation!",
+                          );
+                          return;
+                        }
+                        if (
+                          usedNames.annotations.length !==
+                          usedNames.images.length
+                        ) {
+                          setValidationError(
+                            "number of annotations must match number of images!",
+                          );
+                          return;
+                        }
+                        setValidationError(null);
+                      }
+                      onContinue();
+                    }}
+                    disabled={!!activeJobForProject}
+                    className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {continueLabel} &rarr;
+                  </button>
+                  {activeJobForProject && (
+                    <p className="text-white/70 text-xs mt-1 text-center">
+                      a {activeJobForProject.kind} job is already running for
+                      this project — please wait for it to finish
+                    </p>
+                  )}
+                </>
+              );
+            })()}
           <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
             <span className="text-white/80">selected:</span>
             {usedNames.models.map((name) => (
@@ -785,12 +909,24 @@ export default function ProjectDetail({
                 <hr className="border-white/40 my-1" />
                 {usedNames.annotations.map((name) => (
                   <div key={name} className="flex items-center justify-between">
-                    <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
+                    <TruncatedName
+                      name={name}
+                      className="flex-1 min-w-0 mr-2"
+                    />
                     {stepsUnlocked < 2 && (
                       <button
-                        onClick={() => onUsedNamesChange({ ...usedNames, annotations: usedNames.annotations.filter((n) => n !== name) })}
+                        onClick={() =>
+                          onUsedNamesChange({
+                            ...usedNames,
+                            annotations: usedNames.annotations.filter(
+                              (n) => n !== name,
+                            ),
+                          })
+                        }
                         className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                      >×</button>
+                      >
+                        ×
+                      </button>
                     )}
                   </div>
                 ))}
@@ -798,7 +934,13 @@ export default function ProjectDetail({
             )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => {
-              const hasProgress = getImageProgress(name, project.annotations ?? [], project.meiFiles ?? [], stepsUnlocked) !== null;
+              const hasProgress =
+                getImageProgress(
+                  name,
+                  project.annotations ?? [],
+                  project.meiFiles ?? [],
+                  stepsUnlocked,
+                ) !== null;
               return (
                 <div key={name} className="flex items-center justify-between">
                   <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />

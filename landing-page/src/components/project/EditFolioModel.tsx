@@ -4,22 +4,30 @@ import { findFolioConflict } from "../../utils/folio";
 import FolioSelect from "../shared/FolioSelect";
 
 interface EditFolioModalProps {
-    image: ProjectImage;
-    images: ProjectImage[];
-    folioOptions: string[];
-    value: string;
-    onChange: (v: string) => void;
-    onSubmit: () => void;
-    onClose: () => void;
+  image: ProjectImage;
+  images: ProjectImage[];
+  folioOptions: string[];
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
 }
 
 export default function EditFolioModal({
-    image, images, folioOptions, value, onChange, onSubmit, onClose,
+  image,
+  images,
+  folioOptions,
+  value,
+  onChange,
+  onSubmit,
+  onClose,
 }: EditFolioModalProps) {
-    const conflict = findFolioConflict(images, value, image.id);
+  const conflict = findFolioConflict(images, value, image.id);
   return (
     <Modal onClose={onClose}>
-      <h2 className="text-xl text-[#1D3335] text-center">edit folio — {image.name}</h2>
+      <h2 className="text-xl text-[#1D3335] text-center">
+        edit folio — {image.name}
+      </h2>
       <FolioSelect
         autoFocus
         value={value}

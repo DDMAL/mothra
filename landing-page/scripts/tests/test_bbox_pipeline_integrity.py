@@ -22,7 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from staffline_adapter import staves_from_jsomr  # noqa: E402
-from encode_to_mei import assign_glyphs_to_staves, build_mei, trace_stave_zone_parity  # noqa: E402
+from encode_to_mei import (  # noqa: E402
+    assign_glyphs_to_staves, build_mei, trace_stave_zone_parity, _stave_zone_bounds,
+)
 from medieval_models import STAVE_FILENAME, STAVE_CLASS_MAP  # noqa: E402
 
 
@@ -52,9 +54,14 @@ def _line(stave_id, within_stave_index, x_start, x_end, y_values, ulx, uly, lrx,
 
 def test_jsomr_to_mei_zones_survive_unchanged():
     """Two staves' worth of JSOMR records -> staves_from_jsomr() ->
-    build_mei() -> parse the MEI zones back out and confirm they're
-    byte-for-byte the same coordinates staves_from_jsomr() produced -- the
-    exact integrity trace_stave_zone_parity() checks on every real encode."""
+    build_mei() -> parse the MEI zones back out and confirm they're the
+    coordinates trace_stave_zone_parity() itself expects -- ulx/lrx
+    byte-for-byte from staves_from_jsomr(), uly/lry from
+    _stave_zone_bounds() (Verovio derives its rendered note spacing from
+    the zone's height, so build_mei() deliberately writes the stave's
+    REAL measured line spacing there rather than its raw padded bbox --
+    see _stave_zone_bounds's own docstring). trace_stave_zone_parity()
+    is the exact integrity check every real encode runs against."""
     records = []
     for i, y in enumerate([100, 120, 140, 160]):
         records.append(_line(0, i, 0, 700, [y] * 701, 50, y - 5, 750, y + 5))
@@ -71,6 +78,13 @@ def test_jsomr_to_mei_zones_survive_unchanged():
     assert len(trace) == 1
     assert "verified identical" in trace[0]
     assert "[warn]" not in trace[0]
+
+    # Confirm this isn't a vacuous pass: these staves' real line spacing
+    # (20px/20px) actually differs from their raw padded bbox, so
+    # trace_stave_zone_parity() only comes back clean here because it's
+    # comparing against _stave_zone_bounds() -- not because uly/lry happen
+    # to already match the raw bbox for this fixture.
+    assert any(_stave_zone_bounds(s) != (s.uly, s.lry) for s in staves)
 
 
 def test_trace_flags_a_genuine_divergence():

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isValidFolioShape } from "../../utils/folio";
 
 interface FolioSelectProps {
@@ -31,8 +31,20 @@ export default function FolioSelect({
   // Start in custom mode if we're editing a folio that's already off-canonical,
   // so re-opening a picker on a phantom-tagged image shows the typed value,
   // not a blank dropdown that appears to have lost it.
-  const [customMode, setCustomMode] = useState(() => !!value && !options.includes(value));
-  const [customInput, setCustomInput] = useState(() => (customMode ? value : ""));
+  const [customMode, setCustomMode] = useState(
+    () => !!value && !options.includes(value),
+  );
+  const [customInput, setCustomInput] = useState(() =>
+    customMode ? value : "",
+  );
+
+  // The above only derives customInput once, at mount. If the parent later
+  // pushes a new `value` while we're already in custom mode (e.g. a folio
+  // renumbered elsewhere, or the value cleared/reset), keep the free-text
+  // input in sync with it rather than silently showing a stale value.
+  useEffect(() => {
+    if (customMode) setCustomInput(value);
+  }, [value, customMode]);
 
   if (customMode) {
     const invalid = customInput !== "" && !isValidFolioShape(customInput);
@@ -64,7 +76,8 @@ export default function FolioSelect({
         </div>
         {invalid && (
           <p className="text-red-400 text-xs">
-            should look like "003r" or "003" — digits, optionally followed by r/v
+            should look like "003r" or "003" — digits, optionally followed by
+            r/v
           </p>
         )}
       </div>

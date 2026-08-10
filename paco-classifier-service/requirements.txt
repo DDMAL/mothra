@@ -1,0 +1,23 @@
+fastapi>=0.110.0
+uvicorn>=0.29.0
+# python-multipart 0.0.9 and h11 <0.16.0 both have known DoS/parsing-
+# smuggling CVEs (h11's is CRITICAL -- malformed chunked-encoding bodies) in
+# the exact multipart-upload path /classify's `image: UploadFile` uses.
+python-multipart>=0.0.30
+h11>=0.16.0
+# tensorflow==2.15.1, not Paco_classifier's own newrequirements.txt's 2.13.1:
+# 2.13.1 hard-pins typing-extensions<4.6.0 on EVERY platform (base package,
+# tensorflow-cpu-aws, tensorflow-intel all carry the same bound -- confirmed
+# via PyPI metadata directly, not just observed on one platform), which no
+# fastapi>=0.110.0 (or its pydantic>=2.9 dependency) can satisfy --
+# ResolutionImpossible on macOS AND Linux/amd64 AND Linux/arm64 alike.
+# 2.15.1's typing-extensions requirement has no upper bound at all (checked
+# the same way) and still predates TF 2.16's default switch to Keras 3, so
+# .h5 loading behavior should match 2.13.1's (both Keras-2 line) -- this one
+# version bump is what makes a single requirements.txt work everywhere
+# (Docker/Linux and native macOS dev both use this same file; no more
+# requirements-macos.txt split).
+tensorflow==2.15.1
+numpy==1.24.3
+opencv-python==4.9.0.80
+h5py==3.10.0

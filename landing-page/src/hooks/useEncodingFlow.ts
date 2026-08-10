@@ -10,7 +10,6 @@ export function useEncodingFlow(
   selectedProjectId: number | null,
   setProjects: SetProjects,
 ) {
- 
   const [pendingXmlFile, setPendingXmlFile] = useState<File | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [neonManifest, setNeonManifest] = useState<Record<
@@ -21,8 +20,17 @@ export function useEncodingFlow(
     bytes: string;
     stem: string;
   } | null>(null);
-  const [pendingBatchPairs, setPendingBatchPairs] = useState<{ xmlFile: File; imageFile: File }[]>([]);
-  const [batchResults, setBatchResults] = useState<{ sessionId: string; stem: string; manifest: Record<string, unknown> | null; imageName?: string }[]>([]);
+  const [pendingBatchPairs, setPendingBatchPairs] = useState<
+    { xmlFile: File; imageFile: File }[]
+  >([]);
+  const [batchResults, setBatchResults] = useState<
+    {
+      sessionId: string;
+      stem: string;
+      manifest: Record<string, unknown> | null;
+      imageName?: string;
+    }[]
+  >([]);
 
   const handleEncodeBatchResult = async (ev: {
     item: number;
@@ -41,7 +49,9 @@ export function useEncodingFlow(
       pair?.xmlFile.name.replace(/\.xml$/i, "") ??
       `item-${ev.item}`;
     const imageName = pair?.imageFile.name ?? ev.image_name;
-    const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) => c.charCodeAt(0));
+    const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) =>
+      c.charCodeAt(0),
+    );
     const xmlText = new TextDecoder().decode(xmlBytes);
     const newMeiFile: MeiFile = {
       id: crypto.randomUUID(),
@@ -67,11 +77,17 @@ export function useEncodingFlow(
       newMeiFile.id = saved.id;
     }
     setProjects((prev) =>
-      prev.map((p) => (p.id === selectedProjectId ? { ...p, meiFiles: [...p.meiFiles, newMeiFile] } : p)),
+      prev.map((p) =>
+        p.id === selectedProjectId
+          ? { ...p, meiFiles: [...p.meiFiles, newMeiFile] }
+          : p,
+      ),
     );
-    setBatchResults((prev) => [...prev, { sessionId: ev.session_id, stem, manifest: ev.manifest, imageName }]);
+    setBatchResults((prev) => [
+      ...prev,
+      { sessionId: ev.session_id, stem, manifest: ev.manifest, imageName },
+    ]);
   };
-
 
   const handleEncodeResult = async (ev: {
     session_id: string;
@@ -86,7 +102,9 @@ export function useEncodingFlow(
       pendingXmlFile?.name.replace(/\.xml$/i, "") ??
       "output";
     settleMeiContent({ bytes: ev.mei_base64, stem });
-    const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) => c.charCodeAt(0));
+    const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) =>
+      c.charCodeAt(0),
+    );
     const xmlText = new TextDecoder().decode(xmlBytes);
     const newMeiFile: MeiFile = {
       id: crypto.randomUUID(),
@@ -98,25 +116,27 @@ export function useEncodingFlow(
     };
     if (selectedProjectId) {
       const r = await apiFetch(`/api/projects/${selectedProjectId}/mei`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newMeiFile.name,
-        xmlContent: xmlText,
-        imageName: pendingImageFile?.name ?? null,
-        logs: ev.logs ?? [],
-        staveSource: ev.stave_source ?? null,
-      }),
-    });
-    const saved = await r.json();
-    newMeiFile.id = saved.id;
-  }
-  setProjects((prev) => 
-    prev.map((p) => 
-      p.id === selectedProjectId ? {...p, meiFiles: [...p.meiFiles, newMeiFile] } : p, 
-    )
-  );
-};
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newMeiFile.name,
+          xmlContent: xmlText,
+          imageName: pendingImageFile?.name ?? null,
+          logs: ev.logs ?? [],
+          staveSource: ev.stave_source ?? null,
+        }),
+      });
+      const saved = await r.json();
+      newMeiFile.id = saved.id;
+    }
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === selectedProjectId
+          ? { ...p, meiFiles: [...p.meiFiles, newMeiFile] }
+          : p,
+      ),
+    );
+  };
   // download helpers
 
   const handleDownloadManifest = () => {

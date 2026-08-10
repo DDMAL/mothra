@@ -20,9 +20,7 @@ export default function TextAlignmentsTab({
 }: TextAlignmentsTabProps) {
   const [viewSet, setViewSet] = useState<TextAlignment | null>(null);
   if (textAlignments.length === 0) {
-    return (
-      <p className="mt-6 text-white/70 text-sm">no detected text yet</p>
-    );
+    return <p className="mt-6 text-white/70 text-sm">no detected text yet</p>;
   }
 
   // textAlignments arrives oldest-first; label reruns of the same image

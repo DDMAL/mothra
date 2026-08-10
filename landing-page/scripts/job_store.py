@@ -50,7 +50,106 @@ def create_job(job_id: str, kind: str, project_id: Optional[int], *,
         return job_id, True
     finally:
         release_db_conn(con)
-    
+
+def claim_project_job(project_id: int, kind: str, *, job_id: str,
+                       allowed_kinds: Optional[set[str]] = None,
+                       params: Optional[dict] = None, retry_of: Optional[str] = None,
+                       attempt: int = 1, dedupe_seconds: int = 0,
+                       ) -> tuple[Optional[str], bool, Optional[dict]]:
+    """Atomic version of "get_active_job_for_project() then create_job()" --
+    that two-call, two-connection sequence has a real TOCTOU race: two
+    concurrent kickoff requests for the same project can both see no active
+    job and both insert, so two jobs end up running and writing project
+    state at once. This does the active-job check and the insert as one
+    statement sequence inside one transaction, serialized per-project via
+    pg_advisory_xact_lock(project_id) -- held only for this transaction,
+    auto-released on commit/rollback, so unrelated projects' kickoffs never
+    contend with each other, and this connection is never left holding a
+    lock past its own request.
+
+    Returns (job_id_to_use, is_new, active_job). `active_job` is set (and
+    job_id_to_use is None) when a job of a kind NOT in `allowed_kinds`
+    (defaults to just `kind` itself) is already active -- callers should
+    raise 409 using it, same shape get_active_job_for_project returned.
+    Otherwise behaves like create_job: `is_new` indicates whether the
+    caller should actually enqueue a Celery task, and dedupe_seconds keeps
+    its original meaning (collapse an exact same-kind duplicate kickoff
+    within that window into the existing job's id)."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (project_id,))
+
+        kinds = tuple(allowed_kinds or {kind})
+        cur.execute(
+            "SELECT job_id, kind FROM jobs WHERE project_id=%s"
+            " AND status IN ('pending','running')"
+            " AND kind <> ALL(%s)"
+            " ORDER BY created_at DESC LIMIT 1",
+            (project_id, list(kinds)),
+        )
+        row = cur.fetchone()
+        active = {"job_id": row[0], "kind": row[1]} if row else None
+        if active is not None:
+            con.commit()  # nothing written yet; just releases the advisory lock
+            return None, False, active
+
+        if dedupe_seconds > 0:
+            cur.execute(
+                "SELECT job_id FROM jobs WHERE kind=%s AND project_id=%s"
+                " AND status IN ('pending','running')"
+                " AND created_at > now() - %s::interval"
+                " ORDER BY created_at DESC LIMIT 1",
+                (kind, project_id, f"{dedupe_seconds} seconds"),
+            )
+            row = cur.fetchone()
+            if row:
+                con.commit()
+                return row[0], False, None
+
+        cur.execute(
+            "INSERT INTO jobs (job_id, kind, project_id, status, params, retry_of, attempt)"
+            " VALUES (%s,%s,%s,'pending',%s,%s,%s)",
+            (job_id, kind, project_id, json.dumps(params) if params is not None else None,
+             retry_of, attempt),
+        )
+        con.commit()
+        return job_id, True, None
+    finally:
+        release_db_conn(con)
+
+def get_active_job_for_project(project_id: int) -> Optional[dict]:
+    """Returns {"job_id": ..., "kind": ...} for the most recent pending/running
+    job for this project, across ALL kinds, or None if there isn't one.
+
+    Unlike create_job's dedupe_seconds (scoped to kind+project_id, and only a
+    few-second window — meant to collapse an exact duplicate kickoff, e.g. a
+    React StrictMode double-invoke), this has no time window and isn't
+    scoped to one kind: it's a cross-kind guard used by predict/text-batch
+    kickoff endpoints to prevent a DIFFERENT kind of job from starting while
+    one is already running for the same project. Without it, a fast job
+    with no long-running step of its own (e.g. text_batch, which never
+    calls paco's classifier) can start and finish before a slow one (e.g.
+    predict, when paco's classifier is running inside it) that's still
+    genuinely in progress — and whichever job's own ProcessingPage mount
+    happens to see "done" first drives navigation, with no idea the other
+    job even exists.
+    """
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT job_id, kind FROM jobs WHERE project_id=%s"
+            " AND status IN ('pending','running')"
+            " ORDER BY created_at DESC LIMIT 1",
+            (project_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return {"job_id": row[0], "kind": row[1]} if row else None
+    finally:
+        release_db_conn(con)
+
 def publish_event(job_id: str, event: dict) -> None:
     con = get_db_conn()
     try:

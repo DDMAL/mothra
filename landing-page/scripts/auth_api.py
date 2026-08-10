@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from contextlib import contextmanager
 import bcrypt
+import json
 
 limiter = Limiter(key_func=get_remote_address)
 # connection pooling
@@ -774,3 +775,56 @@ def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=De
             )
             con.commit()
     return {"ok": True}
+
+def get_latest_text_alignment(cur, project_id: int, image_name: str,
+                               image_id: Optional[str] = None) -> Optional[dict]:
+    """Return the most recently created text_alignments row's parsed
+    alignment_json for this image, or None when there's no row, or the
+    stored JSON isn't a dict. Single source of truth for "what is
+    mothra-text's current syllable data for this image" -- shared by
+    tasks_encode.py's _resolve_hints() (feeds a fresh encode) and
+    mei_api.py's create_edit_session (re-verifies an existing one).
+
+    `image_name` alone is NOT unique within a project -- project_images has
+    no DB-level uniqueness constraint on `name` (only an app-level dedup
+    check at upload time), and a project can run /text/run or
+    /text-batch/run more than once for the same name. When the caller can
+    supply the row's actual `image_id` (project_images.id -- the same
+    identifier batch_api.py already keys text_alignments lookups on),
+    resolve by that instead so a same-named-but-different image can't
+    return the wrong alignment. Falls back to the old image_name-only
+    lookup when the caller doesn't have an image_id available (e.g. a
+    freshly-uploaded file with no persisted project_images row yet).
+
+    A real database failure is NOT one of those "no data" cases -- it's
+    distinguished from a missing row/malformed JSON and re-raised (after
+    rolling back the connection, since a failed query otherwise leaves the
+    pooled connection in "current transaction is aborted" state for
+    whatever runs next on it). Callers that want this function's old
+    swallow-everything behavior wrap the call in their own try/except, the
+    same way tasks_encode.py's _resolve_hints() already does for its two
+    neighboring lookups."""
+    try:
+        if image_id:
+            cur.execute(
+                "SELECT alignment_json FROM text_alignments WHERE image_id=%s AND project_id=%s"
+                " ORDER BY created_at DESC LIMIT 1",
+                (image_id, project_id),
+            )
+        else:
+            cur.execute(
+                "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                " ORDER BY created_at DESC LIMIT 1",
+                (image_name, project_id),
+            )
+        row = cur.fetchone()
+    except Exception:
+        cur.connection.rollback()
+        raise
+    if not row or not row[0]:
+        return None
+    try:
+        alignment = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    return alignment if isinstance(alignment, dict) else None

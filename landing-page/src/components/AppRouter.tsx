@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { View, Project, AnnotationSet, MeiFile, ModelKind } from "../types";
+import type {
+  View,
+  Project,
+  AnnotationSet,
+  MeiFile,
+  ModelKind,
+} from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../utils/imageStep";
@@ -40,11 +46,18 @@ const SKIP_PREDICT = ["1", "true", "yes"].includes(
 // A project's used images are eligible for the batch (cross-folio-aware)
 // text-finding pipeline only when every one of them was tagged with a folio
 // against the project's single Cantus source at upload time.
-function computeBatchRun(project: Project): { imageIds: string[]; folios: string[] } | null {
+function computeBatchRun(
+  project: Project,
+): { imageIds: string[]; folios: string[] } | null {
   if (!project.cantusSourceId) return null;
-  const used = project.images.filter((img) => project.usedImageNames.includes(img.name));
+  const used = project.images.filter((img) =>
+    project.usedImageNames.includes(img.name),
+  );
   if (used.length === 0 || !used.every((img) => img.folio)) return null;
-  return { imageIds: used.map((img) => img.id), folios: used.map((img) => img.folio!) };
+  return {
+    imageIds: used.map((img) => img.id),
+    folios: used.map((img) => img.folio!),
+  };
 }
 
 function yoloTxtToJson(yoloTxt: string, imageName: string): string {
@@ -120,7 +133,7 @@ export default function AppRouter({
   handleLogout,
   mutations,
   handleEncodeResult,
-  pendingBatchPairs, 
+  pendingBatchPairs,
   setPendingBatchPairs,
   handleEncodeBatchResult,
 }: AppRouterProps) {
@@ -147,9 +160,18 @@ export default function AppRouter({
   const textFindingSettings = useTextFindingSettings();
 
   // batch text-alignment run (run_chain.py) state
-  const [batchRunIds, setBatchRunIds] = useState<{ imageIds: string[]; folios: string[] } | null>(null);
-  const [batchResult, setBatchResult] = useState<{ batchId: string; fileCount: number } | null>(null);
-  const [batchSummary, setBatchSummary] = useState<{succeeded: unknown[]; failed: unknown[]} | null>(null);
+  const [batchRunIds, setBatchRunIds] = useState<{
+    imageIds: string[];
+    folios: string[];
+  } | null>(null);
+  const [batchResult, setBatchResult] = useState<{
+    batchId: string;
+    fileCount: number;
+  } | null>(null);
+  const [batchSummary, setBatchSummary] = useState<{
+    succeeded: unknown[];
+    failed: unknown[];
+  } | null>(null);
 
   // thread clef settings
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
@@ -166,26 +188,42 @@ export default function AppRouter({
     setSendingBundle(true);
     setSendBundleError(null);
     try {
-      const r = await apiFetchOrThrow(`/api/projects/${selectedProject.id}/sources/${selectedProject.cantusSourceId}/cantus-bundle`);
+      const r = await apiFetchOrThrow(
+        `/api/projects/${selectedProject.id}/sources/${selectedProject.cantusSourceId}/cantus-bundle`,
+      );
       const blob = await r.blob();
       const cd = r.headers.get("Content-Disposition") ?? "";
       const match = cd.match(/filename="?([^"]+)"?/);
-      downloadBlob(blob, match ? match[1] : `cantus-bundle-${selectedProject.cantusSourceId}.zip`);
+      downloadBlob(
+        blob,
+        match
+          ? match[1]
+          : `cantus-bundle-${selectedProject.cantusSourceId}.zip`,
+      );
       setView("send-completion");
     } catch (e) {
-      setSendBundleError(e instanceof Error ? e.message : "failed to prepare bundle");
+      setSendBundleError(
+        e instanceof Error ? e.message : "failed to prepare bundle",
+      );
     } finally {
       setSendingBundle(false);
     }
   };
-  
+
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
-    "project", "processing", "completion", "ic", "encoding-processing", "encoding-completion", "neon-editor", "neon-completion",
+      "project",
+      "processing",
+      "completion",
+      "ic",
+      "encoding-processing",
+      "encoding-completion",
+      "neon-editor",
+      "neon-completion",
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
-  
+
   switch (view) {
     case "landing":
       return (
@@ -260,12 +298,14 @@ export default function AppRouter({
           }
           onStepClick={(step) => {
             if (step === 0) {
-              if (SKIP_PREDICT) { setView("ic"); return; }
+              if (SKIP_PREDICT) {
+                setView("ic");
+                return;
+              }
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
-            }
-            else if (step === 1) setView("ic");
+            } else if (step === 1) setView("ic");
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
           }}
@@ -275,7 +315,9 @@ export default function AppRouter({
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
-          onUpdateCantusSourceId={(sourceId) => updateCantusSourceId(selectedProject.id, sourceId)}
+          onUpdateCantusSourceId={(sourceId) =>
+            updateCantusSourceId(selectedProject.id, sourceId)
+          }
           usedNames={{
             images: selectedProject.usedImageNames,
             models: selectedProject.usedModelNames ?? [],
@@ -287,7 +329,13 @@ export default function AppRouter({
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
           stepsUnlocked={selectedProject.stepsUnlocked}
-          onUploadImage={async (file, folio, sourceId, sourceName, originalFile) => {
+          onUploadImage={async (
+            file,
+            folio,
+            sourceId,
+            sourceName,
+            originalFile,
+          ) => {
             const form = new FormData();
             form.append("file", file);
             if (folio) form.append("folio", folio);
@@ -312,7 +360,8 @@ export default function AppRouter({
               {
                 method: "POST",
                 body: form,
-              });
+              },
+            );
             return r.json();
           }}
           onDeleteModel={async (modelId) => {
@@ -335,11 +384,16 @@ export default function AppRouter({
             const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
             if (format === "json") {
               downloadBlob(
-                new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], {
+                  type: "application/json",
+                }),
                 `${stem}_annotations.json`,
               );
             } else {
-              downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
+              downloadBlob(
+                new Blob([data.yoloTxt], { type: "text/plain" }),
+                `${stem}_annotations.txt`,
+              );
             }
           }}
           onDeleteMei={async (meiId) => {
@@ -384,73 +438,132 @@ export default function AppRouter({
               selectedProject.models.find((m) =>
                 (selectedProject.usedModelNames ?? []).includes(m.name),
               )?.id ?? "";
-            const resolvedCustomModelId = inferenceSettings.customModelId || usedModelId;
+            const resolvedCustomModelId =
+              inferenceSettings.customModelId || usedModelId;
             if (batchRunIds) {
-              return apiFetchJobStream(`/api/projects/${selectedProject.id}/text-batch/run`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  image_ids: batchRunIds.imageIds,
-                  folios: batchRunIds.folios,
-                  source_id: Number(textFindingSettings.sourceId),
-                  segmentation_model: textFindingSettings.segmentationModelId || null,
-                  recognition_model: textFindingSettings.recognitionModelId || null,
-                  device: textFindingSettings.device,
-                  column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
-                  column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
-                  masking_enabled: textFindingSettings.maskingEnabled,
-                  mask_padding: textFindingSettings.maskPadding,
-                  music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
-                  debug_mode: textFindingSettings.debugMode,
-                  mask_model_id: textFindingSettings.maskModelId || null,
-                  model_preset: inferenceSettings.modelPreset,
-                  model_id: inferenceSettings.modelPreset === "custom" ? resolvedCustomModelId : null,
-                  yolo_confidence_threshold: inferenceSettings.threshold,
-                  yolo_device: inferenceSettings.device,
-                  text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
-                  text_music_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.device,
-                  stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
-                  stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
-                }),
-              }, signal, onJobId);
+              return apiFetchJobStream(
+                `/api/projects/${selectedProject.id}/text-batch/run`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    image_ids: batchRunIds.imageIds,
+                    folios: batchRunIds.folios,
+                    source_id: Number(textFindingSettings.sourceId),
+                    segmentation_model:
+                      textFindingSettings.segmentationModelId || null,
+                    recognition_model:
+                      textFindingSettings.recognitionModelId || null,
+                    device: textFindingSettings.device,
+                    column_count:
+                      textFindingSettings.columnCount === "auto"
+                        ? null
+                        : Number(textFindingSettings.columnCount),
+                    column_bimodal_threshold:
+                      textFindingSettings.columnBimodalThreshold,
+                    masking_enabled: textFindingSettings.maskingEnabled,
+                    mask_padding: textFindingSettings.maskPadding,
+                    music_overlap_filter_enabled:
+                      textFindingSettings.musicOverlapFilterEnabled,
+                    debug_mode: textFindingSettings.debugMode,
+                    mask_model_id: textFindingSettings.maskModelId || null,
+                    model_preset: inferenceSettings.modelPreset,
+                    model_id:
+                      inferenceSettings.modelPreset === "custom"
+                        ? resolvedCustomModelId
+                        : null,
+                    yolo_confidence_threshold: inferenceSettings.threshold,
+                    yolo_device: inferenceSettings.device,
+                    text_music_confidence_threshold:
+                      inferenceSettings.useSharedDetectorSettings
+                        ? null
+                        : inferenceSettings.textMusicSettings.threshold,
+                    text_music_device:
+                      inferenceSettings.useSharedDetectorSettings
+                        ? null
+                        : inferenceSettings.textMusicSettings.device,
+                    stave_confidence_threshold:
+                      inferenceSettings.useSharedDetectorSettings
+                        ? null
+                        : inferenceSettings.staveSettings.threshold,
+                    stave_device: inferenceSettings.useSharedDetectorSettings
+                      ? null
+                      : inferenceSettings.staveSettings.device,
+                  }),
+                },
+                signal,
+                onJobId,
+              );
             }
             const usedImageIds = selectedProject.images
               .filter((i) => selectedProject.usedImageNames.includes(i.name))
               .map((i) => i.id);
-            return apiFetchJobStream(`/api/projects/${selectedProject.id}/predict`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                model_preset: inferenceSettings.modelPreset,
-                model_id: inferenceSettings.modelPreset === "custom" ? resolvedCustomModelId : null,
-                image_ids: usedImageIds,
-                confidence_threshold: inferenceSettings.threshold,
-                device: inferenceSettings.device,
-                text_music_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.threshold,
-                text_music_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.textMusicSettings.device,
-                stave_confidence_threshold: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.threshold,
-                stave_device: inferenceSettings.useSharedDetectorSettings ? null : inferenceSettings.staveSettings.device,
-                text_column_count: textFindingSettings.columnCount === "auto" ? null : Number(textFindingSettings.columnCount),
-                text_segmentation_model_id: textFindingSettings.segmentationModelId || null,
-                text_recognition_model_id: textFindingSettings.recognitionModelId || null,
-                text_device: textFindingSettings.device,
-                text_column_bimodal_threshold: textFindingSettings.columnBimodalThreshold,
-                text_masking_enabled: textFindingSettings.maskingEnabled,
-                text_mask_padding: textFindingSettings.maskPadding,
-                text_music_overlap_filter_enabled: textFindingSettings.musicOverlapFilterEnabled,
-                text_debug_mode: textFindingSettings.debugMode,
-                text_mask_model_id: textFindingSettings.maskModelId || null,
-                text_source_id: !textFindingSettings.ocrOnlyMode && textFindingSettings.sourceId
-                  ? Number(textFindingSettings.sourceId)
-                  : null,
-              }),
-            }, signal, onJobId);
+            return apiFetchJobStream(
+              `/api/projects/${selectedProject.id}/predict`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model_preset: inferenceSettings.modelPreset,
+                  model_id:
+                    inferenceSettings.modelPreset === "custom"
+                      ? resolvedCustomModelId
+                      : null,
+                  image_ids: usedImageIds,
+                  confidence_threshold: inferenceSettings.threshold,
+                  device: inferenceSettings.device,
+                  text_music_confidence_threshold:
+                    inferenceSettings.useSharedDetectorSettings
+                      ? null
+                      : inferenceSettings.textMusicSettings.threshold,
+                  text_music_device: inferenceSettings.useSharedDetectorSettings
+                    ? null
+                    : inferenceSettings.textMusicSettings.device,
+                  stave_confidence_threshold:
+                    inferenceSettings.useSharedDetectorSettings
+                      ? null
+                      : inferenceSettings.staveSettings.threshold,
+                  stave_device: inferenceSettings.useSharedDetectorSettings
+                    ? null
+                    : inferenceSettings.staveSettings.device,
+                  text_column_count:
+                    textFindingSettings.columnCount === "auto"
+                      ? null
+                      : Number(textFindingSettings.columnCount),
+                  text_segmentation_model_id:
+                    textFindingSettings.segmentationModelId || null,
+                  text_recognition_model_id:
+                    textFindingSettings.recognitionModelId || null,
+                  text_device: textFindingSettings.device,
+                  text_column_bimodal_threshold:
+                    textFindingSettings.columnBimodalThreshold,
+                  text_masking_enabled: textFindingSettings.maskingEnabled,
+                  text_mask_padding: textFindingSettings.maskPadding,
+                  text_music_overlap_filter_enabled:
+                    textFindingSettings.musicOverlapFilterEnabled,
+                  text_debug_mode: textFindingSettings.debugMode,
+                  text_mask_model_id: textFindingSettings.maskModelId || null,
+                  text_source_id:
+                    !textFindingSettings.ocrOnlyMode &&
+                    textFindingSettings.sourceId
+                      ? Number(textFindingSettings.sourceId)
+                      : null,
+                }),
+              },
+              signal,
+              onJobId,
+            );
           }}
           onResult={(ev) => {
             if (batchRunIds) {
-              const { text_debug_data: batchDebugData } = ev as { text_debug_data?: Record<string, unknown> };
+              const { text_debug_data: batchDebugData } = ev as {
+                text_debug_data?: Record<string, unknown>;
+              };
               if (batchDebugData) {
-                textFindingSettings.setDebugDataByImage((prev) => ({ ...prev, ...batchDebugData }));
+                textFindingSettings.setDebugDataByImage((prev) => ({
+                  ...prev,
+                  ...batchDebugData,
+                }));
               }
               setBatchResult(ev as { batchId: string; fileCount: number });
               apiFetch(`/api/projects/${selectedProject.id}`)
@@ -477,7 +590,10 @@ export default function AppRouter({
               text_debug_data?: Record<string, unknown>;
             };
             if (text_debug_data) {
-              textFindingSettings.setDebugDataByImage((prev) => ({ ...prev, ...text_debug_data }));
+              textFindingSettings.setDebugDataByImage((prev) => ({
+                ...prev,
+                ...text_debug_data,
+              }));
             }
             setProjects((prev) =>
               prev.map((p) =>
@@ -486,7 +602,10 @@ export default function AppRouter({
                       ...p,
                       annotations: [
                         ...p.annotations.filter(
-                          (a) => !annotations.some((na) => na.imageName === a.imageName),
+                          (a) =>
+                            !annotations.some(
+                              (na) => na.imageName === a.imageName,
+                            ),
                         ),
                         ...annotations,
                       ],
@@ -530,8 +649,14 @@ export default function AppRouter({
                       `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
                     );
                     const data = await r.json();
-                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
-                    downloadBlob(new Blob([data.yoloTxt], { type: "text/plain" }), `${stem}_annotations.txt`);
+                    const stem = (data.imageName as string).replace(
+                      /\.[^.]+$/,
+                      "",
+                    );
+                    downloadBlob(
+                      new Blob([data.yoloTxt], { type: "text/plain" }),
+                      `${stem}_annotations.txt`,
+                    );
                   }
                 }
               : undefined
@@ -544,9 +669,14 @@ export default function AppRouter({
                       `/api/projects/${selectedProject.id}/annotations/${ann.id}`,
                     );
                     const data = await r.json();
-                    const stem = (data.imageName as string).replace(/\.[^.]+$/, "");
+                    const stem = (data.imageName as string).replace(
+                      /\.[^.]+$/,
+                      "",
+                    );
                     downloadBlob(
-                      new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], { type: "application/json" }),
+                      new Blob([yoloTxtToJson(data.yoloTxt, data.imageName)], {
+                        type: "application/json",
+                      }),
                       `${stem}_annotations.json`,
                     );
                   }
@@ -559,7 +689,10 @@ export default function AppRouter({
                   const r = await apiFetch(
                     `/api/projects/${selectedProject.id}/text-batch/${batchResult.batchId}/download`,
                   );
-                  downloadBlob(await r.blob(), `batch-${batchResult.batchId}.zip`);
+                  downloadBlob(
+                    await r.blob(),
+                    `batch-${batchResult.batchId}.zip`,
+                  );
                 }
               : undefined
           }
@@ -570,16 +703,31 @@ export default function AppRouter({
         <InteractiveClassifier
           images={selectedProject.images
             .filter((img) => {
-              if (!selectedProject.usedImageNames.includes(img.name)) return false;
-              const p = getImageProgress(img.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
+              if (!selectedProject.usedImageNames.includes(img.name))
+                return false;
+              const p = getImageProgress(
+                img.name,
+                selectedProject.annotations ?? [],
+                selectedProject.meiFiles ?? [],
+                selectedProject.stepsUnlocked,
+              );
               return p === null || p.nextStep <= 1;
             })
             .sort((a, b) => {
-              const pa = getImageProgress(a.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
-              const pb = getImageProgress(b.name, selectedProject.annotations ?? [], selectedProject.meiFiles ?? [], selectedProject.stepsUnlocked);
+              const pa = getImageProgress(
+                a.name,
+                selectedProject.annotations ?? [],
+                selectedProject.meiFiles ?? [],
+                selectedProject.stepsUnlocked,
+              );
+              const pb = getImageProgress(
+                b.name,
+                selectedProject.annotations ?? [],
+                selectedProject.meiFiles ?? [],
+                selectedProject.stepsUnlocked,
+              );
               return (pa?.nextStep ?? 0) - (pb?.nextStep ?? 0);
-            })
-          }
+            })}
           projectId={selectedProjectId}
           clefShape={clefShape}
           onClefShapeChange={setClefShape}
@@ -589,7 +737,10 @@ export default function AppRouter({
             setPendingBatchPairs(pairs);
             setBatchSummary(null);
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 2));
+              updateProjectSteps(
+                selectedProjectId,
+                Math.max(selectedProject.stepsUnlocked, 2),
+              );
             }
             setView("encoding-processing");
           }}
@@ -615,7 +766,10 @@ export default function AppRouter({
             onBack={() => setView("ic")}
             onComplete={() => {
               if (selectedProjectId && selectedProject) {
-                updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
+                updateProjectSteps(
+                  selectedProjectId,
+                  Math.max(selectedProject.stepsUnlocked, 3),
+                );
               }
               setPendingBatchPairs([]);
               setView("encoding-completion");
@@ -624,13 +778,25 @@ export default function AppRouter({
             jobKind="encode_batch"
             streamRequest={(signal, onJobId) => {
               const form = new FormData();
-              pendingBatchPairs.forEach((pair) => form.append("xml_files", pair.xmlFile));
-              pendingBatchPairs.forEach((pair) => form.append("image_files", pair.imageFile));
-              pendingBatchPairs.forEach((pair) => form.append("image_names", pair.imageFile.name));
+              pendingBatchPairs.forEach((pair) =>
+                form.append("xml_files", pair.xmlFile),
+              );
+              pendingBatchPairs.forEach((pair) =>
+                form.append("image_files", pair.imageFile),
+              );
+              pendingBatchPairs.forEach((pair) =>
+                form.append("image_names", pair.imageFile.name),
+              );
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
-              if (selectedProjectId) form.append("project_id", String(selectedProjectId));
-              return apiFetchJobStream("/api/encode-batch", { method: "POST", body: form }, signal, onJobId);
+              if (selectedProjectId)
+                form.append("project_id", String(selectedProjectId));
+              return apiFetchJobStream(
+                "/api/encode-batch",
+                { method: "POST", body: form },
+                signal,
+                onJobId,
+              );
             }}
             onResult={handleEncodeBatchResult}
             onLogsReady={setEncodingLogs}
@@ -641,12 +807,17 @@ export default function AppRouter({
       return pendingXmlFile ? (
         <ProcessingPage
           {...STEP_TIMING}
-          singleLabel={pendingImageFile ? `encoding ${pendingImageFile.name}` : "encoding"}
+          singleLabel={
+            pendingImageFile ? `encoding ${pendingImageFile.name}` : "encoding"
+          }
           logs={encodingLogs}
           onBack={() => setView("ic")}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
-              updateProjectSteps(selectedProjectId, Math.max(selectedProject.stepsUnlocked, 3));
+              updateProjectSteps(
+                selectedProjectId,
+                Math.max(selectedProject.stepsUnlocked, 3),
+              );
             }
             setView("encoding-completion");
           }}
@@ -663,7 +834,12 @@ export default function AppRouter({
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }
-            return apiFetchJobStream("/api/encode-upload", { method: "POST", body: form }, signal, onJobId);
+            return apiFetchJobStream(
+              "/api/encode-upload",
+              { method: "POST", body: form },
+              signal,
+              onJobId,
+            );
           }}
           onResult={handleEncodeResult}
           onLogsReady={setEncodingLogs}
@@ -671,20 +847,23 @@ export default function AppRouter({
       ) : null;
     }
     case "encoding-completion": {
-      const remainingIcImages = selectedProject?.images.filter((img) => {
-        if (!selectedProject.usedImageNames.includes(img.name)) return false;
-        const p = getImageProgress(
-          img.name,
-          selectedProject.annotations ?? [],
-          selectedProject.meiFiles ?? [],
-          selectedProject.stepsUnlocked,
-        );
-        return p === null || p.nextStep <= 1;
-      }) ?? [];
+      const remainingIcImages =
+        selectedProject?.images.filter((img) => {
+          if (!selectedProject.usedImageNames.includes(img.name)) return false;
+          const p = getImageProgress(
+            img.name,
+            selectedProject.annotations ?? [],
+            selectedProject.meiFiles ?? [],
+            selectedProject.stepsUnlocked,
+          );
+          return p === null || p.nextStep <= 1;
+        }) ?? [];
 
       const batchDescription = batchSummary
         ? `batch encoding complete: ${batchSummary.succeeded.length} succeeded${
-            batchSummary.failed.length ? `, ${batchSummary.failed.length} failed` : ""
+            batchSummary.failed.length
+              ? `, ${batchSummary.failed.length} failed`
+              : ""
           }.`
         : null;
 
@@ -703,8 +882,12 @@ export default function AppRouter({
           logContent={encodingLogs.join("\n")}
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
-          onClassifyMore={remainingIcImages.length > 0 ? () => setView("ic") : undefined}
-          classifyMoreCount={remainingIcImages.length > 0 ? remainingIcImages.length : undefined}
+          onClassifyMore={
+            remainingIcImages.length > 0 ? () => setView("ic") : undefined
+          }
+          classifyMoreCount={
+            remainingIcImages.length > 0 ? remainingIcImages.length : undefined
+          }
         />
       );
     }
@@ -717,7 +900,12 @@ export default function AppRouter({
             setProjects((prev) =>
               prev.map((p) =>
                 p.id === selectedProjectId
-                  ? { ...p, meiFiles: p.meiFiles.map((f) => f.id === id ? { ...f, corrected: true } : f) }
+                  ? {
+                      ...p,
+                      meiFiles: p.meiFiles.map((f) =>
+                        f.id === id ? { ...f, corrected: true } : f,
+                      ),
+                    }
                   : p,
               ),
             )

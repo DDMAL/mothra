@@ -6,7 +6,13 @@ import tseslint from 'typescript-eslint';
 import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // 'neon' is a separate git submodule (its own repo/history) — its lint
+  // issues aren't ours to fix here. 'public/neon' is that submodule's own
+  // built/bundled editor output, not hand-written source. 'scripts/.venv'
+  // is a Python virtualenv that happens to vendor some .js (e.g.
+  // matplotlib's web backend) — never meant to be linted by this project's
+  // config at all.
+  globalIgnores(['dist', 'neon', 'public/neon', 'scripts/.venv']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

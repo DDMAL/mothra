@@ -18,10 +18,12 @@ MODELS_DIR = _path("models_dir")
 NEON_MANIFESTS_DIR = _path("neon_manifests_dir")
 MOCK_DATA_DIR = _path("mock_data_dir")
 MEDIEVAL_MODELS_DIR = _path("medieval_models_dir")
+MEI_ENCODING_DIR = _path("mei_encoding_dir")
 
 IC_API_URL = _url("IC_API_URL", "ic_api_url")
 IC_PUBLIC_URL = _url("IC_PUBLIC_URL", "ic_public_url")
 TEXT_API_URL = _url("TEXT_API_URL", "text_api_url")
+PACO_API_URL = _url("PACO_API_URL", "paco_api_url")
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", _cfg["celery"]["broker_url"])
 

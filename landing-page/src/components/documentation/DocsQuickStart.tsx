@@ -100,13 +100,13 @@ export default function DocsQuickStart({
           next to the image name or clicking an image (deletion only).
         </p>
         <p className="leading-relaxed mb-4">
-          If you have several pages from the same manuscript, "+ batch
-          upload" lets you upload them all at once and pair each one with a
-          folio number under a shared Cantus source — Mothra checks that the
-          number of images and folio numbers you've entered match before
-          letting you commit the batch. Images that belong to a source are
-          grouped together in the images tab, and can be annotated together
-          as a batch later on (see the walkthrough for details).
+          If you have several pages from the same manuscript, "+ batch upload"
+          lets you upload them all at once and pair each one with a folio number
+          under a shared Cantus source — Mothra checks that the number of images
+          and folio numbers you've entered match before letting you commit the
+          batch. Images that belong to a source are grouped together in the
+          images tab, and can be annotated together as a batch later on (see the
+          walkthrough for details).
         </p>
         <p className="leading-relaxed">
           Additionally, clicking an image gives you the option to "use" it in

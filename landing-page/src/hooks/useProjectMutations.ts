@@ -44,7 +44,9 @@ export function useProjectMutations(setProjects: SetProjects) {
           };
           setProjects((prev) =>
             prev.map((p) =>
-              p.id === project.id ? { ...p, images: [...p.images, uploadedImage] } : p,
+              p.id === project.id
+                ? { ...p, images: [...p.images, uploadedImage] }
+                : p,
             ),
           );
         } catch {
@@ -54,7 +56,7 @@ export function useProjectMutations(setProjects: SetProjects) {
         }
       }
     } catch (e) {
-     toast.error((e as Error).message);
+      toast.error((e as Error).message);
     }
   };
 
@@ -123,7 +125,7 @@ export function useProjectMutations(setProjects: SetProjects) {
     });
     if (!r.ok) throw new Error("duplicate failed");
     const newProject: Project = normalizeProjects([await r.json()])[0];
-    setProjects(prev => [newProject, ...prev]);
+    setProjects((prev) => [newProject, ...prev]);
     return newProject;
   };
 
@@ -201,7 +203,7 @@ export function useProjectMutations(setProjects: SetProjects) {
         body: JSON.stringify({ cantusSourceId: sourceId }),
       });
       if (!r.ok) return;
-      setProjects((prev) => 
+      setProjects((prev) =>
         prev.map((p) => (p.id === id ? { ...p, cantusSourceId: sourceId } : p)),
       );
     } catch {
@@ -215,7 +217,9 @@ export function useProjectMutations(setProjects: SetProjects) {
       const project = prev.find((p) => p.id === id);
       if (!project) return prev;
       newIsPinned = !project.isPinned;
-      return prev.map((p) => (p.id === id ? { ...p, isPinned: newIsPinned! } : p));
+      return prev.map((p) =>
+        p.id === id ? { ...p, isPinned: newIsPinned! } : p,
+      );
     });
     try {
       const r = await apiFetch(`/api/projects/${id}`, {

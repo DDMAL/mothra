@@ -54,7 +54,10 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = (e: PopStateEvent) => {
-      const state = e.state as { view?: View; selectedProjectId?: number | null } | null;
+      const state = e.state as {
+        view?: View;
+        selectedProjectId?: number | null;
+      } | null;
       isPoppingRef.current = true;
       setView(state?.view ?? "landing");
       setSelectedProjectId(state?.selectedProjectId ?? null);
@@ -62,7 +65,7 @@ export default function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-  
+
   const {
     pendingXmlFile,
     setPendingXmlFile,
@@ -80,13 +83,22 @@ export default function App() {
   useScrollFade(view);
 
   useActiveJobWatcher((job, status) => {
-    toast[status === "succeeded" ? "success" : status === "failed" ? "error" : "info"](
-        `${job.kind} job ${status}`,
-        { duration: 0, action: { label: "view", onClick: () => {
-            if (job.projectId) setSelectedProjectId(job.projectId);
-            setView("project");
-        } } },
-    );
+    toast[
+      status === "succeeded"
+        ? "success"
+        : status === "failed"
+          ? "error"
+          : "info"
+    ](`${job.kind} job ${status}`, {
+      duration: 0,
+      action: {
+        label: "view",
+        onClick: () => {
+          if (job.projectId) setSelectedProjectId(job.projectId);
+          setView("project");
+        },
+      },
+    });
   });
 
   const handleLoginSuccess = (user: CurrentUser, token: string) => {
@@ -109,7 +121,7 @@ export default function App() {
   useEffect(() => {
     registerUnauthenticatedHandler(handleLogout);
   }, []);
-  
+
   useEffect(() => {
     const token = getToken();
     if (!token) return;

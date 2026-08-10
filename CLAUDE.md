@@ -58,14 +58,15 @@ Schema is migrated forward via `_migrate_db()` in `auth_api.py` — new columns 
 
 ## Running locally
 
-**Five processes run together** — the frontend, its backend, the Interactive Classifier service (the IC step iframes it), the text-finding service, and a Celery worker (predict/encode jobs). Redis must also be running as the Celery broker:
+**Six processes run together** — the frontend, its backend, the Interactive Classifier service (the IC step iframes it), the text-finding service, the staffline/background layer-separation service, and a Celery worker (predict/encode jobs). Redis must also be running as the Celery broker:
 
 | Port | Process | Role |
 |---|---|---|
 | `5173` | Vite dev server (landing-page) | Open this in the browser; proxies `/api`, `/neon`, `/Neon-gh` → `:8001` |
-| `8001` | landing-page FastAPI (`uvicorn`) | `/api/*`; also reaches IC/text-service server-to-server |
+| `8001` | landing-page FastAPI (`uvicorn`) | `/api/*`; also reaches IC/text-service/paco-classifier-service server-to-server |
 | `8000` | IC service (`ic/` submodule) | IC REST API **and** the built IC SPA (served single-origin) |
 | `8002` | text-finding service (`text-service/`) | wraps the `mothra-text` pipeline; called from `:8001` |
+| `8003` | staffline classifier service (`paco-classifier-service/`) | wraps the `paco-classifier/` submodule's TensorFlow layer-separation model; called from `:8001`'s worker — see **Staffline detection** below |
 | — | Celery worker | runs `/predict`, `/encode-upload`, `/encode-batch`, `/text-batch/run` jobs; no port of its own |
 
 Redis (default `redis://localhost:6379/0`, override via `CELERY_BROKER_URL`) is
@@ -76,7 +77,7 @@ see schema above), so restarting Redis doesn't lose any job history.
 ### One command (recommended)
 
 ```bash
-./dev.sh          # starts all five; Ctrl-C tears all five down cleanly
+./dev.sh          # starts all six; Ctrl-C tears all six down cleanly
 ./dev.sh -b       # rebuild the IC frontend bundle first (do this after the
                   #   ic/ submodule's frontend changes — else the iframe
                   #   serves a stale build)
@@ -85,10 +86,30 @@ see schema above), so restarting Redis doesn't lose any job history.
 ```
 
 Ports are overridable (`WEB_PORT=3000 ./dev.sh`). The script assumes the venvs
-already exist (`ic/api/.venv`, `landing-page/scripts/.venv`, `text-service/.venv`)
-and `landing-page/node_modules` is installed — it runs them, it doesn't create
-them. It also soft-warns (doesn't block) if Redis isn't reachable at
-`CELERY_BROKER_URL`.
+already exist (`ic/api/.venv`, `landing-page/scripts/.venv`, `text-service/.venv`,
+`paco-classifier-service/.venv`) and `landing-page/node_modules` is installed —
+it runs them, it doesn't create them. It also soft-warns (doesn't block) if
+Redis isn't reachable at `CELERY_BROKER_URL`.
+
+`paco-classifier-service/.venv` uses the same `requirements.txt` as
+Docker/CI — no separate macOS requirements file needed. It pins
+`tensorflow==2.15.1` (not `2.13.1`, which is what `Paco_classifier`'s own
+`newrequirements.txt` recommends): `2.13.1` hard-pins `typing-extensions<4.6.0`
+on **every** platform (confirmed via PyPI metadata directly — base package,
+`tensorflow-cpu-aws`, `tensorflow-intel` all carry the same bound), which no
+`fastapi>=0.110.0` can satisfy, so it fails identically on macOS, Linux/amd64,
+and Linux/arm64. `2.15.1`'s `typing-extensions` requirement has no upper
+bound at all, and it has a real native `macosx_11_0_arm64` wheel directly
+under the plain `tensorflow` package name — the separately-named
+`tensorflow-macos` package is vestigial for versions this recent (an empty
+dispatcher shim with no actual `tensorflow` module inside — confirmed by
+actually installing it, not assumed). `2.15.1` still predates TF 2.16's
+default switch to Keras 3, so `.h5` loading behavior should match `2.13.1`'s
+(both Keras-2 line):
+```bash
+cd paco-classifier-service && python3.10 -m venv .venv \
+  && source .venv/bin/activate && pip install -r requirements.txt
+```
 
 ### Manual (one terminal each)
 
@@ -99,15 +120,18 @@ cd ic/api && HOST=127.0.0.1 PORT=8000 .venv/bin/ic-api
 # Terminal 2 — text-finding service (:8002)
 cd text-service && .venv/bin/uvicorn main:app --port 8002
 
-# Terminal 3 — landing-page backend (:8001)
+# Terminal 3 — staffline classifier service (:8003)
+cd paco-classifier-service && .venv/bin/uvicorn main:app --port 8003
+
+# Terminal 4 — landing-page backend (:8001)
 cd landing-page/scripts && source .venv/bin/activate
 uvicorn main:app --reload --port 8001
 
-# Terminal 4 — Celery worker (predict/encode jobs)
+# Terminal 5 — Celery worker (predict/encode jobs)
 cd landing-page/scripts && source .venv/bin/activate
 celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
 
-# Terminal 5 — landing-page frontend (:5173)
+# Terminal 6 — landing-page frontend (:5173)
 cd landing-page && npm run dev
 ```
 
@@ -120,7 +144,7 @@ DATABASE_URL=postgresql://...   # Neon connection string
 MOTHRA_SECRET=...               # JWT signing key
 ```
 Optional env var overrides (all have working `config.yaml` defaults):
-`IC_API_URL`, `IC_PUBLIC_URL`, `TEXT_API_URL`, `CELERY_BROKER_URL`.
+`IC_API_URL`, `IC_PUBLIC_URL`, `TEXT_API_URL`, `PACO_API_URL`, `CELERY_BROKER_URL`.
 
 ### Configuration (`config.py` / `config.yaml`)
 
@@ -216,15 +240,53 @@ the older geometry-only heuristic) → glyph-position clustering
 `staffline_detections` row (predates this feature, or detection failed/found
 nothing) falls through unchanged to the pre-existing behavior.
 
+**Medieval preset only:** before the stave `.pt` model runs, the page image
+is also sent to `paco-classifier-service` (`landing-page/scripts/paco_api.py`'s
+`classify_stafflines()`, a plain-`urllib` HTTP bridge — see **Running
+locally** above for why this is its own service rather than an in-process
+import), which wraps the `paco-classifier/` submodule
+(`DDMAL/Paco_classifier`, branch `gianna/calvo-training-script`) — a
+TensorFlow auto-encoder that splits the page into a background-only layer
+and a stafflines-only layer (both transparent PNGs). The weights,
+`paco-classifier/models_v4/{model_0.h5,model_1.h5}` (`model_0`=background,
+`model_1`=stafflines), live **inside the submodule itself** — checked into
+`DDMAL/Paco_classifier`, not bundled/Git-LFS-tracked separately in this
+repo, unlike the medieval `.pt` checkpoints. Bumping to a retrained pair is
+therefore a `git submodule update --remote` (or re-pointing the submodule
+at a new commit), not a file swap in this repo; `main.py`'s
+`_resolve_staffline_models_dir()` also honors a `STAFFLINE_MODELS_DIR` env
+override for pointing at an unreleased pair without touching the submodule
+pin at all. The stave model then runs on the **stafflines-only layer**, not
+the raw page, so `staffline_stage.py`'s component-filtering/centerline-fitting
+crops from that cleaner signal instead of raw parchment texture.
+Implemented in `tasks_predict.py`'s `_run_medieval_inference()`: the
+classifier-then-stave-model pass runs in a background `threading.Thread`
+concurrent with the main thread's text/music YOLO pass (the classifier's
+TF inference is the slow half of a predict request) — deliberately kept off
+the task's own shared `cur`/`con` connection, since nothing about this
+pattern has ever needed cross-thread DB access before. If
+`paco-classifier-service` is unreachable or errors, it falls back to
+running the stave model on the raw page image (today's pre-existing
+behavior) rather than failing the job. **Known accepted gap:** an image
+whose annotation row was first written by `tasks_text_batch.py` (unaffected
+by this — it still calls `YoloModelSet.infer()` on the raw page) stays on
+raw-page stave boxes permanently under `tasks_predict.py`'s
+`has_annotation`-reuse skip, unless that row is deleted and predict is
+re-run — same class of staleness already accepted for `job_uploads`/
+`job_sessions` (see **Things that don't exist yet** below).
+
 Deliberately deferred for now (each is a caller-controlled parameter or a
 swappable stage, not a hardcoded limitation, so enabling any of them later
 needs no re-plumbing):
 - **Ink-separation ("BGR")** — `staff-finding/scripts/bgr_adapter.py` wraps an
   external, unvendored `muscrat/layer_sep` repo reachable only via hardcoded
   paths on specific developer machines (no tests, no Docker/LFS story yet).
-  Staffline detection runs directly on raw page crops instead; Sauvola
+  This is a *different* layer-separation model than `paco-classifier-service`
+  above (muscrat/layer_sep vs. Paco_classifier) and remains fully deferred —
+  `staffline_stage.py` itself still runs directly on whatever crop it's
+  handed (raw page, or now the Paco-classifier's stafflines layer); Sauvola
   binarization (`component_filter.py`'s tuned default) is the interim
-  mitigation for faint ink.
+  mitigation for faint ink either way.
 - **`interpolate_staves.py`** (gap-fill/edge-extrapolation for missing lines)
   stays off (`interpolate_missing=False`) per `staff-finding/dox/STATUS.md`'s
   "not yet validated across the corpus" caveat.
@@ -238,17 +300,25 @@ needs no re-plumbing):
 (job name `ci-cd`) runs on every push to `main`/`develop`/`k8s-deployment` (also
 `workflow_dispatch`):
 1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
-   and `text-service` (`text-service/Dockerfile`, build context is the repo root
-   since it needs the sibling `mothra-text/` submodule) and pushes each to
-   `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, tagged `latest`, by short SHA
-   (`sha-<short>`), and by branch. `worker` reuses the `mothra-backend` image, so
-   it isn't built separately. Checkout pulls submodules recursively and Git LFS
-   (the bundled medieval `.pt` weights — without `lfs: true` they'd check out as
-   pointer stubs and inference would fail at runtime).
+   `text-service` (`text-service/Dockerfile`, build context is the repo root
+   since it needs the sibling `mothra-text/` submodule), and
+   `paco-classifier-service` (`paco-classifier-service/Dockerfile`, same
+   repo-root-context reasoning — needs the sibling `paco-classifier/`
+   submodule) and pushes each to
+   `ghcr.io/ddmal/mothra-{backend,ic,text-service,paco-classifier-service}`,
+   tagged `latest`, by short SHA (`sha-<short>`), and by branch. `worker`
+   reuses the `mothra-backend` image, so it isn't built separately. Checkout
+   pulls submodules recursively and Git LFS (the bundled medieval `.pt`
+   weights, tracked in this repo's own `.gitattributes` — without `lfs: true`
+   they'd check out as pointer stubs and inference would fail at runtime;
+   the staffline classifier's `model_0.h5`/`model_1.h5` weights need no such
+   step — they live inside the `paco-classifier` submodule itself, which
+   `submodules: recursive` already checks out in full).
 2. **deploy** (needs `build`) — using the `KUBECONFIG` repo secret, pins
-   `k8s/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml` to this commit's
-   `sha-<short>` tag, applies those plus `k8s/configmap.yaml`/`ingress.yaml`, then
-   `kubectl rollout status` on `backend`/`worker`/`ic`/`text-service` (redis and
+   `k8s/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml`/`paco-classifier-service.yaml`
+   to this commit's `sha-<short>` tag, applies those plus
+   `k8s/configmap.yaml`/`ingress.yaml`, then `kubectl rollout status` on
+   `backend`/`worker`/`ic`/`text-service`/`paco-classifier-service` (redis and
    postgres are excluded from CD — see below).
 
 The cluster runs the `mothra` namespace, manifests live in `k8s/` (see
@@ -270,7 +340,7 @@ whichever service reads them.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
-kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
+kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/paco-classifier-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
 ```
 
@@ -290,15 +360,18 @@ file doesn't un-hook an existing deploy.
 ### Local/manual container runs (`docker-compose.yml`)
 
 A `docker-compose.yml` at the repo root mirrors the same stack (redis + ic +
-text-service + backend + Celery worker) for local testing without a cluster —
-the k8s manifests were modeled on it, not the other way around. `worker` reuses
-the `backend` image, just overrides the `command:`. Before building:
-`git submodule update --init --recursive` and `git lfs pull` (see above — same
-LFS caveat applies locally: `git-lfs` must be installed and registered,
-`brew install git-lfs && git lfs install`, *before* pulling, or the `.pt` files
-silently stay as pointer text). `DATABASE_URL`/`MOTHRA_SECRET` come from a
-root-level `.env` (gitignored, separate from `landing-page/scripts/.env`) that
-Compose auto-loads.
+text-service + paco-classifier-service + backend + Celery worker) for local
+testing without a cluster — the k8s manifests were modeled on it, not the
+other way around. `worker` reuses the `backend` image, just overrides the
+`command:`. Before building: `git submodule update --init --recursive`
+(brings in `paco-classifier/models_v4/`'s weights along with the rest of
+that submodule — no LFS involved) and `git lfs pull` (see above — same LFS
+caveat applies locally for the medieval `.pt` weights specifically:
+`git-lfs` must be installed and registered, `brew install git-lfs && git
+lfs install`, *before* pulling, or those files silently stay as pointer
+text). `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level `.env`
+(gitignored, separate from `landing-page/scripts/.env`) that Compose
+auto-loads.
 
 `staff-finding/` (a sibling directory of `landing-page/`, holding the
 staffline-detection module `staffline_stage.py` imports — see **Staffline
@@ -341,9 +414,13 @@ segmentation step got SIGKILL'd by the VM's OOM killer mid-request
 (`docker compose ps` shows `Exited (137)`, easy to mistake for an
 application bug rather than an OOM kill). `worker` (YOLO inference) and
 `text-service` (Kraken segmentation + HTR) are the two memory-heavy
-containers; `backend`/`ic`/`redis` are comparatively light. If you see a
-service unexpectedly exit with code 137 mid-job, check available memory
-before debugging application code.
+containers; `backend`/`ic`/`redis` are comparatively light. `paco-classifier-service`
+(TensorFlow sliding-window inference over a full page) is likely a third —
+not yet confirmed the same way as the other two, but its `k8s/` resource
+requests/limits are deliberately set higher than `backend`/`ic` as a
+starting assumption pending real usage data. If you see a service
+unexpectedly exit with code 137 mid-job, check available memory before
+debugging application code.
 
 `text-service`'s recognition model (Tridis, via `htrmopo`) is baked into
 the image at build time (both Compose and the CI-built image share the same
@@ -397,7 +474,8 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work, run out-of-request |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
-| `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`) shared by the predict task and `batch_api.py` |
+| `landing-page/scripts/paco_api.py` | Bridges to `paco-classifier-service` (`classify_stafflines()`) — medieval-preset staffline/background layer separation, called from `tasks_predict.py`'s `_run_medieval_inference()`; see **Staffline detection** above |
+| `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`, incl. the split `infer_text_music()`/`infer_staves()` medieval-only methods) shared by the predict task and `batch_api.py` |
 | `landing-page/scripts/encode_api.py` | `POST /api/encode-upload` / `/encode-batch` — kickoff endpoints, enqueue Celery tasks |
 | `landing-page/scripts/encode_to_mei.py` | Core encoding logic: parse XML, estimate staves, build MEI, validate |
 | `landing-page/scripts/batch_api.py` | `POST /text-batch/run` job-queue kickoff, `GET /text-batch/{id}/download`, `GET /sources/{id}/export`, and `GET /sources/{id}/cantus-bundle` (corrected-MEI zip for manual hand-off to `production_mei_files`) |
@@ -512,6 +590,11 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
 - **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
 - **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections
 - **Staffline detection** — `POST /api/predict` runs connected-component filtering, centerline fitting, and stave grouping on stave-class YOLO boxes (`staffline_stage.py`, wrapping the `staff-finding/` package); results are `tasks_encode.py`'s preferred stave source ahead of `parse_yolo_stave_hints()` — see **Staffline detection** above
+- **Staffline/background layer separation (medieval preset)** — the stave model now runs on a
+  TensorFlow-classifier-isolated stafflines layer instead of the raw page, via the standalone
+  `paco-classifier-service` (wraps the `paco-classifier/` submodule), called concurrently with the
+  text/music YOLO pass from `tasks_predict.py`'s `_run_medieval_inference()`; falls back to
+  raw-page stave detection if the service is unreachable — see **Staffline detection** above
 - **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines; fake `setTimeout` timers are gone
 - **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
 - **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs

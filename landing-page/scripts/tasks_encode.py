@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import shutil
+import sys
 import tempfile
 import uuid as _uuid
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Optional
 
 from celery_app import celery_app
 from job_store import publish_event, fetch_upload, drop_upload, session_put, check_cancelled, JobCancelled
-from auth_api import get_db_conn, release_db_conn
+from auth_api import get_db_conn, release_db_conn, get_latest_text_alignment
 from encode_to_mei import (
     parse_gamera_xml, assign_glyphs_to_staves, estimate_staves_from_glyphs,
     parse_yolo_stave_hints, build_mei, build_neon_manifest, validate_mei,
@@ -62,9 +63,11 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     staleness inference_api.py's _load_image_and_yolo_for_detection() already
     guards against for the interpolate-preview/confirm routes (there, by
     re-resolving the current annotation via image_id); here, since this
-    function is only ever called with image_name (not image_id), the
-    equivalent guard is: look up the current annotation_id for this image
-    first, then require tier 1's staffline_detections row to match it.
+    function is only ever called with image_name (not a project_images.id
+    of its own), the equivalent guard is: look up the current
+    annotation_id (and its image_id, reused below for the text_alignment
+    lookup too) for this image first, then require tier 1's
+    staffline_detections row to match it.
 
     ev, if given, is _encode_one's own event-publishing closure -- used here
     only to emit [trace] lines confirming staves_from_jsomr()'s input/output
@@ -79,30 +82,38 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
         con = get_db_conn()
         try:
             cur = con.cursor()
-            try:
-                cur.execute(
-                    "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
-                    " ORDER BY created_at DESC LIMIT 1",
-                    (image_name, project_id),
-                )
-                row = cur.fetchone()
-                if row and row[0]:
-                    text_alignment = json.loads(row[0])
-            except Exception:
-                pass
             current_annotation_id = None
             current_yolo_txt = None
+            current_image_id = None
             try:
                 cur.execute(
-                    "SELECT id, yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                    "SELECT id, yolo_txt, image_id FROM annotations WHERE image_name = %s AND project_id = %s "
                     "ORDER BY created_at DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()
                 if row:
-                    current_annotation_id, current_yolo_txt = row
-            except Exception:
-                pass
+                    current_annotation_id, current_yolo_txt, current_image_id = row
+            except Exception as e:  # noqa: BLE001 - best-effort enrichment lookup;
+                # any DB failure here just means "no current annotation to
+                # disambiguate against," not a reason to fail the whole
+                # encode -- but it's logged, not silently dropped, so a
+                # real/recurring failure is still visible in the job log.
+                print(f"[resolve-hints] {image_name}: current-annotation lookup failed: {e!r}", file=sys.stderr)
+            try:
+                # Same disambiguation this function already applies to
+                # staffline_detections below (image_name alone isn't unique
+                # within a project -- see get_latest_text_alignment's
+                # docstring): prefer the current annotation's image_id when
+                # we have one, so a same-named-but-different image can't
+                # hand back the wrong syllable alignment.
+                text_alignment = get_latest_text_alignment(cur, project_id, image_name, current_image_id)
+            except Exception as e:  # noqa: BLE001 - a real DB failure here just
+                # means "no text alignment this time" for this call site --
+                # get_latest_text_alignment itself already rolled back
+                # before re-raising, so this is a safe, logged fallback
+                # rather than a silent one.
+                print(f"[resolve-hints] {image_name}: text-alignment lookup failed: {e!r}", file=sys.stderr)
             if current_annotation_id is not None:
                 try:
                     cur.execute(
@@ -210,6 +221,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             clef_shape=clef_shape or "C",
             clef_line=clef_line or 3,
             text_alignment=text_alignment,
+            n_detected_staves=n_input_staves,
         )
         for msg in trace_stave_zone_parity(staves, mei_bytes_out):
             ev({"type": "log", "message": msg})

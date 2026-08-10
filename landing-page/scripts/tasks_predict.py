@@ -1,4 +1,5 @@
 import io
+import threading
 from pathlib import Path
 
 from celery_app import celery_app
@@ -8,7 +9,122 @@ from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
 from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
+from paco_api import classify_stafflines, abort_classify_request, PacoClassifierError
 
+# How often the main thread polls check_cancelled() while waiting on the
+# background classifier thread (see _run_medieval_inference below).
+_CANCEL_POLL_INTERVAL_S = 0.5
+
+
+def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_name, publish, job_id=None):
+    """Medieval-preset-only per-image inference: runs the text/music YOLO
+    pass and a classifier-then-stave-YOLO pass concurrently, since the
+    Paco-classifier call is the slow half of this and the two passes are
+    otherwise independent until their outputs are concatenated below.
+
+    The background thread touches NO shared DB state (no cur/con) — i
+    only calls classify_stafflines (plain HTTP) and yolo_models.infer_staves
+    (a pure in-process model call). write_annotation/run_staffline_detection
+    stay strictly main-thread-only, after this function returns. All
+    success/failure state is written into stave_result for the main thread
+    to read AFTER .join() — a bare threading.Thread does not propagate
+    exceptions to its caller on its own, so wrapping try/except around
+    thread.join() instead of inside _stave_pipeline would silently break
+    the fallback path below.
+
+    Returns (yolo_txt, staffline_source_arr) — the merged text+music+stave
+    YOLO lines, and whichever image array the stave boxes were actually
+    detected against, so run_staffline_detection crops the SAME image the
+    stave model saw (not always the raw page).
+
+    If `job_id` is given, waits on the background thread by polling
+    check_cancelled() every _CANCEL_POLL_INTERVAL_S instead of an
+    unconditional thread.join() — a cancel request seen mid-classifier-call
+    aborts the in-flight paco-classifier-service connection (via
+    abort_classify_request) so this raises JobCancelled within about a
+    second, instead of blocking for up to classify_stafflines's own
+    DEFAULT_TIMEOUT (180s) on a job nobody cares about anymore. That same
+    abort now also stops the TensorFlow inference actually running
+    server-side, not just this worker thread: paco-classifier-service polls
+    for exactly this disconnect and cancels cooperatively between patches
+    (see paco_api.py's module docstring and recognition_engine's
+    should_cancel param) — it's no longer a fire-and-forget abandoned call.
+    """
+    import cv2
+    import numpy as np
+
+    stave_result = {}
+    conn_holder: dict = {}
+
+    def _stave_pipeline():
+        try:
+            stafflines_png, _background_png = classify_stafflines(
+                image_bytes, mime_type, conn_holder=conn_holder,
+            )
+            arr = cv2.imdecode(np.frombuffer(stafflines_png, np.uint8), cv2.IMREAD_COLOR)
+            if arr is None:
+                raise PacoClassifierError("could not decode stafflines PNG from paco-classifier-service")
+            if arr.shape[:2] != img_arr.shape[:2]:
+                raise PacoClassifierError(f"classifier output {arr.shape[:2]} != page {img_arr.shape[:2]}")
+            stave_result["yolo_txt"] = yolo_models.infer_staves(arr)
+            stave_result["source_arr"] = arr
+        except Exception as e:
+            stave_result["error"] = e
+
+    thread = threading.Thread(target=_stave_pipeline, daemon=True)
+    thread.start()
+    tm_txt = yolo_models.infer_text_music(img_arr)
+
+    if job_id is None:
+        thread.join()
+    else:
+        # Heartbeat: the classifier call alone can legitimately run past the
+        # SSE stream's 90s stale-job timeout (jobs_api.py's
+        # STALE_JOB_TIMEOUT_SECONDS), which fires purely on "no new
+        # job_events row for 90s" — it can't tell a slow classifier call from
+        # a dead worker. Without a periodic publish() here, a page that takes
+        # >90s falsely reports "job appears to have stalled" to the client
+        # and flips jobs.status to 'failed', even though this thread is
+        # still running fine and will finish and publish its own real
+        # success events moments later. Piggybacking on the existing
+        # cancel-poll loop (rather than adding a second timer) keeps this
+        # cheap and resets the stream's idle counter well under the timeout.
+        _HEARTBEAT_INTERVAL_S = 20.0
+        elapsed_s = 0.0
+        while thread.is_alive():
+            try:
+                check_cancelled(job_id)
+            except JobCancelled:
+                abort_classify_request(conn_holder)
+                thread.join(timeout=5)
+                raise
+            thread.join(timeout=_CANCEL_POLL_INTERVAL_S)
+            elapsed_s += _CANCEL_POLL_INTERVAL_S
+            if elapsed_s >= _HEARTBEAT_INTERVAL_S:
+                elapsed_s = 0.0
+                publish({"type": "log", "message": f"{image_name}: staffline classifier still running..."})
+
+        # The loop above only checks cancellation BETWEEN polls -- the
+        # thread can finish (is_alive() goes False) in the same instant a
+        # cancel request lands, right after the loop's own last
+        # check_cancelled() passed. Recheck once more here, before trusting
+        # stave_result/publishing anything from it, so a job cancelled in
+        # that exact window doesn't still write an annotation as if it
+        # completed normally.
+        check_cancelled(job_id)
+
+    if "error" in stave_result:
+        publish({
+            "type": "log",
+            "message": f"{image_name}: staffline classifier unavailable ({stave_result['error']}) — falling back to raw-image stave detection",
+        })
+        st_txt = yolo_models.infer_staves(img_arr)
+        source_arr = img_arr
+    else:
+        st_txt = stave_result["yolo_txt"]
+        source_arr = stave_result["source_arr"]
+
+    return "\n".join(filter(None, [tm_txt, st_txt])), source_arr
 
 @celery_app.task(name="predict.run")
 def run_predict_task(job_id, project_id, body):
@@ -85,7 +201,7 @@ def run_predict_task(job_id, project_id, body):
             has_annotation = cur.fetchone() is not None
             cur.execute("SELECT 1 FROM text_alignments WHERE project_id=%s AND image_id=%s", (project_id, iid))
             has_text_alignment = cur.fetchone() is not None
-            # annotation and text-finding are independent steps — an image that
+            # annotation and text-finding are independent steps — an image tha
             # already has one but not the other (e.g. a job that died between the
             # two, or a race from concurrent duplicate jobs) must still run
             # whichever step is missing, not be skipped wholesale.
@@ -132,7 +248,14 @@ def run_predict_task(job_id, project_id, body):
                     publish({"type": "log", "message": f"{image_name}: annotation disappeared since validation — re-running YOLO"})
             if not has_annotation:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
-                yolo_txt = yolo_models.infer(img_arr)
+                if yolo_models.medieval_models is not None:
+                    yolo_txt, staffline_source_arr = _run_medieval_inference(
+                        yolo_models, img_arr, bytes(image_data), mime_type, image_name, publish,
+                        job_id=job_id,
+                    )
+                else:
+                    yolo_txt = yolo_models.infer(img_arr)
+                    staffline_source_arr = img_arr
                 ann_id = write_annotation(
                     cur, con, project_id, image_id, image_name, yolo_txt,
                     yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
@@ -145,20 +268,22 @@ def run_predict_task(job_id, project_id, body):
                     "txtName": f"annotation-{ann_id}.txt",
                     "jsonName": "", "detectionCount": n_detections,
                 })
+            else:
+                staffline_source_arr = img_arr  # reused annotation -- no fresh classifier run to redo
 
             # Staffline detection is gated only on has_class (fresh stave-class
             # boxes to work from), never on has_text_alignment -- an image can
             # have has_text_alignment=True (text-finding already ran) and
             # has_annotation=False (YOLO just produced brand-new boxes in this
             # same iteration) at the same time, and those new boxes still need
-            # a staffline_detections row. Ordered before the has_text_alignment
+            # a staffline_detections row. Ordered before the has_text_alignmen
             # check below so its continue can never skip this block.
             if has_class(yolo_txt, STAFFLINE_CLASS_ID):
                 publish({"type": "log", "message":
                     f"[trace] {image_name}: stave-class boxes came from model"
                     f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
                 for sf_ev in run_staffline_detection(
-                    job_id, cur, con, project_id, image_id, image_name, ann_id, img_arr, yolo_txt,
+                    job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

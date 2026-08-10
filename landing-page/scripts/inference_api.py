@@ -8,7 +8,7 @@ import uuid as _uuid
 
 from auth_api import get_current_user, require_project_owner, db_cursor
 from config import SKIP_YOLO
-from job_store import create_job
+from job_store import claim_project_job
 from tasks_predict import run_predict_task
 import staffline_stage
 
@@ -60,13 +60,21 @@ async def run_predict(
         )
     if body.model_preset == "printed":
         raise HTTPException(status_code=400, detail="printed text detection is not available yet!")
-    if body.model_preset == "custom" and not body.model_id: 
+    if body.model_preset == "custom" and not body.model_id:
         raise HTTPException(status_code=400, detail="model_id is required when model_preset is 'custom'")
     new_id = _uuid.uuid4().hex[:8]
     kwargs = {"job_id": new_id, "project_id": project_id, "body": body.model_dump()}
-    job_id, is_new = create_job(new_id, "predict", project_id,
-                                 params={k: v for k, v in kwargs.items() if k != "job_id"},
-                                 dedupe_seconds=5)
+    job_id, is_new, active = claim_project_job(
+        project_id, "predict", job_id=new_id,
+        params={k: v for k, v in kwargs.items() if k != "job_id"},
+        dedupe_seconds=5,
+    )
+    if job_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"a {active['kind']} job (job {active['job_id']}) is already running for this "
+            "project — wait for it to finish or cancel it before starting a predict job.",
+        )
     if is_new:
         run_predict_task.apply_async(kwargs=kwargs, task_id=job_id)
     return {"job_id": job_id}
