@@ -14,15 +14,17 @@ evaluateRodan(), which is the old Rodan-job wrapper and pulls in a Rodan-
 specific ConfigParser.loadConfig() we don't want anywhere near this
 service).
 """
+import asyncio
 import base64
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Annotated
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from tensorflow.keras.models import load_model
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
@@ -73,6 +75,11 @@ STAFFLINES_LABEL = 1
 # RGBA PNG outputs) well under the container's 4 GiB limit.
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_DECODED_PIXELS = 6000 * 6000
+
+# How often /classify polls the ASGI connection for a client disconnect
+# while the background classification thread is running -- see classify()'s
+# own comment for why this matters at all.
+_DISCONNECT_POLL_INTERVAL_S = 0.25
 
 if not BACKGROUND_MODEL_PATH.exists() or not STAFFLINES_MODEL_PATH.exists():
     # Fail fast at startup (mirrors resolve_medieval_model_paths()'s own
@@ -170,17 +177,19 @@ def ready():
 
 
 @app.post("/classify")
-def classify(image: Annotated[UploadFile, File()]):
-    # Plain `def`, not `async def`: FastAPI runs a sync endpoint in its
-    # threadpool automatically, so the blocking TensorFlow/OpenCV/PNG work
-    # below (process_image_msae, _layer_to_rgba_png) doesn't stall the event
-    # loop the way it would inside an `async def` with no `await` yield
-    # points. image.file is a SpooledTemporaryFile -- .read() is sync here.
+async def classify(request: Request, image: Annotated[UploadFile, File()]):
+    # `async def`, not a plain `def`, specifically so this can poll
+    # request.is_disconnected() concurrently with the blocking TensorFlow
+    # work below -- see the cancellation comment further down for why.
+    # UploadFile.read() is itself async-safe (Starlette runs the
+    # underlying SpooledTemporaryFile.read in its threadpool for us), so
+    # this doesn't block the event loop the way a bare image.file.read()
+    # would from inside an async def.
     #
     # Read one byte past the cap so an exactly-at-the-limit upload doesn't
     # get misreported, without ever buffering more than MAX_UPLOAD_BYTES+1
     # bytes for an oversized one.
-    data = image.file.read(MAX_UPLOAD_BYTES + 1)
+    data = await image.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
@@ -197,12 +206,62 @@ def classify(image: Annotated[UploadFile, File()]):
             detail=f"decoded image {width}x{height} exceeds the {MAX_DECODED_PIXELS}-pixel limit",
         )
 
-    label_map = recognition_engine.process_image_msae(
-        img,
-        [str(BACKGROUND_MODEL_PATH), str(STAFFLINES_MODEL_PATH)],
-        PATCH_HEIGHT, PATCH_WIDTH,
-        mode="logical",
-    )
+    # Run the actual classification on a background thread so this
+    # coroutine is free to poll for a client disconnect concurrently (see
+    # below) -- a plain `await run_in_threadpool(...)` would block this
+    # coroutine until the thread finishes, defeating the whole point.
+    #
+    # Mothra's caller (tasks_predict.py) aborts its HTTP connection the
+    # instant a predict job is cancelled (paco_api.py's
+    # abort_classify_request()), but until now that only freed up
+    # Mothra's OWN worker thread -- this process kept running the
+    # abandoned TensorFlow inference to completion regardless, since
+    # nothing here ever checked whether the client was still listening.
+    # cancel_event is polled by process_image_msae() once per patch (see
+    # its should_cancel param), so setting it here now actually stops the
+    # inference within about one patch-predict's worth of time instead of
+    # letting the whole page finish for a result nobody will ever read.
+    cancel_event = threading.Event()
+    outcome: dict = {}
+
+    def _run():
+        try:
+            outcome["label_map"] = recognition_engine.process_image_msae(
+                img,
+                [str(BACKGROUND_MODEL_PATH), str(STAFFLINES_MODEL_PATH)],
+                PATCH_HEIGHT, PATCH_WIDTH,
+                mode="logical",
+                should_cancel=cancel_event.is_set,
+            )
+        except recognition_engine.ClassificationCancelled:
+            outcome["cancelled"] = True
+        except Exception as exc:  # noqa: BLE001 - reported back to the request handler, not raised in this thread
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    while thread.is_alive():
+        if await request.is_disconnected():
+            cancel_event.set()
+            break
+        await asyncio.sleep(_DISCONNECT_POLL_INTERVAL_S)
+    # Whether the loop above exited because the thread finished on its own
+    # or because we just set cancel_event, the thread may still be running
+    # for up to one more patch -- wait for it (off the event loop) before
+    # trusting `outcome`.
+    await asyncio.to_thread(thread.join)
+
+    if outcome.get("cancelled"):
+        # The client that would have read this response is already gone
+        # (that's what set cancel_event above) -- this just ends the
+        # request cleanly instead of returning a result nobody asked for
+        # anymore. 499 (client closed request) isn't in the HTTP spec but
+        # is the conventional code for exactly this case.
+        raise HTTPException(status_code=499, detail="client disconnected; classification cancelled")
+    if "error" in outcome:
+        raise HTTPException(status_code=500, detail=str(outcome["error"]))
+
+    label_map = outcome["label_map"]
     # process_image_msae restores full input resolution internally when
     # resize_ratio/max_dimension are used (neither is passed here, so this
     # should always hold) — re-checked because the Mothra side needs the

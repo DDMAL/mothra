@@ -13,12 +13,15 @@ task's shared psycopg2 connection.
 Uses raw http.client rather than urllib.request.urlopen (unlike text_api.py/
 cantus_api.py's simpler bridges) so the live connection can be exposed via
 `conn_holder` and forcibly aborted from another thread — see
-classify_stafflines's docstring. paco-classifier-service's /classify is a
-fully synchronous endpoint with no cancellation concept of its own (it
-blocks for the whole TensorFlow inference, up to DEFAULT_TIMEOUT seconds),
-so this is the only way a job-cancel request can make this call stop
-blocking the calling thread promptly instead of running to completion
-regardless.
+classify_stafflines's docstring. Aborting here is also what makes
+cancellation effective server-side, not just locally: paco-classifier-
+service's /classify polls for exactly this disconnect (its own
+request.is_disconnected() loop) and uses it to stop the TensorFlow
+inference between patches via recognition_engine.process_image_msae()'s
+should_cancel param, instead of running the whole page to completion for a
+result nobody will read. Without this abort, that /classify call would
+otherwise block the calling thread for up to DEFAULT_TIMEOUT seconds
+regardless of whether Mothra's own job was already cancelled.
 """
 from __future__ import annotations
 
@@ -113,12 +116,15 @@ def abort_classify_request(conn_holder: dict) -> None:
     """Forcibly abort an in-flight classify_stafflines() call, given the
     same `conn_holder` dict passed to it. Safe to call even if the
     connection hasn't been established yet, or has already finished/closed
-    on its own — this is a best-effort nudge, not a guarantee the remote
-    TensorFlow inference stops (paco-classifier-service has no way to be
-    told that; see this module's docstring). `sock.shutdown()` before
-    `close()` is what actually unblocks a thread currently parked in
-    getresponse()/read() on this connection — closing the fd alone isn't
-    reliably enough to interrupt a blocking read on every platform."""
+    on its own. This does double duty: it unblocks the LOCAL thread
+    immediately, and the resulting disconnect is also what
+    paco-classifier-service's /classify polls for to cancel the remote
+    TensorFlow inference cooperatively (see this module's docstring) — so
+    this is a real cancellation trigger for both sides now, not just a
+    local nudge. `sock.shutdown()` before `close()` is what actually
+    unblocks a thread currently parked in getresponse()/read() on this
+    connection — closing the fd alone isn't reliably enough to interrupt a
+    blocking read on every platform."""
     conn = conn_holder.get("conn")
     if conn is None:
         return

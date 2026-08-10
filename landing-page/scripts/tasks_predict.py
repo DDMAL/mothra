@@ -43,12 +43,12 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     aborts the in-flight paco-classifier-service connection (via
     abort_classify_request) so this raises JobCancelled within about a
     second, instead of blocking for up to classify_stafflines's own
-    DEFAULT_TIMEOUT (180s) on a job nobody cares about anymore. This can't
-    stop the TensorFlow inference actually running server-side — paco-
-    classifier-service has no cancellation concept of its own (see
-    paco_api.py's module docstring) — it only frees up this worker thread
-    promptly; the abandoned call keeps running remotely and its result is
-    simply discarded when it eventually finishes.
+    DEFAULT_TIMEOUT (180s) on a job nobody cares about anymore. That same
+    abort now also stops the TensorFlow inference actually running
+    server-side, not just this worker thread: paco-classifier-service polls
+    for exactly this disconnect and cancels cooperatively between patches
+    (see paco_api.py's module docstring and recognition_engine's
+    should_cancel param) — it's no longer a fire-and-forget abandoned call.
     """
     import cv2
     import numpy as np
