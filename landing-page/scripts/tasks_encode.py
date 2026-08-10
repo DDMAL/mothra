@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import shutil
+import sys
 import tempfile
 import uuid as _uuid
 from pathlib import Path
@@ -93,8 +94,12 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                 row = cur.fetchone()
                 if row:
                     current_annotation_id, current_yolo_txt, current_image_id = row
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 - best-effort enrichment lookup;
+                # any DB failure here just means "no current annotation to
+                # disambiguate against," not a reason to fail the whole
+                # encode -- but it's logged, not silently dropped, so a
+                # real/recurring failure is still visible in the job log.
+                print(f"[resolve-hints] {image_name}: current-annotation lookup failed: {e!r}", file=sys.stderr)
             try:
                 # Same disambiguation this function already applies to
                 # staffline_detections below (image_name alone isn't unique
@@ -103,10 +108,12 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
                 # we have one, so a same-named-but-different image can't
                 # hand back the wrong syllable alignment.
                 text_alignment = get_latest_text_alignment(cur, project_id, image_name, current_image_id)
-            except Exception:
-                pass  # a real DB failure here just means "no text alignment this
-                      # time" for this call site -- get_latest_text_alignment
-                      # itself already rolled back before re-raising
+            except Exception as e:  # noqa: BLE001 - a real DB failure here just
+                # means "no text alignment this time" for this call site --
+                # get_latest_text_alignment itself already rolled back
+                # before re-raising, so this is a safe, logged fallback
+                # rather than a silent one.
+                print(f"[resolve-hints] {image_name}: text-alignment lookup failed: {e!r}", file=sys.stderr)
             if current_annotation_id is not None:
                 try:
                     cur.execute(
