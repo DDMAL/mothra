@@ -562,9 +562,13 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
 
 ## Things that don't exist yet (planned)
 
-- Cleanup of `job_uploads`/`job_sessions` rows — no TTL/periodic deletion yet, they accumulate
-  (and now matter slightly more: failed-but-not-yet-retried encode jobs keep their staged
-  `job_uploads` rows around on purpose, so retry can still fetch them — see **Job queue** above)
+- *Periodic* cleanup of `job_uploads`/`job_sessions` rows — `job_store.py` has real cleanup
+  functions (`cleanup_stale_uplaods(max_age_days=1)` — note the typo — and
+  `cleanup_stale_sessions(max_age_days=14)`, invoked from `main.py`), but they run **once at
+  process start only**; there is no scheduler, so a long-lived pod never sweeps again. Rows
+  still accumulate between restarts (and matter slightly more now: failed-but-not-yet-retried
+  encode jobs keep their staged `job_uploads` rows around on purpose, so retry can still fetch
+  them — see **Job queue** above)
 - Health/status page — no way to check backend/Postgres/Redis/Celery-worker/IC/text-service
   liveness from the app; not implemented
 - IIIF manifest import — no way to bulk-import project images from a IIIF manifest URL; not
@@ -595,7 +599,12 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   `paco-classifier-service` (wraps the `paco-classifier/` submodule), called concurrently with the
   text/music YOLO pass from `tasks_predict.py`'s `_run_medieval_inference()`; falls back to
   raw-page stave detection if the service is unreachable — see **Staffline detection** above
-- **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines; fake `setTimeout` timers are gone
+- **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines when given a
+  `streamRequest`, which every current `AppRouter` call site passes. The fake `setTimeout`
+  timer path is **dormant, not gone**: `ProcessingPage.tsx` still contains the timer-driven
+  fake-progress block (guarded by `if (streamRequest) return;`), which would reactivate for any
+  future call site that omits `streamRequest` — slated for removal in the alpha transition
+  (see `documentation_allons-y/ALPHA_TRANSITION_PLAN.md`)
 - **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
 - **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs
 - **Soft-delete + hard-delete** — `deleted_at` is the soft-delete flag; a separate hard-delete path does `DELETE FROM project_images` + `DELETE FROM projects` to purge BYTEA data
