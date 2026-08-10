@@ -62,9 +62,11 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     staleness inference_api.py's _load_image_and_yolo_for_detection() already
     guards against for the interpolate-preview/confirm routes (there, by
     re-resolving the current annotation via image_id); here, since this
-    function is only ever called with image_name (not image_id), the
-    equivalent guard is: look up the current annotation_id for this image
-    first, then require tier 1's staffline_detections row to match it.
+    function is only ever called with image_name (not a project_images.id
+    of its own), the equivalent guard is: look up the current
+    annotation_id (and its image_id, reused below for the text_alignment
+    lookup too) for this image first, then require tier 1's
+    staffline_detections row to match it.
 
     ev, if given, is _encode_one's own event-publishing closure -- used here
     only to emit [trace] lines confirming staves_from_jsomr()'s input/output
@@ -79,25 +81,32 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
         con = get_db_conn()
         try:
             cur = con.cursor()
-            try:
-                text_alignment = get_latest_text_alignment(cur, project_id, image_name)
-            except Exception:
-                pass  # a real DB failure here just means "no text alignment this
-                      # time" for this call site -- get_latest_text_alignment
-                      # itself already rolled back before re-raising
             current_annotation_id = None
             current_yolo_txt = None
+            current_image_id = None
             try:
                 cur.execute(
-                    "SELECT id, yolo_txt FROM annotations WHERE image_name = %s AND project_id = %s "
+                    "SELECT id, yolo_txt, image_id FROM annotations WHERE image_name = %s AND project_id = %s "
                     "ORDER BY created_at DESC LIMIT 1",
                     (image_name, project_id),
                 )
                 row = cur.fetchone()
                 if row:
-                    current_annotation_id, current_yolo_txt = row
+                    current_annotation_id, current_yolo_txt, current_image_id = row
             except Exception:
                 pass
+            try:
+                # Same disambiguation this function already applies to
+                # staffline_detections below (image_name alone isn't unique
+                # within a project -- see get_latest_text_alignment's
+                # docstring): prefer the current annotation's image_id when
+                # we have one, so a same-named-but-different image can't
+                # hand back the wrong syllable alignment.
+                text_alignment = get_latest_text_alignment(cur, project_id, image_name, current_image_id)
+            except Exception:
+                pass  # a real DB failure here just means "no text alignment this
+                      # time" for this call site -- get_latest_text_alignment
+                      # itself already rolled back before re-raising
             if current_annotation_id is not None:
                 try:
                     cur.execute(

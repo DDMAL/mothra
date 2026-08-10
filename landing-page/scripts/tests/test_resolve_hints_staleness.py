@@ -34,7 +34,7 @@ def _install_db_free_stubs():
         auth_api_stub.get_db_conn = lambda: None
         auth_api_stub.release_db_conn = lambda con: None
 
-        def _stub_get_latest_text_alignment(cur, project_id, image_name):
+        def _stub_get_latest_text_alignment(cur, project_id, image_name, image_id=None):
             # Faithful-enough stand-in for auth_api.get_latest_text_alignment:
             # every test in this file passes text_alignment_row=None (this
             # file only exercises the staffline-detection staleness guard,
@@ -43,11 +43,18 @@ def _install_db_free_stubs():
             # nothing -- but it's written to also handle a real row, in case
             # a future test in this file exercises that path.
             import json
-            cur.execute(
-                "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
-                " ORDER BY created_at DESC LIMIT 1",
-                (image_name, project_id),
-            )
+            if image_id:
+                cur.execute(
+                    "SELECT alignment_json FROM text_alignments WHERE image_id=%s AND project_id=%s"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (image_id, project_id),
+                )
+            else:
+                cur.execute(
+                    "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (image_name, project_id),
+                )
             row = cur.fetchone()
             if not row or not row[0]:
                 return None
@@ -148,7 +155,7 @@ def test_stale_staffline_detection_is_ignored_in_favor_of_current_annotation(mon
                     "centerline_page": {"x_start": 0, "x_end": 10, "y_values": [5] * 11}}]
 
     cursor = FakeCursor(
-        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02"),
+        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
         staffline_row_by_annotation_id={stale_annotation_id: (stale_jsomr,)},
         text_alignment_row=None,
     )
@@ -187,7 +194,7 @@ def test_current_staffline_detection_still_wins_when_it_matches():
              "centerline_page": {"x_start": 0, "x_end": 700, "y_values": [5] * 701}},
         ]
         cursor = FakeCursor(
-            annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02"),
+            annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
             staffline_row_by_annotation_id={current_annotation_id: (fresh_jsomr,)},
             text_alignment_row=None,
         )

@@ -45,7 +45,11 @@ services:
     expose:
       - "8003"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"]
+      # /ready (not /health) so depends_on's service_healthy actually waits
+      # for the classifier weights to have loaded as valid Keras models,
+      # not just for the process to be serving HTTP -- see main.py's
+      # ready()/health() docstrings.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/ready', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 5

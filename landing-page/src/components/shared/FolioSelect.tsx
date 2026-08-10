@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isValidFolioShape } from "../../utils/folio";
 
 interface FolioSelectProps {
@@ -37,6 +37,14 @@ export default function FolioSelect({
   const [customInput, setCustomInput] = useState(() =>
     customMode ? value : "",
   );
+
+  // The above only derives customInput once, at mount. If the parent later
+  // pushes a new `value` while we're already in custom mode (e.g. a folio
+  // renumbered elsewhere, or the value cleared/reset), keep the free-text
+  // input in sync with it rather than silently showing a stale value.
+  useEffect(() => {
+    if (customMode) setCustomInput(value);
+  }, [value, customMode]);
 
   if (customMode) {
     const invalid = customInput !== "" && !isValidFolioShape(customInput);

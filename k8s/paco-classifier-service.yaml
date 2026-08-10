@@ -36,15 +36,20 @@ spec:
           # point, not measured; tune after watching real usage (see
           # text-service's own OOM-kill lesson in CLAUDE.md).
           #
-          # /health is a liveness/readiness signal only -- it does NOT
-          # exercise process_image_msae() itself (which reloads its Keras
-          # models fresh on every /classify call, so there's no persistent
-          # "warmed" state to probe for). It confirms the process is
-          # actually serving HTTP and that the weight files it validated at
-          # startup are still present -- see main.py's health() docstring.
+          # /health (liveness) confirms the process is actually serving
+          # HTTP and that the weight files it validated at startup are
+          # still present -- it does NOT exercise process_image_msae()
+          # itself (which reloads its Keras models fresh on every
+          # /classify call, so there's no persistent "warmed" state to
+          # probe for on every poll). /ready (readiness) additionally
+          # confirms those weight files actually loaded as valid Keras
+          # models at startup, so a corrupt/incompatible .h5 (which passes
+          # /health) keeps this pod out of rotation instead of silently
+          # failing every /classify call -- see main.py's health()/ready()
+          # docstrings.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 8003
             initialDelaySeconds: 10
             periodSeconds: 10

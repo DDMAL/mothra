@@ -132,14 +132,15 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
 
         image_data_uri = None
         image_bytes = None
+        image_id = None
         if image_name:
             cur.execute(
-                "SELECT data, original_data, original_mime_type, mime_type FROM project_images"
+                "SELECT id, data, original_data, original_mime_type, mime_type FROM project_images"
                 " WHERE project_id=%s AND name=%s",
                 (project_id, image_name))
             img_row = cur.fetchone()
             if img_row:
-                img_data, original_data, original_mime_type, mime_type = img_row
+                image_id, img_data, original_data, original_mime_type, mime_type = img_row
                 image_bytes = bytes(original_data if original_data is not None else img_data)
                 # original_data (when present) can be a different format than
                 # the resized working copy (e.g. PNG vs. the resize's JPEG) —
@@ -161,7 +162,7 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
             # Either must degrade to "skip the correction, open the file as-is"
             # rather than 500 an edit session that opened fine before this.
             try:
-                text_alignment = get_latest_text_alignment(cur, project_id, image_name)
+                text_alignment = get_latest_text_alignment(cur, project_id, image_name, image_id)
                 dims = encode_to_mei.image_dimensions(image_bytes) if text_alignment else None
                 if dims:
                     image_w, image_h = dims

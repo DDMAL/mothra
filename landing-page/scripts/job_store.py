@@ -80,15 +80,17 @@ def claim_project_job(project_id: int, kind: str, *, job_id: str,
         cur = con.cursor()
         cur.execute("SELECT pg_advisory_xact_lock(%s)", (project_id,))
 
+        kinds = tuple(allowed_kinds or {kind})
         cur.execute(
             "SELECT job_id, kind FROM jobs WHERE project_id=%s"
             " AND status IN ('pending','running')"
+            " AND kind <> ALL(%s)"
             " ORDER BY created_at DESC LIMIT 1",
-            (project_id,),
+            (project_id, list(kinds)),
         )
         row = cur.fetchone()
         active = {"job_id": row[0], "kind": row[1]} if row else None
-        if active is not None and active["kind"] not in (allowed_kinds or {kind}):
+        if active is not None:
             con.commit()  # nothing written yet; just releases the advisory lock
             return None, False, active
 

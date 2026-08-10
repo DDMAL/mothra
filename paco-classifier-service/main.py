@@ -18,10 +18,12 @@ import base64
 import os
 import sys
 from pathlib import Path
+from typing import Annotated
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from tensorflow.keras.models import load_model
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
 sys.path.insert(0, str(PACO_DIR))
@@ -61,6 +63,17 @@ PATCH_WIDTH = 256
 BACKGROUND_LABEL = 0
 STAFFLINES_LABEL = 1
 
+# This endpoint has no auth of its own (see the CORS comment on `app` above)
+# and reads the full upload into memory before decoding, so an unbounded
+# upload -- or a small, highly-compressed one that decodes to a huge pixel
+# grid -- can exhaust the container's memory limit before decoding even
+# fails. Bound both: 50 MiB comfortably covers a single high-res page scan,
+# and 6000x6000 covers real manuscript-page resolutions while still keeping
+# the classifier's several in-flight copies (input image, label map, two
+# RGBA PNG outputs) well under the container's 4 GiB limit.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_DECODED_PIXELS = 6000 * 6000
+
 if not BACKGROUND_MODEL_PATH.exists() or not STAFFLINES_MODEL_PATH.exists():
     # Fail fast at startup (mirrors resolve_medieval_model_paths()'s own
     # RuntimeError-on-missing-weights philosophy) rather than on first request.
@@ -70,6 +83,31 @@ if not BACKGROUND_MODEL_PATH.exists() or not STAFFLINES_MODEL_PATH.exists():
         f"or check that the paco-classifier submodule is checked out "
         f"(git submodule update --init --recursive)"
     )
+
+
+def _validate_classifier_models() -> str | None:
+    """One-time, startup-only load of both weight files as real Keras
+    models (mirrors recognition_engine.process_image_msae()'s own bare
+    load_model(path) call, so this fails on exactly the same conditions
+    inference would). The existence check above only confirms the files
+    are present, not that they're valid/loadable/version-compatible --
+    a corrupt or incompatible .h5 passes that check but fails every
+    /classify call. Returns the error string on failure, or None if both
+    models loaded successfully. Deliberately NOT re-run per request or
+    per health poll: load_model() is exactly as expensive as inference
+    (same reason process_image_msae() itself reloads fresh every call
+    instead of caching -- see health()'s docstring), so this result is
+    computed once here and cached for /ready to report cheaply.
+    """
+    try:
+        for path in (BACKGROUND_MODEL_PATH, STAFFLINES_MODEL_PATH):
+            load_model(str(path))
+    except Exception as exc:  # noqa: BLE001 - any load failure means "not ready"
+        return str(exc)
+    return None
+
+
+_classifier_ready_error = _validate_classifier_models()
 
 def _layer_to_rgba_png(image: np.ndarray, label_map: np.ndarray, id_label: int) -> bytes:
     """One label's pixels, alpha-masked — ported verbatim from
@@ -96,32 +134,68 @@ def _layer_to_rgba_png(image: np.ndarray, label_map: np.ndarray, id_label: int) 
 
 @app.get("/health")
 def health():
-    """Liveness/readiness signal for Compose's healthcheck and k8s's probes
-    (see docker-compose.yml / k8s/paco-classifier-service.yaml). Deliberately
-    does NOT exercise recognition_engine.process_image_msae() -- it calls
-    tensorflow.keras.models.load_model() fresh on every single request (no
-    caching in the vendored submodule), so there is no persistent "model
-    warmed" state to probe for; the meaningful, cheap thing to confirm
-    instead is that this process is actually serving HTTP (not just that the
-    OS has a listener on the port, which a bare TCP probe can't tell apart
-    from an app that bound the port and then crashed) and that the weight
-    files this process already validated at import time are still there."""
+    """Liveness signal only (see docker-compose.yml / k8s's livenessProbe).
+    Deliberately does NOT exercise recognition_engine.process_image_msae()
+    -- it calls tensorflow.keras.models.load_model() fresh on every single
+    request (no caching in the vendored submodule), so there is no
+    persistent "model warmed" state to probe for on every poll; the
+    meaningful, cheap thing to confirm here is that this process is
+    actually serving HTTP (not just that the OS has a listener on the
+    port, which a bare TCP probe can't tell apart from an app that bound
+    the port and then crashed) and that the weight files this process
+    already validated at import time are still there. It does NOT confirm
+    those files are valid, loadable models -- see /ready for that."""
     if not BACKGROUND_MODEL_PATH.exists() or not STAFFLINES_MODEL_PATH.exists():
         raise HTTPException(status_code=503, detail="staffline classifier weights missing")
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def ready():
+    """Readiness signal: the weight files must exist AND have actually
+    loaded as valid Keras models at startup (see _validate_classifier_models()
+    above). Point Compose's healthcheck and k8s's readinessProbe at this
+    endpoint, not /health -- a corrupt or version-incompatible .h5 passes
+    /health (files merely exist) but fails every real /classify call,
+    silently falling back to raw-page stave detection on the Mothra side
+    (tasks_predict.py) with nothing surfaced here. This is a cached,
+    startup-only result, not a fresh model load per poll -- see that
+    function's docstring for why."""
+    if _classifier_ready_error is not None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"staffline classifier models failed to load: {_classifier_ready_error}",
+        )
+    return {"status": "ready"}
+
+
 @app.post("/classify")
-def classify(image: UploadFile = File(...)):
+def classify(image: Annotated[UploadFile, File()]):
     # Plain `def`, not `async def`: FastAPI runs a sync endpoint in its
     # threadpool automatically, so the blocking TensorFlow/OpenCV/PNG work
     # below (process_image_msae, _layer_to_rgba_png) doesn't stall the event
     # loop the way it would inside an `async def` with no `await` yield
     # points. image.file is a SpooledTemporaryFile -- .read() is sync here.
-    data = image.file.read()
+    #
+    # Read one byte past the cap so an exactly-at-the-limit upload doesn't
+    # get misreported, without ever buffering more than MAX_UPLOAD_BYTES+1
+    # bytes for an oversized one.
+    data = image.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"uploaded image exceeds the {MAX_UPLOAD_BYTES}-byte limit",
+        )
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=400, detail="could not decode uploaded image")
+
+    height, width = img.shape[:2]
+    if height * width > MAX_DECODED_PIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"decoded image {width}x{height} exceeds the {MAX_DECODED_PIXELS}-pixel limit",
+        )
 
     label_map = recognition_engine.process_image_msae(
         img,

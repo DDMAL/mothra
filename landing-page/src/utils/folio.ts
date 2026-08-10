@@ -274,8 +274,10 @@ export function buildEffectiveFolioSequence(
     // fall back to today's positional behavior
     sequence.push(nextCanonical);
     isPhantom.push(false);
-    if (nextCanonical !== undefined) lastAccepted = nextCanonical;
-    c++;
+    if (nextCanonical !== undefined) {
+      lastAccepted = nextCanonical;
+      c++;
+    }
   }
 
   return { sequence, isPhantom, canonicalConsumed: c };
