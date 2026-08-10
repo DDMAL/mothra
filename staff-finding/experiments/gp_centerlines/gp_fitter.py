@@ -42,10 +42,17 @@ MATERN_NU = 2.5
 # to track high-frequency noise.
 LENGTH_SCALE_INIT = 100.0
 
-# Bounds for the kernel length-scale hyperparameter optimisation.
+# Bounds for the kernel length-scale hyperparameter optimisation. Upper
+# bound of 800px is ~8x LENGTH_SCALE_INIT -- lets the optimiser relax toward
+# a near-linear fit on unusually straight lines, rather than being genuinely
+# unbounded (which would let the optimiser wander arbitrarily far on a noisy
+# page instead of settling near the expected scale).
 LENGTH_SCALE_BOUNDS = (5.0, 800.0)
 
-# Initial noise level for the WhiteKernel (observation noise in pixels²).
+# Initial noise level for the WhiteKernel (observation noise in pixels²), so
+# std ≈ sqrt(2.0) ≈ 1.4px -- bracketing the sub-pixel jitter expected from
+# Sauvola-boundary noise and quantization in the filtered ink coordinates,
+# not measurement noise in any other sense.
 NOISE_LEVEL_INIT = 2.0
 NOISE_LEVEL_BOUNDS = (0.1, 50.0)
 
@@ -126,6 +133,13 @@ def gp_fit(
     gpr = GaussianProcessRegressor(
         kernel=kernel,
         n_restarts_optimizer=n_restarts,
+        # Stafflines sit at very different absolute page-y values (hundreds
+        # to thousands of px apart, line to line and page to page). Without
+        # this, the GP's implicit zero mean would force the kernel to spend
+        # its length-scale/noise budget representing that large constant
+        # offset before it could represent shape at all. normalize_y
+        # subtracts the observation mean first so the hyperparameters
+        # optimise against the curve's shape alone.
         normalize_y=True,
     )
 

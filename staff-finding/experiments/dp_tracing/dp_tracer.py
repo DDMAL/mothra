@@ -115,7 +115,10 @@ def dp_trace(
         ys = np.full(len(xs), y_hint)
         return xs, ys
 
-    # Light Gaussian blur to reduce pixel-level noise.
+    # Light Gaussian blur to reduce pixel-level noise. 0.5px cutoff below is
+    # a "not worth the full-page filter1d call" threshold, not a
+    # correctness one -- also means very low-resolution scans (small
+    # scale_unit) silently get no pre-blur at all.
     sigma = blur_sigma_multiplier * scale_unit
     if sigma > 0.5:
         smoothed = gaussian_filter1d(gray.astype(np.float32), sigma=sigma, axis=0)

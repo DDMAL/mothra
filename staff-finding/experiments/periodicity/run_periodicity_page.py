@@ -80,6 +80,16 @@ def run_periodicity_page(
     blur_sigma_multiplier: float = BLUR_SIGMA_MULTIPLIER,
     n_teeth: int = N_TEETH,
     teeth_weight: float = TEETH_WEIGHT,
+    # Same default as dp_tracing (which extends to recover staflines the
+    # YOLO box clipped/narrowed), inherited on the assumption that it
+    # transfers directly since this is also a DP trace. Not necessarily
+    # safe: the comb teeth here reach further than plain DP's local
+    # darkness cost (y ± k*h_est per tooth), so extending across blank
+    # margins risks the comb locking onto unrelated periodic structure
+    # (text lines, decoration) in a way plain DP's simpler cost wouldn't.
+    # That risk was never weighed against the clipped-box benefit
+    # specifically for the comb case -- revisit if periodicity traces show
+    # margin-locking on a page with decorated margins.
     extend_to_page: bool = True,
     use_valley_threshold: bool = False,
 ) -> None:

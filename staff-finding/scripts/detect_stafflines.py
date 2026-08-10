@@ -27,6 +27,13 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
 def collect_images(images_dir: Path) -> list[Path]:
+    """Recursively find every image under images_dir, case-insensitively.
+
+    Skips macOS resource-fork sidecar files (``._foo.jpg``, created by
+    Finder/external drives when copying) rather than trying to run
+    detection on them -- extension-based globbing alone can't tell these
+    apart from real images.
+    """
     images = []
     for ext in IMAGE_EXTENSIONS:
         images.extend(images_dir.rglob(f"*{ext}"))
@@ -42,6 +49,25 @@ def detect_and_write(
     iou: float,
     device: str | None,
 ) -> None:
+    """Run the YOLO stave detector once per image, writing one <stem>.txt each.
+
+    Label files are keyed by filename stem alone (e.g. "page.png" ->
+    "page.txt"), matching how the calling shell scripts (test_model.sh,
+    scripts/run_inference.py) look them back up -- the simplest possible
+    mapping, and sufficient for the common case of one manuscript's pages
+    per run.
+
+    Known, deliberately-accepted limitation: two images with the same stem
+    in different subdirectories of images_dir silently overwrite each
+    other's label file, so whichever is processed last "wins" for both.
+    A real fix needs collision-proof label paths plus an explicit
+    image-to-label mapping threaded through every consumer -- flagged by
+    CodeRabbit on PR #53 and declined as a heavy lift for what's currently
+    a manual-batch-testing-only edge case (this script isn't reachable from
+    the production predict pipeline, which processes one already-identified
+    image at a time, never a whole directory). See test_model.sh's own
+    --help text for the same note at its call site.
+    """
     model = YOLO(str(weights))  # load once for the whole batch
     output_dir.mkdir(parents=True, exist_ok=True)
 

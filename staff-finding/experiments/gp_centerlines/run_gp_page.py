@@ -194,7 +194,15 @@ def run_gp_page(
             method="gp_matern25",
             meta=meta,
         )
-        # Store uncertainty in flags as a summary statistic (mean std across x).
+        # Store uncertainty in flags as a summary statistic (mean std across
+        # x), not in the JSOMR schema's own quality.confidence field:
+        # confidence is a stub nothing downstream (eval_page.py/eval_batch.py)
+        # reads yet, so flags -- already rendered in the diagnostic and JSON
+        # -- was the path of least resistance. This does throw away the
+        # actual point of a GP: per-column resolution, collapsed here to one
+        # page-level number. Revisit (put y_std in meta, or wire up
+        # confidence for real) before leaning on this for QA at the per-line
+        # level rather than just a page-level sanity check.
         mean_std = float(np.mean(y_std)) if y_std else 0.0
         fit.flags = [f"mean_uncertainty_px:{mean_std:.2f}"]
 
