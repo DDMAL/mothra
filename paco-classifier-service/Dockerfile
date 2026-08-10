@@ -14,7 +14,15 @@ COPY paco-classifier-service/ ./paco-classifier-service/
 # the weights -- no separate model-weights COPY step needed.
 COPY paco-classifier/ ./paco-classifier/
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
-USER appuser
+# Numeric UID, not the username: k8s's runAsNonRoot: true (see
+# k8s/paco-classifier-service.yaml) can only verify non-root statically from
+# the image's config.User field when it's a UID. A named USER can't be
+# resolved without actually running the container, so the kubelet refuses to
+# create it at all -- "container has runAsNonRoot and image has non-numeric
+# user (appuser), cannot verify user is non-root" -- rather than silently
+# running as root. 10001 matches the --uid passed to useradd above, so this
+# is still appuser, just referenced the way k8s can check.
+USER 10001
 WORKDIR /app/paco-classifier-service
 EXPOSE 8003
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=30s \
