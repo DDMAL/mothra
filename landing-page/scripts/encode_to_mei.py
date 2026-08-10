@@ -208,22 +208,40 @@ def assign_glyphs_to_staves(
 ) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
     """Assign each glyph to a stave.
 
-    Detected staves (usually from YOLO stave-class detections) can miss real
-    staff systems entirely — confirmed on a real manuscript page where only 4
-    of 10 real staff-system rows had any stave-class detection at all. Rather
-    than force every glyph onto whichever detected stave is nearest (which
-    corrupts note ordering and pitch for every missed row, since glyphs from
-    multiple distinct physical rows end up interleaved by x-position in one
-    stave's bucket), this reconciles independently-clustered row-groups
-    against the detected staves by Y-range overlap: a row that overlaps a
-    detected stave is assigned to it as before; a row that overlaps nothing
-    is a system the detector missed, and gets a synthesized stave of its own.
+    Two passes, in order:
 
-    That synthesized stave's line_ys (used for pitch computation — see
+    1. Direct claim: each glyph is assigned individually to whichever
+       existing stave's own line band (uly..lry, padded by
+       STAVE_BUFFER_PX) it falls nearest/within -- never to a stave more
+       than STAVE_BUFFER_PX away. This is per-glyph, not per-row-blob, so a
+       lyric-text glyph (or anything else) sitting between two
+       independently-detected staves can never drag a REAL note that IS
+       near its own stave along with it into the wrong bucket, and two
+       real, adjacent, correctly-detected staves can never have their
+       glyphs merged into just one of them and left the other with
+       nothing -- confirmed as a real failure mode on a page where two
+       genuinely-detected, Y-adjacent staves both ended up with zero
+       glyphs after the OLD row-clustering-then-best-overlap-wins design
+       let a lyric-text-bridged row blob's whole content get claimed by a
+       third bucket instead.
+
+    2. Whatever's left unclaimed by pass 1 (mostly lyric-text glyphs that
+       don't sit close enough to any note-line band, plus -- crucially --
+       every glyph belonging to a system the detector missed entirely) is
+       clustered into rows exactly as before (_cluster_glyphs_into_staves),
+       and EACH resulting row is matched to whichever existing stave its
+       own aggregate bbox overlaps most (unchanged blob-level logic); a row
+       that overlaps no existing stave at all is a genuinely missed system
+       and gets a synthesized stave of its own, appended at the end of
+       `staves`. This pass is unchanged from before this fix -- it only
+       ever sees the reduced, already-narrowed-down leftover set, so it
+       can no longer misroute a real note that pass 1 already claimed.
+
+    That synthesized stave's line_ys (used for pitch computation -- see
     _step_from_y) would otherwise come purely from the missed row's own
     glyphs' bounding box (_cluster_glyphs_into_staves's crude fallback),
     which can be badly skewed by that row's own melodic range (a single
-    unusually high/low note inflates the guessed staff height) — confirmed
+    unusually high/low note inflates the guessed staff height) -- confirmed
     on a real page as a visible, per-row-only vertical rendering offset
     (notes floating well above/below their real staff, since Neon/Verovio
     renders pitch, not raw pixel position). Passing this page's OWN
@@ -236,10 +254,7 @@ def assign_glyphs_to_staves(
     same opt-in-fabrication rule as tier-3's own estimate_staves_from_glyphs
     fallback -- without this, a page could end up with tier-3 staves carrying
     synthetic pitch geometry while recovered staves silently didn't, even
-    though the caller asked for synthetic lines everywhere. The two knobs
-    compose: allow_synthetic_lines gates whether a recovered stave gets any
-    line_ys at all, and typical_line_spacing (when synthesis is allowed)
-    decides how reliable that synthesis is.
+    though the caller asked for synthetic lines everywhere.
 
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
@@ -250,26 +265,48 @@ def assign_glyphs_to_staves(
         result: dict[int, list[Glyph]] = {-1: list(glyphs)}
         return result, staves
 
-    typical_spacing = _typical_line_spacing(staves)
-    result = {i: [] for i in range(len(staves))}
-    row_groups = _cluster_glyphs_into_staves(
-        glyphs, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing,
-        allow_synthetic_lines=allow_synthetic_lines,
-    )
+    result: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+    unclaimed: list[Glyph] = []
 
-    for row_stave, members in row_groups:
-        best_idx, best_overlap = None, 0
-        for i, stave in enumerate(staves):
-            lo, hi = stave.uly - STAVE_BUFFER_PX, stave.lry + STAVE_BUFFER_PX
-            overlap = min(row_stave.lry, hi) - max(row_stave.uly, lo)
-            if overlap > best_overlap:
-                best_overlap, best_idx = overlap, i
+    def _claim(glyph: Glyph, candidates: list[StaveBbox]) -> Optional[int]:
+        best_idx, best_dist = None, None
+        for i, stave in candidates: 
+            if stave.uly <= glyph.cy <= stave.lry:
+                dist = 0.0
+            else:
+                dist = min(abs(glyph.cy - stave.uly), abs(glyph.cy - stave.lry))
+            if dist <= STAVE_BUFFER_PX and (best_dist is None or dist < best_dist):
+                best_dist, best_idx = dist, i
+        return best_idx
+
+    indexed_staves = list(enumerate(staves))
+    for glyph in glyphs:
+        best_idx = _claim(glyph, indexed_staves)
         if best_idx is not None:
-            result[best_idx].extend(members)
+            result[best_idx].append(glyph)
         else:
-            new_idx = len(staves)
-            staves.append(row_stave)
-            result[new_idx] = list(members)
+            unclaimed.append(glyph)
+
+    if unclaimed:
+        typical_spacing = _typical_line_spacing(staves)
+        row_groups = _cluster_glyphs_into_staves(
+            unclaimed, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing,
+            allow_synthetic_lines=allow_synthetic_lines,
+        )
+
+        for row_stave, members in row_groups:
+            best_idx, best_overlap = None, 0
+            for i, stave in enumerate(staves):
+                lo, hi = stave.uly - STAVE_BUFFER_PX, stave.lry + STAVE_BUFFER_PX
+                overlap = min(row_stave.lry, hi) - max(row_stave.uly, lo)
+                if overlap > best_overlap:
+                    best_overlap, best_idx = overlap, i
+            if best_idx is not None:
+                result[best_idx].extend(members)
+            else:
+                new_idx = len(staves)
+                staves.append(row_stave)
+                result[new_idx] = list(members)
     for idx in result:
         result[idx].sort(key=lambda g: g.ulx)
     return result, staves
@@ -1088,9 +1125,12 @@ def build_mei(
         for g in row_groups if len(g) > 1
     }
 
-    for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
+    for stave_idx in sorted(
+            (k for k in glyphs_by_stave if k >= 0),
+            key=lambda k: (staves[k].uly, k),
+    ):
         staff_glyphs = glyphs_by_stave[stave_idx]
-        if not staff_glyphs:
+        if not staff_glyphs and not boxes_by_stave.get(stave_idx):
             continue
         # <sb> marks the start of each stave and links it to its zone
         zone_id = stave_zone_ids.get(stave_idx, str(stave_idx))

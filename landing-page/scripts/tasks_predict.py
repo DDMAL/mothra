@@ -282,8 +282,13 @@ def run_predict_task(job_id, project_id, body):
                 publish({"type": "log", "message":
                     f"[trace] {image_name}: stave-class boxes came from model"
                     f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
+                redetect_fn = (
+                    yolo_models.infer_staves_raw_boxes
+                    if yolo_models.medieval_models is not None else None
+                )
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
+                    redetect_fn=redetect_fn,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

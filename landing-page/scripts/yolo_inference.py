@@ -103,6 +103,42 @@ class YoloModelSet:
         _append_boxes(lines, st_model(img_arr, device=self.st_device, verbose=False)[0], st_map, self.st_threshold)
         return "\n".join(lines)
 
+    def infer_staves_raw_boxes(self, img_arr, conf: float, iou: float, imgsz: int) -> list[dict]:
+        """Medieval-preset-only: run the stave detector directly on `img_arr`
+        (typically a small page crop, not the full page) at caller-chosen
+        conf/iou/imgsz, returning raw crop-local pixel boxes plus each box's
+        own confidence -- unlike infer_staves(), this bypasses the yolo-txt
+        round trip and self.st_threshold entirely, since staffline_stage.py's
+        fallback re-probe (_run_fallback_redetect_stage) needs per-box
+        confidence values to rank candidates
+        (fallback_redetect.validate_and_select_candidates), not a
+        fixed-threshold yolo-txt line. Mirrors
+        staff-finding/scripts/run_page.py's own run_fallback_redetect()
+        model.predict(...) call exactly, so an equivalent standalone CLI run
+        and this in-process path behave identically.
+
+        Returns one dict per surviving box: {"xyxy": (x0, y0, x1, y1),
+        "confidence": float}, crop-local (same coordinate frame as img_arr)
+        -- the caller converts to page-absolute using its own crop origin,
+        exactly like it already does for the page's primary stave-class
+        boxes.
+        """
+        assert self.medieval_models is not None, "infer_staves_raw_boxes is medieval-preset-only"
+        _, st_model = self.medieval_models
+        _, st_map = self.class_maps
+        result = st_model.predict(
+            source=img_arr, conf=conf, iou=iou, imgsz=imgsz, save=False, verbose=False,
+        )[0]
+        boxes = []
+        if result.boxes is not None:
+            for box in result.boxes:
+                if st_map.get(int(box.cls[0])) is None:
+                    continue
+                x0, y0, x1, y1 = box.xyxy[0].tolist()
+                boxes.append({"xyxy": (x0, y0, x1, y1), "confidence": float(box.conf[0])})
+        return boxes
+
+
 def resolve_yolo_models(
         cur, project_id: int, model_preset: str, model_id: Optional[str],
         confidence_threshold: float, device: str,

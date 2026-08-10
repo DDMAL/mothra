@@ -26,7 +26,7 @@ like a stream_text_finding failure would.
 
 import json
 import uuid as _uuid
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 import numpy as np
 
@@ -39,6 +39,14 @@ STAFFLINE_CLASS_ID = 2
 
 # Matches staff-finding/scripts/run_page.py's DEFAULT_CROP_PADDING_PX.
 CROP_PADDING_PX = 2
+
+# Fallback missed-detection re-probe (medieval-preset only; see
+# _run_fallback_redetect_stage). Ported verbatim from
+# staff-finding/scripts/run_page.py's DEFAULT_FALLBACK_CONF/_IOU/FALLBACK_IMGSZ
+# -- that module can't be imported directly; see this file's module docstring.
+FALLBACK_CONF = 0.15
+FALLBACK_IOU = 0.7
+FALLBACK_IMGSZ = 1280
 
 
 def has_class(yolo_txt: str, class_id: int) -> bool:
@@ -180,10 +188,140 @@ def _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, sca
     ))
     return records
 
+def _sibling_widths_for_stave(stave_id, grouping_result, fit_results) -> list[float]:
+    """Page-absolute x-widths of a stave's own already-detected fits, for
+    fallback_redetect.is_plausible_width's relative-width comparison. Ported
+    verbatim from staff-finding/scripts/run_page.py's
+    _sibling_widths_for_stave (that module can't be imported directly; see
+    this file's module docstring)."""
+    from group_staves import page_absolute_x_range
+
+    widths = []
+    for asg in grouping_result.assignments:
+        if asg.stave_id != stave_id:
+            continue
+        rng = page_absolute_x_range(fit_results[asg.fit_index])
+        if rng is not None:
+            widths.append(rng[1] - rng[0])
+    return widths
+
+def _top_score_of(result) -> Optional[float]:
+    """Pull the kept component's total score from a ComponentFilterResult.
+    Ported verbatim from staff-finding/scripts/run_page.py's _top_score_of
+    (that module can't be imported directly; see this file's module
+    docstring)."""
+    for entry in result.score_breakdown.values():
+        if entry.get("kept"):
+            return float(entry["total"])
+    return None
+
+def _run_fallback_redetect_stage(
+    image_name: str, image_arr: np.ndarray, w: int,
+    fit_results: list, boxes: list, grouping_result,
+    scale_unit: float, redetect_fn: Callable, job_id: Optional[str] = None,
+) -> tuple[int, list[str]]:
+    """Probe under-populated staves for stave-class boxes the primary YOLO
+    pass missed entirely -- confirmed, on real pages, to happen even for
+    perfectly ordinary, well-inked staves. Mutates fit_results/boxes in
+    place, appending one entry per accepted candidate, in lockstep (both
+    lists are always the same length -- _assemble_jsomr_records zips them),
+    so the caller's second group_staves() call and _assemble_jsomr_records
+    need no special-casing for these entries.
+
+    Mirrors staff-finding/scripts/run_page.py's own run_fallback_redetect()
+    (that module can't be imported directly; see this file's module
+    docstring), using redetect_fn (YoloModelSet.infer_staves_raw_boxes, bound
+    to the already-loaded medieval stave model) in place of a directly-
+    loaded ultralytics.YOLO model -- the whole reason this wasn't wired up
+    before now (custom/uploaded models have no dedicated stave-only model
+    instance to reuse for a second pass; see CLAUDE.md).
+
+    Returns (n_added, trace) -- trace is a list of already-formatted
+    "[trace] ..." log message strings, matching _fit_and_group's own trace
+    list shape so run_staffline_detection can yield them identically.
+    """
+    from component_filter import filter_components
+    from fit_centerline import fit_centerline
+    from fallback_redetect import FallbackCandidate, identify_probe_regions, validate_and_select_candidates
+
+    trace: list[str] = []
+    if grouping_result.mode_lines_per_stave is None:
+        trace.append(f"[trace] {image_name}: fallback re-probe skipped (no page-level mode line count)")
+        return 0, trace
+
+    regions = identify_probe_regions(
+        fits=fit_results,
+        assignments=grouping_result.assignments,
+        rhythm_anomalies=grouping_result.rhythm_anomalies,
+        gap_distribution=grouping_result.gap_distribution,
+        scale_unit=scale_unit,
+        min_threshold=grouping_result.min_threshold_px,
+        cut_threshold=grouping_result.cut_threshold_px,
+        mode_n=grouping_result.mode_lines_per_stave,
+        page_width=w,
+    )
+    if not regions:
+        trace.append(f"[trace] {image_name}: fallback re-probe found no under-populated staves; nothing to probe")
+        return 0, trace
+
+    n_added = 0
+    for region in regions:
+        if job_id is not None:
+            check_cancelled(job_id)
+
+        y0, y1 = int(region.y_start), int(region.y_end)
+        x0, x1 = int(region.x_start), int(region.x_end)
+        probe_crop = image_arr[y0:y1, x0:x1]
+        if probe_crop.size == 0:
+            trace.append(f"[trace] {image_name}: stave {region.stave_id} fallback probe crop degenerate; skipping")
+            continue
+        raw_boxes = redetect_fn(probe_crop, FALLBACK_CONF, FALLBACK_IOU, FALLBACK_IMGSZ)
+
+        candidates: list[FallbackCandidate] = []
+        for raw_box in raw_boxes:
+            bx0, by0, bx1, by1 = raw_box["xyxy"]
+            page_box = (
+                int(round(bx0)) + x0, int(round(by0)) + y0,
+                int(round(bx1)) + x0, int(round(by1)) + y0,
+            )
+            crop, actual_box = _crop_with_padding(image_arr, page_box, CROP_PADDING_PX)
+            if crop.size == 0:
+                continue
+            filter_result = filter_components(crop, scale_unit=scale_unit)
+            fit_result = fit_centerline(filter_result, scale_unit=scale_unit)
+            fit_result.x_page_offset = float(actual_box[0])
+            fit_result.y_page_offset = float(actual_box[1])
+            stage1_score = _top_score_of(filter_result) or 0.0
+            candidates.append(FallbackCandidate(
+                fit=fit_result, yolo_confidence=raw_box["confidence"], stage1_score=stage1_score,
+            ))
+        sibling_widths = _sibling_widths_for_stave(region.stave_id, grouping_result, fit_results)
+        accepted, cap_exceeded = validate_and_select_candidates(region, candidates, sibling_widths)
+        trace.append(
+            f"[trace] {image_name}: stave {region.stave_id} fallback re-probe: "
+            f"{len(candidates)} candidate(s) found, {len(accepted)} accepted"
+            + (f", cap_exceeded (fallback_found_more_than_expected:{region.stave_id})" if cap_exceeded else "")
+        )
+
+        for candidate in accepted:
+            fit_result = candidate.fit
+            fit_result.flags = list(fit_result.flags) + [
+                "fallback_redetected", f"fallback_conf:{candidate.yolo_confidence:.3f}",
+            ]
+            fit_results.append(fit_result)
+            boxes.append((
+                int(fit_result.x_page_offset),
+                int(fit_result.y_page_offset),
+                int(fit_result.x_page_offset + (fit_result.x_end - fit_result.x_start)),
+                int(fit_result.y_page_offset + 1),  # height not tracked post-fit; not load-bearing downstream
+            ))
+            n_added += 1
+    return n_added, trace
 
 def _fit_and_group(
     image_name: str, image_arr: np.ndarray, w: int, h: int, detections, scale_unit: float,
     interpolate_missing: bool, job_id: Optional[str] = None,
+    redetect_fn: Optional[Callable] = None,
 ) -> dict:
     """Per-box centerline fit + stave grouping -- shared by
     run_staffline_detection (persisted, tied to a Celery job) and
@@ -194,6 +332,14 @@ def _fit_and_group(
     call only runs once per image; a page with many stave boxes can spend
     real time in this loop with no cancellation observed in between).
     Omit it for the preview path, which has no job to cancel.
+
+    redetect_fn, if given, is called as redetect_fn(crop, conf, iou, imgsz)
+    for each under-populated stave's probe region and must return
+    list[{"xyxy": (x0,y0,x1,y1), "confidence": float}] in the crop's own
+    local coordinates (see YoloModelSet.infer_staves_raw_boxes). Omit it
+    (default None) to skip the fallback re-probe entirely -- the only
+    caller passing a real one today is tasks_predict.py, and only for the
+    medieval preset (see module CLAUDE.md's Staffline detection section).
 
     Returns a dict with "trace" (already-formatted [trace] message strings,
     so both callers report identical box-count tracing) always present, and
@@ -231,11 +377,28 @@ def _fit_and_group(
     grouping_result = group_staves(
         fit_results, scale_unit=scale_unit, interpolate_missing=interpolate_missing,
     )
+
+    fallback_lines_added = 0
+    if redetect_fn is not None:
+        fallback_lines_added, fallback_trace = _run_fallback_redetect_stage(
+            image_name, image_arr, w, fit_results, boxes, grouping_result,
+            scale_unit, redetect_fn, job_id=job_id,
+        )
+        trace.extend(fallback_trace)
+        if fallback_lines_added:
+            grouping_result = group_staves(
+                fit_results, scale_unit=scale_unit, interpolate_missing=interpolate_missing,
+            )
+            trace.append(
+                f"[trace] {image_name}: fallback re-probe recovered {fallback_lines_added} "
+                f"line(s); stave grouping re-run"
+            )
     records = _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, scale_unit)
     stave_ids = {r["stave_id"] for r in records if r["stave_id"] is not None}
     return {
         "degenerate": False, "trace": trace,
         "records": records, "stave_ids": stave_ids, "grouping_result": grouping_result,
+        "fallback_lines_added": fallback_lines_added,
     }
 
 
@@ -341,6 +504,7 @@ def run_staffline_detection(
     project_id: int, image_id: str, image_name: str, annotation_id: str,
     image_arr: np.ndarray, yolo_txt: str,
     interpolate_missing: bool = False,
+    redetect_fn: Optional[Callable] = None,
 ) -> Iterator[dict]:
     """Run staffline detection for one image, yielding {"type": "log"|"error",
     "message": ...} event dicts and persisting the result to
@@ -357,6 +521,11 @@ def run_staffline_detection(
     except below -- a cancelled job must actually stop, not be recorded as
     one failed staffline-detection attempt among many while the outer
     per-image loop keeps going.
+
+    redetect_fn is passed straight through to _fit_and_group -- see that
+    function's docstring. Default None (no fallback re-probe) keeps every
+    existing caller's behavior unchanged; tasks_predict.py is the only
+    caller that passes a real one, and only for the medieval preset.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
 
@@ -374,7 +543,8 @@ def run_staffline_detection(
     scale_unit = _compute_page_scale_unit(detections, w, h)
 
     try:
-        result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing, job_id=job_id)
+        result = _fit_and_group(image_name, image_arr, w, h, detections, scale_unit, interpolate_missing, job_id=job_id,
+                        redetect_fn=redetect_fn, )
         for msg in result["trace"]:
             yield {"type": "log", "message": msg}
 
@@ -391,7 +561,9 @@ def run_staffline_detection(
         settings = {
             "interpolate_missing": interpolate_missing,
             "binarization": "sauvola",
-            "bgr_enabled": False,  # ink-separation deferred this pass, see module docstring
+            "bgr_enabled": False,
+            "fallback_redetect_enabled": redetect_fn is not None,
+            "fallback_lines_added": result.get("fallback_lines_added", 0),
             "package_version": _package_version(),
         }
 
