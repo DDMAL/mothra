@@ -13,7 +13,7 @@ from PIL import Image
 
 from celery_app import celery_app
 from job_store import publish_event, check_cancelled, JobCancelled
-from auth_api import get_db_conn, release_db_conn
+from auth_api import get_db_conn, release_db_conn, _log_activity
 from models_api import get_model_file_path
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
@@ -139,6 +139,10 @@ def run_text_batch_task(job_id, project_id, body):
         if body.get("column_count"):
             publish({"type": "log", "message": f"column count forced to {body['column_count']}"})
         publish({"type": "stage_done", "name": "validating"})
+
+        _log_activity(cur, project_id, "text_batch_run",
+                       f"{yolo_models.model_label} on {len(folios)} folio(s) (source {body['source_id']})")
+        con.commit()
 
         publish({"type": "stage", "name": "processing"})
         text_debug_data: dict = {}

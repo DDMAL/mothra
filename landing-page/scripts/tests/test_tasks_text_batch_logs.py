@@ -44,6 +44,14 @@ def _install_stubs():
         auth_api_stub.get_db_conn = lambda: None
         auth_api_stub.release_db_conn = lambda con: None
         sys.modules["auth_api"] = auth_api_stub
+    # A different test module (test_resolve_hints_staleness.py) may have
+    # already installed a bare auth_api stub without this attribute --
+    # patch it in regardless of which stub got there first.
+    if not hasattr(sys.modules["auth_api"], "_log_activity"):
+        sys.modules["auth_api"]._log_activity = lambda cur, project_id, action_type, detail="": (
+            cur.execute("INSERT INTO activity_log (project_id, action_type, detail) VALUES (%s, %s, %s)",
+                        (project_id, action_type, detail))
+        )
 
     if "job_store" not in sys.modules:
         job_store_stub = types.ModuleType("job_store")
@@ -107,6 +115,7 @@ class FakeCursor:
     def __init__(self, images_by_id):
         self.images_by_id = images_by_id
         self.inserted_alignments = []
+        self.inserted_activity = []
         self._pending = None
 
     def execute(self, sql, params=()):
@@ -114,6 +123,9 @@ class FakeCursor:
             self._pending = self.images_by_id[params[0]]
         elif "INSERT INTO text_alignments" in sql:
             self.inserted_alignments.append(params)
+            self._pending = None
+        elif "INSERT INTO activity_log" in sql:
+            self.inserted_activity.append(params)
             self._pending = None
         else:
             self._pending = None
@@ -211,6 +223,18 @@ def test_batch_run_scopes_log_text_per_folio(monkeypatch):
     assert "layer separation done" not in folio1_log
     assert "running Kraken segmentation" not in folio1_log
     assert "folio0-specific-log" not in folio1_log
+
+    # One activity_log row for the whole batch run, mirroring
+    # tasks_predict.py's "predict_run" entry -- not a bug fix, this is a new
+    # parity addition so batch text-finding runs are no longer invisible in
+    # the "download all logs" -> activity_log.txt export.
+    assert len(cursor.inserted_activity) == 1
+    project_id, action_type, detail = cursor.inserted_activity[0]
+    assert project_id == 1
+    assert action_type == "text_batch_run"
+    assert "fake-model" in detail
+    assert "2 folio(s)" in detail
+    assert "source 42" in detail
 
 
 if __name__ == "__main__":
