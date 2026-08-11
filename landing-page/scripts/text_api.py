@@ -266,12 +266,14 @@ def run_text_finding(project_id: int, image_name: str, column_count: Optional[in
     source_id: Optional[int] = None,
     folio: Optional[str] = None,
 ):
-    """Stream single-image text-finding results for one project image over SSE.
+    """Stream text-finding for a single image outside the job queue.
 
-    Fetches the named image, then forwards it to `stream_text_finding` and
-    re-emits each yielded event as a `data: {...}\\n\\n` frame. Unlike the
-    batch/predict paths this runs synchronously in-request, not as a Celery
-    job — single-image text-finding is fast enough not to need the job queue.
+    Not called from the current frontend (superseded by the job-queued path
+    -- tasks_predict.py's run_predict_task calls stream_text_finding()
+    inline per image, and tasks_text_batch.py handles batches) -- kept as a
+    directly-curlable path to rerun text-finding alone without job-queue
+    overhead, same "old in-request generator" shape CLAUDE.md describes the
+    queue replacing elsewhere, just not fully retired here.
     """
     image_id, image_bytes, mime_type = _project_image(project_id, image_name, user["id"])
 

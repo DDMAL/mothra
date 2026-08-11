@@ -225,7 +225,25 @@ def run_grouping_and_save(
     """
     from fit_centerline import FitResult  # use real FitResult for group_staves
 
-    # group_staves expects real FitResult objects — bridge the gap
+    # group_staves expects real FitResult objects — bridge the gap.
+    # Deliberately leaves coefficients/residual_mean/residual_max/
+    # n_pixels_used/n_pixels_total at their dataclass defaults ([], 0.0, 0):
+    # none of the four experiment methods produce a real polynomial fit or a
+    # directly comparable pixel-count/residual concept (DP/periodicity have
+    # no fit residual at all; GP and implicit-neural have different quality
+    # signals entirely), so populating fake values seemed worse than leaving
+    # them empty.
+    #
+    # Cost of that, silently: group_staves._fit_y_at_x() returns None
+    # whenever coefficients is empty, so the curve-agreement extrapolation
+    # check inside its duplicate/split-fragment reconciliation pass can
+    # never activate for experiment output -- it always falls back to the
+    # coarser center-y-distance heuristic. And its _primary_and_absorbed()
+    # tiebreak (by -n_pixels_used, then residual_mean) ties on (0, 0.0, ...)
+    # for every experiment fit, so picking which of two overlapping
+    # detections is "primary" degenerates to YOLO detection order instead of
+    # "more supporting evidence, lower error." Every experiment inherits
+    # both gaps, all the time.
     real_fits = []
     for ef in fit_results:
         rf = FitResult(

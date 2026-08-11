@@ -11,41 +11,61 @@ import pytest
 # We do this by importing from the module file directly, bypassing the
 # sys.path injection at module top.
 import importlib.util
-
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_SCRIPTS_DIR))  # so run_pageOG.py's sibling imports resolve
-spec = importlib.util.spec_from_file_location(
-    "run_page_partial", str(_SCRIPTS_DIR / "run_pageOG.py")
-)
-# Stub out imports the test environment doesn't have, via a module-scoped
-# MonkeyPatch so _restore_stubbed_modules can undo them once this file's
-# tests are done, instead of leaking them into whatever pytest collects next.
 import types
 
-_mp = pytest.MonkeyPatch()
-
-fake_inference = types.ModuleType("inference_simple")
-fake_inference.load_model = lambda *a, **kw: None
-fake_inference.sliding_window_inference = lambda *a, **kw: None
-fake_inference.post_process_ink = lambda *a, **kw: None
-fake_inference.separate_layers = lambda *a, **kw: (None, None)
-_mp.setitem(sys.modules, "inference_simple", fake_inference)
-
-fake_torch = types.ModuleType("torch")
-fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
-_mp.setitem(sys.modules, "torch", fake_torch)
-
-run_page = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(run_page)
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _restore_stubbed_modules():
-    yield
-    _mp.undo()
+def _load_stubbed_run_page():
+    """Stub inference_simple/torch, then load run_pageOG.py under the
+    isolated name "run_page_partial" (bypassing run_page.py's own
+    bgr_adapter/inference_simple import chain -- see module docstring).
+    Returns (module, MonkeyPatch) so a caller can undo the stubs after use.
+
+    Deliberately NOT done at module top level: that runs during pytest's
+    COLLECTION phase, which imports every test file's top-level code across
+    the whole run *before* executing any test -- so a module-level stub can
+    still leak into another file's own collection-time imports if that file
+    is collected later in the same run, even with fixture-based teardown,
+    since a fixture only fires once execution of *this* file's own tests
+    begins, well after collection of every file has already finished.
+    Called from the run_page fixture below (for teardown) or directly from
+    __main__ (no teardown needed -- the process exits right after). Returns
+    the module rather than binding it at module level, since it's loaded
+    under a synthetic name ("run_page_partial") that a plain `import
+    run_page` elsewhere couldn't retrieve anyway.
+    """
+    sys.path.insert(0, str(_SCRIPTS_DIR))  # so run_pageOG.py's sibling imports resolve
+
+    mp = pytest.MonkeyPatch()
+
+    fake_inference = types.ModuleType("inference_simple")
+    fake_inference.load_model = lambda *a, **kw: None
+    fake_inference.sliding_window_inference = lambda *a, **kw: None
+    fake_inference.post_process_ink = lambda *a, **kw: None
+    fake_inference.separate_layers = lambda *a, **kw: (None, None)
+    mp.setitem(sys.modules, "inference_simple", fake_inference)
+
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+    mp.setitem(sys.modules, "torch", fake_torch)
+
+    spec = importlib.util.spec_from_file_location(
+        "run_page_partial", str(_SCRIPTS_DIR / "run_pageOG.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, mp
 
 
-def test_parse_yolo_txt():
+@pytest.fixture(scope="module")
+def run_page():
+    module, mp = _load_stubbed_run_page()
+    yield module
+    mp.undo()
+
+
+def test_parse_yolo_txt(run_page):
     sample = """\
 1 0.550555 0.350755 0.023019 0.029412
 2 0.512238 0.351451 0.019814 0.016097
@@ -68,7 +88,7 @@ malformed line
     assert len(class_2) == 3
 
 
-def test_yolo_to_pixel_box():
+def test_yolo_to_pixel_box(run_page):
     d = run_page.YoloDetection(
         class_id=2,
         x_center_norm=0.5,
@@ -82,7 +102,7 @@ def test_yolo_to_pixel_box():
     assert box == (300, 900, 700, 1100)
 
 
-def test_compute_scale_unit():
+def test_compute_scale_unit(run_page):
     # Three detections with heights 20, 30, 40 in pixel space at 1000x1000.
     detections = [
         run_page.YoloDetection(2, 0.5, 0.1, 0.5, 0.02),  # h = 20
@@ -94,7 +114,7 @@ def test_compute_scale_unit():
     assert scale == 30.0
 
 
-def test_crop_with_padding_clamping():
+def test_crop_with_padding_clamping(run_page):
     img = np.zeros((100, 200, 3), dtype=np.uint8)
     # Box near top-left corner; padding should clamp.
     box = (5, 5, 50, 50)
@@ -116,8 +136,9 @@ def test_crop_with_padding_clamping():
 
 
 if __name__ == "__main__":
-    test_parse_yolo_txt()
-    test_yolo_to_pixel_box()
-    test_compute_scale_unit()
-    test_crop_with_padding_clamping()
+    _run_page, _mp = _load_stubbed_run_page()
+    test_parse_yolo_txt(_run_page)
+    test_yolo_to_pixel_box(_run_page)
+    test_compute_scale_unit(_run_page)
+    test_crop_with_padding_clamping(_run_page)
     print("\nAll driver sanity checks passed.")

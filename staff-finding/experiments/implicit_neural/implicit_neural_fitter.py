@@ -41,6 +41,12 @@ import torch.nn.functional as F
 N_FREQS = 8  # number of sinusoidal frequency bands in positional encoding
 HIDDEN = 32  # MLP hidden layer width
 LR = 1e-3  # Adam learning rate
+# Fixed budget, no plateau/early-stop check -- every line trains for exactly
+# N_STEPS regardless of whether loss has converged. Judged "enough" from the
+# first real run's results (final_data_loss ~0.20-0.35 across 86 lines, see
+# NOTES.md) rather than any convergence criterion; NOTES.md's own "potential
+# improvements" section already proposes adaptive step counts as future
+# work, i.e. this is a placeholder, not a tuned value.
 N_STEPS = 150  # gradient steps per staffline
 LAMBDA_SMOOTH = 0.01  # weight on finite-difference smoothness regulariser
 BAND_HALF_MULTIPLIER = 1.5  # clamp band = ± multiplier × scale_unit around y_hint
@@ -213,6 +219,14 @@ def implicit_neural_fit(
         y_pred = mlp(x_norm)  # (N,), page-absolute y (unclamped from network)
 
         # Clamp to the search band so the path stays near the staffline.
+        # Hard clamp, not a soft out-of-band penalty added to the loss: a
+        # hard clamp has zero gradient past the band edge, so a prediction
+        # that ever gets pushed out has nothing pulling it back -- a real
+        # dead-gradient risk in principle. Judged acceptable because the
+        # warm start (_warm_start below sets fc3.bias = y_hint) begins every
+        # line dead-center in the band, and lr/n_steps are small enough that
+        # drift rarely reaches the boundary in practice -- not because a
+        # soft penalty was tried and rejected.
         y_pred_clamped = torch.clamp(y_pred, y_lo, y_hi)
 
         # Normalise y to [-1, 1] for grid_sample.
@@ -229,13 +243,25 @@ def implicit_neural_fit(
             grid,
             mode="bilinear",
             align_corners=True,
+            # NOT the torch default ("zeros"). With "low = dark = ink =
+            # good" below, an out-of-bounds sample under zero-padding would
+            # read as pure black -- the *best possible* loss value -- which
+            # would actively reward the network for pushing predictions
+            # toward/past the image edge. "border" (clamp to the edge pixel)
+            # avoids fabricating that false "perfect ink" signal.
             padding_mode="border",
         )  # (1, 1, N, 1)
         sampled = sampled.squeeze()  # (N,)
 
         data_loss = sampled.mean()  # low = dark = ink = good
 
-        # Finite-difference second derivative (shape N-2).
+        # Finite-difference second derivative (curvature), not first
+        # (slope): a slope penalty would bias the fit toward flat/
+        # horizontal, fighting genuine page warp/skew. A curvature penalty
+        # only punishes *changes* in slope (wiggle) while a constant tilt
+        # passes through for free -- the standard thin-beam-bending-energy
+        # argument, appropriate since stafflines are expected to tilt but
+        # not oscillate at high frequency (shape N-2).
         smooth_loss = (
             (y_pred_clamped[:-2] - 2 * y_pred_clamped[1:-1] + y_pred_clamped[2:])
             .abs()

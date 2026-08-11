@@ -1,0 +1,114 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: GentAnt1475_0017_AC_rightcrop
+Mode lines per stave: 2
+Line count distribution: {2: 2, 3: 1}
+Cut threshold (px): 18.5
+Flags: mode_count_below_typical
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 0.5 px  
+  Gap 1: 51.9 px  >>> INTER-STAVE <<<
+  Gap 2: 11.3 px  
+  Gap 3: 13.4 px  
+  Gap 4: 802.9 px  >>> INTER-STAVE <<<
+  Gap 5: 2.5 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 3: line 0, y=155.3px
+  Fit 30: line 1, y=155.8px
+
+Stave 1:
+  Fit 68: line 0, y=207.7px
+  Fit 65: line 1, y=219.0px
+  Fit 50: line 2, y=232.4px
+
+Stave 2:
+  Fit 21: line 0, y=1035.3px
+  Fit 72: line 1, y=1037.8px
+
+Unassigned fits:
+  Fit 0 [no_y_position_available]
+  Fit 1 [no_y_position_available]
+  Fit 2 [no_y_position_available]
+  Fit 4 [no_y_position_available]
+  Fit 5 [no_y_position_available]
+  Fit 6 [no_y_position_available]
+  Fit 7 [no_y_position_available]
+  Fit 8 [no_y_position_available]
+  Fit 9 [no_y_position_available]
+  Fit 10 [no_y_position_available]
+  Fit 11 [no_y_position_available]
+  Fit 12 [no_y_position_available]
+  Fit 13 [no_y_position_available]
+  Fit 14 [no_y_position_available]
+  Fit 15 [no_y_position_available]
+  Fit 16 [no_y_position_available]
+  Fit 17 [no_y_position_available]
+  Fit 18 [no_y_position_available]
+  Fit 19 [no_y_position_available]
+  Fit 20 [no_y_position_available]
+  Fit 22 [no_y_position_available]
+  Fit 23 [no_y_position_available]
+  Fit 24 [no_y_position_available]
+  Fit 25 [no_y_position_available]
+  Fit 26 [no_y_position_available]
+  Fit 27 [no_y_position_available]
+  Fit 28 [no_y_position_available]
+  Fit 29 [no_y_position_available]
+  Fit 31 [no_y_position_available]
+  Fit 32 [no_y_position_available]
+  Fit 33 [no_y_position_available]
+  Fit 34 [no_y_position_available]
+  Fit 35 [no_y_position_available]
+  Fit 36 [no_y_position_available]
+  Fit 37 [no_y_position_available]
+  Fit 38 [no_y_position_available]
+  Fit 39 [no_y_position_available]
+  Fit 40 [no_y_position_available]
+  Fit 41 [no_y_position_available]
+  Fit 42 [no_y_position_available]
+  Fit 43 [no_y_position_available]
+  Fit 44 [no_y_position_available]
+  Fit 45 [no_y_position_available]
+  Fit 46 [no_y_position_available]
+  Fit 47 [no_y_position_available]
+  Fit 48 [no_y_position_available]
+  Fit 49 [no_y_position_available]
+  Fit 51 [no_y_position_available]
+  Fit 52 [no_y_position_available]
+  Fit 53 [no_y_position_available]
+  Fit 54 [no_y_position_available]
+  Fit 55 [no_y_position_available]
+  Fit 56 [no_y_position_available]
+  Fit 57 [no_y_position_available]
+  Fit 58 [no_y_position_available]
+  Fit 59 [no_y_position_available]
+  Fit 60 [no_y_position_available]
+  Fit 61 [no_y_position_available]
+  Fit 62 [no_y_position_available]
+  Fit 63 [no_y_position_available]
+  Fit 64 [no_y_position_available]
+  Fit 66 [no_y_position_available]
+  Fit 67 [no_y_position_available]
+  Fit 69 [no_y_position_available]
+  Fit 70 [no_y_position_available]
+  Fit 71 [no_y_position_available]
+  Fit 73 [no_y_position_available]
+  Fit 74 [no_y_position_available]
+  Fit 75 [no_y_position_available]
+  Fit 76 [no_y_position_available]
+  Fit 77 [no_y_position_available]
+  Fit 78 [no_y_position_available]
+  Fit 79 [no_y_position_available]
+  Fit 80 [no_y_position_available]
+  Fit 81 [no_y_position_available]
+  Fit 82 [no_y_position_available]
+  Fit 83 [no_y_position_available]
+  Fit 84 [no_y_position_available]
+  Fit 85 [no_y_position_available]

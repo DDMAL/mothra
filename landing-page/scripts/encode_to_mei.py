@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """
 encode_to_mei.py - Convert GameraXML (output from standalone IC) + Mothra inference JSON (stave detections) into
-a pitch-less MEI-Neume file and Neon manifest JSON-LD
+an MEI-Neume file and Neon manifest JSON-LD.
+
+Every <nc> gets a pname/oct (see _nc_pitch/_pitch_from_step below), but this
+is a geometric placeholder, not a transcription: there is no real pitch-
+recognition step here, only neume *shape* from Ichiro's classifier. Each
+note-component's y-position relative to the reconstructed stave lines is
+converted to a diatonic step below an assumed clef (clef_shape/clef_line,
+default C-clef/line 3) -- good enough for Verovio/Neon to render something
+placed on the staff, not a claim that it's correct. A human corrects it in
+Neon afterward.
 
 Usage:
     python scrupts/encode_to_mei.py \
@@ -1653,7 +1662,7 @@ def verify_and_correct_syllables(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GameraXML + Mothra inference JSON -> pitch-less MEI + Neon manifest."
+        description="GameraXML + Mothra inference JSON -> MEI (placeholder pitch, human-corrected in Neon) + Neon manifest."
     )
     parser.add_argument("--gamera-xml", required=True, type=Path, metavar="PATH")
     parser.add_argument("--mothra-json", required=True, type=Path, metavar="PATH")

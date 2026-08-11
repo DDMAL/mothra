@@ -48,6 +48,13 @@ def release_db_conn(con) -> None:
 
 router = APIRouter()
 
+# Falls back to a fresh random secret rather than refusing to start, so a
+# bare local checkout with no .env still runs. Cost: this evaluates at
+# import time, so any process started without MOTHRA_SECRET set (backend,
+# worker, a future replica) gets its OWN random secret -- silently
+# invalidating every previously-issued access/refresh token and Neon
+# edit-session token on that process's next restart, with no error to flag
+# it as a misconfiguration rather than "random logouts after every deploy."
 SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
@@ -624,6 +631,13 @@ def _migrate_db():
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
+    """SHA-256+base64 the password before bcrypt ever sees it.
+
+    bcrypt silently truncates its input at 72 bytes, so without this two
+    different long/multi-byte-UTF-8 passwords sharing the same first 72
+    bytes would hash identically and both would authenticate. Collapsing to
+    a fixed-size digest first means the whole password participates.
+    """
     return base64.b64encode(hashlib.sha256(pw.encode("utf-8")).digest()).decode()
 
 def hash_password(pw: str) -> str:
@@ -637,6 +651,16 @@ def create_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
 
 def _hash_token(raw: str) -> str:
+    """Plain SHA-256, deliberately not bcrypt, for refresh-token storage.
+
+    Refresh tokens are 256 bits of secrets.token_urlsafe(32), not a
+    human-chosen password -- nothing brute-forces that, so bcrypt's slow
+    salted hashing buys nothing here and would actively break the lookup:
+    bcrypt salts randomly by design, so the same token would hash
+    differently every time and refresh_tokens.token_hash could never be
+    looked up by a plain WHERE equality the way it is in refresh_token()
+    below. A deterministic hash is both sufficient and required.
+    """
     return hashlib.sha256(raw.encode()).hexdigest()
 
 def create_refresh_token(user_id: int) -> str:

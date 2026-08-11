@@ -1,0 +1,6 @@
+page_name,image,gt_txt,gt_source,pred_json,variant
+McGill_MS234-064,../../image-sets/ms234_064/McGill_MS234-064.jpg,../../image-sets/ms234_064/McGill_MS234-064.txt,corrected_ms234,McGill_MS234-064_no_bgr/McGill_MS234-064_stafflines.json,no_bgr
+McGill_MS234-064,../../image-sets/ms234_064/McGill_MS234-064.jpg,../../image-sets/ms234_064/McGill_MS234-064.txt,corrected_ms234,McGill_MS234-064/McGill_MS234-064_stafflines.json,bgr
+McGill_MS234-064,../../image-sets/ms234_064/McGill_MS234-064.jpg,../../image-sets/ms234_064/McGill_MS234-064.txt,corrected_ms234,McGill_MS234-064_glyphmask_baseline/McGill_MS234-064_stafflines.json,glyphmask_baseline
+McGill_MS234-064,../../image-sets/ms234_064/McGill_MS234-064.jpg,../../image-sets/ms234_064/McGill_MS234-064.txt,corrected_ms234,McGill_MS234-064_glyphmask_naive/McGill_MS234-064_stafflines.json,glyphmask_naive
+McGill_MS234-064,../../image-sets/ms234_064/McGill_MS234-064.jpg,../../image-sets/ms234_064/McGill_MS234-064.txt,corrected_ms234,McGill_MS234-064_glyphmask_band/McGill_MS234-064_stafflines.json,glyphmask_band

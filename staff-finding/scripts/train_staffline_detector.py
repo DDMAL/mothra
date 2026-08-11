@@ -177,6 +177,15 @@ def build_dataset(
 
 
 def train(args: argparse.Namespace, yaml_path: Path) -> None:
+    """Train (or resume) the stave-detector YOLO model.
+
+    Every augmentation/optimiser argument below is commented individually --
+    each is tuned for this specific problem (manuscript photography rather
+    than natural images: desaturated/variably-lit scans, near-horizontal
+    staves that must never be treated as flippable top-to-bottom, and a
+    small ~26-image training set that benefits unusually heavily from
+    mosaic augmentation), not left at Ultralytics' generic defaults.
+    """
     try:
         from ultralytics import YOLO
     except ImportError as exc:

@@ -1,0 +1,72 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: McGill_MS234-064
+Mode lines per stave: 3
+Line count distribution: {4: 1, 3: 3, 2: 1}
+Cut threshold (px): 68.3
+Flags: mode_count_below_typical
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 29.2 px  
+  Gap 1: 40.9 px  
+  Gap 2: 50.2 px  
+  Gap 3: 428.1 px  >>> INTER-STAVE <<<
+  Gap 4: 27.6 px  
+  Gap 5: 48.1 px  
+  Gap 6: 132.2 px  >>> INTER-STAVE <<<
+  Gap 7: 35.9 px  
+  Gap 8: 255.0 px  >>> INTER-STAVE <<<
+  Gap 9: 36.7 px  
+  Gap 10: 43.2 px  
+  Gap 11: 420.7 px  >>> INTER-STAVE <<<
+  Gap 12: 34.2 px  
+  Gap 13: 47.9 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 4: line 0, y=541.3px
+  Fit 5: line 1, y=570.5px
+  Fit 6: line 2, y=611.4px
+  Fit 7: line 3, y=661.6px
+
+Stave 1:
+  Fit 13: line 0, y=1089.7px
+  Fit 14: line 1, y=1117.3px
+  Fit 15: line 2, y=1165.4px
+
+Stave 2:
+  Fit 16: line 0, y=1297.6px
+  Fit 17: line 1, y=1333.5px
+
+Stave 3:
+  Fit 21: line 0, y=1588.5px
+  Fit 22: line 1, y=1625.2px
+  Fit 23: line 2, y=1668.4px
+
+Stave 4:
+  Fit 29: line 0, y=2089.1px
+  Fit 30: line 1, y=2123.3px
+  Fit 31: line 2, y=2171.2px
+
+Unassigned fits:
+  Fit 0 [no_y_position_available]
+  Fit 1 [no_y_position_available]
+  Fit 2 [no_y_position_available]
+  Fit 3 [no_y_position_available]
+  Fit 8 [no_y_position_available]
+  Fit 9 [no_y_position_available]
+  Fit 10 [no_y_position_available]
+  Fit 11 [no_y_position_available]
+  Fit 12 [no_y_position_available]
+  Fit 18 [no_y_position_available]
+  Fit 19 [no_y_position_available]
+  Fit 20 [no_y_position_available]
+  Fit 24 [no_y_position_available]
+  Fit 25 [no_y_position_available]
+  Fit 26 [no_y_position_available]
+  Fit 27 [no_y_position_available]
+  Fit 28 [no_y_position_available]

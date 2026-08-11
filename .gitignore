@@ -15,6 +15,10 @@ staff-finding/models/
 zzzz/
 staff-finding/addtl-gt/
 
+# Personal per-user config for the DDMAL HuggingFace sync tooling — hardcodes
+# absolute paths specific to the machine it was generated on (see the file's
+# own header comment).
+staff-finding/config.yaml
 # Editable-install build artifacts (any package, anywhere in the repo)
 *.egg-info/
 

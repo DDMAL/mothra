@@ -48,6 +48,15 @@ BLUR_SIGMA_MULTIPLIER = 0.2
 # Number of comb teeth.  Must be odd (1, 3, 5, …).  1 = plain DP; 3 = one
 # neighbour on each side.  Beyond 5 teeth rarely helps and risks pulling toward
 # distant structures.
+#
+# Unlike dp_tracer.py's HINT_DISTANCE_PENALTY_WEIGHT (same role: how much an
+# auxiliary signal should outweigh the primary darkness cost), N_TEETH and
+# TEETH_WEIGHT below never got an equivalent synthetic-benchmark derivation.
+# NOTES.md's own run log found the underlying autocorrelation period
+# estimate unreliable per-YOLO-box on the one manuscript tested (falling
+# back to h_est=scale_unit for most/all lines) -- these defaults are
+# initial guesses awaiting the same kind of empirical tuning pass, not
+# validated values.
 N_TEETH = 3
 
 # Weight given to each off-centre tooth relative to the centre tooth (weight=1).
@@ -113,7 +122,13 @@ def estimate_period(
     acorr = full_corr[N - 1 :]  # acorr[0] = zero-lag (maximum)
     acorr = acorr / (acorr[0] + 1e-12)  # normalise so zero-lag = 1
 
-    # Define the lag search window: [lag_lo, lag_hi].
+    # Define the lag search window: [lag_lo, lag_hi]. Deliberately wider
+    # than run_periodicity_page.py's H_RATIO_LO/HI=(0.7, 1.5) acceptance
+    # gate around scale_unit -- search broadly here for any plausible
+    # autocorrelation peak, then let the caller reject it if it lands
+    # outside the physically-plausible range. Two-stage by design: a narrow
+    # search window here would risk missing the true period on pages where
+    # it deviates further from scale_unit than the acceptance gate allows.
     lag_lo = max(1, int(np.floor(0.4 * scale_unit)))
     lag_hi = min(len(acorr) - 1, int(np.ceil(2.5 * scale_unit)))
 
@@ -144,6 +159,12 @@ def compute_dark_field(
     Gaussian blur and normalisation once per detection.
     """
     sigma = blur_sigma_multiplier * scale_unit
+    # Below 0.5px a Gaussian kernel barely touches neighbouring pixels --
+    # visually negligible, but a full-page gaussian_filter1d call isn't
+    # free, so this is a "not worth paying for" cutoff rather than a
+    # correctness one. Since sigma scales with scale_unit, it also means
+    # very low-resolution scans get no pre-blur at all -- the noise-
+    # suppression benefit silently disappears there, not just shrinks.
     if sigma > 0.5:
         smoothed = gaussian_filter1d(gray.astype(np.float32), sigma=sigma, axis=0)
     else:
@@ -278,12 +299,31 @@ def periodicity_trace(
             )
 
     # Normalise comb_cost to [0, 1] then invert so low cost = good (dark).
+    # Global min/max over the whole band x columns array, not per-column:
+    # a per-column rescale would flatten every column to the same [0, 1]
+    # range regardless of how strongly periodic its signal actually is,
+    # erasing exactly the comb-teeth signal this cost is built to preserve.
+    # Also unlike dp_tracer.py's plain darkness cost (bare /255.0, no
+    # rescale needed there), comb_cost isn't naturally bounded to [0, 1] --
+    # teeth_weight contributions can push it above 1 (e.g. n_teeth=3,
+    # teeth_weight=0.4 → worst case ~1.8) and fewer teeth land in-bounds
+    # near page edges, so its raw scale isn't uniform across rows either.
+    # When the field is perfectly flat (c_max == c_min, e.g. a blank/uniform
+    # crop), there's no signal at all to trace: minimum_filter1d only bounds
+    # how far the path can step between columns, it doesn't penalise moving,
+    # so a uniform data_cost leaves np.argmin's tie-break to pick the first
+    # band row (y_lo) below -- a flat field would silently return a path
+    # pinned to the top of the search band instead of near y_hint. Bail out
+    # the same way the n_band/n_cols guard above does: a stable path at
+    # y_hint is preferable to running DP over a cost surface with nothing in
+    # it to optimise.
     c_min = comb_cost.min()
     c_max = comb_cost.max()
-    if c_max > c_min:
-        comb_cost = (comb_cost - c_min) / (c_max - c_min)
-    else:
-        comb_cost[:] = 0.5
+    if c_max <= c_min:
+        xs = np.arange(x_start, x_end + 1)
+        ys = np.full(len(xs), float(np.clip(y_hint, y_lo, y_hi)))
+        return xs, ys
+    comb_cost = (comb_cost - c_min) / (c_max - c_min)
     data_cost = 1.0 - comb_cost  # low = good signal = ink
 
     # -----------------------------------------------------------------
