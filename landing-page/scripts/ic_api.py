@@ -331,6 +331,37 @@ def ic_manage_url(project_id: int, user=Depends(get_current_user)) -> dict:
     }
 
 
+@router.get("/projects/{project_id}/ic/session-count")
+def ic_session_count(project_id: int, user=Depends(get_current_user)) -> dict:
+    """How many saved IC sessions this project has.
+
+    Sessions live in IC's store, not mothra's DB, so whether a project has any
+    is not derivable here — the project page needs this to decide whether to
+    offer "manage IC sessions". It can't key that off ``steps_unlocked``:
+    sessions can exist while that is still 0 (the ``VITE_SKIP_PREDICT`` dev
+    path goes straight to IC, and a batch text-finding job that fails after
+    its YOLO stage leaves annotations behind without advancing the step), and
+    those are exactly the cases where a stale session most needs clearing.
+
+    Errors are the caller's to interpret rather than something to swallow into
+    a 0 here — a count of zero and "IC is down" must stay distinguishable, or
+    an unreachable IC would silently hide the button again.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+    try:
+        # Short timeout on purpose: this runs on every project-page open, and
+        # a down IC must not park a request thread on the default 30s.
+        _, raw = _get(f"{IC_API_URL}/sessions?project_id={project_id}", timeout=5)
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    try:
+        sessions = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="IC returned a malformed session list")
+    return {"count": len(sessions) if isinstance(sessions, list) else 0}
+
+
 # ---------------------------------------------------------------------------
 # Batch training set + "queue all" (parent-page-driven, no per-page iframe)
 # ---------------------------------------------------------------------------

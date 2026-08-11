@@ -1,4 +1,4 @@
-import type { AnnotationSet, MeiFile } from "../types";
+import type { AnnotationSet, MeiFile, ProjectImage } from "../types";
 
 export interface ImageProgress {
   nextStep: number; // 1=ic, 3=neon, 4=send
@@ -25,6 +25,33 @@ export function getImageProgress(
   if (stepsUnlocked >= 1 && annotations.some((a) => a.imageName === imageName))
     return { nextStep: 1, badge: "ic" };
   return null;
+}
+
+// The used images the interactive classifier still has work for: never
+// predicted (progress null) or predicted but not yet encoded (nextStep 1).
+// An image that already has an MEI file is past step 1 and drops out - which
+// is why this can legitimately come back empty once every page is encoded
+// (InteractiveClassifier renders an explanatory empty state for that).
+export function pendingIcImages(
+  images: ProjectImage[],
+  usedImageNames: string[],
+  annotations: AnnotationSet[],
+  meiFiles: MeiFile[],
+  stepsUnlocked: number,
+): ProjectImage[] {
+  const progressOf = (name: string) =>
+    getImageProgress(name, annotations, meiFiles, stepsUnlocked);
+  return images
+    .filter((img) => {
+      if (!usedImageNames.includes(img.name)) return false;
+      const p = progressOf(img.name);
+      return p === null || p.nextStep <= 1;
+    })
+    .sort(
+      (a, b) =>
+        (progressOf(a.name)?.nextStep ?? 0) -
+        (progressOf(b.name)?.nextStep ?? 0),
+    );
 }
 
 export function minNextStep(

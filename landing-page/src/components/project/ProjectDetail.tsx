@@ -8,6 +8,7 @@ import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings"
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import IcSessionsModal from "./IcSessionsModal";
+import type { IcResumeRequest } from "./IcSessionsModal";
 import ActivityLog from "./ActivityLog";
 import ImageTab from "./ImageTab";
 import ModelTab from "./ModelTab";
@@ -44,6 +45,9 @@ interface ProjectDetailProps {
   }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
+  /** Open a saved IC session picked in the "manage IC sessions" modal on the
+   * IC step page (step 1), rather than inside the modal's iframe. */
+  onResumeIcSession: (req: IcResumeRequest) => void;
   onSendToCantus: () => void;
   sendingBundle?: boolean;
   sendBundleError?: string | null;
@@ -88,6 +92,7 @@ export default function ProjectDetail({
   onUsedNamesChange,
   stepsUnlocked,
   onStepClick,
+  onResumeIcSession,
   onSendToCantus,
   sendingBundle = false,
   sendBundleError = null,
@@ -128,6 +133,10 @@ export default function ProjectDetail({
   const [projectRenameName, setProjectRenameName] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [icSessionsModal, setIcSessionsModal] = useState(false);
+  // Saved IC sessions for this project, or null while unknown (still loading,
+  // or IC didn't answer). Sessions live in IC's store, so this is the only way
+  // to know they exist - see the gate on the "manage IC sessions" button.
+  const [icSessionCount, setIcSessionCount] = useState<number | null>(null);
   const [loadedCantusSource, setLoadedCantusSource] =
     useState<CantusSource | null>(null);
   const [imageSubTab, setImageSubTab] = useState<"grid" | "batch">("grid");
@@ -142,6 +151,24 @@ export default function ProjectDetail({
     setBatchEndFolio("");
     setBatchImages([]);
   }, [project.id]);
+
+  // Re-read on modal close too: sessions can be deleted in there, and the
+  // count is in the button's own label.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/projects/${project.id}/ic/session-count`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled)
+          setIcSessionCount(typeof d?.count === "number" ? d.count : null);
+      })
+      .catch(() => {
+        if (!cancelled) setIcSessionCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, icSessionsModal]);
 
   const batchFolioSequence = useMemo(() => {
     const folios = loadedCantusSource?.folios ?? [];
@@ -381,12 +408,22 @@ export default function ProjectDetail({
             >
               export all files ↓
             </button>
-            {stepsUnlocked >= 1 && (
+            {/* Hidden only when IC positively reports no sessions AND the IC
+                step was never reached. `stepsUnlocked >= 1` alone used to gate
+                this, which hid the button in exactly the cases where a saved
+                session most needs clearing - sessions can exist at step 0 (see
+                ic_api.py's session-count endpoint). A null count means IC
+                didn't answer, so show it and let the modal report the error
+                rather than silently hiding the only way in. */}
+            {(icSessionCount === null ||
+              icSessionCount > 0 ||
+              stepsUnlocked >= 1) && (
               <button
                 onClick={() => setIcSessionsModal(true)}
                 className="text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
               >
                 manage IC sessions
+                {icSessionCount ? ` (${icSessionCount})` : ""}
               </button>
             )}
           </div>
@@ -993,6 +1030,10 @@ export default function ProjectDetail({
         <IcSessionsModal
           projectId={project.id}
           onClose={() => setIcSessionsModal(false)}
+          onResumeSession={(req) => {
+            setIcSessionsModal(false);
+            onResumeIcSession(req);
+          }}
         />
       )}
     </div>

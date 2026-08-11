@@ -4,8 +4,18 @@ import { apiFetch } from "../../lib/apiFetch";
 import { AuthImage } from "../shared/AuthImage";
 
 interface InteractiveClassifierProps {
+  // Only the pages step 1 still has work for - see pendingIcImages().
   images: ProjectImage[];
+  // Page to open on instead of the first one - set when the user picked a
+  // saved session in "manage IC sessions". Nothing session-specific needs to
+  // be threaded through beyond this: /ic/start resumes whatever session is
+  // saved for the selected page, and IC keeps at most one per page.
+  initialImageName?: string | null;
+  // How many pages the project has selected in total, pending or not. Lets the
+  // empty state tell "nothing selected yet" apart from "all already encoded".
+  usedImageCount: number;
   projectId: number | null;
+  onBack: () => void;
   onEncodeBatch: (pairs: { xmlFile: File; imageFile: File }[]) => void;
   clefShape: "C" | "F";
   onClefShapeChange: (s: "C" | "F") => void;
@@ -17,14 +27,25 @@ const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
 
 export default function InteractiveClassifier({
   images,
+  initialImageName = null,
+  usedImageCount,
   projectId,
+  onBack,
   onEncodeBatch,
   clefShape,
   onClefShapeChange,
   clefLine,
   onClefLineChange,
 }: InteractiveClassifierProps) {
-  const [currentIdx, setCurrentIdx] = useState(0);
+  // Resolved once, at mount: this view is remounted on every entry (AppRouter
+  // switches on `view`), and after that the filmstrip owns the selection - a
+  // resume shouldn't keep yanking the user back to its page.
+  const [currentIdx, setCurrentIdx] = useState(() => {
+    const i = initialImageName
+      ? images.findIndex((im) => im.name === initialImageName)
+      : -1;
+    return i === -1 ? 0 : i;
+  });
   const [icUrl, setIcUrl] = useState<string | null>(null);
   const [icOrigin, setIcOrigin] = useState<string | null>(null);
   // Set only once the user finishes IC's create-session screen (the iframe
@@ -312,6 +333,13 @@ export default function InteractiveClassifier({
   return (
     <div className="animate-fade-in flex-1 min-h-0 bg-[#4AADAA] flex flex-col pb-3">
       <div className="flex items-center gap-6 px-8 py-3">
+        <button
+          onClick={onBack}
+          title="back to project"
+          className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0"
+        >
+          ←
+        </button>
         <h1 className="text-4xl font-bold italic text-white">
           interactive classifier
         </h1>
@@ -470,8 +498,27 @@ export default function InteractiveClassifier({
         {/* IC editor area */}
         <div className="flex-1 min-h-0 flex items-stretch justify-stretch overflow-hidden">
           {images.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-white/40 text-sm italic">
-              no images selected
+            // Reached by navigating to step 1 once every selected page is
+            // already encoded (each one is past step 1, so pendingIcImages()
+            // filters them all out) - the classifier has nothing to stage, so
+            // say which case this is instead of showing an empty canvas.
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+              <p className="text-white/70 text-sm">
+                {usedImageCount === 0
+                  ? "no pages are selected for this project yet"
+                  : `every selected page (${usedImageCount}) has already been classified and encoded`}
+              </p>
+              <p className="text-white/40 text-xs max-w-md">
+                {usedImageCount === 0
+                  ? "select images on the project page and run detection first."
+                  : "there's nothing left to classify here — carry on with correction (step 3), or select more pages on the project page."}
+              </p>
+              <button
+                onClick={onBack}
+                className="mt-1 px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold"
+              >
+                back to project
+              </button>
             </div>
           ) : status === "error" ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">
