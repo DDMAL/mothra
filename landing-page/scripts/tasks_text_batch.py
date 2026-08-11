@@ -13,7 +13,7 @@ from PIL import Image
 
 from celery_app import celery_app
 from job_store import publish_event, check_cancelled, JobCancelled
-from auth_api import get_db_conn, release_db_conn
+from auth_api import get_db_conn, release_db_conn, _log_activity
 from models_api import get_model_file_path
 from text_api import TEXT_API_URL, _stream_multipart, _music_boxes_for_image, _mask_json_for_image
 from yolo_inference import resolve_yolo_models, write_annotation
@@ -27,9 +27,13 @@ def run_text_batch_task(job_id, project_id, body):
     then forwards the batch to the text-service's `/batch-run` endpoint and
     relays its SSE progress as `job_events` rows via `publish_event`.
     """
+    pending_logs: list[str] = []
+
     def publish(obj):
         publish_event(job_id, obj)
-    
+        if obj.get("type") == "log":
+            pending_logs.append(obj.get("message", ""))
+
     con = get_db_conn()
     cur = con.cursor()
     try:
@@ -136,6 +140,10 @@ def run_text_batch_task(job_id, project_id, body):
             publish({"type": "log", "message": f"column count forced to {body['column_count']}"})
         publish({"type": "stage_done", "name": "validating"})
 
+        _log_activity(cur, project_id, "text_batch_run",
+                       f"{yolo_models.model_label} on {len(folios)} folio(s) (source {body['source_id']})")
+        con.commit()
+
         publish({"type": "stage", "name": "processing"})
         text_debug_data: dict = {}
         fields = {
@@ -167,18 +175,21 @@ def run_text_batch_task(job_id, project_id, body):
                 image_name = images[idx][0]
                 alignment = ev["text_alignment"]
                 aid = _uuid.uuid4().hex
+                syl_count = len(alignment.get("syl_boxes", []))
+                publish({"type": "log", "message": f"{image_name}: {syl_count} syllable(s) aligned"})
+                log_text = "\n".join(pending_logs)
+                pending_logs = []
                 cur.execute(
                     "INSERT INTO text_alignments"
                     " (id, project_id, image_id, image_name, alignment_json,"
                     " median_line_spacing, syllable_count, log_text)"
                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                     (aid, project_id, image_id, image_name, json.dumps(alignment),
-                     alignment.get("median_line_spacing", 0.0), len(alignment.get("syl_boxes", [])), ""),
+                     alignment.get("median_line_spacing", 0.0), syl_count, log_text),
                 )
                 con.commit()
                 if ev.get("debug_data"):
                     text_debug_data[image_name] = ev["debug_data"]
-                publish({"type": "log", "message": f"{image_name}: {len(alignment.get('syl_boxes', []))} syllable(s) aligned"})
                 continue
             if ev.get("type") == "result":
                 if text_debug_data:
