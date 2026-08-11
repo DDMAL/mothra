@@ -15,15 +15,40 @@ interface TruncatedNameProps {
 // manuscript filenames from each other. This instead always keeps the last
 // `tailLength` characters of `name` (plus `suffix`, if any) visible, and lets
 // only the shared prefix ellipsize when space runs out.
+// Below this many characters, ellipsizing the head saves too little space to
+// be worth splitting off its own box — and a head that short is exactly what
+// triggers the two rendering bugs below, so folding it into `tail` instead
+// sidesteps both.
+const MIN_HEAD_LENGTH = 3;
+// Never collapsed or trimmed by CSS whitespace rules, unlike a regular space.
+const NBSP = " ";
+
 export default function TruncatedName({
   name,
   suffix = "",
   tailLength = 14,
   className = "",
 }: TruncatedNameProps) {
-  const hasHead = name.length > tailLength;
-  const head = hasHead ? name.slice(0, name.length - tailLength) : "";
-  const tail = hasHead ? name.slice(name.length - tailLength) : name;
+  const hasHead = name.length > tailLength + MIN_HEAD_LENGTH;
+  let head = "";
+  let tail = name;
+
+  if (hasHead) {
+    head = name.slice(0, name.length - tailLength);
+    tail = name.slice(name.length - tailLength);
+
+    // The split point can land on/next to whitespace in `name`. Rendered in
+    // separate boxes, that space sits at the very edge of one span's own
+    // line box, where the browser's normal whitespace-collapsing trims it
+    // away entirely (issue #192) — fusing two words with no visible gap.
+    // Trim it from both sides and reinsert a single non-breaking space so
+    // exactly one space survives, same as if the string had never been split.
+    const trimmedHead = head.replace(/\s+$/, "");
+    const hadBoundarySpace = trimmedHead.length !== head.length || /^\s/.test(tail);
+    head = trimmedHead;
+    tail = tail.replace(/^\s+/, "");
+    if (hadBoundarySpace) tail = NBSP + tail;
+  }
 
   return (
     <span
