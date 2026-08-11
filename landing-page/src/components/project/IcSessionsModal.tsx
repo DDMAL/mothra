@@ -67,7 +67,7 @@ export default function IcSessionsModal({
       origin = null;
     }
     function onMessage(e: MessageEvent) {
-      if (origin && e.origin !== origin) return;
+      if (!origin || e.origin !== origin) return;
       const data = e.data;
       if (
         data?.type === "ic:resume-session" &&
