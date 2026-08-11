@@ -7,3 +7,7 @@
 [submodule "mothra-text"]
 	path = mothra-text
 	url = https://github.com/DDMAL/mothra-text.git
+[submodule "paco-classifier"]
+	path = paco-classifier
+	url = https://github.com/DDMAL/Paco_classifier.git
+	branch = gianna/calvo-training-script

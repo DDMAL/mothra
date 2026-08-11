@@ -36,6 +36,7 @@ for _f in BATCH_DIR.glob("*.zip"):
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
 from steps.gt_manifest import fetch_cantus_csv, make_output_stem
 from steps.nw_chant_allocator import _folio_sort_key, read_folio_state
+from run_chain import _are_contiguous
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -177,6 +178,7 @@ async def run_text_pipeline(
     mask_padding: int = Form(15),
     mask_json: Optional[str] = Form(None),
     music_overlap_filter_enabled: bool = Form(True),
+    debug_mode: bool = Form(False),
 ):
     """Run Kraken segmentation + HTR over a single image and stream progress as SSE.
 
@@ -259,6 +261,7 @@ async def run_text_pipeline(
                         ocr_only_mode=(source_id is None),
                         mothra_json_path=mothra_json_path,
                         padding=mask_padding,
+                        music_boxes=parsed_music_boxes if music_overlap_filter_enabled else None,
                     )
                 except Exception as exc:
                     result_holder["error"] = exc
@@ -275,25 +278,48 @@ async def run_text_pipeline(
             if "error" in result_holder:
                 raise result_holder["error"]
             collection, manifest = result_holder["value"]
+            dropped_lines = getattr(collection, '_music_filter_dropped', [])
+            if dropped_lines:
+                yield event({"type": "log", "message": f"dropped {len(dropped_lines)} line(s) overlapping YOLO music regions before NW alignment"})
             payload = _build_pipeline_payload(
                 collection, str(image_path), manifest, folio=folio, mode=("ocr_only" if source_id is None else "cantus_aligned"),
             )
-            if parsed_music_boxes and music_overlap_filter_enabled:
-                kept_lines, dropped_lines = filter_lines_over_music(payload["lines"], parsed_music_boxes)
-                payload["lines"] = kept_lines
-                for dl in dropped_lines:
-                    yield event({"type": "log", "message": f"dropped line overlapping YOLO music region: bbox={dl['bbox']}, text={dl.get('text', '')!r}"})
-                if dropped_lines:
-                    yield event({"type": "log", "message": f"dropped {len(dropped_lines)} line(s) overlapping YOLO music regions (disable via music_overlap_filter_enabled)"})
-            elif parsed_music_boxes and not music_overlap_filter_enabled:
-                yield event({"type": "log", "message": "music-overlap filter disabled; all detected lines kept"})
+            lines_pre_filter = list(payload["lines"]) if debug_mode else None
             mei_json_path = tmp_dir / "mei_alignment.json"
             _write_mei_json(payload, str(mei_json_path))
             text_alignment = json.loads(mei_json_path.read_text())
             n_syl = len(text_alignment.get("syl_boxes", []))
             yield event({"type": "log", "message": f"{n_syl} syllable(s) aligned"})
             yield event({"type": "stage_done", "name": "processing"})
-            yield event({"type": "result", "text_alignment": text_alignment})
+            result_ev: dict = {"type": "result", "text_alignment": text_alignment}
+            if debug_mode:
+                mask_boxes = json.loads(mask_json).get("annotations", []) if mask_json else []
+                result_ev["debug_data"] = {
+                    "mothra_text": {
+                        "mask": {
+                            "box_count": len(mask_boxes),
+                            "boxes": mask_boxes,
+                        },
+                        "run_params": {
+                            "folio": folio,
+                            "source_id": source_id,
+                            "padding": mask_padding,
+                            "column_bimodal_threshold": column_bimodal_threshold,
+                            "column_count": column_count,
+                            "ocr_only_mode": source_id is None,
+                            "segmentation_model": segmentation_model,
+                            "recognition_model": effective_recognition_model,
+                            "device": device,
+                        },
+                        "lines_pre_filter": lines_pre_filter,
+                        "music_filter": {
+                            "enabled": music_overlap_filter_enabled,
+                            "threshold": 0.30,
+                            "lines_dropped": dropped_lines,
+                        },
+                    }
+                }
+            yield event(result_ev)
             yield event({"type": "done"})
         except Exception as e:
             yield event({"type": "error", "message": str(e)})
@@ -324,6 +350,7 @@ async def run_text_batch(
     masking_enabled: bool = Form(True),
     mask_padding: int = Form(15),
     music_overlap_filter_enabled: bool = Form(True),
+    debug_mode: bool = Form(False),
 ):
     """Run Kraken segmentation + HTR over a batch of Cantus-aligned folios and
     stream progress as SSE.
@@ -388,6 +415,27 @@ async def run_text_batch(
                 try:
                     for i, (image_path, folio, stem) in enumerate(zip(image_paths, folio_list, stems)):
                         logger.info("Folio %d/%d: %s", i + 1, len(folio_list), folio)
+                        # infer_continuation=True (build_flat_text_and_anchors' own
+                        # default) would otherwise let it independently scan the CSV
+                        # for "the nearest preceding folio with a 77 break" and
+                        # re-derive the same wrong continuation even after prev_state
+                        # is reset below - it has no idea this folio's true physical
+                        # predecessor was skipped in this batch, only that no explicit
+                        # prev_folio_state was passed. Must be suppressed in the same
+                        # branch, not just prev_state.
+                        infer_continuation = True
+                        if i > 0 and not _are_contiguous(folio_list[i - 1], folio):
+                            # e.g. a folio was intentionally skipped in this batch (or is
+                            # simply not the next physical page) - carrying the previous
+                            # folio's leftover continuation words into this one would
+                            # silently corrupt its alignment from the very first line.
+                            # Mirrors run_chain.py's identical reset for the CLI chain.
+                            logger.info(
+                                "folio %s: not contiguous with previous folio %s, resetting FolioState",
+                                folio, folio_list[i - 1],
+                            )
+                            prev_state = None
+                            infer_continuation = False
                         mask_json_tmp = None
                         folio_mask_json = parsed_mask_json[i] if i < len(parsed_mask_json) else None
                         mothra_json_path = None
@@ -401,6 +449,7 @@ async def run_text_batch(
                         state_path = state_tmp.name
                         state_tmp.close()
                         try:
+                            folio_boxes = parsed_music_boxes[i] if i < len(parsed_music_boxes) else []
                             collection, manifest = run(
                                 image_path=image_path,
                                 folio=folio,
@@ -411,35 +460,59 @@ async def run_text_batch(
                                 column_bimodal_threshold=column_bimodal_threshold,
                                 prev_folio_state=prev_state,
                                 folio_state_out=state_path,
+                                infer_continuation=infer_continuation,
                                 column_count=column_count,
                                 mothra_json_path=mothra_json_path,
                                 padding=mask_padding,
+                                music_boxes=folio_boxes if music_overlap_filter_enabled else None,
                             )
+                            dropped_lines = getattr(collection, '_music_filter_dropped', [])
+                            if dropped_lines:
+                                logger.info(
+                                    "folio %s: dropped %d line(s) overlapping YOLO music regions before NW alignment: %s",
+                                    folio, len(dropped_lines), [dl["bbox"] for dl in dropped_lines],
+                                )
                             payload = _build_pipeline_payload(
                                 collection, image_path, manifest, folio=stem, mode="cantus_aligned",
                             )
-                            folio_boxes = parsed_music_boxes[i] if i < len(parsed_music_boxes) else []
-                            if folio_boxes and music_overlap_filter_enabled:
-                                kept_lines, dropped_lines = filter_lines_over_music(payload["lines"], folio_boxes)
-                                payload["lines"] = kept_lines
-                                if dropped_lines:
-                                    logger.info(
-                                        "folio %s: dropped %d line(s) overlapping YOLO music regions: %s",
-                                        folio, len(dropped_lines), [dl["bbox"] for dl in dropped_lines],
-                                    )
+                            lines_pre_filter = list(payload["lines"]) if debug_mode else None
                             mei_json_path = tmp_out / f"{stem}.json"
                             _write_mei_json(payload, str(mei_json_path))
                             text_alignment = json.loads(mei_json_path.read_text())
-                            # Relayed through the same log_queue the SSE loop
-                            # below already drains — batch_api.py intercepts
-                            # this event type to persist text_alignments per
-                            # folio as it completes, not just at the end.
-                            log_queue.put({
+                            folio_result: dict = {
                                 "type": "folio_result",
                                 "image_index": i,
                                 "folio": folio,
                                 "text_alignment": text_alignment,
-                            })
+                            }
+                            if debug_mode:
+                                folio_mask_json = parsed_mask_json[i] if i < len(parsed_mask_json) else None
+                                mask_boxes = json.loads(folio_mask_json).get("annotations", []) if folio_mask_json else []
+                                folio_result["debug_data"] = {
+                                    "mothra_text": {
+                                        "mask": {"box_count": len(mask_boxes), "boxes": mask_boxes},
+                                        "run_params": {
+                                            "folio": folio, "source_id": source_id,
+                                            "padding": mask_padding,
+                                            "column_bimodal_threshold": column_bimodal_threshold,
+                                            "column_count": column_count,
+                                            "segmentation_model": segmentation_model,
+                                            "recognition_model": effective_recognition_model,
+                                            "device": device,
+                                        },
+                                        "lines_pre_filter": lines_pre_filter,
+                                        "music_filter": {
+                                            "enabled": music_overlap_filter_enabled,
+                                            "threshold": 0.30,
+                                            "lines_dropped": dropped_lines,
+                                        },
+                                    }
+                                }
+                            # Relayed through the same log_queue the SSE loop
+                            # below already drains — batch_api.py intercepts
+                            # this event type to persist text_alignments per
+                            # folio as it completes, not just at the end.
+                            log_queue.put(folio_result)
                             prev_state = read_folio_state(state_path)
                             result_holder["completed"] += 1
                         finally:

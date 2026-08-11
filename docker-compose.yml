@@ -34,6 +34,27 @@ services:
     ports:
       - "8002:8002"
 
+  paco-classifier-service:
+    build:
+      context: .
+      dockerfile: paco-classifier-service/Dockerfile
+    # Internal-only: backend/worker reach it at http://paco-classifier-service:8003
+    # over the Compose network. /classify has no authentication, so it must
+    # never be published on the host -- `expose` documents the port without
+    # binding it to 0.0.0.0 on the host machine.
+    expose:
+      - "8003"
+    healthcheck:
+      # /ready (not /health) so depends_on's service_healthy actually waits
+      # for the classifier weights to have loaded as valid Keras models,
+      # not just for the process to be serving HTTP -- see main.py's
+      # ready()/health() docstrings.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   backend:
     build:
       context: ./landing-page
@@ -49,6 +70,7 @@ services:
       IC_API_URL: http://ic:8000
       IC_PUBLIC_URL: ${IC_PUBLIC_URL:-http://localhost:8000}
       TEXT_API_URL: http://text-service:8002
+      PACO_API_URL: http://paco-classifier-service:8003
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
     depends_on:
       redis:
@@ -57,6 +79,8 @@ services:
         condition: service_started
       text-service:
         condition: service_started
+      paco-classifier-service:
+        condition: service_healthy
       postgres:
         condition: service_healthy   # init_db()/_migrate_db() run at import; wait for DB
     volumes:
@@ -72,11 +96,14 @@ services:
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       TEXT_API_URL: http://text-service:8002
+      PACO_API_URL: http://paco-classifier-service:8003
     depends_on:
       redis:
         condition: service_started
       text-service:
         condition: service_started
+      paco-classifier-service:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     command: celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2

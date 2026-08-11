@@ -42,6 +42,66 @@ def y_values_at(stave_records: list[dict], x_page: float) -> list[float]:
     return ys
 
 
+def _dedupe_line_ys(line_ys: list[float]) -> list[float]:
+    """Merge near-duplicate y-samples that are really the SAME real ruled
+    line sampled twice, not two distinct lines.
+
+    y_values_at() samples every line record at the stave's shared x_mid,
+    clamping to that record's own detected x-extent when x_mid falls
+    outside it (see that function's docstring). When the staffline
+    detector splits one real, continuous ruled line into separate
+    left-half/right-half fragment records (e.g. because a decorative
+    initial or damage breaks the line mid-page), each fragment is a
+    DIFFERENT JSOMR record with its own within_stave_index, so
+    staves_from_jsomr has no way to know they're the same physical line
+    -- and whichever fragment doesn't actually cover x_mid gets clamped
+    to its own edge instead, landing a few pixels away from the other
+    fragment's genuine x_mid sample.
+
+    Confirmed on a real page where one stave's 4 real lines were split
+    this way into 7 JSOMR records, inflating line_ys to 7 entries -- which
+    badly corrupts encode_to_mei.py's clef-line lookup (_step_from_y),
+    since it assumes len(line_ys) reflects the real line count. Every
+    note on that stave rendered at a systematically wrong pitch as a
+    result (confirmed: notes rendered a full line-spacing or more away
+    from where they visually belong).
+
+    Finds the split point via the biggest jump in the SORTED gap
+    distribution, rather than a fixed fraction of the overall median gap
+    -- a fixed-fraction-of-median threshold is sensitive to how many
+    duplicate-pairs vs. real gaps are present (a page with more duplicate
+    pairs than real gaps can drag the median itself down into the
+    duplicate cluster, defeating a fixed-fraction cut entirely). The
+    split is only trusted when the two sides are clearly bimodal (the
+    larger side at least 3x the smaller side at the split) -- guards
+    against merging real, uniformly-spaced lines on a normal stave, where
+    the "biggest jump" between very-similar real gaps is just noise, not
+    a genuine duplicate-vs-real distinction."""
+    if len(line_ys) < 3:
+        return line_ys
+    gaps = [line_ys[i + 1] - line_ys[i] for i in range(len(line_ys) - 1)]
+    sorted_gaps = sorted(gaps)
+    if len(sorted_gaps) < 2:
+        return line_ys
+    jumps = [(sorted_gaps[i + 1] - sorted_gaps[i], i) for i in range(len(sorted_gaps) - 1)]
+    biggest_jump, split_i = max(jumps, key=lambda t: t[0])
+    small_side, large_side = sorted_gaps[split_i], sorted_gaps[split_i + 1]
+    if biggest_jump <= 0 or small_side < 0 or (small_side > 0 and large_side < small_side * 3):
+        return line_ys  # no clear bimodal split -- treat every gap as real
+    threshold = (small_side + large_side) / 2
+
+    merged: list[float] = [line_ys[0]]
+    counts = [1]
+    for y in line_ys[1:]:
+        if y - merged[-1] < threshold:
+            merged[-1] = (merged[-1] * counts[-1] + y) / (counts[-1] + 1)
+            counts[-1] += 1
+        else:
+            merged.append(y)
+            counts.append(1)
+    return merged
+
+
 def staves_from_jsomr(jsomr_records: list[dict]) -> list[StaveBbox]:
     """Group JSOMR per-line records by stave_id into StaveBbox groups.
 
@@ -80,7 +140,7 @@ def staves_from_jsomr(jsomr_records: list[dict]) -> list[StaveBbox]:
             uly, lry = min(ys), max(ys)
 
         x_mid = (ulx + lrx) / 2
-        line_ys = sorted(y_values_at(lines, x_mid))
+        line_ys = _dedupe_line_ys(sorted(y_values_at(lines, x_mid)))
 
         staves.append(StaveBbox(
             id=f"jsomr-stave-{stave_id}",

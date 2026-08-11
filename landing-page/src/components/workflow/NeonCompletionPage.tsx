@@ -5,72 +5,84 @@ import CompletionPage from "./CompletionPage";
 import MeiCompareModal from "./MeiCompareModal";
 
 interface Props {
-    project: Project;
-    originalMeiFiles: MeiFile[];
-    onSendToCantus: () => void;
-    sendingBundle?: boolean;
-    sendBundleError?: string | null;
-    onBackToProject: () => void;
+  project: Project;
+  originalMeiFiles: MeiFile[];
+  onSendToCantus: () => void;
+  sendingBundle?: boolean;
+  sendBundleError?: string | null;
+  onBackToProject: () => void;
 }
 
 export default function NeonCompletionPage({
-    project,
-    originalMeiFiles,
-    onSendToCantus,
-    sendingBundle = false,
-    sendBundleError = null,
-    onBackToProject,
+  project,
+  originalMeiFiles,
+  onSendToCantus,
+  sendingBundle = false,
+  sendBundleError = null,
+  onBackToProject,
 }: Props) {
-    const [showCompare, setShowCompare] = useState(false);
-    const [correctedFiles, setCorrectedFiles] = useState<MeiFile[]>([]);
-    const [loadingCompare, setLoadingCompare] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [correctedFiles, setCorrectedFiles] = useState<MeiFile[]>([]);
+  const [loadingCompare, setLoadingCompare] = useState(false);
 
-    async function handleCompare() {
-        if (correctedFiles.length > 0) {
-            setShowCompare(true);
-            return;
-        }
-        setLoadingCompare(true);
-        try {
-            const r = await apiFetch(`/api/projects/${project.id}`);
-            if (r.ok) {
-                const data = await r.json();
-                const files: MeiFile[] = (data.meiFiles ?? []).map(
-                    (f: { id: string; name: string; xmlContent?: string; corrected?: boolean; imageName?: string }) => ({
-                        id: String(f.id),
-                        name: f.name,
-                        xmlContent: f.xmlContent ?? "",
-                        corrected: !!f.corrected,
-                        imageName: f.imageName,
-                    }),
-                );
-                setCorrectedFiles(files.filter((f) => f.corrected));
-            }
-        } finally {
-            setLoadingCompare(false);
-            setShowCompare(true);
-        }
+  async function handleCompare() {
+    if (correctedFiles.length > 0) {
+      setShowCompare(true);
+      return;
     }
+    setLoadingCompare(true);
+    try {
+      const r = await apiFetch(`/api/projects/${project.id}`);
+      if (r.ok) {
+        const data = await r.json();
+        const files: MeiFile[] = (data.meiFiles ?? []).map(
+          (f: {
+            id: string;
+            name: string;
+            xmlContent?: string;
+            corrected?: boolean;
+            imageName?: string;
+          }) => ({
+            id: String(f.id),
+            name: f.name,
+            xmlContent: f.xmlContent ?? "",
+            corrected: !!f.corrected,
+            imageName: f.imageName,
+          }),
+        );
+        setCorrectedFiles(files.filter((f) => f.corrected));
+      }
+    } finally {
+      setLoadingCompare(false);
+      setShowCompare(true);
+    }
+  }
 
-    return (
-        <>
-        <CompletionPage
-            description="corrected mei files can now be sent to cantus ultimus and viewed on the project page."
-            continueLabel={sendingBundle ? "preparing bundle..." : loadingCompare ? "loading…" : "send to cantus ultimus"}
-            continueDisabled={sendingBundle}
-            errorText={sendBundleError}
-            onContinue={onSendToCantus}
-            onBackToProject={onBackToProject}
-            onCompare={originalMeiFiles.length > 0 ? handleCompare : undefined}
+  return (
+    <>
+      <CompletionPage
+        description="corrected mei files can now be sent to cantus ultimus and viewed on the project page."
+        continueLabel={
+          sendingBundle
+            ? "preparing bundle..."
+            : loadingCompare
+              ? "loading…"
+              : "send to cantus ultimus"
+        }
+        continueDisabled={sendingBundle}
+        errorText={sendBundleError}
+        onContinue={onSendToCantus}
+        onBackToProject={onBackToProject}
+        onCompare={originalMeiFiles.length > 0 ? handleCompare : undefined}
+      />
+      {showCompare && (
+        <MeiCompareModal
+          originalFiles={originalMeiFiles}
+          correctedFiles={correctedFiles}
+          onClose={() => setShowCompare(false)}
+          projectImages={project.images}
         />
-        {showCompare && (
-            <MeiCompareModal
-            originalFiles={originalMeiFiles}
-            correctedFiles={correctedFiles}
-            onClose={() => setShowCompare(false)}
-            projectImages={project.images}
-            />
-        )}
-        </>
-    );
+      )}
+    </>
+  );
 }

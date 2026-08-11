@@ -79,6 +79,30 @@ class YoloModelSet:
             _append_boxes(lines, self.single_model(img_arr, device=self.device, verbose=False)[0], self.custom_cls_map, self.confidence_threshold)
         return "\n".join(lines)
 
+    def infer_text_music(self, img_arr) -> str:
+        """Medieval-preset-only: runs just the text/music model. Split out
+        of infer() so tasks_predict.py can run this concurrently with a
+        separately-sourced stave pass (see its own module notes)."""
+        assert self.medieval_models is not None, "infer_text_music is medieval-preset-only"
+        tm_model, _ = self.medieval_models
+        tm_map, _ = self.class_maps
+        lines = []
+        _append_boxes(lines, tm_model(img_arr, device=self.tm_device, verbose=False)[0], tm_map, self.tm_threshold)
+        return "\n".join(lines)
+
+    def infer_staves(self, img_arr) -> str:
+        """Medieval-preset-only counterpart to infer_text_music — runs just
+        the stave model, on whatever image array the caller passes (the raw
+        page, or — see tasks_predict.py — the Paco-classifier's
+        stafflines-only layer).
+        """
+        assert self.medieval_models is not None, "infer_staves is medieval-preset-only"
+        _, st_model = self.medieval_models
+        _, st_map = self.class_maps
+        lines = []
+        _append_boxes(lines, st_model(img_arr, device=self.st_device, verbose=False)[0], st_map, self.st_threshold)
+        return "\n".join(lines)
+
 def resolve_yolo_models(
         cur, project_id: int, model_preset: str, model_id: Optional[str],
         confidence_threshold: float, device: str,
@@ -90,7 +114,21 @@ def resolve_yolo_models(
     Raises RuntimeError (medieval preset unavailable) or ValueError (custom
     model not found) - callers decide how to surface that as an SSE error.
     """
-    from ultralytics import YOLO
+    # Raised as RuntimeError, not left as the bare ModuleNotFoundError: callers
+    # (tasks_predict, batch_api) catch RuntimeError/ValueError and surface the
+    # text as an SSE error, whereas an ImportError escapes those handlers and
+    # kills the job with an opaque traceback instead of an actionable message.
+    try:
+        from ultralytics import YOLO
+    except ImportError as exc:
+        raise RuntimeError(
+            "YOLO inference needs the 'ultralytics' package, which isn't installed "
+            "in this environment. Either install it "
+            "(pip install -r landing-page/scripts/requirements.txt), or skip the "
+            "predict step: set MOTHRA_SKIP_YOLO=1 in landing-page/scripts/.env and "
+            "VITE_SKIP_PREDICT=1 in landing-page/.env.local, then restart the "
+            "backend, the Celery worker, and the Vite dev server."
+        ) from exc
 
     tm_threshold = text_music_confidence_threshold if text_music_confidence_threshold is not None else confidence_threshold
     st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else confidence_threshold

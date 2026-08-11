@@ -15,16 +15,13 @@ interface NeonBatchEditorProps {
   onFileCorrected?: (id: string) => void;
 }
 
-const btn: React.CSSProperties = {
-  padding: "6px 14px",
-  borderRadius: 6,
-  border: "none",
-  cursor: "pointer",
-  background: "#2d2d4e",
-  color: "white",
-  fontSize: 13,
-  whiteSpace: "nowrap",
-};
+// Shared sizing/typography for every button below; each call site adds its
+// own bg-*/border-*/cursor-*/opacity-* classes explicitly (never bundled in
+// here) so two conflicting utilities for the same property never land in
+// one className string -- Tailwind resolves same-property conflicts by
+// stylesheet order, not by where they appear in the string, so duplicating
+// e.g. two different `bg-*` classes here would be a real (if subtle) bug.
+const BTN_BASE = "px-3.5 py-1.5 rounded-md text-white text-[13px] whitespace-nowrap";
 
 export default function NeonBatchEditor({
   project,
@@ -78,7 +75,7 @@ export default function NeonBatchEditor({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, corrected]);
 
   const currentFile = meiFiles[currentIndex];
@@ -124,15 +121,12 @@ export default function NeonBatchEditor({
     if (next !== -1) setCurrentIndex(next);
   }
 
+  const prevDisabled = nearestUncorrected(currentIndex, -1) === -1;
+  const nextDisabled = nearestUncorrected(currentIndex, 1) === -1;
+  const currentDone = corrected.has(currentFile?.id ?? "");
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        background: "#0f0f1a",
-      }}
-    >
+    <div className="flex flex-col h-screen bg-[#0f0f1a]">
       <div
         tabIndex={0}
         onKeyDown={(e) => {
@@ -145,20 +139,15 @@ export default function NeonBatchEditor({
             if (n !== -1) setCurrentIndex(n);
           }
         }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "8px 16px",
-          background: "#1a1a2e",
-          borderBottom: "2px solid #4AADAA",
-          flexShrink: 0,
-        }}
+        className="flex items-center gap-2 px-4 py-2 bg-[#1a1a2e] border-b-2 border-[#4AADAA] shrink-0"
       >
-        <span style={{ color: "#4AADAA55", fontSize: 11 }}>
+        <span className="text-[#4AADAA55] text-[11px]">
           ← → navigate · Ctrl+Enter mark done
         </span>
-        <button onClick={onBack} style={btn}>
+        <button
+          onClick={onBack}
+          className={`${BTN_BASE} border-none bg-[#2d2d4e] cursor-pointer`}
+        >
           ← Back
         </button>
         <button
@@ -166,43 +155,35 @@ export default function NeonBatchEditor({
             const prev = nearestUncorrected(currentIndex, -1);
             if (prev !== -1) setCurrentIndex(prev);
           }}
-          disabled={nearestUncorrected(currentIndex, -1) === -1}
-          style={{ ...btn, opacity: nearestUncorrected(currentIndex, -1) === -1 ? 0.4 : 1 }}
+          disabled={prevDisabled}
+          className={`${BTN_BASE} border-none bg-[#2d2d4e] cursor-pointer ${prevDisabled ? "opacity-40" : "opacity-100"}`}
         >
           ← Prev
         </button>
 
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            gap: 6,
-            overflowX: "auto",
-            padding: "2px 0",
-          }}
-        >
+        <div className="flex-1 flex gap-1.5 overflow-x-auto py-0.5">
           {meiFiles.map((f, i) => {
             const done = corrected.has(f.id);
+            const isCurrent = i === currentIndex;
+            const bg = isCurrent
+              ? "bg-[#4AADAA]"
+              : done
+                ? "bg-[#1e4d4b]"
+                : "bg-[#2d2d4e]";
+            const border = isCurrent
+              ? "border-none"
+              : "border border-[#4AADAA44]";
             return (
               <button
                 key={f.id}
-                onClick={() => { if (!done) setCurrentIndex(i); }}
-                disabled={done}
-                style={{
-                  ...btn,
-                  background:
-                    i === currentIndex
-                      ? "#4AADAA"
-                      : done
-                        ? "#1e4d4b"
-                        : "#2d2d4e",
-                  border: i === currentIndex ? "none" : "1px solid #4AADAA44",
-                  flexShrink: 0,
-                  opacity: done ? 0.4 : 1,
-                  cursor: done ? "not-allowed" : "pointer",
+                onClick={() => {
+                  if (!done) setCurrentIndex(i);
                 }}
+                disabled={done}
+                className={`${BTN_BASE} shrink-0 ${bg} ${border} ${done ? "opacity-40 cursor-not-allowed" : "opacity-100 cursor-pointer"}`}
               >
-                {done ? "✓ " : ""}{f.name}
+                {done ? "✓ " : ""}
+                {f.name}
               </button>
             );
           })}
@@ -213,53 +194,35 @@ export default function NeonBatchEditor({
             const next = nearestUncorrected(currentIndex, 1);
             if (next !== -1) setCurrentIndex(next);
           }}
-          disabled={nearestUncorrected(currentIndex, 1) === -1}
-          style={{
-            ...btn,
-            opacity: nearestUncorrected(currentIndex, 1) === -1 ? 0.4 : 1,
-          }}
+          disabled={nextDisabled}
+          className={`${BTN_BASE} border-none bg-[#2d2d4e] cursor-pointer ${nextDisabled ? "opacity-40" : "opacity-100"}`}
         >
           Next →
         </button>
 
         <button
           onClick={handleDoneAndNext}
-          style={{
-            ...btn,
-            background: corrected.has(currentFile?.id ?? "")
-              ? "#1e4d4b"
-              : "#4AADAA",
-            color: "white",
-          }}
+          className={`${BTN_BASE} border-none cursor-pointer ${currentDone ? "bg-[#1e4d4b]" : "bg-[#4AADAA]"}`}
         >
-          {corrected.has(currentFile?.id ?? "") ? "✓ Done" : "Mark Done"}
+          {currentDone ? "✓ Done" : "Mark Done"}
           {currentIndex < meiFiles.length - 1 ? " & Next" : ""}
         </button>
 
         <button
           onClick={allCorrected ? onFinish : undefined}
           disabled={!allCorrected}
-          style={{
-            ...btn,
-            background: allCorrected ? "#22c55e" : "#2d2d4e",
-            opacity: allCorrected ? 1 : 0.4,
-            cursor: allCorrected ? "pointer" : "not-allowed",
-          }}
+          className={`${BTN_BASE} border-none ${
+            allCorrected
+              ? "bg-[#22c55e] cursor-pointer opacity-100"
+              : "bg-[#2d2d4e] cursor-not-allowed opacity-40"
+          }`}
         >
           Finish All
         </button>
       </div>
 
       {loading ? (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#4AADAA",
-          }}
-        >
+        <div className="flex-1 flex items-center justify-center text-[#4AADAA]">
           Preparing editor...
         </div>
       ) : currentSession ? (
@@ -267,19 +230,11 @@ export default function NeonBatchEditor({
           ref={iframeRef}
           key={currentSession.session_id}
           src={`/neon/editor.html?manifest=${currentSession.session_id}`}
-          style={{ flex: 1, border: "none", width: "100%" }}
+          className="flex-1 border-none w-full"
           title={`Neon editor - ${currentFile?.name ?? ""}`}
         />
       ) : (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#ef4444",
-          }}
-        >
+        <div className="flex-1 flex items-center justify-center text-[#ef4444]">
           Failed to load editor for this file.
         </div>
       )}

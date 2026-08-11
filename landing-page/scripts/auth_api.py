@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from contextlib import contextmanager
 import bcrypt
+import json
 
 limiter = Limiter(key_func=get_remote_address)
 # connection pooling
@@ -20,6 +21,12 @@ _db_pool: Optional["_pg_pool.ThreadedConnectionPool"] = None
 def _get_pool() -> "_pg_pool.ThreadedConnectionPool":
     global _db_pool
     if _db_pool is None:
+        # Bare os.environ[...] -- raises KeyError, not a friendly error, if
+        # landing-page/scripts/.env doesn't exist/doesn't set this yet.
+        # psycopg2 just needs a DSN, so any local Postgres works -- see
+        # ../README.md's "Prerequisites" section for the install
+        # (brew install postgresql@16 && createdb mothra_dev, then
+        # DATABASE_URL=postgresql://localhost/mothra_dev).
         _db_pool = _pg_pool.ThreadedConnectionPool(
             minconn=2, maxconn=15, dsn=os.environ["DATABASE_URL"]
         )
@@ -324,6 +331,23 @@ def _migrate_db():
     cur = con.cursor()
     try:
         cur.execute("ALTER TABLE mei_files ADD COLUMN image_name TEXT")
+        con.commit()
+    except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close()
+        release_db_conn(con)
+
+    # Records which of tasks_encode.py's 3-tier stave-source fallback actually
+    # produced this MEI's zones ("staffline_detection" / "yolo_annotation" /
+    # "glyph_estimate" / "glyph_estimate_unresolved_lines" /
+    # "glyph_estimate_synthetic_lines" / "placeholder_no_glyphs") -- see
+    # CLAUDE.md's "Staffline detection" section. NULL for MEI files encoded
+    # before this column existed.
+    con = get_db_conn()
+    cur = con.cursor()
+    try:
+        cur.execute("ALTER TABLE mei_files ADD COLUMN stave_source TEXT")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
         con.rollback()
@@ -775,3 +799,56 @@ def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=De
             )
             con.commit()
     return {"ok": True}
+
+def get_latest_text_alignment(cur, project_id: int, image_name: str,
+                               image_id: Optional[str] = None) -> Optional[dict]:
+    """Return the most recently created text_alignments row's parsed
+    alignment_json for this image, or None when there's no row, or the
+    stored JSON isn't a dict. Single source of truth for "what is
+    mothra-text's current syllable data for this image" -- shared by
+    tasks_encode.py's _resolve_hints() (feeds a fresh encode) and
+    mei_api.py's create_edit_session (re-verifies an existing one).
+
+    `image_name` alone is NOT unique within a project -- project_images has
+    no DB-level uniqueness constraint on `name` (only an app-level dedup
+    check at upload time), and a project can run /text/run or
+    /text-batch/run more than once for the same name. When the caller can
+    supply the row's actual `image_id` (project_images.id -- the same
+    identifier batch_api.py already keys text_alignments lookups on),
+    resolve by that instead so a same-named-but-different image can't
+    return the wrong alignment. Falls back to the old image_name-only
+    lookup when the caller doesn't have an image_id available (e.g. a
+    freshly-uploaded file with no persisted project_images row yet).
+
+    A real database failure is NOT one of those "no data" cases -- it's
+    distinguished from a missing row/malformed JSON and re-raised (after
+    rolling back the connection, since a failed query otherwise leaves the
+    pooled connection in "current transaction is aborted" state for
+    whatever runs next on it). Callers that want this function's old
+    swallow-everything behavior wrap the call in their own try/except, the
+    same way tasks_encode.py's _resolve_hints() already does for its two
+    neighboring lookups."""
+    try:
+        if image_id:
+            cur.execute(
+                "SELECT alignment_json FROM text_alignments WHERE image_id=%s AND project_id=%s"
+                " ORDER BY created_at DESC LIMIT 1",
+                (image_id, project_id),
+            )
+        else:
+            cur.execute(
+                "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                " ORDER BY created_at DESC LIMIT 1",
+                (image_name, project_id),
+            )
+        row = cur.fetchone()
+    except Exception:
+        cur.connection.rollback()
+        raise
+    if not row or not row[0]:
+        return None
+    try:
+        alignment = json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+    return alignment if isinstance(alignment, dict) else None

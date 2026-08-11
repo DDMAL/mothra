@@ -40,7 +40,10 @@ export default function CompletionPage({
   classifyMoreCount,
 }: CompletionPageProps) {
   const handleDownloadLogs = () => {
-    downloadBlob(new Blob([logContent ?? ""], { type: "text/plain" }), logsFileName!);
+    downloadBlob(
+      new Blob([logContent ?? ""], { type: "text/plain" }),
+      logsFileName!,
+    );
   };
 
   return (
@@ -73,7 +76,8 @@ export default function CompletionPage({
               onClick={onClassifyMore}
               className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
             >
-              classify more{classifyMoreCount != null ? ` (${classifyMoreCount})` : ""}
+              classify more
+              {classifyMoreCount != null ? ` (${classifyMoreCount})` : ""}
             </button>
           )}
           <button
@@ -91,9 +95,7 @@ export default function CompletionPage({
             compare before &amp; after →
           </button>
         )}
-        {errorText && (
-          <p className="text-red-100 text-sm">{errorText}</p>
-        )}
+        {errorText && <p className="text-red-100 text-sm">{errorText}</p>}
       </div>
       {logsFileName && (
         <button
@@ -103,7 +105,9 @@ export default function CompletionPage({
           &gt; download {logsFileName}
         </button>
       )}
-      {(onDownloadAnnotations || onDownloadAnnotationsJson || onDownloadZip) && (
+      {(onDownloadAnnotations ||
+        onDownloadAnnotationsJson ||
+        onDownloadZip) && (
         <div className="absolute bottom-8 right-8 flex flex-col items-end gap-2">
           {onDownloadAnnotations && (
             <button

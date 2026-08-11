@@ -1,0 +1,92 @@
+name: rerun-on-infra-failure
+
+# Automatically re-runs a failed `tests`/`ci-cd` run when the failure was
+# GitHub's fault rather than ours.
+#
+# Why this exists: on 2026-08-06 a critical GitHub Actions incident
+# (githubstatus.com, 15:22Z -> 2026-08-07 02:05Z) made jobs fail before a
+# single step from our workflow file ever ran, with:
+#
+#     Getting action download info
+#     Failed to resolve action download info. Error: Service Unavailable
+#     ##[error]Service Unavailable
+#
+# The runner retries that resolution twice internally (~20-30s apart) and then
+# gives up. Because it happens during "Set up job", *no* in-workflow mechanism
+# can catch it -- not `continue-on-error`, not a retry action, not a step-level
+# `if:`. None of our steps exist yet. Re-running the run is the only recourse,
+# so this automates that instead of relying on someone noticing the red X.
+#
+# It is deliberately narrow. An infrastructure failure never gets past setup:
+# the failed job either records no steps at all (job cancelled while queued) or
+# its only failing step is "Set up job" itself. A genuine test or build failure
+# always fails at a named step from the workflow file, so it is left alone and
+# stays red -- this cannot paper over a real break.
+#
+# Caveat: during a severe incident, webhook delivery is itself throttled (on
+# 2026-08-06 GitHub was processing ~15% of webhooks at the low point), so this
+# workflow may not fire at all. It shortens the recovery tail; it is not a
+# guarantee. Re-run by hand with `gh run rerun <id> --failed` when needed.
+
+on:
+  workflow_run:
+    workflows: ["tests", "ci-cd"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rerun:
+    # run_attempt caps the retries: attempt 1 and 2 may be re-run, so a run
+    # gets at most 3 total attempts before it is left red for a human.
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Note: no `actions/checkout`, no `setup-*`, nothing from the Actions
+      # marketplace -- only `gh`, which is preinstalled on the runner image.
+      # That is intentional: a job with zero actions to resolve has nothing to
+      # fail at the "Getting action download info" step this workflow exists to
+      # recover from.
+      - name: Re-run only if the failure happened before any step ran
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          # One line per bad job: a JSON array of that job's failing step names.
+          gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate \
+            --jq '.jobs[]
+                  | select(.conclusion == "failure" or .conclusion == "cancelled")
+                  | [ .steps[]? | select(.conclusion == "failure") | .name ]
+                  | @json' > failing_steps.txt
+
+          if [ ! -s failing_steps.txt ]; then
+            echo "Run $RUN_ID reported failure but no failed/cancelled job was found; not re-running."
+            exit 0
+          fi
+
+          echo "Failing steps per bad job in run $RUN_ID (attempt $ATTEMPT):"
+          cat failing_steps.txt
+
+          while read -r steps; do
+            case "$steps" in
+              # []              -> job never started; cancelled while queued.
+              # ["Set up job"]  -> died resolving actions / provisioning.
+              '[]'|'["Set up job"]') ;;
+              *)
+                echo "Real failure at $steps -- leaving run $RUN_ID red."
+                exit 0
+                ;;
+            esac
+          done < failing_steps.txt
+
+          echo "All failures are setup-level (GitHub-side). Re-running failed jobs."
+          gh run rerun "$RUN_ID" --failed

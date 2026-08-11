@@ -8,12 +8,16 @@ interface StafflinesTabProps {
   stafflines: StafflineSet[];
   images: ProjectImage[];
   projectId: number;
+  // Called when a previewed interpolation is accepted inside the viewer
+  // modal -- merges the newly persisted detection into project.stafflines.
+  onAddStaffline: (set: StafflineSet) => void;
 }
 
 export default function StafflinesTab({
   stafflines,
   images,
   projectId,
+  onAddStaffline,
 }: StafflinesTabProps) {
   const [viewSet, setViewSet] = useState<StafflineSet | null>(null);
   if (stafflines.length === 0) {
@@ -48,6 +52,13 @@ export default function StafflinesTab({
           projectId={projectId}
           onClose={() => setViewSet(null)}
           label={labelById.get(viewSet.id)}
+          onAccepted={(newSet) => {
+            onAddStaffline(newSet);
+            // Swap the modal to the just-confirmed detection so the user
+            // immediately sees the persisted (not just previewed) result,
+            // instead of it silently landing behind the still-open modal.
+            setViewSet(newSet);
+          }}
         />
       )}
       <div className="mt-6 grid grid-cols-5 gap-4">

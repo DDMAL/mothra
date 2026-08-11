@@ -1,0 +1,223 @@
+{
+  "image_size": [
+    2154,
+    2750
+  ],
+  "scale_unit": 54.0,
+  "n_boxes": 9,
+  "n_fits": 9,
+  "n_assigned": 9,
+  "stave_count": 1,
+  "mode_lines_per_stave": 9,
+  "line_count_distribution": {
+    "9": 1
+  },
+  "cut_threshold_px": 309.5,
+  "grouping_flags": [],
+  "lines": [
+    {
+      "fit_index": 0,
+      "bounding_box": [
+        129,
+        1809,
+        1543,
+        1865
+      ],
+      "x_start_page": 141.0,
+      "x_end_page": 1519.0,
+      "y_mid_page": 1841.2,
+      "y_mean_page": 1837.115808556925,
+      "stave_id": 0,
+      "within_stave_index": 8,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 9.354
+    },
+    {
+      "fit_index": 1,
+      "bounding_box": [
+        135,
+        1047,
+        1531,
+        1108
+      ],
+      "x_start_page": 140.0,
+      "x_end_page": 1459.0,
+      "y_mid_page": 1076.9,
+      "y_mean_page": 1077.771212121212,
+      "stave_id": 0,
+      "within_stave_index": 4,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 10.196
+    },
+    {
+      "fit_index": 2,
+      "bounding_box": [
+        130,
+        1389,
+        1544,
+        1451
+      ],
+      "x_start_page": 141.0,
+      "x_end_page": 1514.0,
+      "y_mid_page": 1418.8,
+      "y_mean_page": 1419.817248908297,
+      "stave_id": 0,
+      "within_stave_index": 6,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 8.116
+    },
+    {
+      "fit_index": 3,
+      "bounding_box": [
+        142,
+        838,
+        1545,
+        895
+      ],
+      "x_start_page": 273.0,
+      "x_end_page": 1538.0,
+      "y_mid_page": 861.8,
+      "y_mean_page": 862.9464454976303,
+      "stave_id": 0,
+      "within_stave_index": 3,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 8.312
+    },
+    {
+      "fit_index": 4,
+      "bounding_box": [
+        134,
+        628,
+        1531,
+        687
+      ],
+      "x_start_page": 134.0,
+      "x_end_page": 1501.0,
+      "y_mid_page": 655.1,
+      "y_mean_page": 655.8861111111111,
+      "stave_id": 0,
+      "within_stave_index": 2,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 9.838
+    },
+    {
+      "fit_index": 5,
+      "bounding_box": [
+        123,
+        501,
+        1550,
+        560
+      ],
+      "x_start_page": 137.0,
+      "x_end_page": 1524.0,
+      "y_mid_page": 531.2,
+      "y_mean_page": 532.4218299711815,
+      "stave_id": 0,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.66
+    },
+    {
+      "fit_index": 6,
+      "bounding_box": [
+        139,
+        297,
+        1538,
+        351
+      ],
+      "x_start_page": 143.0,
+      "x_end_page": 1521.0,
+      "y_mid_page": 329.1,
+      "y_mean_page": 328.81950688905005,
+      "stave_id": 0,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 8.086
+    },
+    {
+      "fit_index": 7,
+      "bounding_box": [
+        576,
+        1606,
+        1449,
+        1643
+      ],
+      "x_start_page": 576.0,
+      "x_end_page": 1448.0,
+      "y_mid_page": 1624.8,
+      "y_mean_page": 1624.5484536082472,
+      "stave_id": 0,
+      "within_stave_index": 7,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 7.439
+    },
+    {
+      "fit_index": 8,
+      "bounding_box": [
+        122,
+        1303,
+        1513,
+        1361
+      ],
+      "x_start_page": 126.0,
+      "x_end_page": 1512.0,
+      "y_mid_page": 1339.1,
+      "y_mean_page": 1337.076063446287,
+      "stave_id": 0,
+      "within_stave_index": 5,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 9.96
+    }
+  ],
+  "settings": {
+    "image": "original",
+    "paco_base": "original",
+    "channel_order": "rgb",
+    "pass_crop": true,
+    "conf": 0.5,
+    "notes": [
+      "original file",
+      "live detection conf=0.5 iou=0.7: 9 boxes"
+    ]
+  },
+  "comparison_vs_baseline": {
+    "matched": 9,
+    "unmatched_baseline": 24,
+    "unmatched_variant": 0,
+    "y_mae_px": 0.44,
+    "y_max_px": 2.4,
+    "match_threshold_px": 25.8,
+    "y_rescale_factor": 1.0,
+    "stave_count_delta": -7,
+    "mode_delta": 5
+  }
+}

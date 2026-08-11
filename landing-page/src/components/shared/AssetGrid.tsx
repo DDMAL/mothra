@@ -55,7 +55,10 @@ export default function AssetGrid<T extends AssetItem>({
           const used = usedNames.includes(item.name);
           const badge = used ? (getItemBadge?.(item.name) ?? null) : null;
           const group = groupBy?.(item);
-          const prevGroup = groupBy && pageIdx > 0 ? groupBy(pagedItems[pageIdx - 1]) : undefined;
+          const prevGroup =
+            groupBy && pageIdx > 0
+              ? groupBy(pagedItems[pageIdx - 1])
+              : undefined;
           const showHeader = groupBy && group !== prevGroup;
           return (
             <Fragment key={item.id}>
@@ -95,7 +98,11 @@ export default function AssetGrid<T extends AssetItem>({
                       aria-label={`Open actions for ${item.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        section.setMenu({ id: item.id, x: e.clientX, y: e.clientY });
+                        section.setMenu({
+                          id: item.id,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
                       }}
                       // Faintly visible by default (not opacity-0) so it stays
                       // discoverable on touch/keyboard, which have no hover —
@@ -123,7 +130,11 @@ export default function AssetGrid<T extends AssetItem>({
         })}
       </div>
       {totalPages > 1 && (
-        <Paginator page={section.page} totalPages={totalPages} onPageChange={section.setPage} />
+        <Paginator
+          page={section.page}
+          totalPages={totalPages}
+          onPageChange={section.setPage}
+        />
       )}
     </>
   );

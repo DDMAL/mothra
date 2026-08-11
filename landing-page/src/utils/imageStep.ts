@@ -2,7 +2,7 @@ import type { AnnotationSet, MeiFile } from "../types";
 
 export interface ImageProgress {
   nextStep: number; // 1=ic, 3=neon, 4=send
-  badge: string;    // label shown on the greyed-out card
+  badge: string; // label shown on the greyed-out card
 }
 
 export function getImageProgress(

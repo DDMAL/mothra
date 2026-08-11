@@ -23,6 +23,12 @@ export function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-export function getRefreshToken() { return localStorage.getItem(REFRESH_TOKEN_KEY); }
-export function setRefreshToken(t: string) { localStorage.setItem(REFRESH_TOKEN_KEY, t); }
-export function clearRefreshToken(): void { localStorage.removeItem(REFRESH_TOKEN_KEY); }
+export function getRefreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+export function setRefreshToken(t: string) {
+  localStorage.setItem(REFRESH_TOKEN_KEY, t);
+}
+export function clearRefreshToken(): void {
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}

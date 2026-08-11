@@ -8,10 +8,17 @@ interface MeiImageDiffViewProps {
   imageName: string;
 }
 
-export default function MeiImageDiffView({ imageId, diff, imageName }: MeiImageDiffViewProps) {
+export default function MeiImageDiffView({
+  imageId,
+  diff,
+  imageName,
+}: MeiImageDiffViewProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const [naturalSize, setNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -125,23 +132,27 @@ export default function MeiImageDiffView({ imageId, diff, imageName }: MeiImageD
           <span className="flex gap-4 flex-wrap">
             {diff.added.length > 0 && (
               <span>
-                <span style={{ color: "#22C55E" }}>●</span> {diff.added.length} added
+                <span style={{ color: "#22C55E" }}>●</span> {diff.added.length}{" "}
+                added
               </span>
             )}
             {diff.removed.length > 0 && (
               <span>
-                <span style={{ color: "#EF4444" }}>●</span> {diff.removed.length} removed
+                <span style={{ color: "#EF4444" }}>●</span>{" "}
+                {diff.removed.length} removed
               </span>
             )}
             {diff.moved.length > 0 && (
               <span>
-                <span style={{ color: "#EAB308" }}>●</span> {diff.moved.length} moved
+                <span style={{ color: "#EAB308" }}>●</span> {diff.moved.length}{" "}
+                moved
               </span>
             )}
           </span>
         ) : (
           <span className="italic">
-            all zones displayed — no geometric changes detected (corrections were pitch or note-type only)
+            all zones displayed — no geometric changes detected (corrections
+            were pitch or note-type only)
           </span>
         )}
       </div>

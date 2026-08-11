@@ -3,19 +3,20 @@ import TruncatedName from "../shared/TruncatedName";
 import type { FolioReviewRow, FolioReviewStatus } from "../../utils/folio";
 
 interface BatchFolioReviewModalProps {
-    rows: FolioReviewRow[];
-    canUseDetected: boolean;
-    onUseDetected: () => void;
-    onUsePositional: () => void;
-    onCancel: () => void;
+  rows: FolioReviewRow[];
+  canUseDetected: boolean;
+  onUseDetected: () => void;
+  onUsePositional: () => void;
+  onCancel: () => void;
 }
 
 const STATUS_LABEL: Record<FolioReviewStatus, string> = {
-    match: "✓ matches",
-    "no-detection": "— no folio in filename",
-    mismatch: "⚠ different position",
-    "not-in-source": "⚠ not in Cantus source",
-    duplicate: "⚠ duplicate folio",
+  match: "✓ matches",
+  "no-detection": "— no folio in filename",
+  mismatch: "⚠ different position",
+  "not-in-source": "⚠ not in Cantus source",
+  duplicate: "⚠ duplicate folio",
+  "phantom-continuation": "◆ not in Cantus source — continuation (ok)",
 };
 
 const STATUS_COLOR: Record<FolioReviewStatus, string> = {
@@ -24,6 +25,7 @@ const STATUS_COLOR: Record<FolioReviewStatus, string> = {
   mismatch: "text-yellow-700",
   "not-in-source": "text-red-700",
   duplicate: "text-red-700",
+  "phantom-continuation": "text-[#4AADAA]",
 };
 
 export default function BatchFolioReviewModal({
@@ -35,10 +37,12 @@ export default function BatchFolioReviewModal({
 }: BatchFolioReviewModalProps) {
   return (
     <Modal onClose={onCancel} size="2xl" backdrop="dark">
-      <h2 className="text-xl text-[#1D3335] text-center">check folio assignment</h2>
+      <h2 className="text-xl text-[#1D3335] text-center">
+        check folio assignment
+      </h2>
       <p className="text-sm text-[#1D3335]/70 text-center -mt-2">
-        some filenames suggest a different folio than upload order would assign —
-        review before running annotation/text-finding on this batch.
+        some filenames suggest a different folio than upload order would assign
+        — review before running annotation/text-finding on this batch.
       </p>
       <div className="max-h-[50vh] overflow-y-auto rounded-xl bg-white/40 divide-y divide-[#1D3335]/10">
         <div className="grid grid-cols-4 gap-2 px-3 py-2 text-xs font-semibold text-[#1D3335]/70 sticky top-0 bg-white/60 backdrop-blur">
@@ -55,7 +59,9 @@ export default function BatchFolioReviewModal({
             <TruncatedName name={row.fileName} className="min-w-0" />
             <span>{row.positionalFolio ?? "—"}</span>
             <span>{row.detectedFolio ?? "—"}</span>
-            <span className={STATUS_COLOR[row.status]}>{STATUS_LABEL[row.status]}</span>
+            <span className={STATUS_COLOR[row.status]}>
+              {STATUS_LABEL[row.status]}
+            </span>
           </div>
         ))}
       </div>
