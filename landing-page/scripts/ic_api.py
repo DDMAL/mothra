@@ -359,7 +359,12 @@ def ic_session_count(project_id: int, user=Depends(get_current_user)) -> dict:
         sessions = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(status_code=502, detail="IC returned a malformed session list")
-    return {"count": len(sessions) if isinstance(sessions, list) else 0}
+    if not isinstance(sessions, list):
+        raise HTTPException(
+            status_code=502,
+            detail="IC returned a malformed session list",
+        )
+    return {"count": len(sessions)}
 
 
 # ---------------------------------------------------------------------------

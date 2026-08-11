@@ -24,6 +24,7 @@ import type { IcResumeRequest } from "./project/IcSessionsModal";
 import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
+import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
@@ -729,18 +730,35 @@ export default function AppRouter({
         selectedProject.stepsUnlocked,
       );
       // The page a resume request (from "manage IC sessions") points at. IC
-      // records mothra's image id when the session is staged; fall back to the
-      // file-name stem it also stores, for sessions saved without one.
+      // records mothra's image id when the session is staged, so that's the
+      // authoritative match; the file-name stem it also stores is a fallback
+      // only for sessions saved without an id. Deliberately not a fallback for
+      // an id that fails to resolve - that means the page was deleted, and a
+      // stem match could land on a different image that reuses the filename
+      // (the session wouldn't even be the one /ic/start finds for it).
       const resumeImage = resumeIcSession
-        ? (selectedProject.images.find(
-            (img) => img.id === resumeIcSession.imageId,
-          ) ??
-          selectedProject.images.find(
-            (img) =>
-              img.name.replace(/\.[^.]+$/, "") === resumeIcSession.sourceName,
-          ) ??
-          null)
+        ? ((resumeIcSession.imageId == null
+            ? selectedProject.images.find(
+                (img) =>
+                  img.name.replace(/\.[^.]+$/, "") ===
+                  resumeIcSession.sourceName,
+              )
+            : selectedProject.images.find(
+                (img) => img.id === resumeIcSession.imageId,
+              )) ?? null)
         : null;
+      // An unresolvable resume must not fall through to the classifier: it
+      // would mount on the first pending page, and queueing there would pair
+      // this session's GameraXML with that other page's image.
+      if (resumeIcSession && !resumeImage)
+        return (
+          <IcSessionUnavailable
+            sourceName={resumeIcSession.sourceName}
+            sessionId={resumeIcSession.sessionId}
+            onBack={() => setView("project")}
+            onOpenClassifier={goToIc}
+          />
+        );
       // A saved session's page is normally still pending, but it doesn't have
       // to be (its page may have been encoded by some other route). Add it
       // back rather than silently ignoring the click - and so the queued XML
