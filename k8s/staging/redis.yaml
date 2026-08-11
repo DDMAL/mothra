@@ -1,0 +1,62 @@
+# Staging's own Celery broker. Deliberately NOT shared with production's redis:
+# both environments' workers consume the same default `celery` queue name, so one
+# broker would let them steal each other's tasks. See the comment on
+# CELERY_BROKER_URL in k8s/staging/configmap.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-staging
+  namespace: mothra
+  labels:
+    app: redis-staging
+    mothra.env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-staging
+  template:
+    metadata:
+      labels:
+        app: redis-staging
+        mothra.env: staging
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-staging
+  namespace: mothra
+  labels:
+    app: redis-staging
+    mothra.env: staging
+spec:
+  selector:
+    app: redis-staging
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

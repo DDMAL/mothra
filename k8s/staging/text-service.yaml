@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: text-service-staging
+  namespace: mothra
+  labels:
+    app: text-service-staging
+    mothra.env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: text-service-staging
+  template:
+    metadata:
+      labels:
+        app: text-service-staging
+        mothra.env: staging
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: text-service
+          # Placeholder tag — rewritten to this commit's sha-<short> by the deploy
+          # job; sha-0000000 is not a real tag so a missed rewrite fails loudly.
+          image: ghcr.io/ddmal/mothra-text-service:sha-0000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8002
+          # No env required (port fixed in the image CMD). Kraken/HTR + the
+          # baked-in Tridis OCR model make this a memory-heavy container.
+          readinessProbe:
+            tcpSocket:
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8002
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: text-service-staging
+  namespace: mothra
+  labels:
+    app: text-service-staging
+    mothra.env: staging
+spec:
+  selector:
+    app: text-service-staging
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002

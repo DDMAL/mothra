@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-staging
+  namespace: mothra
+  labels:
+    app: backend-staging
+    mothra.env: staging
+spec:
+  replicas: 1                    # keep at 1 until a migration Job exists (init_db runs at import)
+  selector:
+    matchLabels:
+      app: backend-staging
+  template:
+    metadata:
+      labels:
+        app: backend-staging
+        mothra.env: staging
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: backend
+          # Placeholder tag — rewritten to this commit's sha-<short> by the deploy
+          # job; sha-0000000 is not a real tag so a missed rewrite fails loudly.
+          image: ghcr.io/ddmal/mothra-backend:sha-0000000
+          imagePullPolicy: IfNotPresent
+          # CMD from the image (uvicorn main:app --host 0.0.0.0 --port 8001)
+          ports:
+            - name: http
+              containerPort: 8001
+          # Staging shares the `mothra` namespace, so production's mothra-config /
+          # mothra-secrets are resolvable from here. Leaving either unsuffixed
+          # would boot this pod green against the *production* database and let
+          # _migrate_db() ALTER production tables — verify these two names.
+          envFrom:
+            - configMapRef:
+                name: mothra-config-staging
+            - secretRef:
+                name: mothra-secrets-staging
+          volumeMounts:
+            - name: stored-models
+              mountPath: /app/scripts/stored_models
+          readinessProbe:
+            tcpSocket:
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: stored-models
+          persistentVolumeClaim:
+            claimName: mothra-stored-models-staging
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-staging
+  namespace: mothra
+  labels:
+    app: backend-staging
+    mothra.env: staging
+spec:
+  selector:
+    app: backend-staging
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001

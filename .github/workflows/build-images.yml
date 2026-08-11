@@ -5,14 +5,42 @@ name: ci-cd
 # CD: after a successful build, applies the app manifests and rolls out the
 # deployments (all except redis and postgres).
 # The Celery `worker` reuses the `mothra-backend` image, so it is not built here.
+#
+# Two environments share the `mothra` namespace and the same four images:
+#   main            → production, manifests in k8s/
+#   any other ref   → staging,    manifests in k8s/staging/
+# Both manifest sets use identical *filenames*; the `resolve` job below picks the
+# directory, and staging's object names carry a -staging suffix. See k8s/README.md.
+#
+# Only main deploys automatically (to production). Staging is deployed on demand
+# from *any* branch: Actions → ci-cd → Run workflow → pick the branch → leave
+# `environment: auto`. Auto-deploying staging on every push is deliberately not
+# done — one shared staging environment and a ~25min four-image build don't
+# survive ~20 active branches pushing into them.
+# Note that a dispatched run uses the *selected branch's* copy of this workflow
+# and of k8s/staging/, not main's — see the caveat in k8s/README.md.
 
 on:
   push:
     branches:
-      - main
-      - develop
-      - k8s-deployment
+      - main             # → production
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Manifest set to deploy (auto = main→production, any other branch→staging)"
+        type: choice
+        default: auto
+        options:
+          - auto
+          - staging
+          - production
+
+# Distinguishes the on-demand staging runs (now the common case) from main's
+# automatic production deploys in the Actions run list.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('manual · {0} · {1}', inputs.environment, github.ref_name)
+      || format('push · {0}', github.ref_name) }}
 
 permissions:
   contents: read
@@ -21,22 +49,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # A cold (cache-miss) backend build runs ~5-10 min. Anything past 45 is a
-    # stuck runner or a hung registry pull, not a slow build -- release the
-    # runner instead of letting it sit for the 6h default.
-    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           # backend: multi-stage Node(SPA + Neon submodule) -> Python/torch.
-          # Needs the LFS-tracked medieval .pt weights baked in, plus the
-          # sibling staff-finding/ dir (outside this context) via the
-          # build-contexts input below, for staffline_stage.py's package.
+          # Needs the LFS-tracked medieval .pt weights baked in.
           - name: backend
             context: ./landing-page
             file: ./landing-page/Dockerfile
-            build-contexts: staff_finding=./staff-finding
           # ic: built from the ic submodule (has its own Dockerfile).
           - name: ic
             context: ./ic
@@ -94,8 +115,11 @@ jobs:
         with:
           # metadata-action lowercases the image name (DDMAL -> ddmal).
           images: ghcr.io/${{ github.repository_owner }}/mothra-${{ matrix.name }}
+          # `latest` is gated to the default branch: staging builds share these
+          # image repos, so an ungated `latest` would be whichever environment
+          # pushed most recently.
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
             type=ref,event=branch
 
@@ -104,7 +128,6 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
-          build-contexts: ${{ matrix.build-contexts }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
@@ -112,18 +135,62 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-  deploy:
-    # Runs only after all three images are built & pushed, so the sha-tagged
-    # images are guaranteed to exist before we roll the deployments.
-    needs: build
+  # Single source of truth for the ref→environment mapping. A separate job (rather
+  # than a step inside `deploy`) so the job-level `concurrency` block below can
+  # read the resolved environment via `needs`.
+  resolve:
     runs-on: ubuntu-latest
-    # Bounds the job as a whole; the rollout loop below already caps itself at
-    # 300s per deployment (4 deployments = 20 min worst case).
-    timeout-minutes: 30
-    # Serialize deploys per branch; don't cancel an in-flight rollout.
+    outputs:
+      env: ${{ steps.pick.outputs.env }}
+      dir: ${{ steps.pick.outputs.dir }}
+      suffix: ${{ steps.pick.outputs.suffix }}
+    steps:
+      - id: pick
+        env:
+          REF: ${{ github.ref_name }}
+          DISPATCH: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'auto' }}
+        run: |
+          set -euo pipefail
+          case "$REF" in
+            main) ENV=production ;;
+            *)    ENV=staging ;;
+          esac
+          if [ "$DISPATCH" != auto ]; then
+            # Never let a feature branch's images reach production by dispatch.
+            if [ "$DISPATCH" = production ] && [ "$REF" != main ]; then
+              echo "::error::refusing to deploy production from '$REF' (main only)"
+              exit 1
+            fi
+            ENV="$DISPATCH"
+          fi
+          # Both manifest sets use the same filenames: DIR selects the environment,
+          # SUFFIX is the object-name suffix (used only by `rollout status`).
+          if [ "$ENV" = production ]; then
+            DIR=k8s;         SUFFIX=""
+          else
+            DIR=k8s/staging; SUFFIX="-staging"
+          fi
+          {
+            echo "env=$ENV"
+            echo "dir=$DIR"
+            echo "suffix=$SUFFIX"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::deploying $ENV from $DIR (object suffix '${SUFFIX:-<none>}')"
+
+  deploy:
+    # Runs only after all four images are built & pushed, so the sha-tagged
+    # images are guaranteed to exist before we roll the deployments.
+    needs: [build, resolve]
+    runs-on: ubuntu-latest
+    # Serialize per *environment*, not per branch: two staging branches would
+    # otherwise get separate groups and race on the same -staging objects, while
+    # production and staging deploys share no objects and are safe in parallel.
     concurrency:
-      group: deploy-${{ github.ref }}
+      group: deploy-${{ needs.resolve.outputs.env }}
       cancel-in-progress: false
+    env:
+      DIR: ${{ needs.resolve.outputs.dir }}
+      SUFFIX: ${{ needs.resolve.outputs.suffix }}
     steps:
       - name: Checkout (manifests only)
         uses: actions/checkout@v4
@@ -146,27 +213,37 @@ jobs:
           set -euo pipefail
           TAG="sha-${GITHUB_SHA:0:7}"   # matches metadata-action type=sha,format=short
           echo "Deploying image tag: $TAG"
-          sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" \
-            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml k8s/paco-classifier-service.yaml
-          grep -H 'image: ghcr.io' \
-            k8s/backend.yaml k8s/worker.yaml k8s/ic.yaml k8s/text-service.yaml k8s/paco-classifier-service.yaml
+          FILES=("$DIR/backend.yaml" "$DIR/worker.yaml" "$DIR/ic.yaml" "$DIR/text-service.yaml" \
+                 "$DIR/paco-classifier-service.yaml")
+          sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" "${FILES[@]}"
+          grep -H 'image: ghcr.io' "${FILES[@]}"
+          # sed exits 0 when it matches nothing, so a drifted placeholder would
+          # otherwise deploy whatever stale tag is committed. Fail loudly instead.
+          # Matched on the full `image: <repo>:<tag>` shape rather than an
+          # end-of-line ":$TAG", so a trailing comment after the tag can't fail an
+          # otherwise-correct rewrite (the paco manifest used to carry one).
+          for f in "${FILES[@]}"; do
+            grep -qE "image: ghcr\.io/ddmal/mothra-[a-z-]+:${TAG}([[:space:]]|\$)" "$f" \
+              || { echo "::error::image tag not pinned in $f"; exit 1; }
+          done
 
       - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
         run: |
           set -euo pipefail
           kubectl apply \
-            -f k8s/configmap.yaml \
-            -f k8s/backend.yaml \
-            -f k8s/worker.yaml \
-            -f k8s/ic.yaml \
-            -f k8s/text-service.yaml \
-            -f k8s/paco-classifier-service.yaml \
-            -f k8s/ingress.yaml
+            -f "$DIR/configmap.yaml" \
+            -f "$DIR/backend.yaml" \
+            -f "$DIR/worker.yaml" \
+            -f "$DIR/ic.yaml" \
+            -f "$DIR/text-service.yaml" \
+            -f "$DIR/paco-classifier-service.yaml" \
+            -f "$DIR/ingress.yaml"
 
       - name: Roll out deployments (all except redis & postgres)
         run: |
           set -euo pipefail
+          # Object names, so SUFFIX applies here (not DIR).
           for d in backend worker ic text-service paco-classifier-service; do
-            kubectl -n mothra rollout status "deploy/$d" --timeout=300s
+            kubectl -n mothra rollout status "deploy/${d}${SUFFIX}" --timeout=300s
           done
           kubectl -n mothra get pods

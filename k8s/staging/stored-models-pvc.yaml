@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mothra-stored-models-staging
+  namespace: mothra
+  labels:
+    mothra.env: staging
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: mothra-stored-models-staging-pv
+  resources:
+    requests:
+      storage: 200Gi

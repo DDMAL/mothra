@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ic-staging
+  namespace: mothra
+  labels:
+    app: ic-staging
+    mothra.env: staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ic-staging
+  template:
+    metadata:
+      labels:
+        app: ic-staging
+        mothra.env: staging
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: ic
+          # Placeholder tag — the deploy job rewrites it to this commit's
+          # sha-<short>. sha-0000000 is intentionally not a real tag, so a missed
+          # rewrite fails loudly (ImagePullBackOff) instead of silently shipping
+          # whatever stale sha happened to be committed.
+          image: ghcr.io/ddmal/mothra-ic:sha-0000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8000"
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ic-staging
+  namespace: mothra
+  labels:
+    app: ic-staging
+    mothra.env: staging
+spec:
+  selector:
+    app: ic-staging
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
