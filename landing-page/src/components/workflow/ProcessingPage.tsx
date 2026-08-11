@@ -260,7 +260,18 @@ export default function ProcessingPage({
           if (!line.startsWith("data: ")) continue;
           const ev = JSON.parse(line.slice(6));
           if (ev.type === "item_start") {
-            setItemProgress({ index: ev.item, total: ev.total, name: ev.name });
+            // Assign the ref synchronously, not just via setItemProgress —
+            // if a single stream chunk contains item_start followed by
+            // stage_done, the effect that syncs itemProgressRef from
+            // itemProgress state hasn't run yet, so stage_done below would
+            // otherwise read the *previous* item's index/total.
+            const nextItemProgress = {
+              index: ev.item,
+              total: ev.total,
+              name: ev.name,
+            };
+            itemProgressRef.current = nextItemProgress;
+            setItemProgress(nextItemProgress);
             currentItemStartRef.current = Date.now();
             if (ev.total > 1 && avgItemMsRef.current == null) {
               avgItemMsRef.current = getAverageDurationMs(
@@ -294,15 +305,23 @@ export default function ProcessingPage({
                   : stagePct,
               );
               if (
-                ev.name === "processing" && 
-                ip && ip.total > 1 && currentItemStartRef.current
+                ev.name === "processing" &&
+                ip &&
+                ip.total > 1 &&
+                currentItemStartRef.current
               ) {
                 const itemDurationMs = Date.now() - currentItemStartRef.current;
-                itemDurationsRef.current = [ ...itemDurationsRef.current, itemDurationMs, ];
+                itemDurationsRef.current = [
+                  ...itemDurationsRef.current,
+                  itemDurationMs,
+                ];
                 avgItemMsRef.current =
                   itemDurationsRef.current.reduce((a, b) => a + b, 0) /
                   itemDurationsRef.current.length;
-                recordDurationMs(`${jobKind ?? "unknown"}:item`, itemDurationMs);
+                recordDurationMs(
+                  `${jobKind ?? "unknown"}:item`,
+                  itemDurationMs,
+                );
               }
             }
           }
