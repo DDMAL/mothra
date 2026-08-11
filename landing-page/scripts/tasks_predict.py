@@ -126,6 +126,32 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
 
     return "\n".join(filter(None, [tm_txt, st_txt])), source_arr
 
+
+def _reused_annotation_staffline_source(img_arr, image_bytes, mime_type, image_name, publish):
+    """The classifier-regeneration half of _run_medieval_inference's stave
+    pipeline, reused for a has_annotation=True (reused) image under the
+    medieval preset -- see that function's docstring and the call site
+    above for why the raw page is the wrong default source here. Runs
+    synchronously (no concurrent YOLO pass to overlap with, unlike the
+    fresh-run path) and falls back to the raw page on any classifier
+    failure, matching _run_medieval_inference's own fallback exactly."""
+    import cv2
+    import numpy as np
+    try:
+        stafflines_png, _background_png = classify_stafflines(image_bytes, mime_type)
+        arr = cv2.imdecode(np.frombuffer(stafflines_png, np.uint8), cv2.IMREAD_COLOR)
+        if arr is None:
+            raise PacoClassifierError("could not decode stafflines PNG from paco-classifier-service")
+        if arr.shape[:2] != img_arr.shape[:2]:
+            raise PacoClassifierError(f"classifier output {arr.shape[:2]} != page {img_arr.shape[:2]}")
+        return arr
+    except Exception as e:
+        publish({
+            "type": "log",
+            "message": f"{image_name}: staffline classifier unavailable ({e}) — falling back to raw-image stave detection",
+        })
+        return img_arr
+
 @celery_app.task(name="predict.run")
 def run_predict_task(job_id, project_id, body):
     """Celery task backing `POST /api/projects/{id}/predict`.
@@ -269,7 +295,24 @@ def run_predict_task(job_id, project_id, body):
                     "jsonName": "", "detectionCount": n_detections,
                 })
             else:
-                staffline_source_arr = img_arr  # reused annotation -- no fresh classifier run to redo
+                if yolo_models.medieval_models is not None:
+                    # A reused annotation's stave-box coordinates carry no
+                    # record of which image they were actually detected
+                    # against -- if they came from an earlier medieval-preset
+                    # run, that was the paco-classifier's stafflines-only
+                    # layer, not the raw page (see _run_medieval_inference).
+                    # Defaulting to the raw page here would crop staffline
+                    # detection from different pixels than produced these
+                    # boxes. Regenerate that layer unconditionally rather
+                    # than guess the boxes' provenance -- classifying is
+                    # never worse than the raw page for Sauvola-binarization-
+                    # based line detection, whichever source the existing
+                    # boxes actually came from.
+                    staffline_source_arr = _reused_annotation_staffline_source(
+                        img_arr, bytes(image_data), mime_type, image_name, publish,
+                    )
+                else:
+                    staffline_source_arr = img_arr  # non-medieval preset -- boxes were always raw-page-sourced
 
             # Staffline detection is gated only on has_class (fresh stave-class
             # boxes to work from), never on has_text_alignment -- an image can
@@ -282,8 +325,13 @@ def run_predict_task(job_id, project_id, body):
                 publish({"type": "log", "message":
                     f"[trace] {image_name}: stave-class boxes came from model"
                     f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
+                redetect_fn = (
+                    yolo_models.infer_staves_raw_boxes
+                    if yolo_models.medieval_models is not None else None
+                )
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
+                    redetect_fn=redetect_fn,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

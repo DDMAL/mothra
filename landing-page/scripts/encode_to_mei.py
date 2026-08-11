@@ -217,22 +217,40 @@ def assign_glyphs_to_staves(
 ) -> tuple[dict[int, list[Glyph]], list[StaveBbox]]:
     """Assign each glyph to a stave.
 
-    Detected staves (usually from YOLO stave-class detections) can miss real
-    staff systems entirely — confirmed on a real manuscript page where only 4
-    of 10 real staff-system rows had any stave-class detection at all. Rather
-    than force every glyph onto whichever detected stave is nearest (which
-    corrupts note ordering and pitch for every missed row, since glyphs from
-    multiple distinct physical rows end up interleaved by x-position in one
-    stave's bucket), this reconciles independently-clustered row-groups
-    against the detected staves by Y-range overlap: a row that overlaps a
-    detected stave is assigned to it as before; a row that overlaps nothing
-    is a system the detector missed, and gets a synthesized stave of its own.
+    Two passes, in order:
 
-    That synthesized stave's line_ys (used for pitch computation — see
+    1. Direct claim: each glyph is assigned individually to whichever
+       existing stave's own line band (uly..lry, padded by
+       STAVE_BUFFER_PX) it falls nearest/within -- never to a stave more
+       than STAVE_BUFFER_PX away. This is per-glyph, not per-row-blob, so a
+       lyric-text glyph (or anything else) sitting between two
+       independently-detected staves can never drag a REAL note that IS
+       near its own stave along with it into the wrong bucket, and two
+       real, adjacent, correctly-detected staves can never have their
+       glyphs merged into just one of them and left the other with
+       nothing -- confirmed as a real failure mode on a page where two
+       genuinely-detected, Y-adjacent staves both ended up with zero
+       glyphs after the OLD row-clustering-then-best-overlap-wins design
+       let a lyric-text-bridged row blob's whole content get claimed by a
+       third bucket instead.
+
+    2. Whatever's left unclaimed by pass 1 (mostly lyric-text glyphs that
+       don't sit close enough to any note-line band, plus -- crucially --
+       every glyph belonging to a system the detector missed entirely) is
+       clustered into rows exactly as before (_cluster_glyphs_into_staves),
+       and EACH resulting row is matched to whichever existing stave its
+       own aggregate bbox overlaps most (unchanged blob-level logic); a row
+       that overlaps no existing stave at all is a genuinely missed system
+       and gets a synthesized stave of its own, appended at the end of
+       `staves`. This pass is unchanged from before this fix -- it only
+       ever sees the reduced, already-narrowed-down leftover set, so it
+       can no longer misroute a real note that pass 1 already claimed.
+
+    That synthesized stave's line_ys (used for pitch computation -- see
     _step_from_y) would otherwise come purely from the missed row's own
     glyphs' bounding box (_cluster_glyphs_into_staves's crude fallback),
     which can be badly skewed by that row's own melodic range (a single
-    unusually high/low note inflates the guessed staff height) — confirmed
+    unusually high/low note inflates the guessed staff height) -- confirmed
     on a real page as a visible, per-row-only vertical rendering offset
     (notes floating well above/below their real staff, since Neon/Verovio
     renders pitch, not raw pixel position). Passing this page's OWN
@@ -245,10 +263,7 @@ def assign_glyphs_to_staves(
     same opt-in-fabrication rule as tier-3's own estimate_staves_from_glyphs
     fallback -- without this, a page could end up with tier-3 staves carrying
     synthetic pitch geometry while recovered staves silently didn't, even
-    though the caller asked for synthetic lines everywhere. The two knobs
-    compose: allow_synthetic_lines gates whether a recovered stave gets any
-    line_ys at all, and typical_line_spacing (when synthesis is allowed)
-    decides how reliable that synthesis is.
+    though the caller asked for synthetic lines everywhere.
 
     Returns (glyphs_by_stave, staves) — `staves` may be LONGER than the input
     (synthesized entries appended at the end). Callers must build zones/
@@ -259,26 +274,48 @@ def assign_glyphs_to_staves(
         result: dict[int, list[Glyph]] = {-1: list(glyphs)}
         return result, staves
 
-    typical_spacing = _typical_line_spacing(staves)
-    result = {i: [] for i in range(len(staves))}
-    row_groups = _cluster_glyphs_into_staves(
-        glyphs, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing,
-        allow_synthetic_lines=allow_synthetic_lines,
-    )
+    result: dict[int, list[Glyph]] = {i: [] for i in range(len(staves))}
+    unclaimed: list[Glyph] = []
 
-    for row_stave, members in row_groups:
-        best_idx, best_overlap = None, 0
-        for i, stave in enumerate(staves):
-            lo, hi = stave.uly - STAVE_BUFFER_PX, stave.lry + STAVE_BUFFER_PX
-            overlap = min(row_stave.lry, hi) - max(row_stave.uly, lo)
-            if overlap > best_overlap:
-                best_overlap, best_idx = overlap, i
+    def _claim(glyph: Glyph, candidates: list[StaveBbox]) -> Optional[int]:
+        best_idx, best_dist = None, None
+        for i, stave in candidates: 
+            if stave.uly <= glyph.cy <= stave.lry:
+                dist = 0.0
+            else:
+                dist = min(abs(glyph.cy - stave.uly), abs(glyph.cy - stave.lry))
+            if dist <= STAVE_BUFFER_PX and (best_dist is None or dist < best_dist):
+                best_dist, best_idx = dist, i
+        return best_idx
+
+    indexed_staves = list(enumerate(staves))
+    for glyph in glyphs:
+        best_idx = _claim(glyph, indexed_staves)
         if best_idx is not None:
-            result[best_idx].extend(members)
+            result[best_idx].append(glyph)
         else:
-            new_idx = len(staves)
-            staves.append(row_stave)
-            result[new_idx] = list(members)
+            unclaimed.append(glyph)
+
+    if unclaimed:
+        typical_spacing = _typical_line_spacing(staves)
+        row_groups = _cluster_glyphs_into_staves(
+            unclaimed, page_w, page_h, id_prefix="row", typical_line_spacing=typical_spacing,
+            allow_synthetic_lines=allow_synthetic_lines,
+        )
+
+        for row_stave, members in row_groups:
+            best_idx, best_overlap = None, 0
+            for i, stave in enumerate(staves):
+                lo, hi = stave.uly - STAVE_BUFFER_PX, stave.lry + STAVE_BUFFER_PX
+                overlap = min(row_stave.lry, hi) - max(row_stave.uly, lo)
+                if overlap > best_overlap:
+                    best_overlap, best_idx = overlap, i
+            if best_idx is not None:
+                result[best_idx].extend(members)
+            else:
+                new_idx = len(staves)
+                staves.append(row_stave)
+                result[new_idx] = list(members)
     for idx in result:
         result[idx].sort(key=lambda g: g.ulx)
     return result, staves
@@ -295,6 +332,37 @@ def cluster_into_syllables(glyphs: list[Glyph], gap_mult: float = SYLLABLE_GAP_M
             clusters[-1].append(glyph)
     return clusters
 
+def _cluster_boxes_into_rows(boxes: list[dict], gap_mult: float = SYLLABLE_GAP_MULTIPLIER) -> list[list[dict]]:
+    """Group one stave's syl_boxes into physical text rows by Y-gap —
+    mirrors cluster_into_syllables's X-gap clustering, but on the other
+    axis. A single stave's text can legitimately span more than one
+    physical manuscript line: a long line wraps to a continuation row
+    written directly above the next stave begins, still belonging (by
+    this pipeline's manuscript convention, see _assign_boxes_to_staves)
+    to the stave above it rather than the one below. Boxes are sorted by
+    center-Y first so rows come out top-to-bottom; callers must sort each
+    row left-to-right and concatenate rows in this order — never sort two
+    rows' boxes together by X alone, or a wrapped row's leftmost token
+    (written first on the page specifically because it's a continuation)
+    sorts ahead of the row above it whenever it happens to sit further
+    left, scrambling reading order (confirmed: this is exactly the failure
+    _group_staves_by_row's docstring describes for pooled fragments, one
+    axis over)."""
+    if not boxes:
+        return []
+    ordered = sorted(boxes, key=lambda b: (b["ul"][1] + b["lr"][1]) / 2)
+    heights = [b["lr"][1] - b["ul"][1] for b in ordered if b["lr"][1] > b["ul"][1]]
+    threshold = gap_mult * median(heights) if heights else 0
+    rows: list[list[dict]] = [[ordered[0]]]
+    for box in ordered[1:]:
+        prev_cy = (rows[-1][-1]["ul"][1] + rows[-1][-1]["lr"][1]) / 2
+        cy = (box["ul"][1] + box["lr"][1]) / 2
+        if cy - prev_cy > threshold:
+            rows.append([box])
+        else:
+            rows[-1].append(box)
+    return rows
+
 def _assign_boxes_to_staves(staves: list[StaveBbox], boxes: list[dict]) -> dict[int, list[dict]]:
     """Assign each syl_box to a stave — a box strictly inside a stave's
     [uly, lry] band goes there; otherwise it goes to the nearest stave
@@ -309,7 +377,16 @@ def _assign_boxes_to_staves(staves: list[StaveBbox], boxes: list[dict]) -> dict[
     edge. Only a box sitting above every stave (e.g. a rubric before the
     first system) falls back to nearest-by-distance. Every box is placed
     exactly once, deterministically — no 'best single match, everything
-    else dropped' step here."""
+    else dropped' step here.
+
+    Within a stave's bucket, boxes are ordered row-by-row (top to bottom,
+    via _cluster_boxes_into_rows) then left-to-right within each row — NOT
+    by a single flat X sort. A stave whose text wraps to a second physical
+    row (see that helper's docstring) puts both rows' boxes in the same
+    bucket; a flat X sort would interleave the two rows' tokens by raw
+    X-position instead of preserving row order, which is a real observed
+    bug (a wrapped row's continuation syllable sorting ahead of the row
+    above it whenever it happens to sit further left on the page)."""
     result: dict[int, list[dict]] = {i: [] for i in range(len(staves))}
     if not staves:
         return result
@@ -331,8 +408,11 @@ def _assign_boxes_to_staves(staves: list[StaveBbox], boxes: list[dict]) -> dict[
             if dist < best_dist:
                 best_idx, best_dist = idx, dist
         result[best_idx].append(box)
-    for group in result.values():
-        group.sort(key=lambda b: b["ul"][0])
+    for idx, group in result.items():
+        rows = _cluster_boxes_into_rows(group)
+        for row in rows:
+            row.sort(key=lambda b: b["ul"][0])
+        result[idx] = [b for row in rows for b in row]
     return result
 
 def _assign_glyphs_to_boxes(glyphs: list[Glyph], boxes: list[dict]) -> list[list[Glyph]]:
@@ -352,16 +432,33 @@ def _assign_glyphs_to_boxes(glyphs: list[Glyph], boxes: list[dict]) -> list[list
     A glyph whose center falls inside a box's own x-range goes there;
     anything else goes to the nearest box by X-distance. Every glyph lands
     in exactly one box's bucket — some buckets may end up empty (a syllable
-    with no note under it), which is fine; see the caller."""
+    with no note under it), which is fine; see the caller.
+
+    Containment is capped to boxes that aren't extreme width outliers
+    relative to their row-mates (more than 4x the median syl_box width
+    here). A stray/mis-detected syl_box (e.g. a quire mark or page
+    signature mothra-text misreads as a short word) can end up with an
+    anomalously wide X-range; since containment always wins outright over
+    any other box's mere edge-distance, an oversized box's range can swallow
+    every glyph on the whole stave into one syllable, leaving every real
+    syl_box on that stave with none — confirmed as a real observed failure.
+    An outlier-width box still competes for glyphs by ordinary edge-distance,
+    it just loses its automatic containment win; this leaves every
+    normal-width box's behavior (including legitimately wide multi-word
+    boxes) completely unchanged."""
     if not boxes:
         return []
     result: list[list[Glyph]] = [[] for _ in boxes]
+    widths = [b["lr"][0] - b["ul"][0] for b in boxes]
+    typical_width = median(widths) if widths else 0
+    outlier_width = 4 * typical_width if typical_width else float("inf")
     ranges = [(b["ul"][0], b["lr"][0]) for b in boxes]
     for glyph in sorted(glyphs, key=lambda g: g.ulx):
         cx = (glyph.ulx + glyph.lrx) / 2
         best_idx, best_dist = 0, float("inf")
         for i, (lo, hi) in enumerate(ranges):
-            dist = 0 if lo <= cx <= hi else min(abs(cx - lo), abs(cx - hi))
+            contains = lo <= cx <= hi and widths[i] <= outlier_width
+            dist = 0 if contains else min(abs(cx - lo), abs(cx - hi))
             if dist < best_dist:
                 best_idx, best_dist = i, dist
         result[best_idx].append(glyph)
@@ -1097,9 +1194,12 @@ def build_mei(
         for g in row_groups if len(g) > 1
     }
 
-    for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0):
+    for stave_idx in sorted(
+            (k for k in glyphs_by_stave if k >= 0),
+            key=lambda k: (staves[k].uly, k),
+    ):
         staff_glyphs = glyphs_by_stave[stave_idx]
-        if not staff_glyphs:
+        if not staff_glyphs and not boxes_by_stave.get(stave_idx):
             continue
         # <sb> marks the start of each stave and links it to its zone
         zone_id = stave_zone_ids.get(stave_idx, str(stave_idx))
@@ -1207,7 +1307,40 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
                 except (ValueError, TypeError):
                     pass
     return _serialize_mei(root)
-    
+
+def scale_text_alignment(text_alignment: Optional[dict], factor_x: float, factor_y: Optional[float] = None) -> Optional[dict]:
+    """Scale a text_alignment's syl_boxes ul/lr coords by (factor_x, factor_y)
+    -- counterpart to scale_facsimile, for when syl_boxes (always computed
+    against the working-copy image) must be compared/written against
+    geometry in a different pixel space.
+
+    factor_x/factor_y are independent, NOT a single uniform scale: the
+    client-side upload resize (imageResize.ts) rounds width and height
+    separately after applying one scalar shrink factor, so
+    image_w/working_w and image_h/working_h can come out numerically
+    different (e.g. an odd source dimension rounds differently on each
+    axis) even though the resize was visually uniform. Using one factor for
+    both axes would skew Y coordinates by that rounding error. factor_y
+    defaults to factor_x for callers that only have (or only need) one
+    axis's ratio."""
+    if factor_y is None:
+        factor_y = factor_x
+    if not text_alignment or (factor_x == 1.0 and factor_y == 1.0):
+        return text_alignment
+
+    def _scaled(box):
+        try:
+            ul = [box["ul"][0] * factor_x, box["ul"][1] * factor_y]
+            lr = [box["lr"][0] * factor_x, box["lr"][1] * factor_y]
+        except (KeyError, TypeError, IndexError):
+            return box  # malformed box passes through unscaled, not dropped
+        return {**box, "ul": ul, "lr": lr}
+
+    scaled = dict(text_alignment)
+    scaled["syl_boxes"] = [_scaled(b) for b in text_alignment.get("syl_boxes", [])]
+    return scaled
+
+
 REQUIRED_MEI_VERSION = "5.0.0-dev"
 
 def validate_mei(xml_bytes: bytes) -> list[str]:
@@ -1550,6 +1683,23 @@ def verify_and_correct_syllables(
     staff_zone_id_by_idx = {i: f"sz-{stave.id}" for i, stave in enumerate(staves)}
     logs: list[str] = []
 
+    # A box that's genuinely a fragment-pooled row-mate's (see
+    # _pool_group_syllable_data) can be Y-bucketed here, unpooled, to a
+    # DIFFERENT stave than the one whose glyphs it's actually paired with —
+    # that stave then computes it as a real box with zero glyphs matched,
+    # even though its true glyphs (and its already-correct <syllable>) live
+    # on the row-mate. Detecting that specific case doesn't need re-running
+    # the pooling (out of scope here, see below) -- it only needs to know
+    # whether this exact text is ALREADY backed by real glyphs somewhere
+    # else in the document; if so, this glyph-less copy is that duplicate,
+    # not new content.
+    old_texts_with_glyphs_anywhere = {
+        syl_text
+        for stave_units in current_syllables.values()
+        for syl_text, glyph_ids in stave_units
+        if glyph_ids
+    }
+
     for stave_idx in range(len(staves)):
         neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
         stave_boxes = boxes_by_stave.get(stave_idx, [])
@@ -1570,27 +1720,39 @@ def verify_and_correct_syllables(
         # existing real syl_text for the exact same glyph grouping -- only
         # a genuine glyph-membership change (row split/merge, reordering)
         # or a genuine text change should ever get written.
+        #
+        # NB: a unit with glyph_ids empty is NEVER the "-" fallback --
+        # _build_syllable_units only emits "-" via cluster_into_syllables,
+        # which clusters actual existing neume glyphs, so a "-" unit always
+        # carries at least one. glyph_ids empty means stave_boxes was
+        # non-empty and this specific real syl_box just has no note matched
+        # to it in this stave-scoped, unpooled recheck: either a real "text
+        # with nothing under it" box (legitimate, build_mei can produce
+        # these), or a row-mate's fragment-pooled box this simplified check
+        # can't see the glyph match for (see the module-level
+        # old_texts_with_glyphs_anywhere comment above, and
+        # _reconstruct_mei_state's docstring: redoing that pooling is out
+        # of scope here). Distinguish the two by whether this exact text is
+        # already backed by real glyphs somewhere else in the document —
+        # if so it's that duplicate, drop it; otherwise it's genuinely new
+        # data, keep it. An earlier version of this guard instead checked
+        # only THIS stave's own old empty-glyph units, which silently
+        # deleted real new syllables (and their boxes) the moment their
+        # glyph-matching outcome changed for any reason, including
+        # unrelated fixes upstream — too narrow. A version after that
+        # dropped the check entirely, which let the fragment-pooled
+        # duplicate case back in — too broad. This is the middle ground.
         old_units = current_syllables.get(stave_idx, [])
         old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
-        old_empty_texts = {syl_text for syl_text, glyph_ids in old_units if not glyph_ids}
         reconciled_units = []
         for syl_text, box, glyphs_in_syl in new_units:
             glyph_ids = tuple(g.id for g in glyphs_in_syl)
-            if not glyph_ids:
-                # A box with no neumes assigned here is either a genuine
-                # "text with nothing under it" (build_mei can legitimately
-                # produce these for an isolated stave) or -- the same
-                # pooling gap as above -- a box a row-mate actually owns,
-                # miscounted as unclaimed only because pooling isn't
-                # redone here. Only keep it if this stave already had a
-                # matching empty-glyph unit; otherwise it's a phantom this
-                # unpooled recheck invents, not a real disagreement.
-                if syl_text not in old_empty_texts:
-                    continue
-            else:
+            if glyph_ids:
                 old_text = old_text_by_glyphs.get(glyph_ids)
                 if syl_text == "-" and old_text not in (None, "-"):
                     syl_text = old_text
+            elif syl_text in old_texts_with_glyphs_anywhere:
+                continue
             reconciled_units.append((syl_text, box, glyphs_in_syl))
         new_units = reconciled_units
 
