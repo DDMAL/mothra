@@ -2,9 +2,22 @@ import { useEffect, useState } from "react";
 import Modal from "../shared/Modal";
 import { apiFetch } from "../../lib/apiFetch";
 
+export interface IcResumeRequest {
+  sessionId: string;
+  /** mothra's project_images.id for the session's page — IC stores it when
+   * the session is staged, so it maps straight back to a ProjectImage. */
+  imageId: string | null;
+  sourceName: string;
+}
+
 interface IcSessionsModalProps {
   projectId: number;
   onClose: () => void;
+  /** Clicking an in-progress session asks the host to open it. Deliberately
+   * not handled inside this modal: IC's SessionView on its own is missing the
+   * filmstrip, clef controls and encode queue that make the session useful,
+   * so the IC step page opens it instead. */
+  onResumeSession: (req: IcResumeRequest) => void;
 }
 
 // Manage this project's saved Interactive Classifier sessions. The whole
@@ -14,6 +27,7 @@ interface IcSessionsModalProps {
 export default function IcSessionsModal({
   projectId,
   onClose,
+  onResumeSession,
 }: IcSessionsModalProps) {
   const [icUrl, setIcUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +54,36 @@ export default function IcSessionsModal({
       cancelled = true;
     };
   }, [projectId]);
+
+  // IC's manage page posts this instead of resuming in place when it's
+  // embedded (see the ic submodule's App.tsx). Accept it only from IC's own
+  // origin, the same guard InteractiveClassifier uses for its messages.
+  useEffect(() => {
+    if (!icUrl) return;
+    let origin: string | null = null;
+    try {
+      origin = new URL(icUrl).origin;
+    } catch {
+      origin = null;
+    }
+    function onMessage(e: MessageEvent) {
+      if (!origin || e.origin !== origin) return;
+      const data = e.data;
+      if (
+        data?.type === "ic:resume-session" &&
+        typeof data.sessionId === "string"
+      ) {
+        onResumeSession({
+          sessionId: data.sessionId,
+          imageId: typeof data.imageId === "string" ? data.imageId : null,
+          sourceName:
+            typeof data.sourceName === "string" ? data.sourceName : "",
+        });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [icUrl, onResumeSession]);
 
   return (
     <Modal onClose={onClose} size="5xl" backdrop="dark">

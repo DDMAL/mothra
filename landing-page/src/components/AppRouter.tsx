@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
-import { getImageProgress, minNextStep } from "../utils/imageStep";
+import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
@@ -20,9 +20,11 @@ import AuthPage from "./auth/AuthPage";
 import MyAccount from "./account/MyAccount";
 import MyProjects from "./project/MyProjects";
 import ProjectDetail from "./project/ProjectDetail";
+import type { IcResumeRequest } from "./project/IcSessionsModal";
 import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
+import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
@@ -177,6 +179,12 @@ export default function AppRouter({
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
   const [clefLine, setClefLine] = useState(3);
 
+  // A saved IC session picked in the project page's "manage IC sessions"
+  // modal, to be opened on the IC step page. Cleared by goToIc() below, so
+  // every other route into that view starts on the first page to classify.
+  const [resumeIcSession, setResumeIcSession] =
+    useState<IcResumeRequest | null>(null);
+
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
 
@@ -223,6 +231,16 @@ export default function AppRouter({
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
+
+  // Ordinary way into the IC step: start on the first page to classify. Any
+  // saved-session resume left over from a previous visit is dropped here, so
+  // only the "manage IC sessions" path (which sets it) ever opens one - the
+  // request has to outlive the navigation itself, since the "ic" case below
+  // keeps reading it to hold the session's page in the filmstrip.
+  const goToIc = () => {
+    setResumeIcSession(null);
+    setView("ic");
+  };
 
   switch (view) {
     case "landing":
@@ -284,7 +302,7 @@ export default function AppRouter({
             );
             if (step >= 4) handleSendToCantus();
             else if (step >= 3) setView("neon-editor");
-            else if (step >= 1 || SKIP_PREDICT) setView("ic");
+            else if (step >= 1 || SKIP_PREDICT) goToIc();
             else {
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
@@ -299,15 +317,19 @@ export default function AppRouter({
           onStepClick={(step) => {
             if (step === 0) {
               if (SKIP_PREDICT) {
-                setView("ic");
+                goToIc();
                 return;
               }
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
-            } else if (step === 1) setView("ic");
+            } else if (step === 1) goToIc();
             else if (step === 2) setView("ic-completion");
             else if (step === 3) setView("neon-editor");
+          }}
+          onResumeIcSession={(req) => {
+            setResumeIcSession(req);
+            setView("ic");
           }}
           onSendToCantus={handleSendToCantus}
           sendingBundle={sendingBundle}
@@ -637,7 +659,7 @@ export default function AppRouter({
     case "completion":
       return (
         <CompletionPage
-          onContinue={() => setView("ic")}
+          onContinue={() => goToIc()}
           onBackToProject={() => setView("project")}
           logsFileName="annotatorlogs.txt"
           logContent={annotationLogs.join("\n")}
@@ -698,36 +720,59 @@ export default function AppRouter({
           }
         />
       );
-    case "ic":
-      return selectedProject ? (
+    case "ic": {
+      if (!selectedProject) return null;
+      const pending = pendingIcImages(
+        selectedProject.images,
+        selectedProject.usedImageNames,
+        selectedProject.annotations ?? [],
+        selectedProject.meiFiles ?? [],
+        selectedProject.stepsUnlocked,
+      );
+      // The page a resume request (from "manage IC sessions") points at. IC
+      // records mothra's image id when the session is staged, so that's the
+      // authoritative match; the file-name stem it also stores is a fallback
+      // only for sessions saved without an id. Deliberately not a fallback for
+      // an id that fails to resolve - that means the page was deleted, and a
+      // stem match could land on a different image that reuses the filename
+      // (the session wouldn't even be the one /ic/start finds for it).
+      const resumeImage = resumeIcSession
+        ? ((resumeIcSession.imageId == null
+            ? selectedProject.images.find(
+                (img) =>
+                  img.name.replace(/\.[^.]+$/, "") ===
+                  resumeIcSession.sourceName,
+              )
+            : selectedProject.images.find(
+                (img) => img.id === resumeIcSession.imageId,
+              )) ?? null)
+        : null;
+      // An unresolvable resume must not fall through to the classifier: it
+      // would mount on the first pending page, and queueing there would pair
+      // this session's GameraXML with that other page's image.
+      if (resumeIcSession && !resumeImage)
+        return (
+          <IcSessionUnavailable
+            sourceName={resumeIcSession.sourceName}
+            sessionId={resumeIcSession.sessionId}
+            onBack={() => setView("project")}
+            onOpenClassifier={goToIc}
+          />
+        );
+      // A saved session's page is normally still pending, but it doesn't have
+      // to be (its page may have been encoded by some other route). Add it
+      // back rather than silently ignoring the click - and so the queued XML
+      // is paired with the right image, which needs the page to be selectable.
+      const images =
+        resumeImage && !pending.some((img) => img.id === resumeImage.id)
+          ? [...pending, resumeImage]
+          : pending;
+      return (
         <InteractiveClassifier
-          images={selectedProject.images
-            .filter((img) => {
-              if (!selectedProject.usedImageNames.includes(img.name))
-                return false;
-              const p = getImageProgress(
-                img.name,
-                selectedProject.annotations ?? [],
-                selectedProject.meiFiles ?? [],
-                selectedProject.stepsUnlocked,
-              );
-              return p === null || p.nextStep <= 1;
-            })
-            .sort((a, b) => {
-              const pa = getImageProgress(
-                a.name,
-                selectedProject.annotations ?? [],
-                selectedProject.meiFiles ?? [],
-                selectedProject.stepsUnlocked,
-              );
-              const pb = getImageProgress(
-                b.name,
-                selectedProject.annotations ?? [],
-                selectedProject.meiFiles ?? [],
-                selectedProject.stepsUnlocked,
-              );
-              return (pa?.nextStep ?? 0) - (pb?.nextStep ?? 0);
-            })}
+          images={images}
+          initialImageName={resumeImage?.name ?? null}
+          usedImageCount={selectedProject.usedImageNames.length}
+          onBack={() => setView("project")}
           projectId={selectedProjectId}
           clefShape={clefShape}
           onClefShapeChange={setClefShape}
@@ -745,7 +790,8 @@ export default function AppRouter({
             setView("encoding-processing");
           }}
         />
-      ) : null;
+      );
+    }
     case "ic-completion":
       return (
         <IcCompletionTestPage
@@ -763,7 +809,7 @@ export default function AppRouter({
           <ProcessingPage
             {...STEP_TIMING}
             logs={encodingLogs}
-            onBack={() => setView("ic")}
+            onBack={() => goToIc()}
             onComplete={() => {
               if (selectedProjectId && selectedProject) {
                 updateProjectSteps(
@@ -811,7 +857,7 @@ export default function AppRouter({
             pendingImageFile ? `encoding ${pendingImageFile.name}` : "encoding"
           }
           logs={encodingLogs}
-          onBack={() => setView("ic")}
+          onBack={() => goToIc()}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
@@ -847,17 +893,15 @@ export default function AppRouter({
       ) : null;
     }
     case "encoding-completion": {
-      const remainingIcImages =
-        selectedProject?.images.filter((img) => {
-          if (!selectedProject.usedImageNames.includes(img.name)) return false;
-          const p = getImageProgress(
-            img.name,
+      const remainingIcImages = selectedProject
+        ? pendingIcImages(
+            selectedProject.images,
+            selectedProject.usedImageNames,
             selectedProject.annotations ?? [],
             selectedProject.meiFiles ?? [],
             selectedProject.stepsUnlocked,
-          );
-          return p === null || p.nextStep <= 1;
-        }) ?? [];
+          )
+        : [];
 
       const batchDescription = batchSummary
         ? `batch encoding complete: ${batchSummary.succeeded.length} succeeded${
@@ -883,7 +927,7 @@ export default function AppRouter({
           onDownloadMei={meiContent ? handleDownloadMei : undefined}
           onDownloadManifest={meiContent ? handleDownloadManifest : undefined}
           onClassifyMore={
-            remainingIcImages.length > 0 ? () => setView("ic") : undefined
+            remainingIcImages.length > 0 ? () => goToIc() : undefined
           }
           classifyMoreCount={
             remainingIcImages.length > 0 ? remainingIcImages.length : undefined
