@@ -29,16 +29,22 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 def collect_images(images_dir: Path) -> list[Path]:
     """Recursively find every image under images_dir, case-insensitively.
 
+    Filters on ``p.suffix.lower()`` rather than globbing the lower- and
+    upper-case suffix separately -- the latter misses any mixed-case
+    extension (e.g. ``page.JpG``), which isn't rare on manuscripts digitised
+    across different scanning setups.
+
     Skips macOS resource-fork sidecar files (``._foo.jpg``, created by
     Finder/external drives when copying) rather than trying to run
     detection on them -- extension-based globbing alone can't tell these
     apart from real images.
     """
-    images = []
-    for ext in IMAGE_EXTENSIONS:
-        images.extend(images_dir.rglob(f"*{ext}"))
-        images.extend(images_dir.rglob(f"*{ext.upper()}"))
-    return sorted(p for p in set(images) if not p.name.startswith("._"))
+    images = [
+        p
+        for p in images_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+    return sorted(p for p in images if not p.name.startswith("._"))
 
 
 def detect_and_write(

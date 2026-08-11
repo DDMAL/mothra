@@ -308,15 +308,22 @@ def periodicity_trace(
     # teeth_weight contributions can push it above 1 (e.g. n_teeth=3,
     # teeth_weight=0.4 → worst case ~1.8) and fewer teeth land in-bounds
     # near page edges, so its raw scale isn't uniform across rows either.
-    # The 0.5 fallback below (when the field is perfectly flat, c_max ==
-    # c_min) is a neutral "no preference" cost, so DP's smoothness term
-    # drives the path there instead of a spurious cost gradient.
+    # When the field is perfectly flat (c_max == c_min, e.g. a blank/uniform
+    # crop), there's no signal at all to trace: minimum_filter1d only bounds
+    # how far the path can step between columns, it doesn't penalise moving,
+    # so a uniform data_cost leaves np.argmin's tie-break to pick the first
+    # band row (y_lo) below -- a flat field would silently return a path
+    # pinned to the top of the search band instead of near y_hint. Bail out
+    # the same way the n_band/n_cols guard above does: a stable path at
+    # y_hint is preferable to running DP over a cost surface with nothing in
+    # it to optimise.
     c_min = comb_cost.min()
     c_max = comb_cost.max()
-    if c_max > c_min:
-        comb_cost = (comb_cost - c_min) / (c_max - c_min)
-    else:
-        comb_cost[:] = 0.5
+    if c_max <= c_min:
+        xs = np.arange(x_start, x_end + 1)
+        ys = np.full(len(xs), float(np.clip(y_hint, y_lo, y_hi)))
+        return xs, ys
+    comb_cost = (comb_cost - c_min) / (c_max - c_min)
     data_cost = 1.0 - comb_cost  # low = good signal = ink
 
     # -----------------------------------------------------------------
