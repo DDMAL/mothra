@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/apiFetch";
 import { registerActiveJobs, markJobSettled } from "../../lib/activeJobs";
+import { getAverageDurationMs, recordDurationMs } from "../../lib/jobTiming";
 
 interface Stage {
   text: boolean;
@@ -38,6 +39,20 @@ const STAGE_PROGRESS: Record<string, number> = {
   processing: 100,
 };
 
+function formatRemaining(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s <= 0) return "almost done...";
+  if (s >= 60) return `~${Math.floor(s / 60)}m ${s % 60}s remaining`;
+  return `~${s}s remaining`;
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 2) return "estimating...";
+  if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s elapsed`;
+  return `${s}s elapsed`;
+}
+
 export default function ProcessingPage({
   onBack,
   onComplete,
@@ -68,8 +83,20 @@ export default function ProcessingPage({
   const [revealedLogs, setRevealedLogs] = useState<string[]>([]);
   const [timeDisplay, setTimeDisplay] = useState<string>("estimating...");
   const logEndRef = useRef<HTMLDivElement>(null);
+
   const startTimeRef = useRef(Date.now());
   const progressRef = useRef(0);
+  // Single-item jobs: estimated total job duration (ms), seeded from this
+  // browser's history of past jobs of the same kind. Null until at least
+  // one historical sample exists for this kind.
+  const estimatedTotalMsRef = useRef<number | null>(null);
+  // Batch jobs: estimated per-item duration (ms) — seeded from history the
+  // same way, then overwritten with this run's own live average as soon as
+  // one item in this run finishes (more relevant than history, since it
+  // reflects the exact files being processed right now).
+  const avgItemMsRef = useRef<number | null>(null);
+  const itemDurationsRef = useRef<number[]>([]);
+  const currentItemStartRef = useRef<number | null>(null);
   const itemProgressRef = useRef<{
     index: number;
     total: number;
@@ -122,26 +149,39 @@ export default function ProcessingPage({
         clearInterval(timer);
         return;
       }
-      const elapsedMs = Date.now() - startTimeRef.current;
-      if (p <= 0) {
-        setTimeDisplay("estimating...");
+      const ip = itemProgressRef.current;
+      const now = Date.now();
+      if (ip && ip.total > 1) {
+        // Batch job: don't extrapolate from the stage checkpoints at all —
+        // real per-item timing (this run's completed items, falling back
+        // to history until one exists) is the reliable signal here.
+        if (avgItemMsRef.current == null) {
+          setTimeDisplay("estimating...");
+          return;
+        }
+        const itemsRemaining = ip.total - ip.index - 1;
+        const elapsedOnCurrentItem = currentItemStartRef.current
+          ? now - currentItemStartRef.current
+          : 0;
+        const remainingMs =
+          avgItemMsRef.current * itemsRemaining +
+          Math.max(0, avgItemMsRef.current - elapsedOnCurrentItem);
+        setTimeDisplay(formatRemaining(remainingMs));
         return;
       }
-      const totalMs = elapsedMs / (p / 100);
-      const remainingMs = Math.max(0, totalMs - elapsedMs);
-      const s = Math.round(remainingMs / 1000);
-      if (s <= 0) {
-        setTimeDisplay("almost done...");
+      // Single-item job: no in-run signal to average over. Countdown from
+      // this browser's historical average for the same job kind if one
+      // exists; otherwise show real elapsed time rather than a fabricated
+      // number.
+      const elapsedMs = now - startTimeRef.current;
+      if (estimatedTotalMsRef.current == null) {
+        setTimeDisplay(formatElapsed(elapsedMs));
         return;
       }
-      if (s >= 60) {
-        setTimeDisplay(`~${Math.floor(s / 60)}m ${s % 60}s remaining`);
-      } else {
-        setTimeDisplay(`~${s}s remaining`);
-      }
+      setTimeDisplay(formatRemaining(estimatedTotalMsRef.current - elapsedMs));
     }, 1000);
     return () => clearInterval(timer);
-  });
+  }, []);
 
   useEffect(() => {
     if (streamRequest) return;
@@ -221,6 +261,12 @@ export default function ProcessingPage({
           const ev = JSON.parse(line.slice(6));
           if (ev.type === "item_start") {
             setItemProgress({ index: ev.item, total: ev.total, name: ev.name });
+            currentItemStartRef.current = Date.now();
+            if (ev.total > 1 && avgItemMsRef.current == null) {
+              avgItemMsRef.current = getAverageDurationMs(
+                `${jobKind ?? "unknown"}:item`,
+              );
+            }
             setStages([
               { text: false, check: false },
               { text: false, check: false },
@@ -247,6 +293,17 @@ export default function ProcessingPage({
                   ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100)
                   : stagePct,
               );
+              if (
+                ev.name === "processing" && 
+                ip && ip.total > 1 && currentItemStartRef.current
+              ) {
+                const itemDurationMs = Date.now() - currentItemStartRef.current;
+                itemDurationsRef.current = [ ...itemDurationsRef.current, itemDurationMs, ];
+                avgItemMsRef.current =
+                  itemDurationsRef.current.reduce((a, b) => a + b, 0) /
+                  itemDurationsRef.current.length;
+                recordDurationMs(`${jobKind ?? "unknown"}:item`, itemDurationMs);
+              }
             }
           }
           if (ev.type === "log") {
@@ -281,6 +338,13 @@ export default function ProcessingPage({
           if (ev.type === "done" && !completedRef.current) {
             completedRef.current = true;
             if (jobIdRef.current) markJobSettled(jobIdRef.current);
+            const ip = itemProgressRef.current;
+            if (!ip || ip.total <= 1) {
+              recordDurationMs(
+                jobKind ?? "unknown",
+                Date.now() - startTimeRef.current,
+              );
+            }
             onLogsReady?.(collectedLogs);
             if (ev.succeeded || ev.failed) {
               onBatchDone?.({
@@ -314,6 +378,10 @@ export default function ProcessingPage({
     setItemProgress(null);
     completedRef.current = false;
     startTimeRef.current = Date.now();
+    estimatedTotalMsRef.current = getAverageDurationMs(jobKind ?? "unknown");
+    avgItemMsRef.current = null;
+    itemDurationsRef.current = [];
+    currentItemStartRef.current = null;
 
     const abort = new AbortController();
     streamAbortRef.current = abort;
@@ -364,6 +432,11 @@ export default function ProcessingPage({
       jobIdRef.current = newId;
       registerActiveJobs(newId, projectId ?? null, jobKind ?? "unknown");
       completedRef.current = false;
+      startTimeRef.current = Date.now();
+      estimatedTotalMsRef.current = getAverageDurationMs(jobKind ?? "unknown");
+      avgItemMsRef.current = null;
+      itemDurationsRef.current = [];
+      currentItemStartRef.current = null;
       setProgress(0);
       setStages([
         { text: false, check: false },
