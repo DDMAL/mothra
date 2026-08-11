@@ -49,15 +49,25 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A cold (cache-miss) backend build runs ~5-10 min. Anything past 45 is a
+    # stuck runner or a hung registry pull, not a slow build -- release the
+    # runner instead of letting it sit for the 6h default.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           # backend: multi-stage Node(SPA + Neon submodule) -> Python/torch.
-          # Needs the LFS-tracked medieval .pt weights baked in.
+          # Needs the LFS-tracked medieval .pt weights baked in, plus the
+          # sibling staff-finding/ dir (outside this context) via the
+          # build-contexts input below, for staffline_stage.py's package.
+          # Without that input BuildKit reads `COPY --from=staff_finding` in
+          # landing-page/Dockerfile as an *image* reference and fails trying to
+          # pull docker.io/library/staff_finding:latest.
           - name: backend
             context: ./landing-page
             file: ./landing-page/Dockerfile
+            build-contexts: staff_finding=./staff-finding
           # ic: built from the ic submodule (has its own Dockerfile).
           - name: ic
             context: ./ic
@@ -128,6 +138,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
+          # Empty for every image except backend; the action treats an empty
+          # value as "no additional contexts".
+          build-contexts: ${{ matrix.build-contexts }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
@@ -182,6 +195,9 @@ jobs:
     # images are guaranteed to exist before we roll the deployments.
     needs: [build, resolve]
     runs-on: ubuntu-latest
+    # Bounds the job as a whole; the rollout loop below already caps itself at
+    # 300s per deployment (5 deployments = 25 min worst case).
+    timeout-minutes: 35
     # Serialize per *environment*, not per branch: two staging branches would
     # otherwise get separate groups and race on the same -staging objects, while
     # production and staging deploys share no objects and are safe in parallel.
