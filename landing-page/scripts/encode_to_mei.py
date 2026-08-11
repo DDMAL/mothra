@@ -1661,6 +1661,23 @@ def verify_and_correct_syllables(
     staff_zone_id_by_idx = {i: f"sz-{stave.id}" for i, stave in enumerate(staves)}
     logs: list[str] = []
 
+    # A box that's genuinely a fragment-pooled row-mate's (see
+    # _pool_group_syllable_data) can be Y-bucketed here, unpooled, to a
+    # DIFFERENT stave than the one whose glyphs it's actually paired with —
+    # that stave then computes it as a real box with zero glyphs matched,
+    # even though its true glyphs (and its already-correct <syllable>) live
+    # on the row-mate. Detecting that specific case doesn't need re-running
+    # the pooling (out of scope here, see below) -- it only needs to know
+    # whether this exact text is ALREADY backed by real glyphs somewhere
+    # else in the document; if so, this glyph-less copy is that duplicate,
+    # not new content.
+    old_texts_with_glyphs_anywhere = {
+        syl_text
+        for stave_units in current_syllables.values()
+        for syl_text, glyph_ids in stave_units
+        if glyph_ids
+    }
+
     for stave_idx in range(len(staves)):
         neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
         stave_boxes = boxes_by_stave.get(stave_idx, [])
@@ -1687,18 +1704,22 @@ def verify_and_correct_syllables(
         # which clusters actual existing neume glyphs, so a "-" unit always
         # carries at least one. glyph_ids empty means stave_boxes was
         # non-empty and this specific real syl_box just has no note matched
-        # to it in this stave-scoped, unpooled recheck (a real "text with
-        # nothing under it" box, or a row-mate's box this simplified check
-        # can't see the fragment-pooled glyph match for -- see
-        # _reconstruct_mei_state's docstring: redoing that pooling is out of
-        # scope here). Either way it's real current mothra-text data, not an
-        # invented phantom -- an earlier version of this guard dropped it
-        # outright unless an old unit already had the identical text with
-        # no glyphs, which silently deleted real syllables (and their
-        # boxes) the moment their glyph-matching outcome changed for any
-        # reason, including totally unrelated fixes upstream. Always keep
-        # it; only "-" (which, per above, can't occur here) would need the
-        # anti-regression treatment.
+        # to it in this stave-scoped, unpooled recheck: either a real "text
+        # with nothing under it" box (legitimate, build_mei can produce
+        # these), or a row-mate's fragment-pooled box this simplified check
+        # can't see the glyph match for (see the module-level
+        # old_texts_with_glyphs_anywhere comment above, and
+        # _reconstruct_mei_state's docstring: redoing that pooling is out
+        # of scope here). Distinguish the two by whether this exact text is
+        # already backed by real glyphs somewhere else in the document —
+        # if so it's that duplicate, drop it; otherwise it's genuinely new
+        # data, keep it. An earlier version of this guard instead checked
+        # only THIS stave's own old empty-glyph units, which silently
+        # deleted real new syllables (and their boxes) the moment their
+        # glyph-matching outcome changed for any reason, including
+        # unrelated fixes upstream — too narrow. A version after that
+        # dropped the check entirely, which let the fragment-pooled
+        # duplicate case back in — too broad. This is the middle ground.
         old_units = current_syllables.get(stave_idx, [])
         old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
         reconciled_units = []
@@ -1708,6 +1729,8 @@ def verify_and_correct_syllables(
                 old_text = old_text_by_glyphs.get(glyph_ids)
                 if syl_text == "-" and old_text not in (None, "-"):
                     syl_text = old_text
+            elif syl_text in old_texts_with_glyphs_anywhere:
+                continue
             reconciled_units.append((syl_text, box, glyphs_in_syl))
         new_units = reconciled_units
 
