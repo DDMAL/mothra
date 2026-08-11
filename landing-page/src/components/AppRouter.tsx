@@ -229,7 +229,7 @@ export default function AppRouter({
       return (
         <main>
           <Hero
-            onGetStarted={() => setView("register")}
+            onLogin={() => setView("login")}
             onViewWalkthrough={() => setView("docs")}
           />
         </main>

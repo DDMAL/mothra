@@ -103,16 +103,16 @@ export default function Navbar({
         ) : (
           <>
             <button
-              onClick={onLogin}
+              onClick={onGetStarted}
               className="text-sm text-[#1D3335] hover:opacity-70 transition-opacity cursor-pointer"
             >
-              log in
+              sign up
             </button>
             <button
-              onClick={onGetStarted}
+              onClick={onLogin}
               className="px-5 py-2 bg-[#4AADAA] text-white text-sm rounded-full hover:opacity-90 transition-opacity cursor-pointer"
             >
-              get started
+              log in
             </button>
           </>
         )}

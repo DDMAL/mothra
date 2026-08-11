@@ -129,6 +129,7 @@ export default function App() {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((user) => {
         setCurrentUser(user);
+        setView((v) => (v === "landing" ? "projects" : v));
         return apiFetch("/api/projects");
       })
       .then((r) => r.json())
