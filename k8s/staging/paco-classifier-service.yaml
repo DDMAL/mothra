@@ -1,19 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: paco-classifier-service
+  name: paco-classifier-service-staging
   namespace: mothra
   labels:
-    app: paco-classifier-service
+    app: paco-classifier-service-staging
+    mothra.env: staging
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: paco-classifier-service
+      app: paco-classifier-service-staging
   template:
     metadata:
       labels:
-        app: paco-classifier-service
+        app: paco-classifier-service-staging
+        mothra.env: staging
     spec:
       securityContext:
         runAsNonRoot: true
@@ -94,13 +96,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: paco-classifier-service
+  name: paco-classifier-service-staging
   namespace: mothra
   labels:
-    app: paco-classifier-service
+    app: paco-classifier-service-staging
+    mothra.env: staging
 spec:
   selector:
-    app: paco-classifier-service
+    app: paco-classifier-service-staging
   ports:
     - name: http
       port: 8003

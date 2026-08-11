@@ -19,8 +19,9 @@ editing anything here.
 | Postgres | `mothra-postgres.postgres…` | `mothra-staging-postgres.postgres…` |
 | NFS path | `/srv/nfs/mothra/stored_models` | `/srv/nfs/mothra-staging/stored_models` |
 
-Both mirror the `docker-compose.yml` stack: redis + ic + text-service + backend +
-Celery worker. **Postgres lives in its own repo** (deployed to the `postgres`
+Both mirror the `docker-compose.yml` stack: redis + ic + text-service +
+paco-classifier-service + backend + Celery worker. **Postgres lives in its own
+repo** (deployed to the `postgres`
 namespace); each environment reaches its own instance cross-namespace via
 `DATABASE_URL`. Staging's instance is a *separate deployment* serving a database
 also called `mothra` — only the host differs.
@@ -36,10 +37,11 @@ also called `mothra` — only the host differs.
 - **Storage:** static NFS PersistentVolume (RWX) for `stored_models`, shared by
   backend + worker. Separate PV/PVC per environment, since `models_api.py` deletes
   files and a shared volume would let staging destroy production checkpoints.
-- **Images:** `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, pulled with the
-  `ghcr-pull-secret` imagePullSecret (namespace-scoped, so staging reuses it as-is).
-  `worker` reuses the `mothra-backend` image. **Both environments share these three
-  image repos** — only the tag differs, so `latest` is published from `main` only.
+- **Images:** `ghcr.io/ddmal/mothra-{backend,ic,text-service,paco-classifier-service}`,
+  pulled with the `ghcr-pull-secret` imagePullSecret (namespace-scoped, so staging
+  reuses it as-is). `worker` reuses the `mothra-backend` image. **Both environments
+  share these four image repos** — only the tag differs, so `latest` is published
+  from `main` only.
 - **GPU:** both `worker` Deployments are pinned to `k3s-gpu-node-1` and share one
   MIG instance. Neither requests `nvidia.com/gpu` (see the comment in
   `k8s/worker.yaml`), so the scheduler cannot arbitrate: concurrent inference in
@@ -57,10 +59,11 @@ k8s/
   redis.yaml             # Deployment + Service :6379
   ic.yaml                # Deployment + Service :8000
   text-service.yaml      # Deployment + Service :8002
+  paco-classifier-service.yaml  # Deployment + Service :8003
   backend.yaml           # Deployment + Service :8001
   worker.yaml            # Deployment (celery worker; no Service)
   ingress.yaml           # Traefik: ic-frame-ancestors Middleware + one Ingress per host
-  staging/               # same 11 filenames, same `mothra` namespace,
+  staging/               # same 12 filenames, same `mothra` namespace,
                          #   every object name/label/selector suffixed -staging
 ```
 
@@ -120,12 +123,12 @@ the commit's `sha-<short>` tag.
 
 **Deploying a branch to staging:** Actions → **ci-cd** → **Run workflow** → pick
 the branch in the dropdown → leave `environment` at `auto` → **Run workflow**. The
-run shows up as `manual · auto · <branch>`. It builds that branch's three images,
+run shows up as `manual · auto · <branch>`. It builds that branch's four images,
 tags them `sha-<short>`, and rolls staging onto them.
 
 Staging deploys are **not** automatic on push. There is one shared staging
 environment (one deployment set, one `mothra-staging-postgres`) and a ~25-minute
-three-image build, so ~20 active branches auto-deploying would just thrash both;
+four-image build, so ~20 active branches auto-deploying would just thrash both;
 whoever dispatches last owns staging either way.
 
 **Caveat — a dispatched run uses the *selected branch's* files.** That is both the
@@ -145,7 +148,9 @@ loudly instead of silently redeploying a stale image.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
-kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
+kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml \
+              -f k8s/paco-classifier-service.yaml \
+              -f k8s/backend.yaml -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
 
 # staging (same filenames — note the directory)
@@ -153,6 +158,7 @@ kubectl apply -f k8s/staging/secret.yaml -f k8s/staging/configmap.yaml
 kubectl apply -f k8s/staging/stored-models-pv.yaml -f k8s/staging/stored-models-pvc.yaml
 kubectl apply -f k8s/staging/redis.yaml
 kubectl apply -f k8s/staging/ic.yaml -f k8s/staging/text-service.yaml \
+              -f k8s/staging/paco-classifier-service.yaml \
               -f k8s/staging/backend.yaml -f k8s/staging/worker.yaml
 kubectl apply -f k8s/staging/ingress.yaml
 ```
@@ -176,7 +182,8 @@ kubectl -n mothra describe ingress mothra-ic | grep -i middlewares   # annotatio
 Staging equivalents — plus the two checks that only matter in a shared namespace:
 ```
 kubectl -n mothra get all -l mothra.env=staging      # staging objects only
-kubectl -n mothra get endpoints backend ic text-service   # production pods only (no staging IPs)
+kubectl -n mothra get endpoints backend ic text-service paco-classifier-service
+# → production pods only (no staging IPs)
 
 # staging really is wired to staging config/secrets — a copy-paste slip here is
 # the one mistake that fails *open* (staging writing to the production database)
@@ -192,7 +199,9 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 ```
 
 ## Known follow-ups
-- No real `/healthz` yet → probes are TCP/exec. Adding `/healthz` is recommended.
+- No real `/healthz` yet → probes are TCP/exec, except `paco-classifier-service`,
+  which has real `/health` + `/ready` HTTP probes. Adding `/healthz` to the others
+  is recommended.
 - `init_db()`/`_migrate_db()` run at import → keep backend/worker at **1 replica**
   until a one-shot migration Job is added, then scale out. This now applies to two
   sets of Deployments, and on a *fresh* database the same import-time migration has
@@ -200,5 +209,6 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 - text-service `/batch-download/{id}` uses local disk keyed by batch_id → needs
   shared storage or a single replica if batch downloads are used.
 - Sharing the `mothra` namespace means no `ResourceQuota` headroom check happens
-  automatically — staging adds ≈1.5 CPU / 5.6Gi of *requests*. Confirm with
+  automatically — staging adds ≈2 CPU / 8.6Gi of *requests* (paco-classifier-service
+  alone is 500m / 3Gi of that). Confirm with
   `kubectl -n mothra describe quota,limitrange` if pods start failing admission.

@@ -6,7 +6,7 @@ name: ci-cd
 # deployments (all except redis and postgres).
 # The Celery `worker` reuses the `mothra-backend` image, so it is not built here.
 #
-# Two environments share the `mothra` namespace and the same three images:
+# Two environments share the `mothra` namespace and the same four images:
 #   main            → production, manifests in k8s/
 #   any other ref   → staging,    manifests in k8s/staging/
 # Both manifest sets use identical *filenames*; the `resolve` job below picks the
@@ -15,7 +15,7 @@ name: ci-cd
 # Only main deploys automatically (to production). Staging is deployed on demand
 # from *any* branch: Actions → ci-cd → Run workflow → pick the branch → leave
 # `environment: auto`. Auto-deploying staging on every push is deliberately not
-# done — one shared staging environment and a ~25min three-image build don't
+# done — one shared staging environment and a ~25min four-image build don't
 # survive ~20 active branches pushing into them.
 # Note that a dispatched run uses the *selected branch's* copy of this workflow
 # and of k8s/staging/, not main's — see the caveat in k8s/README.md.
@@ -178,7 +178,7 @@ jobs:
           echo "::notice::deploying $ENV from $DIR (object suffix '${SUFFIX:-<none>}')"
 
   deploy:
-    # Runs only after all three images are built & pushed, so the sha-tagged
+    # Runs only after all four images are built & pushed, so the sha-tagged
     # images are guaranteed to exist before we roll the deployments.
     needs: [build, resolve]
     runs-on: ubuntu-latest
@@ -213,13 +213,18 @@ jobs:
           set -euo pipefail
           TAG="sha-${GITHUB_SHA:0:7}"   # matches metadata-action type=sha,format=short
           echo "Deploying image tag: $TAG"
-          FILES=("$DIR/backend.yaml" "$DIR/worker.yaml" "$DIR/ic.yaml" "$DIR/text-service.yaml")
+          FILES=("$DIR/backend.yaml" "$DIR/worker.yaml" "$DIR/ic.yaml" "$DIR/text-service.yaml" \
+                 "$DIR/paco-classifier-service.yaml")
           sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" "${FILES[@]}"
           grep -H 'image: ghcr.io' "${FILES[@]}"
           # sed exits 0 when it matches nothing, so a drifted placeholder would
           # otherwise deploy whatever stale tag is committed. Fail loudly instead.
+          # Matched on the full `image: <repo>:<tag>` shape rather than an
+          # end-of-line ":$TAG", so a trailing comment after the tag can't fail an
+          # otherwise-correct rewrite (the paco manifest used to carry one).
           for f in "${FILES[@]}"; do
-            grep -q ":${TAG}\$" "$f" || { echo "::error::image tag not pinned in $f"; exit 1; }
+            grep -qE "image: ghcr\.io/ddmal/mothra-[a-z-]+:${TAG}([[:space:]]|\$)" "$f" \
+              || { echo "::error::image tag not pinned in $f"; exit 1; }
           done
 
       - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
@@ -231,7 +236,7 @@ jobs:
             -f "$DIR/worker.yaml" \
             -f "$DIR/ic.yaml" \
             -f "$DIR/text-service.yaml" \
-            -f k8s/paco-classifier-service.yaml \
+            -f "$DIR/paco-classifier-service.yaml" \
             -f "$DIR/ingress.yaml"
 
       - name: Roll out deployments (all except redis & postgres)

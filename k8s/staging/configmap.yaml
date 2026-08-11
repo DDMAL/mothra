@@ -19,6 +19,7 @@ data:
   CELERY_BROKER_URL: "redis://redis-staging:6379/0"
   IC_API_URL: "http://ic-staging:8000"                 # server-to-server (cluster DNS)
   TEXT_API_URL: "http://text-service-staging:8002"     # server-to-server (cluster DNS)
+  PACO_API_URL: "http://paco-classifier-service-staging:8003"  # server-to-server (cluster DNS)
   # TLS is terminated by the campus front proxy (134.87.11.29), which forces
   # http→https, so browsers are always on https — use https here to avoid
   # mixed-content (IC iframe) and CORS-origin mismatches.

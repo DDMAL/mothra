@@ -315,14 +315,18 @@ needs no re-plumbing):
 **Merging to `main` deploys production automatically. Staging is deployed on
 demand from any branch** — Actions → `ci-cd` → Run workflow → pick the branch →
 leave `environment: auto`. Staging is deliberately *not* push-triggered: it's a
-single shared environment behind a ~25-minute three-image build, so having ~20
+single shared environment behind a ~25-minute four-image build, so having ~20
 active branches auto-deploy into it would only thrash both.
 `.github/workflows/build-images.yml` (job name `ci-cd`) therefore runs on push to
 `main` only, plus `workflow_dispatch` from any ref:
 1. **build** — builds `backend` (`landing-page/Dockerfile`), `ic` (`ic/Dockerfile`),
-   and `text-service` (`text-service/Dockerfile`, build context is the repo root
-   since it needs the sibling `mothra-text/` submodule) and pushes each to
-   `ghcr.io/ddmal/mothra-{backend,ic,text-service}`, tagged by short SHA
+   `text-service` (`text-service/Dockerfile`, build context is the repo root
+   since it needs the sibling `mothra-text/` submodule), and
+   `paco-classifier-service` (`paco-classifier-service/Dockerfile`, likewise
+   root-context for the sibling `paco-classifier/` submodule — which carries its
+   own `models_v4/*.h5` weights in-tree, so `submodules: recursive` covers them
+   with no LFS involved), and pushes each to
+   `ghcr.io/ddmal/mothra-{backend,ic,text-service,paco-classifier-service}`, tagged by short SHA
    (`sha-<short>`), by branch, and `latest` **from `main` only** (both environments
    share these image repos, so an ungated `latest` would be whichever one pushed
    last). `worker` reuses the `mothra-backend` image, so it isn't built separately.
@@ -335,13 +339,20 @@ active branches auto-deploy into it would only thrash both.
    (`auto`/`staging`/`production`, default `auto`) so staging can be redeployed from
    `main`; dispatching `production` from a non-`main` ref is refused.
 3. **deploy** (needs `build` + `resolve`) — using the `KUBECONFIG` repo secret, pins
-   `$dir/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml` to this commit's
+   `$dir/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml`/`paco-classifier-service.yaml`
+   to this commit's
    `sha-<short>` tag (and now *fails* if that `sed` matched nothing, since `sed`
    exits 0 on no-match and would otherwise ship a stale tag), applies those plus
    `$dir/configmap.yaml`/`ingress.yaml`, then `kubectl rollout status` on
-   `backend{suffix}`/`worker{suffix}`/`ic{suffix}`/`text-service{suffix}`. redis,
-   postgres, secrets and the PV/PVC are excluded from CD. `concurrency` is keyed on
+   `backend{suffix}`/`worker{suffix}`/`ic{suffix}`/`text-service{suffix}`/`paco-classifier-service{suffix}`.
+   redis, postgres, secrets and the PV/PVC are excluded from CD. `concurrency` is keyed on
    the resolved environment, so production and staging deploys don't block each other.
+   **Every one of those five manifests must be pinned via `$dir`, never a hardcoded
+   `k8s/` path.** `paco-classifier-service.yaml` was briefly both hardcoded to `k8s/`
+   *and* missing from the `sed` list: a staging deploy would then have applied
+   *production*'s paco Deployment with the unrewritten `sha-0000000` placeholder,
+   taking production's classifier to `ImagePullBackOff` — and the fail-loudly guard
+   wouldn't have caught it, since it only iterates the `sed` list.
 
 A dispatched run executes the **selected branch's** copy of the workflow and of
 `k8s/staging/`, not `main`'s. That's what makes it possible to test manifest edits
@@ -374,6 +385,13 @@ blanket `X-Frame-Options: SAMEORIGIN` doesn't block the IC iframe. Staging also 
 its own `redis-staging` broker — a shared broker would let the two environments'
 Celery workers steal each other's tasks off the default `celery` queue, and the
 worker's `celery inspect ping` probes would still pass while that happened.
+For the same reason staging runs its own `paco-classifier-service-staging`, with
+`mothra-config-staging` setting `PACO_API_URL` to that Service by its suffixed name:
+inside the shared namespace the bare name `paco-classifier-service` resolves to
+*production*'s classifier, and omitting the key entirely is no safer — `config.py`
+would fall back to `config.yaml`'s `http://localhost:8003`, nothing would answer,
+and `paco_api.py`'s graceful raw-page fallback would silently leave staging running
+a different staffline pipeline than production.
 `stored_models` (locally-uploaded custom YOLO checkpoints, written by
 `models_api.py`) is **not baked into the image** — it's a static NFS
 PersistentVolume (RWX, `stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
