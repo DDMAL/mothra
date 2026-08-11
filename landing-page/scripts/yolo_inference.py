@@ -127,7 +127,7 @@ class YoloModelSet:
         _, st_model = self.medieval_models
         _, st_map = self.class_maps
         result = st_model.predict(
-            source=img_arr, conf=conf, iou=iou, imgsz=imgsz, save=False, verbose=False,
+            source=img_arr, conf=conf, iou=iou, imgsz=imgsz, device=self.st_device, save=False, verbose=False,
         )[0]
         boxes = []
         if result.boxes is not None:

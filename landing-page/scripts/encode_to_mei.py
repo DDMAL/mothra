@@ -1299,17 +1299,30 @@ def scale_facsimile(mei_bytes: bytes, factor: float) -> bytes:
                     pass
     return _serialize_mei(root)
 
-def scale_text_alignment(text_alignment: Optional[dict], factor: float) -> Optional[dict]:
-    """Scale a text_alignment's syl_boxes ul/lr coords by factor -- counterpart to
-    scale_facsimile, for when syl_boxes (always computed against the working-copy
-    image) must be compared/written against geometry in a different pixel space."""
-    if not text_alignment or factor == 1.0:
+def scale_text_alignment(text_alignment: Optional[dict], factor_x: float, factor_y: Optional[float] = None) -> Optional[dict]:
+    """Scale a text_alignment's syl_boxes ul/lr coords by (factor_x, factor_y)
+    -- counterpart to scale_facsimile, for when syl_boxes (always computed
+    against the working-copy image) must be compared/written against
+    geometry in a different pixel space.
+
+    factor_x/factor_y are independent, NOT a single uniform scale: the
+    client-side upload resize (imageResize.ts) rounds width and height
+    separately after applying one scalar shrink factor, so
+    image_w/working_w and image_h/working_h can come out numerically
+    different (e.g. an odd source dimension rounds differently on each
+    axis) even though the resize was visually uniform. Using one factor for
+    both axes would skew Y coordinates by that rounding error. factor_y
+    defaults to factor_x for callers that only have (or only need) one
+    axis's ratio."""
+    if factor_y is None:
+        factor_y = factor_x
+    if not text_alignment or (factor_x == 1.0 and factor_y == 1.0):
         return text_alignment
 
     def _scaled(box):
         try:
-            ul = [box["ul"][0] * factor, box["ul"][1] * factor]
-            lr = [box["lr"][0] * factor, box["lr"][1] * factor]
+            ul = [box["ul"][0] * factor_x, box["ul"][1] * factor_y]
+            lr = [box["lr"][0] * factor_x, box["lr"][1] * factor_y]
         except (KeyError, TypeError, IndexError):
             return box  # malformed box passes through unscaled, not dropped
         return {**box, "ul": ul, "lr": lr}

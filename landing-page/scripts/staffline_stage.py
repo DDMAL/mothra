@@ -269,8 +269,9 @@ def _run_fallback_redetect_stage(
         if job_id is not None:
             check_cancelled(job_id)
 
-        y0, y1 = int(region.y_start), int(region.y_end)
-        x0, x1 = int(region.x_start), int(region.x_end)
+        page_h, page_w = image_arr.shape[:2]
+        y0, y1 = max(0, int(region.y_start)), min(page_h, int(region.y_end))
+        x0, x1 = max(0, int(region.x_start)), min(page_w, int(region.x_end))
         probe_crop = image_arr[y0:y1, x0:x1]
         if probe_crop.size == 0:
             trace.append(f"[trace] {image_name}: stave {region.stave_id} fallback probe crop degenerate; skipping")
@@ -305,15 +306,24 @@ def _run_fallback_redetect_stage(
 
         for candidate in accepted:
             fit_result = candidate.fit
-            fit_result.flags = list(fit_result.flags) + [
-                "fallback_redetected", f"fallback_conf:{candidate.yolo_confidence:.3f}",
+            fit_result.flags = [
+                *fit_result.flags, "fallback_redetected", f"fallback_conf:{candidate.yolo_confidence:.3f}",
             ]
             fit_results.append(fit_result)
+            # y_values are crop-local (see FitResult's docstring); the box's
+            # vertical extent must come from their page-space min/max, not a
+            # fixed 1px placeholder -- StafflineViewerModal.tsx strokeRect's
+            # this directly, and staffline_adapter.py folds it into stave
+            # bounds, so a degenerate box there visibly under-draws/mis-sizes
+            # a recovered line.
+            page_ys = [y + fit_result.y_page_offset for y in fit_result.y_values]
+            uly = min(page_ys) if page_ys else fit_result.y_page_offset
+            lry = max(page_ys) if page_ys else fit_result.y_page_offset
             boxes.append((
                 int(fit_result.x_page_offset),
-                int(fit_result.y_page_offset),
+                int(uly),
                 int(fit_result.x_page_offset + (fit_result.x_end - fit_result.x_start)),
-                int(fit_result.y_page_offset + 1),  # height not tracked post-fit; not load-bearing downstream
+                int(lry) + 1,  # +1 so lry > uly even for a perfectly flat fit
             ))
             n_added += 1
     return n_added, trace
