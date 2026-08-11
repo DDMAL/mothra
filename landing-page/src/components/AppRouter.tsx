@@ -180,6 +180,11 @@ export default function AppRouter({
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setSendBundleError(null);
+    setSendingBundle(false);
+  }, [selectedProjectId]);
+
   const handleSendToCantus = async () => {
     if (!selectedProject?.cantusSourceId) {
       setSendBundleError("link a Cantus source to this project first");
