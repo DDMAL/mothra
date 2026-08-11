@@ -509,6 +509,11 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   now downloads a real zip of corrected MEI files (`GET /sources/{id}/cantus-bundle`) for manual
   hand-off, since Cantus Ultimus has no write API; see **Workflow pipeline** above
 - **Batch encoding** — `POST /api/encode-batch` (`batch_api.py`/`tasks_encode.py`) handles multiple XML+image pairs in one job
+- **Batch text-finding logs** — `tasks_text_batch.py` now captures and persists per-folio `log_text`
+  on each `text_alignments` row (scoped between `folio_result` boundaries, with the batch-global
+  preamble landing on the first folio), matching `text_api.py`'s single-folio `/predict` path —
+  previously hard-coded to `""`, which is why the Detected text viewer's "view logs" always showed
+  "no logs recorded for this run"
 - **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
 - **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections
 - **Staffline detection** — `POST /api/predict` runs connected-component filtering, centerline fitting, and stave grouping on stave-class YOLO boxes (`staffline_stage.py`, wrapping the `staff-finding/` package); results are `tasks_encode.py`'s preferred stave source ahead of `parse_yolo_stave_hints()` — see **Staffline detection** above
