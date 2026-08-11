@@ -166,8 +166,16 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
                 dims = encode_to_mei.image_dimensions(image_bytes) if text_alignment else None
                 if dims:
                     image_w, image_h = dims
+                    # image_bytes/dims may be original_data (pre-upload-resize) while text_alignment's
+                    # syl_boxes were always computed against the working copy (img_data) -- see
+                    # text_api.py's _project_image. Rescale before comparing/writing zones against
+                    # image_w/image_h. Degrades to factor=1.0 (today's behavior) if the working copy's
+                    # header can't be read -- image_dimensions returns None rather than raising.
+                    working_dims = encode_to_mei.image_dimensions(bytes(img_data)) if img_data is not None else None
+                    factor = (image_w / working_dims[0]) if working_dims and working_dims[0] else 1.0
+                    scaled_alignment = encode_to_mei.scale_text_alignment(text_alignment, factor)
                     corrected_bytes, correction_logs = encode_to_mei.verify_and_correct_syllables(
-                        xml_content.encode(), text_alignment, image_w, image_h,
+                        xml_content.encode(), scaled_alignment, image_w, image_h,
                     )
                     if correction_logs:
                         xml_content = corrected_bytes.decode()
