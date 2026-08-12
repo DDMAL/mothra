@@ -114,6 +114,7 @@ export type View =
   | "processing"
   | "completion"
   | "ic"
+  | "ic-auto"
   | "ic-completion"
   | "encoding-processing"
   | "encoding-completion"

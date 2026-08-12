@@ -482,6 +482,8 @@ rollout restart`) remains the safer habit.
 | `landing-page/src/lib/apiFetch.ts` | `apiFetch` (also drives the silent JWT-refresh-on-401 flow via `X-Refresh-Token`) / `apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper, reports `job_id` via an `onJobId` callback |
 | `landing-page/src/types.ts` | All shared TypeScript types |
 | `landing-page/src/components/AppRouter.tsx` | All view routing (switch on `view` string) |
+| `landing-page/src/hooks/useIcSettings.ts` | IC step mode (auto/manual) + shared training set — see **Workflow pipeline** step 2 |
+| `landing-page/src/utils/icQueue.ts` | Shared IC-queue helpers (`buildEncodePair`, `autoQueueImage`) used by both IC modes |
 | `landing-page/src/hooks/useEncodingFlow.ts` | Encoding state: pending files, logs, MEI content |
 | `landing-page/src/hooks/useProjectMutations.ts` | Project CRUD mutations |
 | `landing-page/src/hooks/useAssetSection.tsx` | Shared state for grid tabs (selection, pagination, modal, drag) |
@@ -492,7 +494,7 @@ rollout restart`) remains the safer habit.
 
 ```
 1. Create project, upload images ("use" selected images)
-2. Interactive Classifier  →  view: "ic"
+2. Interactive Classifier  →  view: "ic" (manual) / "ic-auto" (auto)
 3. IC completion / upload XML output  →  view: "ic-completion"
 4. Encoding (GameraXML → MEI via encode_to_mei.py)  →  view: "encoding-processing"
 5. Neon.js batch editor for human correction  →  view: "neon-editor"
@@ -500,6 +502,34 @@ rollout restart`) remains the safer habit.
 ```
 
 `stepsUnlocked` on the project record gates which steps are accessible. It increments as each step completes and is persisted via `PUT /api/projects/{id}`.
+
+**Step 2 has two modes, chosen before the pipeline runs.** The "Classifier
+settings" column of the project page's settings box (`IcSettingsSection.tsx`,
+rendered beside the "CantusDB settings" column inside `CantusSourcePanel.tsx`)
+holds an auto/manual switch plus the shared training set (built-in presets from `GET /api/ic/training-presets` +
+uploaded GameraXML), in state at `useIcSettings.ts`. Both used to live on the
+IC page itself — a "training set" popover in its top bar and a "queue all
+available" button in its filmstrip — and were moved here so the choice is made
+once, alongside image/model selection, rather than mid-classification.
+- **auto** (default) → view `"ic-auto"` (`IcAutoQueue.tsx`): no classifier
+  interface at all. Every pending page is classified server-side through
+  `POST /projects/{id}/ic/auto-queue` (sequentially, as the old "queue all
+  available" did) and the resulting queue goes straight to
+  `"encoding-processing"`. Needs a non-empty training set — classify has no
+  training pool otherwise — so `ProjectDetail.tsx` greys out Continue
+  (`autoIcNeedsTraining`, checked at steps 0 and 1) until one is picked, rather
+  than letting a whole detection run be spent first. Because auto is the
+  default, that greyed-out Continue is what a brand-new project sees until
+  training data is picked or the switch is flipped to manual.
+- **manual** (the pre-existing behaviour) → view `"ic"`: the classifier opens
+  per page, and the training set above is pre-selected in each page's
+  create-session screen via the `ic:prefill-training` postMessage. No selection
+  made ⇒ no prefill, and the classifier's own defaults stand.
+
+`AppRouter.tsx`'s `goToIc()` picks the view from the mode, so every ordinary
+route into step 2 (Continue, the completion page, the progress sidebar) honours
+it. Resuming a saved session from "manage IC sessions" always opens `"ic"`
+regardless of mode — the user picked that session explicitly.
 
 Step 6 is **not** a live push to Cantus Ultimus — the DDMAL/cantus (Cantus
 Ultimus) repo has no write API (its DRF views are all `ListAPIView`/
