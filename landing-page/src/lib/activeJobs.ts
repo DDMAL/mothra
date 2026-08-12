@@ -16,6 +16,12 @@ export function registerActiveJobs(
   projectId: number | null,
   kind: string,
 ) {
+  // Idempotent by jobId -- a "view progress" reconnect (AppRouter's
+  // resumeJob path, see ProjectDetail.tsx) re-registers a job that may
+  // already be here from its original kickoff; without this guard the same
+  // jobId would accumulate duplicate entries every time its ProcessingPage
+  // is reopened.
+  if (activeJobs.some((j) => j.jobId === jobId)) return;
   activeJobs = [...activeJobs, { jobId, projectId, kind }];
   emitChange();
 }
