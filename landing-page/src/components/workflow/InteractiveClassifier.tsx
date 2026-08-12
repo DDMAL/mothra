@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectImage } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { buildEncodePair } from "../../utils/icQueue";
+import type { EncodePair } from "../../utils/icQueue";
 import { AuthImage } from "../shared/AuthImage";
 
 interface InteractiveClassifierProps {
@@ -63,14 +64,22 @@ export default function InteractiveClassifier({
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
-  const [encoding, setEncoding] = useState(false);
-  const [queue, setQueue] = useState<{ xmlFile: File; imageFile: File }[]>([]);
+  // Set while "encode batch" finalises the queued sessions (see
+  // handleEncodeBatch) - queueing itself is local state now, so nothing else
+  // is async enough to need a busy flag.
+  const [finalizing, setFinalizing] = useState(false);
+  // Queued pages hold a *reference* to their still-editable IC session, not
+  // its GameraXML: finalising is deferred to "encode batch" (see
+  // handleEncodeBatch) so a queued-but-not-encoded page keeps its corrections.
+  const [queue, setQueue] = useState<
+    { image: ProjectImage; sessionId: string }[]
+  >([]);
   // Set when IC's in-iframe "auto-export" fires — there's no "queue page"
   // click on that path, so we run the queue logic ourselves once state settles.
   const [autoQueueRequested, setAutoQueueRequested] = useState(false);
 
   const queuedNames = useMemo(
-    () => new Set(queue.map((p) => p.imageFile.name)),
+    () => new Set(queue.map((q) => q.image.name)),
     [queue],
   );
 
@@ -168,32 +177,29 @@ export default function InteractiveClassifier({
     return () => window.removeEventListener("message", onMessage);
   }, [icOrigin]);
 
-  const handleQueuePage = useCallback(async () => {
+  // Mark this page's session for encoding and move on. Deliberately does *not*
+  // call /complete: that transitions the IC session to EXPORT, which is
+  // terminal and read-only, so /ic/start can no longer resume it (see IC's
+  // store.lookup()). Doing it here meant a page queued but never encoded - the
+  // user goes back to the project, or just never presses "encode batch" - lost
+  // every correction made in it, since re-entering the page started a fresh
+  // session. Finalising happens in handleEncodeBatch instead.
+  const handleQueuePage = useCallback(() => {
     if (!sessionId || !img) return;
-    setEncoding(true);
     setError(null);
-    try {
-      // 1. Finalise the IC session → GameraXML.
-      const r = await apiFetch(`/api/ic/${sessionId}/complete`, {
-        method: "POST",
-      });
-      if (!r.ok)
-        throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
-      const data = await r.json();
-
-      // 2. Build the pair and hand it to the encode flow; advance to the next
-      //    un-queued page.
-      const pair = await buildEncodePair(img, data.xml_base64);
-      setQueue((prev) => [...prev, pair]);
-      const nextIdx = images.findIndex(
-        (im, idx) => idx > currentIdx && !queuedNames.has(im.name),
-      );
-      if (nextIdx !== -1) setCurrentIdx(nextIdx);
-    } catch (err) {
-      setError(String((err as Error).message ?? err));
-    } finally {
-      setEncoding(false);
-    }
+    setQueue((prev) =>
+      prev.some((q) => q.image.name === img.name)
+        ? // Same page re-queued (it stays editable, so this can happen): keep
+          //   the newest session id rather than adding a second entry.
+          prev.map((q) =>
+            q.image.name === img.name ? { image: img, sessionId } : q,
+          )
+        : [...prev, { image: img, sessionId }],
+    );
+    const nextIdx = images.findIndex(
+      (im, idx) => idx > currentIdx && !queuedNames.has(im.name),
+    );
+    if (nextIdx !== -1) setCurrentIdx(nextIdx);
   }, [sessionId, img, images, currentIdx, queuedNames]);
 
   // Run the queue path for an auto-exported page once the session id and
@@ -206,10 +212,37 @@ export default function InteractiveClassifier({
     }
   }, [autoQueueRequested, sessionId, img, queuedNames, handleQueuePage]);
 
-  const handleEncodeBatch = useCallback(() => {
-    if (queue.length === 0) return;
-    onEncodeBatch(queue);
-  }, [queue, onEncodeBatch]);
+  // Finalise every queued session (CLASSIFYING → EXPORT) and hand the
+  // resulting GameraXML + image pairs to the batch encoder. This is the *only*
+  // place a session is ended: up to here each one stays editable and resumable,
+  // so abandoning the step costs nothing. Because the XML is snapshotted here
+  // rather than at queue time, corrections made to a page *after* queueing it
+  // are picked up too.
+  const handleEncodeBatch = useCallback(async () => {
+    if (queue.length === 0 || finalizing) return;
+    setFinalizing(true);
+    setError(null);
+    try {
+      const pairs: EncodePair[] = [];
+      for (const { image, sessionId: sid } of queue) {
+        const r = await apiFetch(`/api/ic/${sid}/complete`, { method: "POST" });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => `HTTP ${r.status}`);
+          throw new Error(`${image.name}: ${detail}`);
+        }
+        const data = await r.json();
+        pairs.push(await buildEncodePair(image, data.xml_base64));
+      }
+      onEncodeBatch(pairs);
+    } catch (err) {
+      // Left queued on failure: the sessions that did finalise are re-exportable
+      // (IC allows re-export from EXPORT), so pressing the button again retries
+      // the whole queue rather than dropping the pages that already worked.
+      setError(String((err as Error).message ?? err));
+    } finally {
+      setFinalizing(false);
+    }
+  }, [queue, finalizing, onEncodeBatch]);
 
   // show 5 thumbnails at a time, centered on currentIdx
   const VISIBLE = 5;
@@ -266,6 +299,17 @@ export default function InteractiveClassifier({
             first
           </span>
         )}
+        {/* Only the error panel below covers status==="error" (it replaces the
+            iframe); a failure from "encode batch" leaves the classifier up, so
+            it needs to be said here or the click looks like a no-op. */}
+        {status !== "error" && error && (
+          <span
+            className="text-red-100 text-xs font-mono max-w-sm truncate"
+            title={error}
+          >
+            {error}
+          </span>
+        )}
         {queue.length > 0 && (
           <span className="text-white/80 text-sm">
             {queue.length} page{queue.length > 1 ? "s" : ""} queued
@@ -277,22 +321,18 @@ export default function InteractiveClassifier({
         {sessionId && (
           <button
             onClick={handleQueuePage}
-            disabled={encoding || queuedNames.has(img?.name ?? "")}
+            disabled={finalizing || queuedNames.has(img?.name ?? "")}
             className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {encoding
-              ? "queuing..."
-              : queuedNames.has(img?.name ?? "")
-                ? "queued"
-                : "queue page"}
+            {queuedNames.has(img?.name ?? "") ? "queued" : "queue page"}
           </button>
         )}
         <button
           onClick={handleEncodeBatch}
-          disabled={queue.length === 0}
+          disabled={queue.length === 0 || finalizing}
           className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          encode batch ({queue.length})
+          {finalizing ? "finalising..." : `encode batch (${queue.length})`}
         </button>
       </div>
 

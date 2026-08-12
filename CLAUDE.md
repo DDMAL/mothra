@@ -606,6 +606,23 @@ route into step 2 (Continue, the completion page, the progress sidebar) honours
 it. Resuming a saved session from "manage IC sessions" always opens `"ic"`
 regardless of mode — the user picked that session explicitly.
 
+**In manual mode, an IC session is ended by "encode batch", not by "queue
+page".** `POST /api/ic/{session_id}/complete` (IC's
+`POST /sessions/{id}/complete`) moves a session `CLASSIFYING → EXPORT`, which is
+terminal and read-only — and IC's `lookup()` treats an `EXPORT` session as *not*
+resumable, so `ic/start` stages a fresh one for that page. `InteractiveClassifier.tsx`
+used to call it from "queue page", which meant a page queued but never encoded
+(back to the project, or simply never pressing "encode batch") silently lost
+every correction in it. Queueing now only records `{image, sessionId}`, and
+`handleEncodeBatch` completes each queued session then builds its
+`buildEncodePair()` pair — so the GameraXML snapshot is also taken *after* any
+edits made to a page following its queueing. The same deferral covers IC's
+in-iframe "queue page"/auto-export path (`ic:auto-export`), which hands
+completion to the host rather than doing it itself. Note the queue list itself
+is still component-local state, so leaving the view drops the checkmarks — but
+the sessions behind them survive and resume with their corrections intact, so
+re-queueing is a click.
+
 Step 6 is **not** a live push to Cantus Ultimus — the DDMAL/cantus (Cantus
 Ultimus) repo has no write API (its DRF views are all `ListAPIView`/
 `RetrieveAPIView`, GET-only). The real workflow there is manual: a maintainer

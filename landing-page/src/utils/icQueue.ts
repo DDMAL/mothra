@@ -11,7 +11,9 @@ const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
 
 /**
  * Turn IC's GameraXML (base64) + a project image into an encode pair. Shared
- * by the interactive "queue page" path and the automatic queue-all path.
+ * by the interactive path (which builds its pairs when "encode batch" is
+ * pressed, not when a page is queued — see InteractiveClassifier's
+ * handleEncodeBatch) and the automatic queue-all path.
  */
 export async function buildEncodePair(
   image: ProjectImage,
