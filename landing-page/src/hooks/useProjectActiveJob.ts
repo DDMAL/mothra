@@ -30,14 +30,25 @@ export function useProjectActiveJob(projectId: number | null) {
         }
     }, [projectId]);
 
+    // One refetch on mount (or when projectId changes) -- this alone is what
+    // catches a post-reload or a different tab's already-in-progress job.
     useEffect(() => {
         refetch();
-        // Same 5s cadence as useActiveJobWatcher's terminal-status poll -- cheap,
-        // and this is the only way a different tab's kickoff or a post-reload
-        // in-progress job is ever discovered on this page.
+    }, [refetch]);
+
+    // Keep polling on the same 5s cadence as useActiveJobWatcher's
+    // terminal-status poll, but ONLY while a job is actually known to be
+    // active -- polling unconditionally for as long as ProjectDetail stays
+    // mounted (even with nothing ever having run) spammed the backend with
+    // GET .../active-job requests forever for no reason. The tradeoff: a
+    // job started in a DIFFERENT tab while this one sits idle here with no
+    // job of its own won't be noticed until this component remounts -- an
+    // edge case, versus indefinite chatty polling being the common case.
+    useEffect(() => {
+        if (!job) return;
         const interval = setInterval(refetch, 5000);
         return () => clearInterval(interval);
-    }, [refetch]);
+    }, [job, refetch]);
 
     return { activeJob: job, refetchActiveJob: refetch };
 }
