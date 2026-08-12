@@ -130,7 +130,14 @@ export default function App() {
       // finishes while the user just sat on the project page instead of
       // watching it (AppRouter.tsx's onResult/onComplete only run for a
       // mounted ProcessingPage, and there's real overlap when one *is*
-      // mounted, but both ends up idempotent).
+      // mounted, but both end up idempotent).
+      //
+      // The stepsUnlocked bump is chained AFTER the refetch resolves and
+      // floored against the server's own just-fetched value (normalized.
+      // stepsUnlocked), not fired concurrently against a possibly-stale
+      // `projects` closure -- firing both at once let an in-flight GET that
+      // started before the PUT resolve AFTER it and overwrite the
+      // just-bumped local stepsUnlocked back down to its pre-bump value.
       apiFetch(`/api/projects/${projectId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((fresh: Project | null) => {
@@ -139,13 +146,15 @@ export default function App() {
           setProjects((prev) =>
             prev.map((p) => (p.id === normalized.id ? normalized : p)),
           );
+          const minSteps = STEPS_UNLOCKED_BY_JOB_KIND[job.kind];
+          if (minSteps != null) {
+            updateProjectSteps(
+              projectId,
+              Math.max(normalized.stepsUnlocked, minSteps),
+            );
+          }
         })
         .catch(() => {});
-      const minSteps = STEPS_UNLOCKED_BY_JOB_KIND[job.kind];
-      const current = projects.find((p) => p.id === projectId);
-      if (minSteps != null && current) {
-        updateProjectSteps(projectId, Math.max(current.stepsUnlocked, minSteps));
-      }
     }
     toast[
       status === "succeeded"

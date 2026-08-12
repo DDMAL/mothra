@@ -188,19 +188,37 @@ export default function ProjectDetail({
     : serverActiveJob;
   const [cancellingJob, setCancellingJob] = useState(false);
   const [cancelJobPrompt, setCancelJobPrompt] = useState(false);
+  const [cancelJobError, setCancelJobError] = useState<string | null>(null);
 
   const handleCancelActiveJob = async () => {
     if (!activeJobForProject) return;
     setCancellingJob(true);
+    setCancelJobError(null);
     try {
-      await apiFetch(`/api/jobs/${activeJobForProject.jobId}/cancel`, {
-        method: "POST",
-      });
+      const r = await apiFetch(
+        `/api/jobs/${activeJobForProject.jobId}/cancel`,
+        { method: "POST" },
+      );
+      if (!r.ok) {
+        // A 404/403/409 means the job is NOT actually cancelled server-side
+        // -- settling it locally anyway would silently hide a still-running
+        // job with no error shown and no way left to cancel it for real.
+        const d = await r.json().catch(() => ({}));
+        setCancelJobError(
+          (d as { detail?: string }).detail ?? `cancel failed (${r.status})`,
+        );
+        setCancellingJob(false);
+        return;
+      }
       markJobSettled(activeJobForProject.jobId);
       await refetchActiveJob();
-    } finally {
       setCancellingJob(false);
       setCancelJobPrompt(false);
+    } catch {
+      // apiFetch rejects on a network failure -- surface it instead of
+      // letting it escape the click handler as an unhandled rejection.
+      setCancelJobError("cancel failed -- check your connection");
+      setCancellingJob(false);
     }
   };
   
@@ -991,7 +1009,12 @@ export default function ProjectDetail({
                   {activeJobForProject && (
                     <div className="mt-2 flex flex-col items-center gap-1.5">
                       <p className="text-white/70 text-xs text-center">
-                        an {jobKindLabel(activeJobForProject.kind)} job is{" "}
+                        {/^[aeiou]/i.test(
+                          jobKindLabel(activeJobForProject.kind),
+                        )
+                          ? "an"
+                          : "a"}{" "}
+                        {jobKindLabel(activeJobForProject.kind)} job is{" "}
                         {activeJobForProject.status === "pending"
                           ? "queued"
                           : "running"}{" "}
@@ -1038,6 +1061,11 @@ export default function ProjectDetail({
                           </span>
                         )}
                       </div>
+                      {cancelJobError && (
+                        <p className="text-red-200 text-xs text-center">
+                          {cancelJobError}
+                        </p>
+                      )}
                     </div>
                   )}
                 </>

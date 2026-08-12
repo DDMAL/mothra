@@ -473,6 +473,14 @@ export default function AppRouter({
     case "processing":
       return selectedProject ? (
         <ProcessingPage
+          // Force a remount when a NEW resumed job is set while this exact
+          // case is already rendering (onViewActiveJob/App.tsx's toast
+          // handler can both fire while view is already "processing") --
+          // without this, ProcessingPage's kickoff effect (keyed on
+          // retryKey, not streamRequest) keeps streaming whatever job it
+          // mounted with, so "view progress"/toast "view" on a second job
+          // would silently keep showing the first one's logs.
+          key={resumeJob?.jobId ?? "new"}
           onBack={() => {
             setResumeJob(null);
             setView("project");
@@ -620,7 +628,18 @@ export default function AppRouter({
                 );
               }}
           onResult={(ev) => {
-            if (batchRunIds) {
+            // Effective kind for THIS mount: a resumed job's own kind wins
+            // over whatever this tab last kicked off. batchRunIds reflects
+            // this tab's last kickoff, not the job actually being watched --
+            // resuming a text_batch job in a fresh tab (batchRunIds null)
+            // would otherwise take the predict branch and read `ev.annotations`
+            // off a batch result that doesn't carry it, and resuming a
+            // predict job after this tab last ran a batch (batchRunIds still
+            // set) would take the batch branch and write a bogus batchResult.
+            const isBatchResult = resumeJob
+              ? resumeJob.kind === "text_batch"
+              : !!batchRunIds;
+            if (isBatchResult) {
               const { text_debug_data: batchDebugData } = ev as {
                 text_debug_data?: Record<string, unknown>;
               };

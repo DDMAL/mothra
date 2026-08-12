@@ -235,7 +235,7 @@ def get_project_active_job(project_id: int, user=Depends(get_current_user)):
     activeJobs.ts's in-memory registry only covers the same-tab session that
     actually called the kickoff endpoint. Returns null when nothing is
     currently pending/running for this project."""
-    with db_cursor() as (con, cur):
+    with db_cursor() as (_con, cur):
         require_project_owner(cur, project_id, user["id"])
     active = get_active_job_for_project(project_id)
     if active is None:
