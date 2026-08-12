@@ -156,7 +156,7 @@ export default function CantusSourcePanel({
     <div className="mb-4 bg-white/10 rounded-xl p-4 flex gap-8 text-sm text-white max-w-3xl">
       <div className="flex flex-col gap-3 flex-[2] min-w-0">
         <h3 className="text-base text-white font-semibold">
-          CantusDB settings
+          CantusDB Text settings
         </h3>
         <label className="flex items-center gap-2 text-white/80 text-xs">
           <input
