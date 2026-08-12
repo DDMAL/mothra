@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   View,
@@ -187,12 +187,25 @@ export default function AppRouter({
 
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
+  // Bumped whenever the active project changes (or a new send-to-Cantus
+  // request starts), so an in-flight request whose project has since been
+  // navigated away from can recognize itself as stale and skip mutating
+  // state for whatever project is on screen by the time it resolves.
+  const cantusRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    cantusRequestIdRef.current += 1;
+    setSendBundleError(null);
+    setSendingBundle(false);
+  }, [selectedProjectId]);
 
   const handleSendToCantus = async () => {
     if (!selectedProject?.cantusSourceId) {
       setSendBundleError("link a Cantus source to this project first");
       return;
     }
+    const requestId = ++cantusRequestIdRef.current;
+    const isStale = () => cantusRequestIdRef.current !== requestId;
     setSendingBundle(true);
     setSendBundleError(null);
     try {
@@ -200,6 +213,7 @@ export default function AppRouter({
         `/api/projects/${selectedProject.id}/sources/${selectedProject.cantusSourceId}/cantus-bundle`,
       );
       const blob = await r.blob();
+      if (isStale()) return;
       const cd = r.headers.get("Content-Disposition") ?? "";
       const match = cd.match(/filename="?([^"]+)"?/);
       downloadBlob(
@@ -210,11 +224,12 @@ export default function AppRouter({
       );
       setView("send-completion");
     } catch (e) {
+      if (isStale()) return;
       setSendBundleError(
         e instanceof Error ? e.message : "failed to prepare bundle",
       );
     } finally {
-      setSendingBundle(false);
+      if (!isStale()) setSendingBundle(false);
     }
   };
 
@@ -247,7 +262,7 @@ export default function AppRouter({
       return (
         <main>
           <Hero
-            onGetStarted={() => setView("register")}
+            onLogin={() => setView("login")}
             onViewWalkthrough={() => setView("docs")}
           />
         </main>

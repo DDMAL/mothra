@@ -21,7 +21,8 @@ interface NeonBatchEditorProps {
 // one className string -- Tailwind resolves same-property conflicts by
 // stylesheet order, not by where they appear in the string, so duplicating
 // e.g. two different `bg-*` classes here would be a real (if subtle) bug.
-const BTN_BASE = "px-3.5 py-1.5 rounded-md text-white text-[13px] whitespace-nowrap";
+const BTN_BASE =
+  "px-3.5 py-1.5 rounded-md text-white text-[13px] whitespace-nowrap";
 
 export default function NeonBatchEditor({
   project,
