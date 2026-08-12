@@ -75,3 +75,4 @@ landing-page/.vite/
 # cp k8s/staging/secret.yaml.example k8s/staging/secret.yaml   (staging)
 k8s/secret.yaml
 k8s/staging/secret.yaml
+landing-page/.env.local
