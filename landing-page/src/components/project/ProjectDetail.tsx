@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { Project, ModelKind, CantusSource } from "../../types";
+import type { Project, ModelKind, CantusSource, ProjectInitialTab } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -23,7 +23,9 @@ import TruncatedName from "../shared/TruncatedName";
 import {
   subscribeActiveJobs,
   getActiveJobsSnapshot,
+  markJobSettled,
 } from "../../lib/activeJobs";
+import { useProjectActiveJob } from "../../hooks/useProjectActiveJob";
 
 const STEPS = [
   "annotate",
@@ -32,6 +34,16 @@ const STEPS = [
   "neon",
   "send to cantus ultimus",
 ];
+
+const JOB_KIND_LABELS: Record<string, string> = {
+  predict: "annotation",
+  text_batch: "text-finding",
+  encode_upload: "encoding",
+  encode_batch: "batch encoding",
+};
+function jobKindLabel(kind: string): string {
+  return JOB_KIND_LABELS[kind] ?? kind;
+}
 
 interface ProjectDetailProps {
   project: Project;
@@ -50,6 +62,12 @@ interface ProjectDetailProps {
    * IC step page (step 1), rather than inside the modal's iframe. */
   onResumeIcSession: (req: IcResumeRequest) => void;
   onSendToCantus: () => void;
+  onViewActiveJob: (jobId: string, kind: string) => void;
+  /** Deep-links the tab/sub-tab this mount should open on -- set by App.tsx's
+   * job-done toast handler for a succeeded job (issue #196). Null for every
+   * ordinary navigation into this page. */
+  initialTab?: ProjectInitialTab | null;
+  onInitialTabConsumed?: () => void;
   sendingBundle?: boolean;
   sendBundleError?: string | null;
   onRenameProject: (newName: string) => void;
@@ -96,6 +114,9 @@ export default function ProjectDetail({
   onStepClick,
   onResumeIcSession,
   onSendToCantus,
+  onViewActiveJob,
+  initialTab,
+  onInitialTabConsumed,
   sendingBundle = false,
   sendBundleError = null,
   onRenameProject,
@@ -113,24 +134,97 @@ export default function ProjectDetail({
   icSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<"images" | "models" | "generated">(
-    "images",
+    initialTab?.tab ?? "images",
   );
   const [generatedSubTab, setGeneratedSubTab] = useState<
     "annotations" | "text" | "stafflines" | "mei files"
-  >("annotations");
+  >(initialTab?.subTab ?? "annotations");
+
+  // Reacts to initialTab CHANGING, not just seeding on mount -- a toast's
+  // "view" click often lands here while ProjectDetail is already mounted
+  // (the user was sitting on the project page when the job finished), which
+  // re-renders this same case in AppRouter's switch rather than
+  // unmounting/remounting it. A mount-only effect would silently no-op in
+  // that case, which is exactly what "view" looked like it was doing
+  // nothing.
+  useEffect(() => {
+    if (!initialTab) return;
+    setActiveTab(initialTab.tab);
+    if (initialTab.subTab) setGeneratedSubTab(initialTab.subTab);
+    onInitialTabConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
   const [validationError, setValidationError] = useState<string | null>(null);
+
   // Client-side mirror of the backend's cross-kind "one active job per
   // project" guard (job_store.py's get_active_job_for_project) — disables
   // Continue before the user can even attempt a kickoff that the backend
-  // would reject with a 409, instead of them hitting an error. The backend
-  // check remains the actual source of truth (this registry is in-memory,
-  // reset on reload, not shared across tabs).
+  // would reject with a 409, instead of them hitting an error.
+  //
+  // Two sources, combined: the in-memory registry (activeJobs.ts) knows
+  // immediately when THIS tab kicked a job off; useProjectActiveJob polls
+  // the server so a reload or a different tab's kickoff is discovered too.
+  // The backend's own 409 check remains the actual source of truth either
+  // way — both of these are just UI conveniences to avoid surprising the
+  // user with an error, or leaving them with no way to check on/cancel a
+  // job they can't see.
   const activeJobsSnapshot = useSyncExternalStore(
     subscribeActiveJobs,
     getActiveJobsSnapshot,
   );
-  const activeJobForProject =
+  const inMemoryActiveJob = 
     activeJobsSnapshot.find((j) => j.projectId === project.id) ?? null;
+  const { activeJob: serverActiveJob, refetchActiveJob } = useProjectActiveJob(project.id);
+  const activeJobForProject: {
+    jobId: string;
+    kind: string;
+    status: string | null;
+  } | null = inMemoryActiveJob
+    ? {
+      jobId: inMemoryActiveJob.jobId,
+        kind: inMemoryActiveJob.kind,
+        status:
+          serverActiveJob?.jobId === inMemoryActiveJob.jobId
+            ? serverActiveJob.status
+            : null,
+      }
+    : serverActiveJob;
+  const [cancellingJob, setCancellingJob] = useState(false);
+  const [cancelJobPrompt, setCancelJobPrompt] = useState(false);
+  const [cancelJobError, setCancelJobError] = useState<string | null>(null);
+
+  const handleCancelActiveJob = async () => {
+    if (!activeJobForProject) return;
+    setCancellingJob(true);
+    setCancelJobError(null);
+    try {
+      const r = await apiFetch(
+        `/api/jobs/${activeJobForProject.jobId}/cancel`,
+        { method: "POST" },
+      );
+      if (!r.ok) {
+        // A 404/403/409 means the job is NOT actually cancelled server-side
+        // -- settling it locally anyway would silently hide a still-running
+        // job with no error shown and no way left to cancel it for real.
+        const d = await r.json().catch(() => ({}));
+        setCancelJobError(
+          (d as { detail?: string }).detail ?? `cancel failed (${r.status})`,
+        );
+        setCancellingJob(false);
+        return;
+      }
+      markJobSettled(activeJobForProject.jobId);
+      await refetchActiveJob();
+      setCancellingJob(false);
+      setCancelJobPrompt(false);
+    } catch {
+      // apiFetch rejects on a network failure -- surface it instead of
+      // letting it escape the click handler as an unhandled rejection.
+      setCancelJobError("cancel failed -- check your connection");
+      setCancellingJob(false);
+    }
+  };
+  
   const [projectMenu, setProjectMenu] = useState(false);
   const [projectRenameModal, setProjectRenameModal] = useState(false);
   const [projectRenameName, setProjectRenameName] = useState("");
@@ -925,10 +1019,66 @@ export default function ProjectDetail({
                     {continueLabel} &rarr;
                   </button>
                   {activeJobForProject && (
-                    <p className="text-white/70 text-xs mt-1 text-center">
-                      a {activeJobForProject.kind} job is already running for
-                      this project — please wait for it to finish
-                    </p>
+                    <div className="mt-2 flex flex-col items-center gap-1.5">
+                      <p className="text-white/70 text-xs text-center">
+                        {/^[aeiou]/i.test(
+                          jobKindLabel(activeJobForProject.kind),
+                        )
+                          ? "an"
+                          : "a"}{" "}
+                        {jobKindLabel(activeJobForProject.kind)} job is{" "}
+                        {activeJobForProject.status === "pending"
+                          ? "queued"
+                          : "running"}{" "}
+                        for this project
+                      </p>
+                      <div className="flex items-center gap-3 text-xs">
+                        {(activeJobForProject.kind === "predict" ||
+                          activeJobForProject.kind === "text_batch") && (
+                          <button
+                            onClick={() =>
+                              onViewActiveJob(
+                                activeJobForProject.jobId,
+                                activeJobForProject.kind,
+                              )
+                            }
+                            className="text-white underline hover:opacity-80 cursor-pointer"
+                          >
+                            view progress
+                          </button>
+                        )}
+                        {!cancelJobPrompt ? (
+                          <button
+                            onClick={() => setCancelJobPrompt(true)}
+                            className="text-white/70 underline hover:text-white cursor-pointer"
+                          >
+                            cancel job
+                          </button>
+                        ) : (
+                          <span className="flex items-center gap-2 text-white">
+                            cancel it?
+                            <button
+                              onClick={handleCancelActiveJob}
+                              disabled={cancellingJob}
+                              className="px-2 py-0.5 bg-white text-[#4AADAA] rounded font-semibold disabled:opacity-50 cursor-pointer"
+                            >
+                              {cancellingJob ? "cancelling..." : "yes"}
+                            </button>
+                            <button
+                              onClick={() => setCancelJobPrompt(false)}
+                              className="px-2 py-0.5 border border-white/40 rounded cursor-pointer"
+                            >
+                              no
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                      {cancelJobError && (
+                        <p className="text-red-200 text-xs text-center">
+                          {cancelJobError}
+                        </p>
+                      )}
+                    </div>
                   )}
                   {autoIcNeedsTraining && (
                     <p className="text-white/70 text-xs mt-1 text-center">

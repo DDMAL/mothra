@@ -6,6 +6,7 @@ import type {
   AnnotationSet,
   MeiFile,
   ModelKind,
+  ProjectInitialTab,
 } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
@@ -104,6 +105,10 @@ interface AppRouterProps {
   }) => void;
   pendingBatchPairs: { xmlFile: File; imageFile: File }[];
   setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  resumeJob: { jobId: string; kind: string } | null;
+  setResumeJob: (job: { jobId: string; kind: string } | null) => void;
+  pendingProjectTab: ProjectInitialTab | null;
+  setPendingProjectTab: (tab: ProjectInitialTab | null) => void;
   handleEncodeBatchResult: (ev: {
     item: number;
     session_id: string;
@@ -139,6 +144,10 @@ export default function AppRouter({
   handleEncodeResult,
   pendingBatchPairs,
   setPendingBatchPairs,
+  resumeJob,
+  setResumeJob,
+  pendingProjectTab,
+  setPendingProjectTab,
   handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
@@ -372,6 +381,12 @@ export default function AppRouter({
             setView("ic");
           }}
           onSendToCantus={handleSendToCantus}
+          onViewActiveJob={(jobId, kind) => {
+            setResumeJob({ jobId, kind });
+            setView("processing");
+          }}
+          initialTab={pendingProjectTab}
+          onInitialTabConsumed={() => setPendingProjectTab(null)}
           sendingBundle={sendingBundle}
           sendBundleError={sendBundleError}
           onRenameProject={(newName) =>
@@ -484,7 +499,18 @@ export default function AppRouter({
     case "processing":
       return selectedProject ? (
         <ProcessingPage
-          onBack={() => setView("project")}
+          // Force a remount when a NEW resumed job is set while this exact
+          // case is already rendering (onViewActiveJob/App.tsx's toast
+          // handler can both fire while view is already "processing") --
+          // without this, ProcessingPage's kickoff effect (keyed on
+          // retryKey, not streamRequest) keeps streaming whatever job it
+          // mounted with, so "view progress"/toast "view" on a second job
+          // would silently keep showing the first one's logs.
+          key={resumeJob?.jobId ?? "new"}
+          onBack={() => {
+            setResumeJob(null);
+            setView("project");
+          }}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
@@ -492,133 +518,154 @@ export default function AppRouter({
                 Math.max(selectedProject.stepsUnlocked, 1),
               );
             }
+            setResumeJob(null);
             setView("completion");
           }}
           projectId={selectedProject.id}
-          jobKind={batchRunIds ? "text_batch" : "predict"}
-          streamRequest={(signal, onJobId) => {
-            const usedModelId =
-              selectedProject.models.find((m) =>
-                (selectedProject.usedModelNames ?? []).includes(m.name),
-              )?.id ?? "";
-            const resolvedCustomModelId =
-              inferenceSettings.customModelId || usedModelId;
-            if (batchRunIds) {
-              return apiFetchJobStream(
-                `/api/projects/${selectedProject.id}/text-batch/run`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    image_ids: batchRunIds.imageIds,
-                    folios: batchRunIds.folios,
-                    source_id: Number(textFindingSettings.sourceId),
-                    segmentation_model:
-                      textFindingSettings.segmentationModelId || null,
-                    recognition_model:
-                      textFindingSettings.recognitionModelId || null,
-                    device: textFindingSettings.device,
-                    column_count:
-                      textFindingSettings.columnCount === "auto"
-                        ? null
-                        : Number(textFindingSettings.columnCount),
-                    column_bimodal_threshold:
-                      textFindingSettings.columnBimodalThreshold,
-                    masking_enabled: textFindingSettings.maskingEnabled,
-                    mask_padding: textFindingSettings.maskPadding,
-                    music_overlap_filter_enabled:
-                      textFindingSettings.musicOverlapFilterEnabled,
-                    debug_mode: textFindingSettings.debugMode,
-                    mask_model_id: textFindingSettings.maskModelId || null,
-                    model_preset: inferenceSettings.modelPreset,
-                    model_id:
-                      inferenceSettings.modelPreset === "custom"
-                        ? resolvedCustomModelId
-                        : null,
-                    yolo_confidence_threshold: inferenceSettings.threshold,
-                    yolo_device: inferenceSettings.device,
-                    text_music_confidence_threshold:
-                      inferenceSettings.useSharedDetectorSettings
-                        ? null
-                        : inferenceSettings.textMusicSettings.threshold,
-                    text_music_device:
-                      inferenceSettings.useSharedDetectorSettings
+          jobKind={resumeJob?.kind ?? (batchRunIds ? "text_batch" : "predict")}
+          initialLogsOpen={!!resumeJob}
+          streamRequest={
+            resumeJob
+              ? (signal, onJobId) => {
+                  onJobId?.(resumeJob.jobId);
+                  return apiFetch(`/api/jobs/${resumeJob.jobId}/stream`, {
+                    signal,
+                  });
+              }
+            : (signal, onJobId) => {
+                const usedModelId =
+                  selectedProject.models.find((m) =>
+                    (selectedProject.usedModelNames ?? []).includes(m.name),
+                  )?.id ?? "";
+                const resolvedCustomModelId =
+                  inferenceSettings.customModelId || usedModelId;
+                if (batchRunIds) {
+                  return apiFetchJobStream(
+                    `/api/projects/${selectedProject.id}/text-batch/run`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        image_ids: batchRunIds.imageIds,
+                        folios: batchRunIds.folios,
+                        source_id: Number(textFindingSettings.sourceId),
+                        segmentation_model:
+                          textFindingSettings.segmentationModelId || null,
+                        recognition_model:
+                          textFindingSettings.recognitionModelId || null,
+                        device: textFindingSettings.device,
+                        column_count:
+                          textFindingSettings.columnCount === "auto"
+                            ? null
+                            : Number(textFindingSettings.columnCount),
+                        column_bimodal_threshold:
+                          textFindingSettings.columnBimodalThreshold,
+                        masking_enabled: textFindingSettings.maskingEnabled,
+                        mask_padding: textFindingSettings.maskPadding,
+                        music_overlap_filter_enabled:
+                          textFindingSettings.musicOverlapFilterEnabled,
+                        debug_mode: textFindingSettings.debugMode,
+                        mask_model_id: textFindingSettings.maskModelId || null,
+                        model_preset: inferenceSettings.modelPreset,
+                        model_id:
+                          inferenceSettings.modelPreset === "custom"
+                            ? resolvedCustomModelId
+                            : null,
+                        yolo_confidence_threshold: inferenceSettings.threshold,
+                        yolo_device: inferenceSettings.device,
+                        text_music_confidence_threshold:
+                          inferenceSettings.useSharedDetectorSettings
+                            ? null
+                            : inferenceSettings.textMusicSettings.threshold,
+                        text_music_device:
+                          inferenceSettings.useSharedDetectorSettings
+                            ? null
+                            : inferenceSettings.textMusicSettings.device,
+                        stave_confidence_threshold:
+                          inferenceSettings.useSharedDetectorSettings
+                            ? null
+                            : inferenceSettings.staveSettings.threshold,
+                        stave_device: inferenceSettings.useSharedDetectorSettings
+                          ? null
+                          : inferenceSettings.staveSettings.device,
+                      }),
+                    },
+                    signal,
+                    onJobId,
+                  );
+                }
+                const usedImageIds = selectedProject.images
+                  .filter((i) => selectedProject.usedImageNames.includes(i.name))
+                  .map((i) => i.id);
+                return apiFetchJobStream(
+                  `/api/projects/${selectedProject.id}/predict`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      model_preset: inferenceSettings.modelPreset,
+                      model_id:
+                        inferenceSettings.modelPreset === "custom"
+                          ? resolvedCustomModelId
+                          : null,
+                      image_ids: usedImageIds,
+                      confidence_threshold: inferenceSettings.threshold,
+                      device: inferenceSettings.device,
+                      text_music_confidence_threshold:
+                        inferenceSettings.useSharedDetectorSettings
+                          ? null
+                          : inferenceSettings.textMusicSettings.threshold,
+                      text_music_device: inferenceSettings.useSharedDetectorSettings
                         ? null
                         : inferenceSettings.textMusicSettings.device,
-                    stave_confidence_threshold:
-                      inferenceSettings.useSharedDetectorSettings
+                      stave_confidence_threshold:
+                        inferenceSettings.useSharedDetectorSettings
+                          ? null
+                          : inferenceSettings.staveSettings.threshold,
+                      stave_device: inferenceSettings.useSharedDetectorSettings
                         ? null
-                        : inferenceSettings.staveSettings.threshold,
-                    stave_device: inferenceSettings.useSharedDetectorSettings
-                      ? null
-                      : inferenceSettings.staveSettings.device,
-                  }),
-                },
-                signal,
-                onJobId,
-              );
-            }
-            const usedImageIds = selectedProject.images
-              .filter((i) => selectedProject.usedImageNames.includes(i.name))
-              .map((i) => i.id);
-            return apiFetchJobStream(
-              `/api/projects/${selectedProject.id}/predict`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  model_preset: inferenceSettings.modelPreset,
-                  model_id:
-                    inferenceSettings.modelPreset === "custom"
-                      ? resolvedCustomModelId
-                      : null,
-                  image_ids: usedImageIds,
-                  confidence_threshold: inferenceSettings.threshold,
-                  device: inferenceSettings.device,
-                  text_music_confidence_threshold:
-                    inferenceSettings.useSharedDetectorSettings
-                      ? null
-                      : inferenceSettings.textMusicSettings.threshold,
-                  text_music_device: inferenceSettings.useSharedDetectorSettings
-                    ? null
-                    : inferenceSettings.textMusicSettings.device,
-                  stave_confidence_threshold:
-                    inferenceSettings.useSharedDetectorSettings
-                      ? null
-                      : inferenceSettings.staveSettings.threshold,
-                  stave_device: inferenceSettings.useSharedDetectorSettings
-                    ? null
-                    : inferenceSettings.staveSettings.device,
-                  text_column_count:
-                    textFindingSettings.columnCount === "auto"
-                      ? null
-                      : Number(textFindingSettings.columnCount),
-                  text_segmentation_model_id:
-                    textFindingSettings.segmentationModelId || null,
-                  text_recognition_model_id:
-                    textFindingSettings.recognitionModelId || null,
-                  text_device: textFindingSettings.device,
-                  text_column_bimodal_threshold:
-                    textFindingSettings.columnBimodalThreshold,
-                  text_masking_enabled: textFindingSettings.maskingEnabled,
-                  text_mask_padding: textFindingSettings.maskPadding,
-                  text_music_overlap_filter_enabled:
-                    textFindingSettings.musicOverlapFilterEnabled,
-                  text_debug_mode: textFindingSettings.debugMode,
-                  text_mask_model_id: textFindingSettings.maskModelId || null,
-                  text_source_id:
-                    !textFindingSettings.ocrOnlyMode &&
-                    textFindingSettings.sourceId
-                      ? Number(textFindingSettings.sourceId)
-                      : null,
-                }),
-              },
-              signal,
-              onJobId,
-            );
-          }}
+                        : inferenceSettings.staveSettings.device,
+                      text_column_count:
+                        textFindingSettings.columnCount === "auto"
+                          ? null
+                          : Number(textFindingSettings.columnCount),
+                      text_segmentation_model_id:
+                        textFindingSettings.segmentationModelId || null,
+                      text_recognition_model_id:
+                        textFindingSettings.recognitionModelId || null,
+                      text_device: textFindingSettings.device,
+                      text_column_bimodal_threshold:
+                        textFindingSettings.columnBimodalThreshold,
+                      text_masking_enabled: textFindingSettings.maskingEnabled,
+                      text_mask_padding: textFindingSettings.maskPadding,
+                      text_music_overlap_filter_enabled:
+                        textFindingSettings.musicOverlapFilterEnabled,
+                      text_debug_mode: textFindingSettings.debugMode,
+                      text_mask_model_id: textFindingSettings.maskModelId || null,
+                      text_source_id:
+                        !textFindingSettings.ocrOnlyMode &&
+                        textFindingSettings.sourceId
+                          ? Number(textFindingSettings.sourceId)
+                          : null,
+                    }),
+                  },
+                  signal,
+                  onJobId,
+                );
+              }}
           onResult={(ev) => {
-            if (batchRunIds) {
+            // Effective kind for THIS mount: a resumed job's own kind wins
+            // over whatever this tab last kicked off. batchRunIds reflects
+            // this tab's last kickoff, not the job actually being watched --
+            // resuming a text_batch job in a fresh tab (batchRunIds null)
+            // would otherwise take the predict branch and read `ev.annotations`
+            // off a batch result that doesn't carry it, and resuming a
+            // predict job after this tab last ran a batch (batchRunIds still
+            // set) would take the batch branch and write a bogus batchResult.
+            const isBatchResult = resumeJob
+              ? resumeJob.kind === "text_batch"
+              : !!batchRunIds;
+            if (isBatchResult) {
               const { text_debug_data: batchDebugData } = ev as {
                 text_debug_data?: Record<string, unknown>;
               };

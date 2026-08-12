@@ -25,6 +25,7 @@ interface ProcessingPageProps {
   onBatchDone?: (summary: { succeeded: unknown[]; failed: unknown[] }) => void;
   projectId?: number | null;
   jobKind?: string;
+  initialLogsOpen?: boolean;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -66,6 +67,7 @@ export default function ProcessingPage({
   onBatchDone,
   projectId,
   jobKind,
+  initialLogsOpen = false,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -74,7 +76,7 @@ export default function ProcessingPage({
     { text: false, check: false },
     { text: false, check: false },
   ]);
-  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(initialLogsOpen);
   const [cancelPrompt, setCancelPrompt] = useState(false);
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
@@ -595,7 +597,11 @@ export default function ProcessingPage({
                   {revealedLogs.map((line, i) => (
                     <div
                       key={i}
-                      className="text-white/70 text-xs font-mono leading-5"
+                      className={`text-xs font-mono leading-5 ${
+                        line.startsWith("error: ")
+                          ? "text-red-300"
+                          : "text-white/70"
+                      }`}
                     >
                       {line}
                     </div>

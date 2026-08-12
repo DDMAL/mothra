@@ -70,7 +70,11 @@ def claim_project_job(project_id: int, kind: str, *, job_id: str,
     Returns (job_id_to_use, is_new, active_job). `active_job` is set (and
     job_id_to_use is None) when a job of a kind NOT in `allowed_kinds`
     (defaults to just `kind` itself) is already active -- callers should
-    raise 409 using it, same shape get_active_job_for_project returned.
+    raise 409 using it. Unlike get_active_job_for_project's {"job_id",
+    "kind", "status"}, this active_job has no "status" key -- every caller
+    of this function only ever reads "job_id"/"kind" out of it for the 409
+    message, so it was never added here.
+
     Otherwise behaves like create_job: `is_new` indicates whether the
     caller should actually enqueue a Celery task, and dedupe_seconds keeps
     its original meaning (collapse an exact same-kind duplicate kickoff
@@ -119,8 +123,9 @@ def claim_project_job(project_id: int, kind: str, *, job_id: str,
         release_db_conn(con)
 
 def get_active_job_for_project(project_id: int) -> Optional[dict]:
-    """Returns {"job_id": ..., "kind": ...} for the most recent pending/running
-    job for this project, across ALL kinds, or None if there isn't one.
+    """Returns {"job_id": ..., "kind": ..., "status": ...} for the most recent
+    pending/running job for this project, across ALL kinds, or None if there
+    isn't one.
 
     Unlike create_job's dedupe_seconds (scoped to kind+project_id, and only a
     few-second window — meant to collapse an exact duplicate kickoff, e.g. a
@@ -139,14 +144,14 @@ def get_active_job_for_project(project_id: int) -> Optional[dict]:
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT job_id, kind FROM jobs WHERE project_id=%s"
+            "SELECT job_id, kind, status FROM jobs WHERE project_id=%s"
             " AND status IN ('pending','running')"
             " ORDER BY created_at DESC LIMIT 1",
             (project_id,),
         )
         row = cur.fetchone()
         cur.close()
-        return {"job_id": row[0], "kind": row[1]} if row else None
+        return {"job_id": row[0], "kind": row[1], "status": row[2]} if row else None
     finally:
         release_db_conn(con)
 

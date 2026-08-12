@@ -17,6 +17,7 @@ import uuid as _uuid
 import zipfile
 
 from auth_api import get_current_user, db_cursor, require_project_owner, _log_activity, MODELS_DIR
+from job_store import get_active_job_for_project
 
 router = APIRouter()
 
@@ -226,6 +227,20 @@ def get_activity(project_id: int, user=Depends(get_current_user)):
         )
         return [{"actionType": r[0], "detail": r[1], "createdAt": str(r[2])} for r in cur.fetchall()]
 
+@router.get("/projects/{project_id}/active-job")
+def get_project_active_job(project_id: int, user=Depends(get_current_user)):
+    """Exposes job_store.get_active_job_for_project over HTTP so the project
+    page can discover a still-running predict/encode/text-batch job after a
+    reload or from a different tab than the one that kicked it off --
+    activeJobs.ts's in-memory registry only covers the same-tab session that
+    actually called the kickoff endpoint. Returns null when nothing is
+    currently pending/running for this project."""
+    with db_cursor() as (_con, cur):
+        require_project_owner(cur, project_id, user["id"])
+    active = get_active_job_for_project(project_id)
+    if active is None:
+        return None
+    return {"job_id": active["job_id"], "kind": active["kind"], "status": active["status"]}
 
 class CreateProjectBody(BaseModel):
     name: str
