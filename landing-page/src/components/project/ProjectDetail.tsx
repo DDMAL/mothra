@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { Project, ModelKind, CantusSource } from "../../types";
+import type { Project, ModelKind, CantusSource, ProjectInitialTab } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
@@ -62,6 +62,11 @@ interface ProjectDetailProps {
   onResumeIcSession: (req: IcResumeRequest) => void;
   onSendToCantus: () => void;
   onViewActiveJob: (jobId: string, kind: string) => void;
+  /** Deep-links the tab/sub-tab this mount should open on -- set by App.tsx's
+   * job-done toast handler for a succeeded job (issue #196). Null for every
+   * ordinary navigation into this page. */
+  initialTab?: ProjectInitialTab | null;
+  onInitialTabConsumed?: () => void;
   sendingBundle?: boolean;
   sendBundleError?: string | null;
   onRenameProject: (newName: string) => void;
@@ -108,6 +113,8 @@ export default function ProjectDetail({
   onResumeIcSession,
   onSendToCantus,
   onViewActiveJob,
+  initialTab,
+  onInitialTabConsumed,
   sendingBundle = false,
   sendBundleError = null,
   onRenameProject,
@@ -124,11 +131,26 @@ export default function ProjectDetail({
   textFindingSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<"images" | "models" | "generated">(
-    "images",
+    initialTab?.tab ?? "images",
   );
   const [generatedSubTab, setGeneratedSubTab] = useState<
     "annotations" | "text" | "stafflines" | "mei files"
-  >("annotations");
+  >(initialTab?.subTab ?? "annotations");
+
+  // Reacts to initialTab CHANGING, not just seeding on mount -- a toast's
+  // "view" click often lands here while ProjectDetail is already mounted
+  // (the user was sitting on the project page when the job finished), which
+  // re-renders this same case in AppRouter's switch rather than
+  // unmounting/remounting it. A mount-only effect would silently no-op in
+  // that case, which is exactly what "view" looked like it was doing
+  // nothing.
+  useEffect(() => {
+    if (!initialTab) return;
+    setActiveTab(initialTab.tab);
+    if (initialTab.subTab) setGeneratedSubTab(initialTab.subTab);
+    onInitialTabConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Client-side mirror of the backend's cross-kind "one active job per
@@ -969,7 +991,7 @@ export default function ProjectDetail({
                   {activeJobForProject && (
                     <div className="mt-2 flex flex-col items-center gap-1.5">
                       <p className="text-white/70 text-xs text-center">
-                        a {jobKindLabel(activeJobForProject.kind)} job is{" "}
+                        an {jobKindLabel(activeJobForProject.kind)} job is{" "}
                         {activeJobForProject.status === "pending"
                           ? "queued"
                           : "running"}{" "}

@@ -28,6 +28,16 @@ export interface Project {
   stafflines: StafflineSet[];
 }
 
+/** Which tab/sub-tab ProjectDetail should open on mount -- set by App.tsx's
+ * job-done toast handler when routing "view" for a succeeded job to the tab
+ * that actually holds what it produced (issue #196). Consumed once via
+ * ProjectDetail's onInitialTabConsumed and then cleared, so an unrelated
+ * later navigation back to the project page doesn't re-apply a stale value. */
+export interface ProjectInitialTab {
+  tab: "images" | "models" | "generated";
+  subTab?: "annotations" | "text" | "stafflines" | "mei files";
+}
+
 export interface CantusSource {
   sourceId: string;
   name: string;

@@ -6,6 +6,7 @@ import type {
   AnnotationSet,
   MeiFile,
   ModelKind,
+  ProjectInitialTab,
 } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
@@ -102,6 +103,10 @@ interface AppRouterProps {
   }) => void;
   pendingBatchPairs: { xmlFile: File; imageFile: File }[];
   setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  resumeJob: { jobId: string; kind: string } | null;
+  setResumeJob: (job: { jobId: string; kind: string } | null) => void;
+  pendingProjectTab: ProjectInitialTab | null;
+  setPendingProjectTab: (tab: ProjectInitialTab | null) => void;
   handleEncodeBatchResult: (ev: {
     item: number;
     session_id: string;
@@ -137,6 +142,10 @@ export default function AppRouter({
   handleEncodeResult,
   pendingBatchPairs,
   setPendingBatchPairs,
+  resumeJob,
+  setResumeJob,
+  pendingProjectTab,
+  setPendingProjectTab,
   handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
@@ -165,14 +174,6 @@ export default function AppRouter({
   const [batchRunIds, setBatchRunIds] = useState<{
     imageIds: string[];
     folios: string[];
-  } | null>(null);
-  // Set when the user clicks "view progress" on the project page for a job
-  // this tab didn't kick off itself (ProjectDetail.tsx's onViewActiveJob) --
-  // tells the "processing" case below to reattach ProcessingPage to an
-  // existing job_id's stream instead of running its normal kickoff.
-  const [resumeJob, setResumeJob] = useState<{
-    jobId: string;
-    kind: string;
   } | null>(null);
   const [batchResult, setBatchResult] = useState<{
     batchId: string;
@@ -359,6 +360,8 @@ export default function AppRouter({
             setResumeJob({ jobId, kind });
             setView("processing");
           }}
+          initialTab={pendingProjectTab}
+          onInitialTabConsumed={() => setPendingProjectTab(null)}
           sendingBundle={sendingBundle}
           sendBundleError={sendBundleError}
           onRenameProject={(newName) =>
@@ -486,6 +489,7 @@ export default function AppRouter({
           }}
           projectId={selectedProject.id}
           jobKind={resumeJob?.kind ?? (batchRunIds ? "text_batch" : "predict")}
+          initialLogsOpen={!!resumeJob}
           streamRequest={
             resumeJob
               ? (signal, onJobId) => {
