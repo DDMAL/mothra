@@ -50,7 +50,7 @@ export default function IcSettingsSection({
   return (
     <div className="flex flex-col gap-3">
       <h3 className="text-base text-white font-semibold">
-        Classifier settings
+        Glyph Classifier settings
       </h3>
 
       <div className="flex flex-col gap-1">
