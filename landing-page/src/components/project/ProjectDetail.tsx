@@ -5,6 +5,7 @@ import { getImageProgress, minNextStep } from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
 import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
+import type { useIcSettings } from "../../hooks/useIcSettings";
 import RenameModal from "./RenameModal";
 import DeleteProjectModal from "./DeleteProjectModal";
 import IcSessionsModal from "./IcSessionsModal";
@@ -81,6 +82,7 @@ interface ProjectDetailProps {
   onUpdateCantusSourceId: (sourceId: string) => void;
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
+  icSettings: ReturnType<typeof useIcSettings>;
 }
 
 export default function ProjectDetail({
@@ -108,6 +110,7 @@ export default function ProjectDetail({
   onDeleteProject,
   inferenceSettings,
   textFindingSettings,
+  icSettings,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<"images" | "models" | "generated">(
     "images",
@@ -201,6 +204,13 @@ export default function ProjectDetail({
     [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
   );
   const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
+  // Auto IC classifies server-side, which has no training pool without a
+  // training set - so Continue is greyed out until one is picked (or the mode
+  // is switched to manual). Gated on the steps that lead into IC, and checked
+  // at step 0 too: that step flows straight into step 1 in auto mode, so
+  // waiting until the IC step would waste a whole detection run.
+  const autoIcNeedsTraining =
+    nextStep <= 1 && icSettings.mode === "auto" && !icSettings.hasTrainingSet;
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -701,6 +711,7 @@ export default function ProjectDetail({
               onBatchEndFolioChange={setBatchEndFolio}
               batchFolioSequence={batchFolioSequence}
               locked={sourceLocked}
+              icSettings={icSettings}
             />
             <div className="flex items-end">
               {tabs.map((tab, i) => (
@@ -905,9 +916,10 @@ export default function ProjectDetail({
                         }
                         setValidationError(null);
                       }
+                      if (autoIcNeedsTraining) return; // defensive; button is disabled below
                       onContinue();
                     }}
-                    disabled={!!activeJobForProject}
+                    disabled={!!activeJobForProject || autoIcNeedsTraining}
                     className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {continueLabel} &rarr;
@@ -916,6 +928,12 @@ export default function ProjectDetail({
                     <p className="text-white/70 text-xs mt-1 text-center">
                       a {activeJobForProject.kind} job is already running for
                       this project — please wait for it to finish
+                    </p>
+                  )}
+                  {autoIcNeedsTraining && (
+                    <p className="text-white/70 text-xs mt-1 text-center">
+                      the classifier is set to auto — pick training data under
+                      "Classifier settings", or switch it to manual
                     </p>
                   )}
                 </>

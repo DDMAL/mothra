@@ -14,6 +14,7 @@ import { downloadBlob } from "../utils/download";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
+import { useIcSettings } from "../hooks/useIcSettings";
 import Hero from "./landing/Hero";
 import Documentation from "./documentation/Documentation";
 import AuthPage from "./auth/AuthPage";
@@ -24,6 +25,7 @@ import type { IcResumeRequest } from "./project/IcSessionsModal";
 import ProcessingPage from "./workflow/ProcessingPage";
 import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
+import IcAutoQueue from "./workflow/IcAutoQueue";
 import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
@@ -160,6 +162,9 @@ export default function AppRouter({
   // thread inference settings + text-finding settings (mothra-text optional inputs)
   const inferenceSettings = useInferenceSettings();
   const textFindingSettings = useTextFindingSettings();
+  // IC step settings (auto/manual + shared training set), picked on the
+  // project page — see IcSettingsSection.
+  const icSettings = useIcSettings();
 
   // batch text-alignment run (run_chain.py) state
   const [batchRunIds, setBatchRunIds] = useState<{
@@ -239,6 +244,7 @@ export default function AppRouter({
       "processing",
       "completion",
       "ic",
+      "ic-auto",
       "encoding-processing",
       "encoding-completion",
       "neon-editor",
@@ -247,14 +253,33 @@ export default function AppRouter({
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
 
-  // Ordinary way into the IC step: start on the first page to classify. Any
-  // saved-session resume left over from a previous visit is dropped here, so
-  // only the "manage IC sessions" path (which sets it) ever opens one - the
-  // request has to outlive the navigation itself, since the "ic" case below
-  // keeps reading it to hold the session's page in the filmstrip.
+  // Ordinary way into the IC step. Any saved-session resume left over from a
+  // previous visit is dropped here, so only the "manage IC sessions" path
+  // (which sets it) ever opens one - the request has to outlive the navigation
+  // itself, since the "ic" case below keeps reading it to hold the session's
+  // page in the filmstrip.
+  //
+  // "auto" mode never shows the classifier: it classifies and queues every
+  // pending page with the project page's training set, then goes straight to
+  // encoding (see IcAutoQueue). "manual" opens the classifier on the first
+  // page to classify. A saved-session resume always goes to the classifier -
+  // the user picked that session explicitly.
   const goToIc = () => {
     setResumeIcSession(null);
-    setView("ic");
+    setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
+  };
+
+  // Hand a finished IC queue (either mode) to the batch encoder.
+  const startEncodeBatch = (pairs: { xmlFile: File; imageFile: File }[]) => {
+    setPendingBatchPairs(pairs);
+    setBatchSummary(null);
+    if (selectedProjectId && selectedProject) {
+      updateProjectSteps(
+        selectedProjectId,
+        Math.max(selectedProject.stepsUnlocked, 2),
+      );
+    }
+    setView("encoding-processing");
   };
 
   switch (view) {
@@ -453,6 +478,7 @@ export default function AppRouter({
           }}
           inferenceSettings={inferenceSettings}
           textFindingSettings={textFindingSettings}
+          icSettings={icSettings}
         />
       ) : null;
     case "processing":
@@ -793,16 +819,32 @@ export default function AppRouter({
           onClefShapeChange={setClefShape}
           clefLine={clefLine}
           onClefLineChange={setClefLine}
-          onEncodeBatch={(pairs) => {
-            setPendingBatchPairs(pairs);
-            setBatchSummary(null);
-            if (selectedProjectId && selectedProject) {
-              updateProjectSteps(
-                selectedProjectId,
-                Math.max(selectedProject.stepsUnlocked, 2),
-              );
-            }
-            setView("encoding-processing");
+          trainingPresets={icSettings.trainingPresets}
+          trainingFiles={icSettings.trainingFiles}
+          onEncodeBatch={startEncodeBatch}
+        />
+      );
+    }
+    case "ic-auto": {
+      if (!selectedProject) return null;
+      return (
+        <IcAutoQueue
+          images={pendingIcImages(
+            selectedProject.images,
+            selectedProject.usedImageNames,
+            selectedProject.annotations ?? [],
+            selectedProject.meiFiles ?? [],
+            selectedProject.stepsUnlocked,
+          )}
+          usedImageCount={selectedProject.usedImageNames.length}
+          projectId={selectedProjectId}
+          trainingPresets={icSettings.trainingPresets}
+          trainingFiles={icSettings.trainingFiles}
+          onDone={startEncodeBatch}
+          onBack={() => setView("project")}
+          onOpenManualClassifier={() => {
+            setResumeIcSession(null);
+            setView("ic");
           }}
         />
       );
