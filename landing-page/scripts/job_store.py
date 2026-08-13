@@ -123,9 +123,11 @@ def claim_project_job(project_id: int, kind: str, *, job_id: str,
         release_db_conn(con)
 
 def get_active_job_for_project(project_id: int) -> Optional[dict]:
-    """Returns {"job_id": ..., "kind": ..., "status": ...} for the most recent
-    pending/running job for this project, across ALL kinds, or None if there
-    isn't one.
+    """Returns {"job_id": ..., "kind": ..., "status": ..., "created_at": ...}
+    for the most recent pending/running job for this project, across ALL
+    kinds, or None if there isn't one. `created_at` is the raw datetime from
+    the `jobs` row (callers over HTTP, e.g. projects_api.py's
+    get_project_active_job, are responsible for serializing it).
 
     Unlike create_job's dedupe_seconds (scoped to kind+project_id, and only a
     few-second window — meant to collapse an exact duplicate kickoff, e.g. a
