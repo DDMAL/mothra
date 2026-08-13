@@ -56,6 +56,7 @@ export default function App() {
   const [resumeJob, setResumeJob] = useState<{
     jobId: string;
     kind: string;
+    startedAt?: string | null;
   } | null>(null);
   const [pendingProjectTab, setPendingProjectTab] =
     useState<ProjectInitialTab | null>(null);

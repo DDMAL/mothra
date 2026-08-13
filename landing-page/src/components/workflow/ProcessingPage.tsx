@@ -26,6 +26,7 @@ interface ProcessingPageProps {
   projectId?: number | null;
   jobKind?: string;
   initialLogsOpen?: boolean;
+  startedAtMs?: number;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -68,6 +69,7 @@ export default function ProcessingPage({
   projectId,
   jobKind,
   initialLogsOpen = false,
+  startedAtMs,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -78,6 +80,9 @@ export default function ProcessingPage({
   ]);
   const [logsOpen, setLogsOpen] = useState(initialLogsOpen);
   const [cancelPrompt, setCancelPrompt] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -398,7 +403,8 @@ export default function ProcessingPage({
     setRevealedLogs([]);
     setItemProgress(null);
     completedRef.current = false;
-    startTimeRef.current = Date.now();
+    startTimeRef.current =
+      startedAtMs != null && Number.isFinite(startedAtMs) ? startedAtMs : Date.now();
     estimatedTotalMsRef.current = getAverageDurationMs(jobKind ?? "unknown");
     avgItemMsRef.current = null;
     itemDurationsRef.current = [];
@@ -534,17 +540,49 @@ export default function ProcessingPage({
               <span> are you sure? </span>
               <button
                 onClick={async () => {
+                  setCancelling(true);
+                  setCancelError(null);
                   streamAbortRef.current?.abort();
-                  if (jobIdRef.current) {
-                    apiFetch(`/api/jobs/${jobIdRef.current}/cancel`, {
-                      method: "POST",
-                    }).catch(() => {});
+                  const id = jobIdRef.current;
+                  if (id) {
+                    // Awaited and validated -- an unawaited fire-and-forget
+                    // POST here meant a 404/403/409 or a network failure was
+                    // silently ignored, and the job got marked settled and
+                    // navigated away from regardless, leaving it running
+                    // server-side with no way left on this page to retry the
+                    // cancel. On failure, stay on this page (stream is
+                    // already aborted either way -- the user confirmed they
+                    // want to stop watching) and surface the error instead.
+                    try {
+                      const r = await apiFetch(`/api/jobs/${id}/cancel`, {
+                        method: "POST",
+                      });
+                      if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        setCancelError(
+                          (d as { detail?: string }).detail ??
+                            `cancel failed (${r.status})`,
+                        );
+                        setCancelling(false);
+                        return;
+                      }
+                    } catch {
+                      setCancelError("cancel failed -- check your connection");
+                      setCancelling(false);
+                      return;
+                    }
+                    markJobSettled(id);
                   }
+                  // No job id yet (kickoff hasn't gotten one from the server
+                  // -- nothing exists server-side to cancel) is the only
+                  // path that reaches here without a confirmed cancel; it's
+                  // still correct to just leave.
                   onBack();
                 }}
-                className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
+                disabled={cancelling}
+                className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer disabled:opacity-50"
               >
-                yes
+                {cancelling ? "cancelling..." : "yes"}
               </button>
               <button
                 onClick={() => setCancelPrompt(false)}
@@ -560,6 +598,9 @@ export default function ProcessingPage({
             </span>
           )}
         </div>
+        {cancelError && (
+          <p className="mt-2 text-red-200 text-sm font-mono">{cancelError}</p>
+        )}
         {streamError && !done && (
           <div className="mt-4 flex flex-col items-start gap-2">
             <p className="text-red-200 text-sm font-mono">{streamError}</p>

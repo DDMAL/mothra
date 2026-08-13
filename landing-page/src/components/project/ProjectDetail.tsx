@@ -62,7 +62,7 @@ interface ProjectDetailProps {
    * IC step page (step 1), rather than inside the modal's iframe. */
   onResumeIcSession: (req: IcResumeRequest) => void;
   onSendToCantus: () => void;
-  onViewActiveJob: (jobId: string, kind: string) => void;
+  onViewActiveJob: (jobId: string, kind: string, startedAt?: string | null) => void;
   /** Deep-links the tab/sub-tab this mount should open on -- set by App.tsx's
    * job-done toast handler for a succeeded job (issue #196). Null for every
    * ordinary navigation into this page. */
@@ -179,6 +179,7 @@ export default function ProjectDetail({
     jobId: string;
     kind: string;
     status: string | null;
+    createdAt: string | null;
   } | null = inMemoryActiveJob
     ? {
       jobId: inMemoryActiveJob.jobId,
@@ -186,6 +187,10 @@ export default function ProjectDetail({
         status:
           serverActiveJob?.jobId === inMemoryActiveJob.jobId
             ? serverActiveJob.status
+            : null,
+        createdAt:
+          serverActiveJob?.jobId === inMemoryActiveJob.jobId
+            ? serverActiveJob.createdAt
             : null,
       }
     : serverActiveJob;
@@ -552,12 +557,12 @@ export default function ProjectDetail({
           <div className="flex items-center gap-4 mb-3">
             <button
               onClick={onBack}
-              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0"
+              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0 mt-1"
             >
               ←
             </button>
-            <h1 className="text-4xl font-bold italic text-white min-w-0 shrink">
-              <TruncatedName name={project.name} />
+            <h1 className="text-4xl font-bold italic text-white min-w-0 shrink break-words">
+              {project.name}
             </h1>
             <div className="relative shrink-0">
               <button
@@ -1040,6 +1045,7 @@ export default function ProjectDetail({
                               onViewActiveJob(
                                 activeJobForProject.jobId,
                                 activeJobForProject.kind,
+                                activeJobForProject.createdAt,
                               )
                             }
                             className="text-white underline hover:opacity-80 cursor-pointer"

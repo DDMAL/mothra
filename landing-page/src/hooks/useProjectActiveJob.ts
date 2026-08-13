@@ -5,6 +5,7 @@ export interface ProjectActiveJob {
     jobId: string;
     kind: string;
     status: string;
+    createdAt: string | null;
 }
 
 /** Polls GET /api/projects/{id}/active-job -- the server-side source of
@@ -30,11 +31,20 @@ export function useProjectActiveJob(projectId: number | null) {
             // discovered after a reload/from a different tab, with nothing
             // in the in-memory activeJobs.ts registry to fall back on) reads
             // `jobId` as undefined.
-            const data: { job_id: string; kind: string; status: string } | null =
-                await r.json();
+            const data: {
+                job_id: string;
+                kind: string;
+                status: string;
+                created_at: string | null;
+            } | null = await r.json();
             setJob(
                 data
-                    ? { jobId: data.job_id, kind: data.kind, status: data.status }
+                    ? {
+                          jobId: data.job_id,
+                          kind: data.kind,
+                          status: data.status,
+                          createdAt: data.created_at,
+                      }
                     : null,
             );
         } catch {

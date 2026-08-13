@@ -105,8 +105,10 @@ interface AppRouterProps {
   }) => void;
   pendingBatchPairs: { xmlFile: File; imageFile: File }[];
   setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
-  resumeJob: { jobId: string; kind: string } | null;
-  setResumeJob: (job: { jobId: string; kind: string } | null) => void;
+  resumeJob: { jobId: string; kind: string; startedAt?: string | null} | null;
+  setResumeJob: (
+    job: { jobId: string; kind: string; startedAt?: string | null } | null,
+  ) => void;
   pendingProjectTab: ProjectInitialTab | null;
   setPendingProjectTab: (tab: ProjectInitialTab | null) => void;
   handleEncodeBatchResult: (ev: {
@@ -381,8 +383,8 @@ export default function AppRouter({
             setView("ic");
           }}
           onSendToCantus={handleSendToCantus}
-          onViewActiveJob={(jobId, kind) => {
-            setResumeJob({ jobId, kind });
+          onViewActiveJob={(jobId, kind, startedAt) => {
+            setResumeJob({ jobId, kind, startedAt });
             setView("processing");
           }}
           initialTab={pendingProjectTab}
@@ -524,6 +526,9 @@ export default function AppRouter({
           projectId={selectedProject.id}
           jobKind={resumeJob?.kind ?? (batchRunIds ? "text_batch" : "predict")}
           initialLogsOpen={!!resumeJob}
+          startedAtMs={
+            resumeJob?.startedAt ? new Date(resumeJob.startedAt).getTime() : undefined
+          }
           streamRequest={
             resumeJob
               ? (signal, onJobId) => {
