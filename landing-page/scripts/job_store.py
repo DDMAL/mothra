@@ -144,14 +144,18 @@ def get_active_job_for_project(project_id: int) -> Optional[dict]:
     try:
         cur = con.cursor()
         cur.execute(
-            "SELECT job_id, kind, status FROM jobs WHERE project_id=%s"
+            "SELECT job_id, kind, status, created_at FROM jobs WHERE project_id=%s"
             " AND status IN ('pending','running')"
             " ORDER BY created_at DESC LIMIT 1",
             (project_id,),
         )
         row = cur.fetchone()
         cur.close()
-        return {"job_id": row[0], "kind": row[1], "status": row[2]} if row else None
+        return (
+            {"job_id": row[0], "kind": row[1], "status": row[2], "created_at": row[3]}
+            if row
+            else None
+        )
     finally:
         release_db_conn(con)
 

@@ -26,6 +26,7 @@ interface ProcessingPageProps {
   projectId?: number | null;
   jobKind?: string;
   initialLogsOpen?: boolean;
+  startedAtMs?: number;
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
@@ -68,6 +69,7 @@ export default function ProcessingPage({
   projectId,
   jobKind,
   initialLogsOpen = false,
+  startedAtMs,
 }: ProcessingPageProps) {
   const [done, setDone] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -78,6 +80,8 @@ export default function ProcessingPage({
   ]);
   const [logsOpen, setLogsOpen] = useState(initialLogsOpen);
   const [cancelPrompt, setCancelPrompt] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
   const pausedRef = useRef(false);
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -398,7 +402,8 @@ export default function ProcessingPage({
     setRevealedLogs([]);
     setItemProgress(null);
     completedRef.current = false;
-    startTimeRef.current = Date.now();
+    startTimeRef.current =
+      startedAtMs != null && Number.isFinite(startedAtMs) ? startedAtMs : Date.now();
     estimatedTotalMsRef.current = getAverageDurationMs(jobKind ?? "unknown");
     avgItemMsRef.current = null;
     itemDurationsRef.current = [];
@@ -534,17 +539,27 @@ export default function ProcessingPage({
               <span> are you sure? </span>
               <button
                 onClick={async () => {
+                  setCancelling(true);
                   streamAbortRef.current?.abort();
                   if (jobIdRef.current) {
-                    apiFetch(`/api/jobs/${jobIdRef.current}/cancel`, {
-                      method: "POST",
-                    }).catch(() => {});
+                    const id = jobIdRef.current;
+                    markJobSettled(id);
+                    try {
+                      apiFetch(`/api/jobs/${jobIdRef.current}/cancel`, {
+                        method: "POST",
+                      });
+                    } catch {
+                      // best-effort -- still navigate back; the project page's
+                      // own poll self-corrects within 5s even if this
+                      // particular request didn't make it through
+                    }
                   }
                   onBack();
                 }}
+                disabled={cancelling}
                 className="px-3 py-1 bg-white text-[#4AADAA] rounded-lg font-semibold hover:opacity-90 cursor-pointer"
               >
-                yes
+                {cancelling ? "cancelling..." : "yes"}
               </button>
               <button
                 onClick={() => setCancelPrompt(false)}

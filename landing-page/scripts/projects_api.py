@@ -240,7 +240,12 @@ def get_project_active_job(project_id: int, user=Depends(get_current_user)):
     active = get_active_job_for_project(project_id)
     if active is None:
         return None
-    return {"job_id": active["job_id"], "kind": active["kind"], "status": active["status"]}
+    return {
+        "job_id": active["job_id"],
+        "kind": active["kind"],
+        "status": active["status"],
+        "created_at": active["created_at"].isoformat() if active["created_at"] else None,
+    }
 
 class CreateProjectBody(BaseModel):
     name: str
