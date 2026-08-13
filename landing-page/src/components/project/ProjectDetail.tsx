@@ -557,12 +557,12 @@ export default function ProjectDetail({
           <div className="flex items-center gap-4 mb-3">
             <button
               onClick={onBack}
-              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0"
+              className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0 mt-1"
             >
               ←
             </button>
-            <h1 className="text-4xl font-bold italic text-white min-w-0 shrink">
-              <TruncatedName name={project.name} />
+            <h1 className="text-4xl font-bold italic text-white min-w-0 shrink break-words">
+              {project.name}
             </h1>
             <div className="relative shrink-0">
               <button
