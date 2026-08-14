@@ -309,6 +309,8 @@ _ADDED_COLUMNS = [
 
     ("annotations",     "model_label",           "TEXT"),
     ("annotations",     "model_hash",            "TEXT"),
+    ("staffline_detections", "classifier_image",      "BYTEA"),
+    ("staffline_detections", "classifier_image_mime", "TEXT DEFAULT 'image/png'"),
 
     ("text_alignments", "log_text",              "TEXT"),
 
