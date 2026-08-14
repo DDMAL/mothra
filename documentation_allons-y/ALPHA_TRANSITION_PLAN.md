@@ -33,7 +33,9 @@ Status legend: **confirmed** = re-verified directly in source at HEAD (`74c2243`
 
 ### 2.1 Staff-finding: landing vs standalone divergences
 
-The standalone 10aug run was: `detect_stafflines.py --conf 0.25` (imgsz 640, iou 0.7) on the raw source JPEG → `run_page.py --staffline-class 0 --no-bgr` (sauvola, merge on, no interpolation, no fallback-redetect). The landing path differs as follows, ranked by expected impact:
+The standalone 10aug run was: `detect_stafflines.py --conf 0.25` (imgsz 640, iou 0.7) on the raw source JPEG → `run_page.py --staffline-class 0 --no-bgr` (sauvola, merge on, no interpolation, no fallback-redetect). The landing path differs as follows, ranked by expected impact.
+
+**Measured 2026-08-10** (parity sweeps: `staff-finding/e2e_tests/10aug_parity/{ms234_64,gent_right}/`; baseline reproduced the committed 10aug MS234_64 artifacts exactly — 8 staves, mode 4, cut 62.0 px — validating the harness). Gent right corroborates every MS234_64 attribution: conf 0.5 → 42 live boxes vs the 86-box corrected baseline, staves 18→14, mode 5→1, cut 15.5→35.9 px (caveat: Gent's baseline txt is *corrected* GT, so its conf variant conflates threshold with correction — direction still unambiguous); seed and working-copy toggles exact nulls on both pages; BGR swap minor on both (yMAE 0.34 px, one stave merged away on Gent). Paco-layer variants skipped on both — service not available locally; run when the stack is up.
 
 | ID | Finding | Where | Status | Phase |
 |---|---|---|---|---|

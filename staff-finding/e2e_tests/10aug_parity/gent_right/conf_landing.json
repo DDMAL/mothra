@@ -1,0 +1,864 @@
+{
+  "image_size": [
+    926,
+    1438
+  ],
+  "scale_unit": 16.0,
+  "n_boxes": 42,
+  "n_fits": 42,
+  "n_assigned": 35,
+  "stave_count": 14,
+  "mode_lines_per_stave": 1,
+  "line_count_distribution": {
+    "3": 2,
+    "1": 5,
+    "7": 1,
+    "4": 1,
+    "5": 1,
+    "2": 4
+  },
+  "cut_threshold_px": 35.9,
+  "grouping_flags": [
+    "reconciled_duplicate_fits:7",
+    "mode_count_below_typical",
+    "staves_with_unexpected_count:0,3,4,6,8"
+  ],
+  "lines": [
+    {
+      "fit_index": 0,
+      "bounding_box": [
+        413,
+        557,
+        694,
+        577
+      ],
+      "x_start_page": 413.0,
+      "x_end_page": 693.0,
+      "y_mid_page": 567.0,
+      "y_mean_page": 567.1526690391458,
+      "stave_id": 6,
+      "within_stave_index": 0,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.166
+    },
+    {
+      "fit_index": 1,
+      "bounding_box": [
+        551,
+        876,
+        698,
+        887
+      ],
+      "x_start_page": 551.0,
+      "x_end_page": 695.0,
+      "y_mid_page": 879.9,
+      "y_mean_page": 879.7496551724139,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:16"
+      ],
+      "residual_mean": 1.676
+    },
+    {
+      "fit_index": 2,
+      "bounding_box": [
+        459,
+        258,
+        695,
+        277
+      ],
+      "x_start_page": 462.0,
+      "x_end_page": 694.0,
+      "y_mid_page": 268.5,
+      "y_mean_page": 268.3296137339056,
+      "stave_id": 3,
+      "within_stave_index": 0,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.202
+    },
+    {
+      "fit_index": 3,
+      "bounding_box": [
+        232,
+        121,
+        693,
+        145
+      ],
+      "x_start_page": 236.0,
+      "x_end_page": 688.0,
+      "y_mid_page": 135.8,
+      "y_mean_page": 136.40353200883004,
+      "stave_id": 0,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.115
+    },
+    {
+      "fit_index": 4,
+      "bounding_box": [
+        466,
+        299,
+        699,
+        311
+      ],
+      "x_start_page": 475.0,
+      "x_end_page": 698.0,
+      "y_mid_page": 303.0,
+      "y_mean_page": 303.08437499999997,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:10"
+      ],
+      "residual_mean": 0.964
+    },
+    {
+      "fit_index": 5,
+      "bounding_box": [
+        208,
+        775,
+        696,
+        796
+      ],
+      "x_start_page": 208.0,
+      "x_end_page": 688.0,
+      "y_mid_page": 782.8,
+      "y_mean_page": 784.3717255717255,
+      "stave_id": 9,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.634
+    },
+    {
+      "fit_index": 6,
+      "bounding_box": [
+        83,
+        418,
+        422,
+        438
+      ],
+      "x_start_page": 83.0,
+      "x_end_page": 421.0,
+      "y_mid_page": 427.6,
+      "y_mean_page": 427.6047197640118,
+      "stave_id": 4,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 3.404
+    },
+    {
+      "fit_index": 7,
+      "bounding_box": [
+        482,
+        434,
+        696,
+        450
+      ],
+      "x_start_page": 483.0,
+      "x_end_page": 695.0,
+      "y_mid_page": 440.0,
+      "y_mean_page": 439.6615023474178,
+      "stave_id": 4,
+      "within_stave_index": 2,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.799
+    },
+    {
+      "fit_index": 8,
+      "bounding_box": [
+        148,
+        702,
+        681,
+        724
+      ],
+      "x_start_page": 148.0,
+      "x_end_page": 680.0,
+      "y_mid_page": 711.6,
+      "y_mean_page": 713.3437148217637,
+      "stave_id": 8,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 3.545
+    },
+    {
+      "fit_index": 9,
+      "bounding_box": [
+        217,
+        798,
+        694,
+        820
+      ],
+      "x_start_page": 217.0,
+      "x_end_page": 686.0,
+      "y_mid_page": 808.1,
+      "y_mean_page": 809.0559574468086,
+      "stave_id": 9,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 2.99
+    },
+    {
+      "fit_index": 10,
+      "bounding_box": [
+        83,
+        298,
+        412,
+        316
+      ],
+      "x_start_page": 91.0,
+      "x_end_page": 411.0,
+      "y_mid_page": 305.2,
+      "y_mean_page": 305.102492211838,
+      "stave_id": 3,
+      "within_stave_index": 3,
+      "fit_flags": [],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 1.75
+    },
+    {
+      "fit_index": 11,
+      "bounding_box": [
+        484,
+        446,
+        696,
+        462
+      ],
+      "x_start_page": 484.0,
+      "x_end_page": 694.0,
+      "y_mid_page": 453.6,
+      "y_mean_page": 453.77772511848343,
+      "stave_id": 4,
+      "within_stave_index": 3,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.43
+    },
+    {
+      "fit_index": 12,
+      "bounding_box": [
+        83,
+        369,
+        424,
+        390
+      ],
+      "x_start_page": 85.0,
+      "x_end_page": 423.0,
+      "y_mid_page": 377.1,
+      "y_mean_page": 377.223598820059,
+      "stave_id": 3,
+      "within_stave_index": 6,
+      "fit_flags": [],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 1.51
+    },
+    {
+      "fit_index": 13,
+      "bounding_box": [
+        475,
+        372,
+        697,
+        386
+      ],
+      "x_start_page": 475.0,
+      "x_end_page": 690.0,
+      "y_mid_page": 377.5,
+      "y_mean_page": 377.58564814814815,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:12"
+      ],
+      "residual_mean": 0.505
+    },
+    {
+      "fit_index": 14,
+      "bounding_box": [
+        81,
+        945,
+        642,
+        968
+      ],
+      "x_start_page": 81.0,
+      "x_end_page": 641.0,
+      "y_mid_page": 953.0,
+      "y_mean_page": 952.8488413547236,
+      "stave_id": 11,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_no_improvement"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.906
+    },
+    {
+      "fit_index": 15,
+      "bounding_box": [
+        92,
+        653,
+        673,
+        676
+      ],
+      "x_start_page": 92.0,
+      "x_end_page": 669.0,
+      "y_mid_page": 663.0,
+      "y_mean_page": 661.6683391003459,
+      "stave_id": 7,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_no_improvement"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.017
+    },
+    {
+      "fit_index": 16,
+      "bounding_box": [
+        73,
+        872,
+        539,
+        892
+      ],
+      "x_start_page": 73.0,
+      "x_end_page": 486.0,
+      "y_mid_page": 880.6,
+      "y_mean_page": 879.0347826086958,
+      "stave_id": 10,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.142
+    },
+    {
+      "fit_index": 17,
+      "bounding_box": [
+        87,
+        271,
+        407,
+        291
+      ],
+      "x_start_page": 90.0,
+      "x_end_page": 406.0,
+      "y_mid_page": 281.9,
+      "y_mean_page": 282.05205047318617,
+      "stave_id": 3,
+      "within_stave_index": 2,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.467
+    },
+    {
+      "fit_index": 18,
+      "bounding_box": [
+        128,
+        726,
+        679,
+        749
+      ],
+      "x_start_page": 128.0,
+      "x_end_page": 678.0,
+      "y_mid_page": 737.0,
+      "y_mean_page": 735.897277676951,
+      "stave_id": 8,
+      "within_stave_index": 2,
+      "fit_flags": [
+        "line_following_no_improvement"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.716
+    },
+    {
+      "fit_index": 19,
+      "bounding_box": [
+        252,
+        183,
+        702,
+        205
+      ],
+      "x_start_page": 262.0,
+      "x_end_page": 692.0,
+      "y_mid_page": 193.3,
+      "y_mean_page": 193.9821345707657,
+      "stave_id": 1,
+      "within_stave_index": 0,
+      "fit_flags": [],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 0.894
+    },
+    {
+      "fit_index": 20,
+      "bounding_box": [
+        80,
+        477,
+        696,
+        507
+      ],
+      "x_start_page": 80.0,
+      "x_end_page": 518.0,
+      "y_mid_page": 499.4,
+      "y_mean_page": 496.67266514806374,
+      "stave_id": 5,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.505
+    },
+    {
+      "fit_index": 21,
+      "bounding_box": [
+        480,
+        410,
+        699,
+        427
+      ],
+      "x_start_page": 480.0,
+      "x_end_page": 698.0,
+      "y_mid_page": 417.4,
+      "y_mean_page": 417.610502283105,
+      "stave_id": 4,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 2.877
+    },
+    {
+      "fit_index": 22,
+      "bounding_box": [
+        241,
+        107,
+        695,
+        132
+      ],
+      "x_start_page": 241.0,
+      "x_end_page": 692.0,
+      "y_mid_page": 125.0,
+      "y_mean_page": 123.78141592920353,
+      "stave_id": 0,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.251
+    },
+    {
+      "fit_index": 23,
+      "bounding_box": [
+        465,
+        330,
+        698,
+        350
+      ],
+      "x_start_page": 465.0,
+      "x_end_page": 597.0,
+      "y_mid_page": 340.7,
+      "y_mean_page": 340.881954887218,
+      "stave_id": 3,
+      "within_stave_index": 4,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.779
+    },
+    {
+      "fit_index": 24,
+      "bounding_box": [
+        107,
+        1016,
+        677,
+        1039
+      ],
+      "x_start_page": 108.0,
+      "x_end_page": 676.0,
+      "y_mid_page": 1029.5,
+      "y_mean_page": 1029.788576449912,
+      "stave_id": 12,
+      "within_stave_index": 1,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 3.54
+    },
+    {
+      "fit_index": 25,
+      "bounding_box": [
+        84,
+        344,
+        416,
+        362
+      ],
+      "x_start_page": 85.0,
+      "x_end_page": 415.0,
+      "y_mid_page": 353.1,
+      "y_mean_page": 353.1743202416918,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "duplicate_of:33"
+      ],
+      "residual_mean": 1.522
+    },
+    {
+      "fit_index": 26,
+      "bounding_box": [
+        97,
+        850,
+        489,
+        870
+      ],
+      "x_start_page": 97.0,
+      "x_end_page": 486.0,
+      "y_mid_page": 861.5,
+      "y_mean_page": 861.7861538461538,
+      "stave_id": 10,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 3.657
+    },
+    {
+      "fit_index": 27,
+      "bounding_box": [
+        415,
+        585,
+        698,
+        601
+      ],
+      "x_start_page": 415.0,
+      "x_end_page": 689.0,
+      "y_mid_page": 591.1,
+      "y_mean_page": 591.0116363636364,
+      "stave_id": 6,
+      "within_stave_index": 3,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.657
+    },
+    {
+      "fit_index": 28,
+      "bounding_box": [
+        78,
+        591,
+        347,
+        608
+      ],
+      "x_start_page": 79.0,
+      "x_end_page": 345.0,
+      "y_mid_page": 600.0,
+      "y_mean_page": 599.8486891385767,
+      "stave_id": 6,
+      "within_stave_index": 4,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 1.713
+    },
+    {
+      "fit_index": 29,
+      "bounding_box": [
+        465,
+        271,
+        698,
+        289
+      ],
+      "x_start_page": 465.0,
+      "x_end_page": 697.0,
+      "y_mid_page": 278.1,
+      "y_mean_page": 278.7789699570816,
+      "stave_id": 3,
+      "within_stave_index": 1,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.502
+    },
+    {
+      "fit_index": 30,
+      "bounding_box": [
+        262,
+        222,
+        700,
+        245
+      ],
+      "x_start_page": 264.0,
+      "x_end_page": 685.0,
+      "y_mid_page": 229.3,
+      "y_mean_page": 229.58744075829384,
+      "stave_id": 2,
+      "within_stave_index": 0,
+      "fit_flags": [],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 1.605
+    },
+    {
+      "fit_index": 31,
+      "bounding_box": [
+        147,
+        641,
+        681,
+        663
+      ],
+      "x_start_page": 147.0,
+      "x_end_page": 654.0,
+      "y_mid_page": 652.9,
+      "y_mean_page": 652.0690944881891,
+      "stave_id": 7,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 4.914
+    },
+    {
+      "fit_index": 32,
+      "bounding_box": [
+        74,
+        578,
+        345,
+        595
+      ],
+      "x_start_page": 79.0,
+      "x_end_page": 344.0,
+      "y_mid_page": 586.4,
+      "y_mean_page": 585.7131578947368,
+      "stave_id": 6,
+      "within_stave_index": 2,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.8
+    },
+    {
+      "fit_index": 33,
+      "bounding_box": [
+        83,
+        332,
+        425,
+        356
+      ],
+      "x_start_page": 83.0,
+      "x_end_page": 424.0,
+      "y_mid_page": 352.4,
+      "y_mean_page": 350.21111111111105,
+      "stave_id": 3,
+      "within_stave_index": 5,
+      "fit_flags": [
+        "line_following_applied:deg3"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.325
+    },
+    {
+      "fit_index": 34,
+      "bounding_box": [
+        472,
+        296,
+        699,
+        313
+      ],
+      "x_start_page": 475.0,
+      "x_end_page": 698.0,
+      "y_mid_page": 302.5,
+      "y_mean_page": 302.79866071428575,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:10"
+      ],
+      "residual_mean": 1.369
+    },
+    {
+      "fit_index": 35,
+      "bounding_box": [
+        477,
+        370,
+        698,
+        388
+      ],
+      "x_start_page": 477.0,
+      "x_end_page": 690.0,
+      "y_mid_page": 377.5,
+      "y_mean_page": 377.14719626168227,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:12"
+      ],
+      "residual_mean": 1.054
+    },
+    {
+      "fit_index": 36,
+      "bounding_box": [
+        219,
+        1107,
+        685,
+        1127
+      ],
+      "x_start_page": 257.0,
+      "x_end_page": 684.0,
+      "y_mid_page": 1117.5,
+      "y_mean_page": 1117.4780373831775,
+      "stave_id": 13,
+      "within_stave_index": 0,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 0.647
+    },
+    {
+      "fit_index": 37,
+      "bounding_box": [
+        234,
+        147,
+        695,
+        168
+      ],
+      "x_start_page": 234.0,
+      "x_end_page": 686.0,
+      "y_mid_page": 154.3,
+      "y_mean_page": 154.53311258278146,
+      "stave_id": 0,
+      "within_stave_index": 2,
+      "fit_flags": [],
+      "grouping_flags": [
+        "gap_near_threshold"
+      ],
+      "residual_mean": 1.357
+    },
+    {
+      "fit_index": 38,
+      "bounding_box": [
+        78,
+        148,
+        196,
+        164
+      ],
+      "x_start_page": 86.0,
+      "x_end_page": 192.0,
+      "y_mid_page": 154.5,
+      "y_mean_page": 155.08504672897195,
+      "stave_id": null,
+      "within_stave_index": null,
+      "fit_flags": [],
+      "grouping_flags": [
+        "companion_of:37"
+      ],
+      "residual_mean": 2.328
+    },
+    {
+      "fit_index": 39,
+      "bounding_box": [
+        129,
+        995,
+        665,
+        1017
+      ],
+      "x_start_page": 129.0,
+      "x_end_page": 644.0,
+      "y_mid_page": 1005.0,
+      "y_mean_page": 1003.8798449612403,
+      "stave_id": 12,
+      "within_stave_index": 0,
+      "fit_flags": [
+        "line_following_no_improvement"
+      ],
+      "grouping_flags": [],
+      "residual_mean": 5.075
+    },
+    {
+      "fit_index": 40,
+      "bounding_box": [
+        415,
+        571,
+        692,
+        588
+      ],
+      "x_start_page": 415.0,
+      "x_end_page": 691.0,
+      "y_mid_page": 580.4,
+      "y_mean_page": 580.3346570397111,
+      "stave_id": 6,
+      "within_stave_index": 1,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.443
+    },
+    {
+      "fit_index": 41,
+      "bounding_box": [
+        147,
+        714,
+        680,
+        735
+      ],
+      "x_start_page": 147.0,
+      "x_end_page": 679.0,
+      "y_mid_page": 726.2,
+      "y_mean_page": 726.1810506566604,
+      "stave_id": 8,
+      "within_stave_index": 1,
+      "fit_flags": [],
+      "grouping_flags": [],
+      "residual_mean": 2.862
+    }
+  ],
+  "settings": {
+    "image": "original",
+    "paco_base": "original",
+    "channel_order": "rgb",
+    "pass_crop": true,
+    "conf": 0.5,
+    "notes": [
+      "original file",
+      "live detection conf=0.5 iou=0.7: 42 boxes"
+    ]
+  },
+  "comparison_vs_baseline": {
+    "matched": 34,
+    "unmatched_baseline": 36,
+    "unmatched_variant": 1,
+    "y_mae_px": 1.24,
+    "y_max_px": 6.0,
+    "match_threshold_px": 7.5,
+    "y_rescale_factor": 1.0,
+    "stave_count_delta": -4,
+    "mode_delta": -4
+  }
+}
