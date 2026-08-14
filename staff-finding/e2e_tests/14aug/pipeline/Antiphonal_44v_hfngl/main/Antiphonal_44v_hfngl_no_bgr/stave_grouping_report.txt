@@ -1,0 +1,84 @@
+STAVE GROUPING REPORT
+============================================================
+
+Page: Antiphonal_44v_hfngl
+Mode lines per stave: 4
+Line count distribution: {4: 6}
+Cut threshold (px): 31.5
+Flags: reconciled_duplicate_fits:9
+
+GAPS BETWEEN CONSECUTIVE FITS:
+------------------------------------------------------------
+  Gap 0: 18.2 px  
+  Gap 1: 19.1 px  
+  Gap 2: 21.1 px  
+  Gap 3: 69.4 px  >>> INTER-STAVE <<<
+  Gap 4: 19.5 px  
+  Gap 5: 20.1 px  
+  Gap 6: 21.4 px  
+  Gap 7: 67.8 px  >>> INTER-STAVE <<<
+  Gap 8: 18.1 px  
+  Gap 9: 20.9 px  
+  Gap 10: 21.4 px  
+  Gap 11: 58.7 px  >>> INTER-STAVE <<<
+  Gap 12: 19.4 px  
+  Gap 13: 21.3 px  
+  Gap 14: 19.7 px  
+  Gap 15: 65.7 px  >>> INTER-STAVE <<<
+  Gap 16: 19.0 px  
+  Gap 17: 21.4 px  
+  Gap 18: 21.2 px  
+  Gap 19: 71.0 px  >>> INTER-STAVE <<<
+  Gap 20: 20.3 px  
+  Gap 21: 20.9 px  
+  Gap 22: 21.0 px  
+
+STAVE ASSIGNMENTS:
+------------------------------------------------------------
+
+Stave 0:
+  Fit 26: line 0, y=112.2px
+  Fit 29: line 1, y=130.4px
+  Fit 14: line 2, y=149.5px
+  Fit 17: line 3, y=170.6px
+
+Stave 1:
+  Fit 22: line 0, y=240.0px
+  Fit 4: line 1, y=259.5px
+  Fit 11: line 2, y=279.6px
+  Fit 23: line 3, y=301.0px
+
+Stave 2:
+  Fit 30: line 0, y=368.8px
+  Fit 6: line 1, y=386.9px
+  Fit 15: line 2, y=407.8px
+  Fit 28: line 3, y=429.2px
+
+Stave 3:
+  Fit 19: line 0, y=487.9px
+  Fit 18: line 1, y=507.3px
+  Fit 5: line 2, y=528.6px
+  Fit 21: line 3, y=548.3px
+
+Stave 4:
+  Fit 16: line 0, y=614.0px
+  Fit 2: line 1, y=633.0px
+  Fit 8: line 2, y=654.4px
+  Fit 7: line 3, y=675.6px
+
+Stave 5:
+  Fit 0: line 0, y=746.6px
+  Fit 24: line 1, y=766.9px
+  Fit 3: line 2, y=787.8px
+  Fit 12: line 3, y=808.8px
+
+Unassigned fits:
+  Fit 1 [companion_of:4]
+  Fit 9 [companion_of:11]
+  Fit 10 [duplicate_of:29]
+  Fit 13 [companion_of:22]
+  Fit 20 [companion_of:23]
+  Fit 25 [duplicate_of:30]
+  Fit 27 [duplicate_of:28]
+  Fit 31 [duplicate_of:8]
+  Fit 32 [companion_of:22]
