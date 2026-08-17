@@ -5,6 +5,7 @@ Mirrors the SSE event contract used by inference_api.py's /predict and
 encode_api.py's /encode-upload: stage -> stage_done -> log -> result -> done.
 """
 import json
+import os
 import re
 import logging
 import queue
@@ -39,7 +40,14 @@ from steps.nw_chant_allocator import _folio_sort_key, read_folio_state
 from run_chain import _are_contiguous
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# No "*" default -- see landing-page/scripts/main.py's identical fix (mothra#220
+# row 27). text-service has no public ingress route (ClusterIP only, see
+# k8s/text-service.yaml) so this middleware never actually sees real browser
+# traffic today, but an unconditional wildcard is still the wrong default to
+# leave in code for whenever that changes. Falls back to the same local-dev
+# Vite origin as the backend when unset.
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 # run_pipeline.main() resolves this as the --recognition-model CLI default
 # (_DEFAULT_RECOGNITION_MODEL); run() itself defaults to None (stub mode, empty
