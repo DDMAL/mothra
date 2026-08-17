@@ -49,6 +49,15 @@ def run_text_batch_task(job_id, project_id, body):
 
         images = []
         for iid in image_ids:
+            # NOTE (SF-2, ALPHA_TRANSITION_PLAN.md): tasks_predict.py's own
+            # image fetch now prefers original_data over this resized
+            # working copy, since staffline_stage.py's JSOMR is resolution-
+            # sensitive. That fix was NOT backported here on purpose -- this
+            # is a different job type, wasn't part of the measured #213
+            # regression, and expanding the behavior change here multiplies
+            # verification surface without a measured justification. If a
+            # #213-class regression is ever reported for the text-batch
+            # path specifically, this is the place to revisit.
             cur.execute("SELECT name, data, mime_type FROM project_images WHERE id=%s AND project_id=%s", (iid, project_id))
             row = cur.fetchone()
             if not row:
@@ -127,6 +136,11 @@ def run_text_batch_task(job_id, project_id, body):
                     f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, name, ann_id, img_arr, yolo_txt,
+                    # SF-6: this path never has a classifier choice -- img_arr
+                    # is always the raw page (see the PIL decode above).
+                    # Explicit rather than relying on the default so this
+                    # stays correct if the default ever changes.
+                    source_label="raw_page",
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

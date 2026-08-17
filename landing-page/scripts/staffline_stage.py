@@ -140,7 +140,19 @@ def _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, sca
                 "n_pixels_used": fit.n_pixels_used,
                 "n_pixels_total": fit.n_pixels_total,
             },
-            "quality": {"confidence": None, "flags": list(fit.flags)},
+            "quality": {
+                # confidence intentionally left null -- DL-13
+                # (ALPHA_TRANSITION_PLAN.md) is still open on whether/how to
+                # compute this; not a corollary of the SF-8 flags fix below,
+                # do not conflate the two.
+                "confidence": None,
+                # SF-8 fix: fit.flags already carries component-filter flags
+                # merged in above (see _fit_and_group/_run_fallback_redetect_stage);
+                # this adds the third tier, per-assignment grouping flags
+                # (e.g. "gap_near_threshold", "rhythm_*"), previously computed
+                # but never persisted.
+                "flags": list(fit.flags) + (list(asg.flags) if asg else []),
+            },
             "scale_unit": scale_unit,
             "column_id": None,
             "stave_id": stave_id,
@@ -171,7 +183,7 @@ def _assemble_jsomr_records(image_name, fit_results, boxes, grouping_result, sca
             "centerline": centerline_page,
             "centerline_page": centerline_page,
             "fit": {"method": "interpolated", "neighbor_fit_indices": list(interp.neighbor_fit_indices)},
-            "quality": {"confidence": None, "flags": ["interpolated"]},
+            "quality": {"confidence": None, "flags": ["interpolated"]},  # confidence: see DL-13 comment above
             "scale_unit": scale_unit,
             "column_id": None,
             "stave_id": interp.stave_id,
@@ -289,7 +301,15 @@ def _run_fallback_redetect_stage(
             if crop.size == 0:
                 continue
             filter_result = filter_components(crop, scale_unit=scale_unit)
-            fit_result = fit_centerline(filter_result, scale_unit=scale_unit)
+            # SF-5 fix: crop is required whenever save_path is (not the case
+            # here) but was previously omitted even when already in scope --
+            # thread it through to match run_page.py's own usage pattern.
+            fit_result = fit_centerline(filter_result, scale_unit=scale_unit, crop=crop)
+            # SF-8 fix: component-filter-level flags were computed here but
+            # never captured anywhere -- merge into fit.flags (the field
+            # _assemble_jsomr_records already persists) rather than threading
+            # a second parallel list through this function and _fit_and_group.
+            fit_result.flags = list(filter_result.flags) + list(fit_result.flags)
             fit_result.x_page_offset = float(actual_box[0])
             fit_result.y_page_offset = float(actual_box[1])
             stage1_score = _top_score_of(filter_result) or 0.0
@@ -371,7 +391,10 @@ def _fit_and_group(
         if crop.size == 0:
             continue
         filter_result = filter_components(crop, scale_unit=scale_unit)
-        fit_result = fit_centerline(filter_result, scale_unit=scale_unit)
+        # SF-5 fix: see _run_fallback_redetect_stage's identical fix above.
+        fit_result = fit_centerline(filter_result, scale_unit=scale_unit, crop=crop)
+        # SF-8 fix: see _run_fallback_redetect_stage's identical fix above.
+        fit_result.flags = list(filter_result.flags) + list(fit_result.flags)
         fit_result.x_page_offset = float(actual_box[0])
         fit_result.y_page_offset = float(actual_box[1])
         fit_results.append(fit_result)
@@ -480,6 +503,10 @@ def compute_staffline_interpolation(image_name: str, image_arr: np.ndarray, yolo
             "binarization": "sauvola",
             "bgr_enabled": False,  # ink-separation deferred this pass, see module docstring
             "package_version": _package_version(),
+            "page_flags": list(result["grouping_result"].flags),  # SF-8 fix, see run_staffline_detection's identical field
+            "predict_image_width": w,  # SF-7 fix, see run_staffline_detection's identical field
+            "predict_image_height": h,
+            "source_label": "raw_page",  # SF-6 fix: this route always operates on the raw page (see docstring above)
         },
     }
 
@@ -515,6 +542,7 @@ def run_staffline_detection(
     image_arr: np.ndarray, yolo_txt: str,
     interpolate_missing: bool = False,
     redetect_fn: Optional[Callable] = None,
+    source_label: str = "raw_page",
 ) -> Iterator[dict]:
     """Run staffline detection for one image, yielding {"type": "log"|"error",
     "message": ...} event dicts and persisting the result to
@@ -536,6 +564,15 @@ def run_staffline_detection(
     function's docstring. Default None (no fallback re-probe) keeps every
     existing caller's behavior unchanged; tasks_predict.py is the only
     caller that passes a real one, and only for the medieval preset.
+
+    source_label (SF-6) is a short provenance string identifying which of
+    the several possible image sources image_arr actually is (e.g.
+    "paco_layer", "raw_page", "raw_page_fallback") -- persisted into
+    settings_json alongside the predict-time dimensions (SF-7) so a future
+    debugging session can tell which source a given staffline_detections
+    row ran against without re-deriving it from code reading. Default
+    "raw_page" covers every caller that never had a classifier choice to
+    begin with (tasks_text_batch.py, the non-medieval preset).
     """
     from yolo_io import parse_yolo_lines, filter_to_class
 
@@ -575,6 +612,24 @@ def run_staffline_detection(
             "fallback_redetect_enabled": redetect_fn is not None,
             "fallback_lines_added": result.get("fallback_lines_added", 0),
             "package_version": _package_version(),
+            # SF-7 fix: predict-time image dimensions, so tasks_encode.py's
+            # _resolve_hints() can detect when the encode-time image (a
+            # separate upload, possibly a different resolution of the same
+            # page) doesn't match the frame these JSOMR pixel coordinates
+            # were computed in, and scale or reject instead of silently
+            # misplacing every stave.
+            "predict_image_width": w,
+            "predict_image_height": h,
+            "source_label": source_label,  # SF-6 fix, see this function's docstring
+            # SF-8 fix: page-level grouping flags (e.g.
+            # "reconciled_duplicate_fits:N", "mode_count_below_typical",
+            # "staves_with_unexpected_count:...") were computed by
+            # group_staves() but previously only ever surfaced in job_events
+            # log lines, never persisted. Stored here (settings_json, a dict
+            # column) rather than inside jsomr_json, which every consumer
+            # (staves_from_jsomr, tasks_encode.py) treats as a bare list --
+            # reshaping that would be a breaking change to every existing row.
+            "page_flags": list(grouping_result.flags),
         }
 
         new_id = persist_staffline_detection(
