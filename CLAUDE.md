@@ -734,10 +734,10 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   raw-page stave detection if the service is unreachable — see **Staffline detection** above
 - **SSE/streaming for encoding** — `ProcessingPage.tsx` streams real log lines when given a
   `streamRequest`, which every current `AppRouter` call site passes. The fake `setTimeout`
-  timer path is **dormant, not gone**: `ProcessingPage.tsx` still contains the timer-driven
-  fake-progress block (guarded by `if (streamRequest) return;`), which would reactivate for any
-  future call site that omits `streamRequest` — slated for removal in the alpha transition
-  (see `documentation_allons-y/ALPHA_TRANSITION_PLAN.md`)
+  timer path that used to sit dormant behind `if (streamRequest) return;` is gone (removed
+  2026-08-17, see `documentation_allons-y/ALPHA_TRANSITION_PLAN.md`'s Phase 3 SAFE list) — any
+  future call site that omits `streamRequest` now gets no progress animation at all rather than
+  a silent fake one, since nothing rebuilds that fallback path
 - **Annotation overlay viewer** — `AnnotationsTab.tsx` renders YOLO bounding boxes on top of the source image
 - **Project export (zip)** — `GET /api/projects/{id}/export` bundles MEI files + manifest into a ZIP; a second endpoint zips logs
 - **Soft-delete + hard-delete** — `deleted_at` is the soft-delete flag; a separate hard-delete path does `DELETE FROM project_images` + `DELETE FROM projects` to purge BYTEA data
