@@ -25,9 +25,11 @@ export default function IcCompletionTestPage({
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48 relative">
       <div className="flex flex-col items-center gap-6">
-        <h1 className="text-5xl font-bold italic text-white">ta-da!</h1>
+        <h1 className="text-5xl font-bold italic text-white">
+          classification done
+        </h1>
         <p className="text-xl text-[#1D3335]">
-          all images successfully classified!
+          upload the classifier output to continue to encoding
         </p>
         <p className="text-sm text-white/70 -mt-3">progress saved</p>
 

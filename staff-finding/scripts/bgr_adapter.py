@@ -6,9 +6,11 @@ Wraps the inference helpers from the external manuscript-ink-separation script
 point writes to disk; this module provides the same processing pipeline but
 returns the ink-on-white image directly, without disk I/O.
 
-If the path to the external script changes, update _CANDIDATE_DIRS below (or
-set MUSCRAT_LAYER_SEP_DIR). This module is the single place that needs to
-know where it lives; downstream code imports from here.
+Set MUSCRAT_LAYER_SEP_DIR to point at the external muscrat/layer_sep repo's
+scripts dir -- this module is the single place that needs to know where it
+lives; downstream code imports from here. mothra#220 DL-9 (decided
+2026-08-17): no hardcoded per-developer machine paths -- env-var only, so
+nothing load-bearing sits on any one developer's filesystem.
 """
 
 import os
@@ -21,31 +23,15 @@ import numpy as np
 # Location of the external inference script
 # ---------------------------------------------------------------------------
 
-# Known locations of the external muscrat/layer_sep repo across the machines
-# this project has been developed on; first one that actually contains
-# inference_simple.py wins. Override with MUSCRAT_LAYER_SEP_DIR for a machine
-# not listed here.
-_CANDIDATE_DIRS = [
-    os.environ.get("MUSCRAT_LAYER_SEP_DIR"),
-    "/Users/kyriebouressa/Documents/muscrat/layer_sep/scripts",  # mini
-    "/Users/ekaterina/Documents/muscrat/layer_sep/scripts",  # macbook
-    "/Users/ekaterina/Documents/Documents_angantyr/GitHub/muscrat/layer_sep/scripts",
-]
-INFERENCE_SCRIPT_DIR = next(
-    (
-        d
-        for d in _CANDIDATE_DIRS
-        if d and os.path.isfile(os.path.join(d, "inference_simple.py"))
-    ),
-    None,
-)
-if INFERENCE_SCRIPT_DIR is None:
+INFERENCE_SCRIPT_DIR = os.environ.get("MUSCRAT_LAYER_SEP_DIR")
+if not INFERENCE_SCRIPT_DIR or not os.path.isfile(
+    os.path.join(INFERENCE_SCRIPT_DIR, "inference_simple.py")
+):
     raise ModuleNotFoundError(
         "Could not find inference_simple.py (external muscrat/layer_sep repo, "
-        "needed for BGR preprocessing) in any known location:\n  "
-        + "\n  ".join(d for d in _CANDIDATE_DIRS if d)
-        + "\nSet MUSCRAT_LAYER_SEP_DIR to override, or pass --no-bgr to skip "
-        "BGR preprocessing entirely (run_page.py only)."
+        "needed for BGR preprocessing). Set MUSCRAT_LAYER_SEP_DIR to that "
+        "repo's scripts dir, or pass --no-bgr to skip BGR preprocessing "
+        "entirely (run_page.py only)."
     )
 
 sys.path.insert(0, INFERENCE_SCRIPT_DIR)
