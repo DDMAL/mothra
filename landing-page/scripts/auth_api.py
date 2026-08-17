@@ -78,6 +78,28 @@ REFRESH_TOKEN_EXPIRE_DAYS = 30
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
 
+def cleanup_stale_neon_manifests(max_age_seconds: int = 86400) -> int:
+    """Deletes exported Neon-editor manifest files (NEON_MANIFESTS_DIR/*.jsonld)
+    older than max_age_seconds. This lives on the backend container's own
+    ephemeral local disk (not the stored_models NFS share), unlike
+    job_store.cleanup_stale_uploads/cleanup_stale_sessions -- a Celery task run
+    by the worker executes on a different pod/filesystem and would have no
+    effect on these files, so this has to be invoked from the backend process
+    itself (see main.py). Consolidates what used to be two separately
+    maintained inline copies of this same loop (auth_api.py's _migrate_db and
+    mei_api.py's create_edit_session -- mothra#220 row 28)."""
+    import time as _time
+    now = _time.time()
+    deleted = 0
+    for f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
+        try:
+            if now - f.stat().st_mtime > max_age_seconds:
+                f.unlink(missing_ok=True)
+                deleted += 1
+        except FileNotFoundError:
+            pass
+    return deleted
+
 @contextmanager
 def db_cursor():
     con = get_db_conn()
@@ -454,16 +476,6 @@ def _migrate_db():
     finally:
         cur.close(); release_db_conn(con)
 
-
-    # startup cleanup of neon manifests to prevent excess accumulation
-    import time as _time
-    _now = _time.time()
-    for _f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
-        try:
-            if _now - _f.stat().st_mtime > 86400:
-                _f.unlink(missing_ok=True)
-        except FileNotFoundError:
-            pass
 _migrate_db()
 
 def _pre_hash(pw: str) -> str:
