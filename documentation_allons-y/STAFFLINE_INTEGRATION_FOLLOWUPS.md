@@ -29,11 +29,16 @@ this is a punch list, not a plan.
   fits, reconciliation flags) only surfaces in `job_events` log lines today.
   No frontend references staffline/stave concepts at all yet. Natural home
   for a future overlay: `AnnotationsTab.tsx`.
-- **`batch_api.py`'s text-batch-run path** — a second, independent code path
-  that also runs YOLO + `write_annotation()`, outside the Celery job queue.
-  Images processed only through it won't get a `staffline_detections` row;
-  the 3-tier fallback in `tasks_encode.py` already degrades gracefully, but
-  nobody's made it call `staffline_stage.py` either.
+- ~~**`batch_api.py`'s text-batch-run path**~~ — **stale, superseded.** This
+  bullet said the text-batch path never called `staffline_stage.py`; that
+  changed in `916f465` (see "Diagnosed this session" → Root cause 1 below),
+  and confirmed again during the 2026-08-17 Alpha-1 fix batch:
+  `tasks_text_batch.py` does call `run_staffline_detection()` today. Left in
+  the file (struck through) rather than silently deleted, since it was cited
+  as a real gap once. What IS still true, and newly documented as part of
+  that same batch's SF-2 work: this path builds its own `img_arr` from
+  `project_images.data` only, never `original_data` — see SF-2's "Collision
+  noted, explicitly NOT fixed here" note for why that wasn't backported.
 
 ## Found along the way, not fixed
 
@@ -381,6 +386,59 @@ of this staffline geometry is
 (in progress, not yet integrated) — its JSOMR/stave-geometry output contract
 needs to satisfy that project too, not just today's MEI-encoding consumer
 (`staffline_adapter.py`/`encode_to_mei.py`).
+
+## Alpha 1 fix batch (kyrie/alpha1-staffline-parity), 2026-08-17
+
+Closed all nine "Alpha 1 — Staff-finding parity" tickets in one PR, closing
+[#213](https://github.com/DDMAL/mothra/issues/213). Full before/after detail
+lives in `ALPHA_TRANSITION_PLAN.md`'s findings register (§2.1, SF-1 through
+SF-9 rows, each updated in the same PR); summary here for anyone landing on
+this file first:
+
+- **SF-1** (primary cause of #213) — stave-class confidence default was 0.5
+  in landing vs. staff-finding's own proven 0.25; decoupled into its own
+  `yolo_inference.DEFAULT_STAVE_CONFIDENCE` constant rather than falling
+  back to the shared text/music default. Resolves DL-14.
+- **SF-9** — `DEFAULT_STAFFLINE_CLASS`/`STAFFLINE_CLASS_DEFAULT` fixed 2→0
+  across `run_page.py`/`run_pageOG.py`/`eval_page.py`/`eval_batch.py` to
+  match the bundled single-class stave model's real output class; without
+  this, every real box was silently matching nothing.
+- **SF-4** — paco-classifier layer converted BGR→RGB immediately at decode
+  (`_decode_paco_layer`), fixing a channel-order split that fed
+  `component_filter.py`'s `COLOR_RGB2GRAY` step transposed R/B luminance on
+  the classifier-success path.
+- **SF-5** — `crop=crop` now threaded through both `fit_centerline()` call
+  sites in `staffline_stage.py`.
+- **SF-8** — `quality.flags` now merges component-filter + fit + assignment
+  flags (previously only fit flags survived); new `settings_json.page_flags`
+  carries page-level grouping flags. Per-record ids were already stable
+  through the sort (confirmed, not a bug).
+- **SF-7** — predict-time image dimensions now recorded in `settings_json`;
+  `tasks_encode.py`'s `_resolve_hints()` scales or rejects tier-1 JSOMR when
+  the encode-time image's dimensions don't match, instead of trusting stale
+  pixel coordinates blind. The tier-1 bare `except: pass` now logs, matching
+  its sibling lookups in the same function.
+- **SF-2** — predict now prefers `project_images.original_data` over the
+  resized working copy (mirrors `get_original_image()`'s existing fallback).
+  Depends on SF-7 landing first, since JSOMR's absolute-pixel coordinates
+  are resolution-sensitive in a way YOLO's own normalized boxes aren't.
+- **SF-6** — `_decode_paco_layer()` helper removes literal duplication
+  between the fresh and reused-annotation classify/decode paths; every
+  `staffline_detections` row now records a `source_label` provenance field
+  in `settings_json`.
+- **Golden-page parity test** — `staff-finding/scripts/script_tests/test_golden_parity.py`,
+  picked up automatically by the existing CI glob. Gent right is a real,
+  live-reproducing regression test pinned to today's (still fragmented, see
+  "Three checked-in e2e baselines" above) output. **MS234_64 could not get a
+  live test** — its raw source image was never checked into this repo (only
+  ever lived at an external path on the machine that ran the original
+  2026-08-10 parity sweep); the test instead pins the checked-in
+  `baseline.json` snapshot against silent corruption, explicitly documented
+  as not a regression test. Checking that source image into the repo (or
+  Git-LFS'ing it) is an open follow-up.
+
+Also fixed in passing: the stale "`batch_api.py`'s text-batch-run path"
+bullet above (struck through, was already superseded by `916f465`).
 
 ## Needs a manual step, not a code change
 
