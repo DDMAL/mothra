@@ -27,8 +27,16 @@ export function useInferenceSettings() {
     threshold: 0.5,
     device: "cpu",
   });
+  // SF-1 fix (primary cause of #213): stave-class confidence needed its own
+  // default, decoupled from the shared 0.5 used for text/music -- 0.25
+  // matches staff-finding's own proven default (see
+  // yolo_inference.DEFAULT_STAVE_CONFIDENCE's comment for the measured
+  // before/after). This only affects the pre-filled value shown when a user
+  // unchecks "use shared detector settings" and customizes stave threshold
+  // explicitly; the default (shared, unchanged) flow already sends `null`
+  // for stave_confidence_threshold and picks up the same 0.25 server-side.
   const [staveSettings, setStaveSettings] = useState<DetectorSettings>({
-    threshold: 0.5,
+    threshold: 0.25,
     device: "cpu",
   });
 

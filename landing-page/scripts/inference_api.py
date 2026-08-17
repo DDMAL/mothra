@@ -18,10 +18,13 @@ class PredictBody(BaseModel):
     model_id: Optional[str] = None
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     image_ids: list[str]
-    confidence_threshold: float = 0.5
+    confidence_threshold: float = 0.5  # shared text/music default
     device: str = "auto"   # auto → GPU if present else CPU (resolved in yolo_inference)
     text_music_confidence_threshold: Optional[float] = None
     text_music_device: Optional[str] = None
+    # SF-1 fix: None here now falls back to yolo_inference.DEFAULT_STAVE_CONFIDENCE
+    # (0.25), NOT this class's own confidence_threshold (0.5) -- staves needed
+    # their own, independently-validated default. See that constant's comment.
     stave_confidence_threshold: Optional[float] = None
     stave_device: Optional[str] = None
     text_column_count: Optional[int] = None
