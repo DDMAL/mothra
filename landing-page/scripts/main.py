@@ -27,10 +27,16 @@ from jobs_api import router as jobs_router
 from job_store import cleanup_stale_sessions, cleanup_stale_uplaods
 
 app = FastAPI()
+# No "*" default: an unset ALLOWED_ORIGINS used to silently allow every
+# origin in the world rather than failing loud or falling back to something
+# safe. k8s/configmap.yaml (prod/staging) already sets this explicitly; the
+# fallback here only covers local dev, where Vite serves the frontend at
+# :5173 -- not a wildcard.
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("ALLOWED_ORIGINS", "*").split(","), 
-    allow_methods=["*"], 
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 app.include_router(auth_router, prefix="/api")

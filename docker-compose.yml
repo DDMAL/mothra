@@ -33,6 +33,8 @@ services:
       dockerfile: text-service/Dockerfile
     ports:
       - "8002:8002"
+    environment:
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
 
   paco-classifier-service:
     build:
@@ -71,7 +73,7 @@ services:
       IC_PUBLIC_URL: ${IC_PUBLIC_URL:-http://localhost:8000}
       TEXT_API_URL: http://text-service:8002
       PACO_API_URL: http://paco-classifier-service:8003
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
     depends_on:
       redis:
         condition: service_started

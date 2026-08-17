@@ -118,7 +118,8 @@ MOTHRA_SECRET=<any long random string>
   services on non-default ports/hosts): `STORAGE_QUOTA_MB` (default 500),
   `IC_API_URL` / `IC_PUBLIC_URL` (default `http://localhost:8000`),
   `TEXT_API_URL` (default `http://localhost:8002`), `CELERY_BROKER_URL`
-  (default `redis://localhost:6379/0`), `ALLOWED_ORIGINS` (default `*`).
+  (default `redis://localhost:6379/0`), `ALLOWED_ORIGINS` (default
+  `http://localhost:5173`, matching Vite's dev port -- not a wildcard).
   These (and a few filesystem paths) have their non-secret defaults in
   `landing-page/scripts/config.yaml` — `.env`/environment only needs to set
   them if you're overriding a default, and `DATABASE_URL`/`MOTHRA_SECRET`
