@@ -63,6 +63,25 @@ services:
       retries: 5
       start_period: 30s
 
+  # One-shot: init_db()/_migrate_db() no longer run as an import-time side
+  # effect of auth_api.py (mothra#220 row 31) -- this runs the schema
+  # migration once per `docker compose up`, before backend/worker start
+  # (which now fail loudly on missing tables instead of silently creating
+  # the schema themselves). Reuses the backend image; exits 0 on success,
+  # so `service_completed_successfully` below is the actual gate.
+  migrate:
+    build:
+      context: ./landing-page
+      additional_contexts:
+        staff_finding: ./staff-finding
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+      MOTHRA_SECRET: ${MOTHRA_SECRET}
+    command: python migrate.py
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: ./landing-page
@@ -100,7 +119,9 @@ services:
       paco-classifier-service:
         condition: service_healthy
       postgres:
-        condition: service_healthy   # init_db()/_migrate_db() run at import; wait for DB
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - stored_models:/app/scripts/stored_models
 
@@ -124,6 +145,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: celery -A celery_app.celery_app worker -B --loglevel=info --pool=threads --concurrency=2
     volumes:
       - stored_models:/app/scripts/stored_models

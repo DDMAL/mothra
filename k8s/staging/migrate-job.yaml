@@ -1,0 +1,34 @@
+# Staging mirror of k8s/migrate-job.yaml -- mothra#220 row 31. See that file's
+# comments. metadata.name is suffixed -staging since both environments share
+# the mothra namespace (see k8s/README.md) -- two Jobs can't share a name in
+# the same namespace.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-staging
+  namespace: mothra
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/ddmal/mothra-backend:sha-0000000
+          imagePullPolicy: IfNotPresent
+          command: ["python", "migrate.py"]
+          envFrom:
+            - configMapRef:
+                name: mothra-config-staging
+            - secretRef:
+                name: mothra-secrets-staging
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

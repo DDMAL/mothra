@@ -6,6 +6,12 @@ metadata:
   labels:
     app: worker
 spec:
+  # mothra#220 row 31 removed worker's OTHER reason to stay at 1 replica
+  # (init_db()/_migrate_db() no longer run at import). Still pinned to 1,
+  # now for a different reason: row 28's embedded Celery beat (-B below) --
+  # multiple worker replicas would each run their own beat scheduler and
+  # double-fire the same periodic task. Revisit both together if scaling
+  # worker is ever needed (e.g. a dedicated beat Deployment).
   replicas: 1
   selector:
     matchLabels:
