@@ -83,7 +83,6 @@ export default function ProcessingPage({
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
-  const pausedRef = useRef(false);
   const completedRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
   const jobIdRef = useRef<string | null>(null);
@@ -137,10 +136,6 @@ export default function ProcessingPage({
   }, [revealedLogs]);
 
   useEffect(() => {
-    pausedRef.current = cancelPrompt;
-  }, [cancelPrompt]);
-
-  useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
 
@@ -188,48 +183,6 @@ export default function ProcessingPage({
       setTimeDisplay(formatRemaining(estimatedTotalMsRef.current - elapsedMs));
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (streamRequest) return;
-    const reveal = (stageIdx: number, key: keyof Stage, ms: number) =>
-      setTimeout(
-        () =>
-          setStages((prev) =>
-            prev.map((s, i) => (i === stageIdx ? { ...s, [key]: true } : s)),
-          ),
-        ms,
-      );
-
-    const timers = singleLabel
-      ? []
-      : [
-          reveal(0, "text", 2000),
-          reveal(0, "check", 3000),
-          reveal(1, "text", 5000),
-          reveal(1, "check", 6000),
-          reveal(2, "text", 7000),
-          reveal(2, "check", 8000),
-        ];
-
-    // fills to 100 over 10 s; pauses while cancel prompt is open
-    const interval = setInterval(() => {
-      if (!pausedRef.current) {
-        setProgress((p) => {
-          const next = Math.min(100, p + 1);
-          if (next === 100 && !completedRef.current) {
-            completedRef.current = true;
-            if (singleLabel) setDone(true);
-            setTimeout(onComplete, completionDelayMs);
-          }
-          return next;
-        });
-      }
-    }, intervalMs);
-    return () => {
-      timers.forEach(clearTimeout);
-      clearInterval(interval);
-    };
   }, []);
 
   // extracted so a server-tracked job retry (handleRetryJob below) can feed a
@@ -363,6 +316,7 @@ export default function ProcessingPage({
           }
           if (ev.type === "done" && !completedRef.current) {
             completedRef.current = true;
+            if (singleLabel) setDone(true);
             if (jobIdRef.current) markJobSettled(jobIdRef.current);
             const ip = itemProgressRef.current;
             if (!ip || ip.total <= 1) {
@@ -395,6 +349,7 @@ export default function ProcessingPage({
     if (!streamRequest) return;
     setStreamError(null);
     setProgress(0);
+    setDone(false);
     setStages([
       { text: false, check: false },
       { text: false, check: false },

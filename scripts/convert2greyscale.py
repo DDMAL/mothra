@@ -4,11 +4,14 @@ Convert manuscript images to greyscale
 Creates greyscale versions in data/images/greyscale/
 """
 
+import sys
 from PIL import Image
 from pathlib import Path
 
-# Paths
-images_dir = Path('/Users/ekaterina/Documents/mothra/data/images')
+# Paths -- defaults to <repo root>/data/images; pass a directory as argv[1]
+# to point at a different location instead.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+images_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else _REPO_ROOT / 'data' / 'images'
 greyscale_dir = images_dir / 'greyscale'
 
 # Create output directory

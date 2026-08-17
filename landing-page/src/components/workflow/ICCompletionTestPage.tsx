@@ -134,11 +134,6 @@ export default function IcCompletionTestPage({
             back to project
           </button>
         </div>
-        {!xmlFile && (
-          <p className="text-white/50 text-xs -mt-3">
-            no file selected — mock XML data will be used
-          </p>
-        )}
       </div>
     </div>
   );
