@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { type StafflineSet, type JsomrLineRecord } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
+import { AuthImage } from "../shared/AuthImage";
 import { computeRhythmGaps } from "../../lib/rhythmGaps";
 import RhythmChart from "./RhythmChart";
 
@@ -52,7 +53,7 @@ export default function StafflineViewerModal({
 }: Props) {
   const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
   const [notesOpen, setNotesOpen] = useState(false);
-  const [tab, setTab] = useState<"overlay" | "rhythm" | "raw">("overlay");
+  const [tab, setTab] = useState<"overlay" | "rhythm" | "raw" | "classifier">("overlay");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   // Non-null once interpolate-preview has returned -- presence alone means
@@ -67,6 +68,7 @@ export default function StafflineViewerModal({
   const [interpolateError, setInterpolateError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+
 
   const handleCopyText = (text: string) => {
     navigator.clipboard
@@ -104,6 +106,14 @@ export default function StafflineViewerModal({
         : null,
     [viewState],
   );
+
+  const visibleTabs = useMemo(() => {
+    const tabs: Array<"overlay" | "rhythm" | "raw" | "classifier"> = ["overlay"];
+    if (rhythmSummary) tabs.push("rhythm");
+    if (detection.hasClassifierImage) tabs.push("classifier");
+    tabs.push("raw");
+    return tabs;
+  }, [rhythmSummary, detection.hasClassifierImage]);
 
   // While previewing, the overlay draws the previewed (unpersisted) records
   // instead of the real detection's -- everything downstream of this single
@@ -365,10 +375,7 @@ export default function StafflineViewerModal({
               )}
               {viewState.status === "ready" && (
                 <div className="flex bg-[#1D3335]/10 rounded-full p-0.5 text-xs font-mono">
-                  {(rhythmSummary
-                    ? (["overlay", "rhythm", "raw"] as const)
-                    : (["overlay", "raw"] as const)
-                  ).map((t) => (
+                  {visibleTabs.map((t) => (
                     <button
                       key={t}
                       onClick={() => setTab(t)}
@@ -412,6 +419,18 @@ export default function StafflineViewerModal({
           ) : !interpolatePreview && tab === "rhythm" && rhythmSummary ? (
             <div className="p-4">
               <RhythmChart summary={rhythmSummary} />
+            </div>
+          ) : !interpolatePreview && tab === "classifier" ? (
+            <div className="p-4 flex flex-col items-center">
+              <AuthImage
+                src={`/api/projects/${projectId}/stafflines/${detection.id}/classifier-image`}
+                alt={`${detection.imageName} — paco-classifier stafflines layer`}
+                className="block max-w-full rounded-xl"
+              />
+              <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
+                paco-classifier's stafflines-only layer — the image the stave
+                model actually detected boxes against, not the raw page.
+              </p>
             </div>
           ) : !interpolatePreview && tab === "raw" ? (
             <div className="p-4">

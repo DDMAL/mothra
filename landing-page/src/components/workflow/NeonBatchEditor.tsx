@@ -24,6 +24,89 @@ interface NeonBatchEditorProps {
 const BTN_BASE =
   "px-3.5 py-1.5 rounded-md text-white text-[13px] whitespace-nowrap";
 
+// Neon's own Square/Hufnagel font toggle (its Display panel's "notation"
+// dropdown -- see neon/src/DisplayPanel/DisplayControls.ts's
+// setNotationTypeControls()) only ever reflects a per-BROWSER LocalSettings
+// value from whichever option was last clicked -- it never looks at the
+// document it just loaded, so switching between a square- and a
+// hufnagel-encoded file here would otherwise keep whatever font the last
+// file happened to leave selected. Mirrors triggerNeonSave() below: drive
+// Neon's own UI via a synthetic DOM interaction inside the iframe's
+// contentDocument rather than patching the neon submodule itself.
+//
+// notationtype is read straight off the MEI's own <staffDef> (written by
+// encode_to_mei.py's build_mei -- see mothra#210) rather than threaded
+// through as a separate prop, since the MEI itself is the single source of
+// truth for which notation a given file actually uses.
+//
+// Scoped to <staffDef> specifically (via getElementsByTagNameNS, since MEI
+// is namespaced and plain querySelector tag matching doesn't cross that) --
+// a blind substring/regex match over the whole document could in principle
+// hit a `notationtype="neume.hufnagel"` string anywhere else in the file,
+// not just the element Neon/Verovio actually read it from.
+function readNotationType(xmlContent: string): "square" | "hufnagel" | null {
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(xmlContent, "application/xml");
+  } catch {
+    return null;
+  }
+  if (doc.getElementsByTagName("parsererror").length > 0) return null;
+  const staffDefs = doc.getElementsByTagNameNS("*", "staffDef");
+  for (let i = 0; i < staffDefs.length; i++) {
+    const value = staffDefs[i].getAttribute("notationtype");
+    if (value === "neume.square") return "square";
+    if (value === "neume.hufnagel") return "hufnagel";
+  }
+  return null;
+}
+
+function applyNotationTypeFont(
+  iframe: HTMLIFrameElement,
+  xmlContent: string | undefined,
+  timerRef: { current: number | null },
+) {
+  // A previous file's poll (still waiting for Neon's Display panel to
+  // appear) must not fire after this file has taken over the same iframe,
+  // or after the iframe itself has been unmounted (session switch remounts
+  // it under a new `key`) -- either way the stale closure would still hold
+  // a reference to the old iframe/contentDocument. One timer at a time.
+  if (timerRef.current !== null) {
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }
+  if (!xmlContent) return;
+  // No notationtype, or a value neither Neon control corresponds to --
+  // leave whatever font Neon already has selected rather than guessing.
+  const notationType = readNotationType(xmlContent);
+  if (notationType === null) return;
+  const targetId =
+    notationType === "hufnagel"
+      ? "notation-type-hufnagel"
+      : "notation-type-square";
+  // Neon's Display panel doesn't exist yet the instant the iframe's `load`
+  // event fires -- its own manifest fetch + NeonView/SingleView init still
+  // need to run inside the iframe first. Poll briefly rather than assume a
+  // fixed delay (matches the tolerance markCurrentDone() already gives
+  // Neon's own async save, just for the opposite direction: waiting for
+  // something to appear instead of finish).
+  let attempts = 0;
+  const tryClick = () => {
+    const el = iframe.contentDocument?.getElementById(targetId);
+    if (el) {
+      el.click();
+      timerRef.current = null;
+      return;
+    }
+    if (attempts++ < 40) {
+      timerRef.current = window.setTimeout(tryClick, 250);
+    } else {
+      timerRef.current = null;
+    }
+  };
+  tryClick();
+}
+
 export default function NeonBatchEditor({
   project,
   meiFiles,
@@ -43,6 +126,23 @@ export default function NeonBatchEditor({
   );
   const [loading, setLoading] = useState(true);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Shared across every applyNotationTypeFont call for this component
+  // instance so a new call (new file, new session) always cancels whatever
+  // poll the previous one left running -- see that function's comment.
+  const notationTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      // Deliberately reads notationTimerRef.current at cleanup/unmount
+      // time, not a value captured at mount -- this ref holds a plain
+      // timer id we set ourselves (not a DOM node), so the
+      // exhaustive-deps rule's usual concern (a ref that may have gone
+      // stale/null by unmount) doesn't apply here.
+      if (notationTimerRef.current !== null) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        window.clearTimeout(notationTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     async function initSessions() {
@@ -233,6 +333,13 @@ export default function NeonBatchEditor({
           src={`/neon/editor.html?manifest=${currentSession.session_id}`}
           className="flex-1 border-none w-full"
           title={`Neon editor - ${currentFile?.name ?? ""}`}
+          onLoad={(e) =>
+            applyNotationTypeFont(
+              e.currentTarget,
+              currentFile?.xmlContent,
+              notationTimerRef,
+            )
+          }
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-[#ef4444]">

@@ -60,6 +60,7 @@ export interface StafflineSet {
   staveCount?: number | null;
   modeLinesPerStave?: number | null;
   status?: string;
+  hasClassifierImage?: boolean;
 }
 
 // Field names here are snake_case, matching landing-page/scripts/staffline_stage.py's

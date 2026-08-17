@@ -144,7 +144,8 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
 
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
-                include_name_fields=False, allow_synthetic_lines=False):
+                include_name_fields=False, allow_synthetic_lines=False,
+                notation_type=None):
     """Runs the checking/validating/processing pipeline for one XML+image
     pair, publishing the same event sequence the old synchronous generator
     yielded. Returns (session_id, result_payload)."""
@@ -220,6 +221,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
             clef_shape=clef_shape or "C",
             clef_line=clef_line or 3,
+            notation_type=notation_type or "square",
             text_alignment=text_alignment,
             n_detected_staves=n_input_staves,
         )
@@ -256,7 +258,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
 @celery_app.task(name="encode.upload")
 def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
                            image_filename, project_id, image_name, clef_shape, clef_line,
-                           allow_synthetic_lines=False):
+                           allow_synthetic_lines=False, notation_type=None):
     def publish(obj):
         publish_event(job_id, obj)
 
@@ -265,7 +267,7 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
     try:
         _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                     project_id, image_name, clef_shape, clef_line, include_name_fields=False,
-                    allow_synthetic_lines=allow_synthetic_lines)
+                    allow_synthetic_lines=allow_synthetic_lines, notation_type=notation_type)
         publish({"type": "done"})
         drop_upload(xml_upload_id)
         if image_upload_id:
@@ -276,7 +278,7 @@ def run_encode_upload_task(job_id, xml_upload_id, xml_filename, image_upload_id,
 
 @celery_app.task(name="encode.batch")
 def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
-                           allow_synthetic_lines=False):
+                           allow_synthetic_lines=False, notation_type=None):
     def publish(obj):
         publish_event(job_id, obj)
 
@@ -292,6 +294,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
                 publish, xml_bytes, item["xml_filename"], image_bytes, item["image_filename"],
                 project_id, item["image_name"], clef_shape, clef_line,
                 item=i, include_name_fields=True, allow_synthetic_lines=allow_synthetic_lines,
+                notation_type=notation_type,
             )
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})

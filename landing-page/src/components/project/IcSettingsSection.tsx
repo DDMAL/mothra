@@ -25,6 +25,8 @@ export default function IcSettingsSection({
     setTrainingPresets,
     trainingFiles,
     setTrainingFiles,
+    notationType,
+    setNotationType,
   } = icSettings;
   const [availablePresets, setAvailablePresets] = useState<string[]>([]);
 
@@ -73,6 +75,24 @@ export default function IcSettingsSection({
           {mode === "auto"
             ? "every page is classified and queued for you"
             : "you classify each page in the classifier"}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-white/90">notation</span>
+        <select
+          value={notationType}
+          onChange={(e) =>
+            setNotationType(e.target.value as "square" | "hufnagel")
+          }
+          className="bg-transparent border border-white/30 rounded-lg px-2 py-1 text-xs text-white cursor-pointer w-fit"
+        >
+          <option value="square">square</option>
+          <option value="hufnagel">hufnagel</option>
+        </select>
+        <span className="text-white/40 text-xs italic">
+          which neume shapes encoding maps classifications to — applies to
+          every page, in either mode
         </span>
       </div>
 
