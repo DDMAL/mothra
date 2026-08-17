@@ -944,6 +944,7 @@ export default function AppRouter({
               );
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
+              form.append("notation_type", icSettings.notationType);
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
               return apiFetchJobStream(
@@ -986,6 +987,7 @@ export default function AppRouter({
               form.append("image_name", pendingImageFile.name);
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
+              form.append("notation_type", icSettings.notationType);
               if (selectedProjectId)
                 form.append("project_id", String(selectedProjectId));
             }

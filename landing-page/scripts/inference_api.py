@@ -1,6 +1,7 @@
 import io
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 import numpy as np
 from PIL import Image
@@ -120,7 +121,7 @@ async def get_staffline_detection(
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT s.jsomr_json, s.image_name, s.scale_unit, s.stave_count,"
-            " s.mode_lines_per_stave, s.status"
+            " s.mode_lines_per_stave, s.status, s.classifier_image IS NOT NULL"
             " FROM staffline_detections s"
             " JOIN projects p ON p.id = s.project_id"
             " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
@@ -132,8 +133,36 @@ async def get_staffline_detection(
     return {
         "jsomrJson": row[0], "imageName": row[1], "scaleUnit": row[2],
         "staveCount": row[3], "modeLinesPerStave": row[4], "status": row[5],
+        "hasClassifierImage": row[6],
     }
 
+@router.get("/projects/{project_id}/stafflines/{detection_id}/classifier-image")
+def get_staffline_classifier_image(
+    project_id: int,
+    detection_id: str,
+    user=Depends(get_current_user),
+):
+    """Serves the paco-classifier's stafflines-only PNG layer stored on this
+    detection row (see CLAUDE.md's "Staffline detection" section) -- the
+    same image the stave YOLO model actually detected boxes against for a
+    medieval-preset run, not the raw page. 404s both when the detection
+    itself doesn't exist/isn't owned by this user (same scoping as
+    get_staffline_detection above) and when it exists but has no stored
+    classifier image (non-medieval-preset detections, or a medieval one
+    where the classifier call failed and fell back to the raw page -- both
+    real, expected states, not a data-integrity error)."""
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT s.classifier_image, s.classifier_image_mime"
+            " FROM staffline_detections s"
+            " JOIN projects p ON p.id = s.project_id"
+            " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
+            (detection_id, project_id, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        raise HTTPException(status_code=404, detail="no classifier image stored for this detection")
+    return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
 
 def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, user_id: int):
     """Looks up a staffline_detections row's image_id/image_name, then loads
@@ -145,7 +174,7 @@ def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, 
     nothing. Raises HTTPException(404) if the detection, image, or a
     current annotation isn't found."""
     cur.execute(
-        "SELECT s.image_id, s.image_name"
+        "SELECT s.image_id, s.image_name, s.classifier_image, s.classifier_image_mime"
         " FROM staffline_detections s"
         " JOIN projects p ON p.id = s.project_id"
         " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
@@ -154,7 +183,8 @@ def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, 
     row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="staffline detection not found")
-    image_id, image_name = row
+    image_id, image_name, classifier_image, classifier_image_mime = row
+    classifier_image_bytes = bytes(classifier_image) if classifier_image is not None else None
 
     cur.execute(
         "SELECT data FROM project_images WHERE id=%s AND project_id=%s",
@@ -175,7 +205,8 @@ def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, 
         raise HTTPException(status_code=404, detail=f"no current annotation for image {image_id}")
     annotation_id, yolo_txt = ann_row
 
-    return image_id, image_name, annotation_id, image_arr, yolo_txt
+    return (image_id, image_name, annotation_id, image_arr, yolo_txt,
+            classifier_image_bytes, classifier_image_mime)
 
 
 @router.post("/projects/{project_id}/stafflines/{detection_id}/interpolate-preview")
@@ -199,7 +230,7 @@ def preview_staffline_interpolation(
     loop, where it would stall every other concurrent request for its
     duration."""
     with db_cursor() as (con, cur):
-        _image_id, image_name, _ann_id, image_arr, yolo_txt = _load_image_and_yolo_for_detection(
+        _image_id, image_name, _ann_id, image_arr, yolo_txt, _classifier_image_bytes, _classifier_image_mime = _load_image_and_yolo_for_detection(
             cur, project_id, detection_id, user["id"],
         )
     records = staffline_stage.preview_interpolation(image_name, image_arr, yolo_txt)
@@ -240,7 +271,8 @@ def confirm_staffline_interpolation(
     with no connection held at all, then reacquire one just for the cheap
     persist_staffline_detection() write."""
     with db_cursor() as (con, cur):
-        image_id, image_name, annotation_id, image_arr, yolo_txt = _load_image_and_yolo_for_detection(
+        (image_id, image_name, annotation_id, image_arr, yolo_txt,
+         classifier_image_bytes, classifier_image_mime) = _load_image_and_yolo_for_detection(
             cur, project_id, detection_id, user["id"],
         )
 
@@ -251,6 +283,8 @@ def confirm_staffline_interpolation(
     with db_cursor() as (con, cur):
         new_detection_id = staffline_stage.persist_staffline_detection(
             cur, con, project_id, image_id, image_name, annotation_id, computed,
+            classifier_image_bytes=classifier_image_bytes,
+            classifier_image_mime=classifier_image_mime or "image/png",
         )
         # Look up by the id persist_staffline_detection just generated and
         # inserted, not "the latest row for this image" -- created_at uses
@@ -258,17 +292,18 @@ def confirm_staffline_interpolation(
         # can share an identical value) and id is a random uuid4, so neither
         # is a reliable insertion-order tiebreak on its own.
         cur.execute(
-            "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status"
+            "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
+            " classifier_image IS NOT NULL"
             " FROM staffline_detections WHERE id=%s AND project_id=%s",
             (new_detection_id, project_id),
         )
         row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=500, detail="interpolation did not produce a new detection")
-    did, img_id, img_name, stave_count, mode_lines_per_stave, status = row
+    did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image = row
     return {
         "id": did, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
-        "status": status,
+        "status": status, "hasClassifierImage": has_classifier_image,
     }

@@ -31,19 +31,19 @@ imagePath,imagesBinary,name,folio,description,classification,width,mei,review,do
     <nc/>
     <nc intm=""1S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,giving it the width to be able to divide the neume bbox (horizontally) into that number of vertical boxes.
-,,"Podatus 2, width 1",001r,podatus einsiedeln,neume.podatus2b,2,"<neume>
+,,"Podatus 2, width 1",001r,podatus einsiedeln,neume.podatus2b,"[1, 1]","<neume>
     <nc/>
     <nc intm=""1S""/>
 </neume>",No,,,Where should this bbox division into vertical bboxes be done? Heuristic pitch finding (how is that working? because it is getting the pitch of the individual neume-components correcly even having only one bbox for the whole neume) or MEI Encoding job?
-[],[],Podatus 3,001r,,neume.podatus3,2,"<neume>
+[],[],Podatus 3,001r,,neume.podatus3,"[1, 1]","<neume>
     <nc/>
     <nc intm=""2S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,"This file is received by the MEI Encoding job, so it can do the mapping of the IC class into both the MEI code (for encoding the <neume>) and the width column (for dividing the bbox and encoding the <zone>s)"
-[],[],Podatus 4,001r,,neume.podatus4,2,"<neume>
+[],[],Podatus 4,001r,,neume.podatus4,"[1, 1]","<neume>
     <nc/>
     <nc intm=""3S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,
-,,Podatus 5,001r,,neume.podatus5,2,"<neume>
+,,Podatus 5,001r,,neume.podatus5,"[1, 1]","<neume>
     <nc/>
     <nc intm=""4S""/>
 </neume>",,,,
@@ -75,15 +75,15 @@ imagePath,imagesBinary,name,folio,description,classification,width,mei,review,do
         <liquescent/>
     </nc>
 </neume>",,,,
-[],[],Oblique 2,001r,,neume.oblique2,1,"<neume>
+[],[],Oblique 2,001r,,neume.oblique2,"[1, 1]","<neume>
     <nc ligated=""true""/>
     <nc ligated=""true"" intm=""-1S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,
-[],[],Oblique 3,001r,,neume.oblique3,1,"<neume>
+[],[],Oblique 3,001r,,neume.oblique3,"[1, 1]","<neume>
     <nc ligated=""true""/>
     <nc ligated=""true"" intm=""-2S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,
-[],[],Oblique 4,001r,,neume.oblique4,1,"<neume>
+[],[],Oblique 4,001r,,neume.oblique4,"[1, 1]","<neume>
     <nc ligated=""true""/>
     <nc ligated=""true"" intm=""-3S""/>
 </neume>",No,,5d39e8755fbd53216a2fa442,

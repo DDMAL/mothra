@@ -8,6 +8,7 @@ import base64
 import json
 import uuid as _uuid
 import sys
+import xml.etree.ElementTree as ET
 
 from auth_api import (
     get_current_user, db_cursor, require_project_owner, _log_activity,
@@ -16,6 +17,45 @@ from auth_api import (
 import encode_to_mei
 
 router = APIRouter()
+
+
+def _restore_notation_subtype(previous_xml_content: Optional[str], incoming_xml: str) -> str:
+    """Neon's own Verovio-compatibility shim (stripHufnagelForVerovio, in the
+    landing-page/neon submodule's ConvertMei.ts) normalizes a loaded file's
+    <staffDef notationtype="neume.square"|"neume.hufnagel"> down to the bare
+    "neume" before caching it, and Neon's save flow (updateDatabase()) PUTs
+    that same stripped copy back here -- so saving any edit in Neon would
+    otherwise silently lose which notation the file was encoded in, and the
+    file would reopen as Square (NeonBatchEditor.tsx's applyNotationTypeFont
+    has no subtype left to read). The neon submodule is tracked clean
+    against upstream with no local patches, so the fix lives on this side
+    of the PUT instead: if the incoming save has been stripped to the
+    generic form, re-stamp whatever subtype the previously-stored copy had.
+    """
+    if not previous_xml_content:
+        return incoming_xml
+    try:
+        prev_root = ET.fromstring(previous_xml_content.encode("utf-8"))
+    except ET.ParseError:
+        return incoming_xml
+    prev_staff_def = prev_root.find(f".//{{{encode_to_mei.MEI_NS}}}staffDef")
+    prev_notation = prev_staff_def.get("notationtype") if prev_staff_def is not None else None
+    if prev_notation not in ("neume.square", "neume.hufnagel"):
+        return incoming_xml
+
+    try:
+        incoming_root = ET.fromstring(incoming_xml.encode("utf-8"))
+    except ET.ParseError:
+        return incoming_xml
+    incoming_staff_def = incoming_root.find(f".//{{{encode_to_mei.MEI_NS}}}staffDef")
+    if incoming_staff_def is None or incoming_staff_def.get("notationtype") != "neume":
+        # Missing <staffDef>, or one that already carries a real subtype
+        # (or anything else) -- never overwrite an explicit value with a
+        # stale one from the previous revision.
+        return incoming_xml
+    incoming_staff_def.set("notationtype", prev_notation)
+    ET.register_namespace("", encode_to_mei.MEI_NS)
+    return ET.tostring(incoming_root, encoding="unicode")
 
 # Matches types.ts's StaveSource union and the tags tasks_encode.py's
 # 3-tier fallback actually produces (see auth_api.py's mei_files.stave_source
@@ -105,6 +145,9 @@ async def put_mei_content(project_id: int, mei_id: str, token: str, request: Req
         raise HTTPException(status_code=403, detail="invalid or expired edit token")
     xml_content = (await request.body()).decode("utf-8")
     with db_cursor() as (con, cur):
+        cur.execute("SELECT xml_content FROM mei_files WHERE id=%s AND project_id=%s", (mei_id, project_id))
+        row = cur.fetchone()
+        xml_content = _restore_notation_subtype(row[0] if row else None, xml_content)
         cur.execute("UPDATE mei_files SET xml_content=%s WHERE id=%s AND project_id=%s",
                     (xml_content, mei_id, project_id))
         con.commit()

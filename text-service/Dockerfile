@@ -7,6 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY text-service/requirements.txt ./text-service/requirements.txt
+# torch's own wheel index (download.pytorch.org) serves typing-extensions
+# with a metadata Name field spelled "typing_extensions" (underscore)
+# instead of the "typing-extensions" (hyphen) torch's own dependency
+# declares -- pip's consistency check rejects that mismatch outright
+# (confirmed across multiple typing-extensions releases, not one bad
+# version), falls back to building the sdist from source, and that build
+# needs flit_core, which isn't available from this same restricted index
+# either -- so the whole install fails before torch itself is even
+# fetched. The exact same wheel installs fine from the default PyPI index
+# (no consistency check trips there), so satisfy it from there first;
+# pip then sees the constraint already met below and never touches the
+# broken path.
+RUN pip install --no-cache-dir "typing-extensions>=4.10.0"
 # kraken/htrflow pull in torch/torchvision (plus pytorch-lightning/torchmetrics,
 # which just declare a torch version constraint) transitively; installing the
 # CPU-only build first — this service always runs on CPU in these containers,

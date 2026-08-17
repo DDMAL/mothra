@@ -17,6 +17,24 @@ from tasks_encode import run_encode_upload_task, run_encode_batch_task
 
 router = APIRouter()
 
+# The only two mapping CSVs encode_to_mei.py's resolve_neume_mapping() knows
+# how to load (see mothra#210) -- anything else is a client mistake, not a
+# valid notation the encoder can fall back on.
+_VALID_NOTATION_TYPES = {"square", "hufnagel"}
+
+
+def _check_notation_type(notation_type: Optional[str]) -> Optional[JSONResponse]:
+    """Returns a 400 response if notation_type is set but not one of the
+    bundled mapping CSVs -- called before stage_upload()/create_job() so an
+    invalid value fails the request outright instead of staging uploads and
+    creating a job that will only fail once a worker picks it up."""
+    if notation_type is not None and notation_type not in _VALID_NOTATION_TYPES:
+        return JSONResponse(status_code=400, content={
+            "error": f"notation_type must be one of {sorted(_VALID_NOTATION_TYPES)}, got {notation_type!r}",
+        })
+    return None
+
+
 @router.post("/encode")
 def encode():
     glyphs = parse_gamera_xml(MOCK_DATA_DIR / "mock_page.xml")
@@ -34,8 +52,12 @@ async def encode_upload(
     image_name: Optional[str] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
+    notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
 ):
+    if (err := _check_notation_type(notation_type)) is not None:
+        return err
+
     xml_bytes = await xml_file.read()
     xml_filename = xml_file.filename or "uplaoded.xml"
     image_bytes = await image_file.read() if image_file else None
@@ -58,6 +80,7 @@ async def encode_upload(
         "image_name": image_name,
         "clef_shape": clef_shape,
         "clef_line": clef_line,
+        "notation_type": notation_type,
         "allow_synthetic_lines": allow_synthetic_lines,
     }
     create_job(job_id, "encode_upload", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates
@@ -100,6 +123,7 @@ async def encode_batch(
     project_id: Optional[int] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
+    notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
 ):
     if len(xml_files) != len(image_files):
@@ -110,7 +134,9 @@ async def encode_batch(
         return JSONResponse(status_code=400, content={
             "error": f"image_names ({len(image_names)}) must match xml_files ({len(xml_files)}) if provided",
         })
-    
+    if (err := _check_notation_type(notation_type)) is not None:
+        return err
+
     items = []
     for i, (x, img) in enumerate(zip(xml_files, image_files)):
         xml_bytes = await x.read()
@@ -127,13 +153,14 @@ async def encode_batch(
             "image_filename": img.filename,
             "image_name": name,
         })
-    
+
     job_id = new_job_id()
     kwargs = {
         "items": items,
         "project_id": project_id,
         "clef_shape": clef_shape,
         "clef_line": clef_line,
+        "notation_type": notation_type,
         "allow_synthetic_lines": allow_synthetic_lines,
     }
     create_job(job_id, "encode_batch", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates

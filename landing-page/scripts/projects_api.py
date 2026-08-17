@@ -59,14 +59,14 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
     }
 
 
-def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status):
+def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image=False):
     return {
         "id": did, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
         "status": status,
+        "hasClassifierImage": bool(has_classifier_image),
     }
-
 
 def _project_row_to_dict(cur, row, username):
     """Build one project's full API dict (images/models/MEI/annotations/text
@@ -94,10 +94,11 @@ def _project_row_to_dict(cur, row, username):
     )
     text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()]
     cur.execute(
-        "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status"
+        "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
+        " classifier_image IS NOT NULL"
         " FROM staffline_detections WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
-    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in cur.fetchall()]
+    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6]) for r in cur.fetchall()]
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
@@ -175,13 +176,14 @@ def list_projects(user=Depends(get_current_user)):
             )
 
         cur.execute(
-            "SELECT project_id, id, image_id, image_name, stave_count, mode_lines_per_stave, status"
+            "SELECT project_id, id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
+            " classifier_image IS NOT NULL"
             " FROM staffline_detections WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         stafflines_by_pid: dict = {}
-        for pid, did, img_id, img_name, stave_count, mode_lines_per_stave, status in cur.fetchall():
+        for pid, did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image in cur.fetchall():
             stafflines_by_pid.setdefault(pid, []).append(
-                _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status)
+                _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image)
             )
 
         result = [

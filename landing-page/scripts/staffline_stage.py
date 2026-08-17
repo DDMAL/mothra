@@ -25,6 +25,8 @@ like a stream_text_finding failure would.
 """
 
 import json
+import numpy as np
+import psycopg2
 import uuid as _uuid
 from typing import Callable, Iterator, Optional
 
@@ -513,24 +515,37 @@ def compute_staffline_interpolation(image_name: str, image_arr: np.ndarray, yolo
 
 
 def persist_staffline_detection(cur, con, project_id: str, image_id: str, image_name: str,
-                                 annotation_id: str, computed: dict) -> str:
+                                 annotation_id: str, computed: dict,
+                                 classifier_image_bytes: Optional[bytes] = None,
+                                 classifier_image_mime: str = "image/png") -> str:
     """INSERT-and-commit a succeeded detection result using an already-open
     cursor/connection -- the shared write side for both
     run_staffline_detection() (computes and persists on the same connection)
     and inference_api.py's interpolate-confirm route (computes via
     compute_staffline_interpolation() with no connection held, then calls
-    this against a freshly reacquired one). Returns the new row's id."""
+    this against a freshly reacquired one). Returns the new row's id.
+    
+    classifier_image_bytes is the paco-classifier's stafflines-only PNG layer
+    that staffline_source_arr was cropped from (see tasks_predict.py's
+    _run_medieval_inference/_reused_annotation_staffline_source) -- None for
+    any non-medieval-preset detection, or a medieval one where the classifier
+    call itself failed and fell back to the raw page. Stored verbatim (no
+    re-encoding) so it's byte-identical to what paco-classifier-service
+    actually returned."""
     new_id = _uuid.uuid4().hex
     records = computed["records"]
     cur.execute(
         "INSERT INTO staffline_detections"
         " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
-        "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
-        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded')",
+        "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status,"
+        "  classifier_image, classifier_image_mime)"
+        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'succeeded',%s,%s)",
         (
             new_id, project_id, image_id, image_name, annotation_id,
             json.dumps(records), computed["scale_unit"], len(computed["stave_ids"]),
             computed["grouping_result"].mode_lines_per_stave, json.dumps(computed["settings"]),
+            psycopg2.Binary(classifier_image_bytes) if classifier_image_bytes is not None else None,
+            classifier_image_mime,
         ),
     )
     con.commit()
@@ -545,6 +560,7 @@ def run_staffline_detection(
     redetect_fn: Optional[Callable] = None,
     source_label: str = "raw_page",
     storage_variant: str = "working_copy",
+    classifier_image_bytes: Optional[bytes] = None,
 ) -> Iterator[dict]:
     """Run staffline detection for one image, yielding {"type": "log"|"error",
     "message": ...} event dicts and persisting the result to
@@ -585,6 +601,12 @@ def run_staffline_detection(
     read original_data at all (tasks_text_batch.py, the interpolate-preview/
     confirm route) -- only tasks_predict.py's own fetch, which does prefer
     original_data, passes "original" explicitly when it applies.
+
+    classifier_image_bytes (mothra#207, merged from main) is a third,
+    independent piece of provenance -- the paco-classifier's actual
+    stafflines-only PNG bytes, stored verbatim on the row itself (not in
+    settings_json) for `GET /stafflines/{id}/classifier-image` to serve.
+    See persist_staffline_detection()'s docstring for the storage details.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
 
@@ -652,6 +674,7 @@ def run_staffline_detection(
                 "grouping_result": grouping_result, "scale_unit": scale_unit,
                 "settings": settings,
             },
+            classifier_image_bytes=classifier_image_bytes,
         )
 
         # Callers that need to look this row back up right after (e.g.
@@ -679,11 +702,14 @@ def run_staffline_detection(
             cur.execute(
                 "INSERT INTO staffline_detections"
                 " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
-                "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'failed')",
+                "  scale_unit, stave_count, mode_lines_per_stave, settings_json, status,"
+                "  classifier_image, classifier_image_mime)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'failed',%s,%s)",
                 (
                     _uuid.uuid4().hex, project_id, image_id, image_name, annotation_id,
                     json.dumps([]), scale_unit, 0, None, json.dumps({"error": str(e)}),
+                    psycopg2.Binary(classifier_image_bytes) if classifier_image_bytes is not None else None,
+                    "image/png",
                 ),
             )
             con.commit()
