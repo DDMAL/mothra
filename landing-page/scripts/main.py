@@ -2,12 +2,13 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
-from auth_api import limiter, cleanup_stale_neon_manifests
+from auth_api import limiter, cleanup_stale_neon_manifests, get_db_conn, release_db_conn
+from celery_app import celery_app
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -55,6 +56,48 @@ app.include_router(jobs_router, prefix="/api")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.get("/healthz/live", include_in_schema=False)
+def healthz_live():
+    """Liveness only: confirms this process is actually serving HTTP (not
+    just that the OS has a listener on the port, which is all a bare
+    tcpSocket probe -- k8s/backend.yaml's probes before this PR -- can tell).
+    Deliberately checks NO external dependency. A livenessProbe failure gets
+    k8s to kill and restart the pod -- if it also failed on a transient
+    Postgres/Redis blip (like /healthz below does), a downstream outage would
+    cause a restart storm that does nothing to fix the actual outage. That
+    check belongs in readinessProbe (via /healthz), which only pulls the pod
+    out of load-balancing rotation instead of killing it."""
+    return {"status": "ok"}
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Readiness: confirms /healthz/live's process-alive signal AND that
+    this backend's two real dependencies are reachable -- Postgres and the
+    Celery broker (Redis). Point readinessProbe here, NOT livenessProbe --
+    see healthz_live's docstring for why."""
+    try:
+        con = get_db_conn()
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close()
+        finally:
+            release_db_conn(con)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"database unreachable: {exc}")
+
+    try:
+        conn = celery_app.connection()
+        try:
+            conn.ensure_connection(max_retries=1, interval_start=0, timeout=2)
+        finally:
+            conn.release()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"celery broker unreachable: {exc}")
+
+    return {"status": "ok"}
 
 # job_uploads/job_sessions also get a periodic Celery-beat sweep now
 # (celery_app.py's beat_schedule, tasks_cleanup.py) -- this immediate

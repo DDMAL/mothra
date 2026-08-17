@@ -33,13 +33,22 @@ spec:
           volumeMounts:
             - name: stored-models
               mountPath: /app/scripts/stored_models
+          # httpGet probes (mothra#220 row 29) replace bare tcpSocket ones, which
+          # could only tell that the OS had a listener on the port, not that the
+          # app was actually serving HTTP or that Postgres/the Celery broker
+          # were reachable. readinessProbe checks dependencies (/healthz);
+          # livenessProbe deliberately does NOT (/healthz/live) -- a transient
+          # DB/broker outage should pull this pod out of rotation, not kill and
+          # restart it. See main.py's healthz()/healthz_live() docstrings.
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8001
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz/live
               port: 8001
             initialDelaySeconds: 30
             periodSeconds: 15

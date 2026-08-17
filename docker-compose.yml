@@ -35,6 +35,12 @@ services:
       - "8002:8002"
     environment:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    healthcheck:
+      # /healthz (mothra#220 row 29) -- see main.py's healthz() docstring.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   paco-classifier-service:
     build:
@@ -74,6 +80,16 @@ services:
       TEXT_API_URL: http://text-service:8002
       PACO_API_URL: http://paco-classifier-service:8003
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    healthcheck:
+      # /healthz (mothra#220 row 29) checks Postgres + Celery broker
+      # reachability -- see main.py's healthz() docstring. Nothing in this
+      # file currently depends_on backend's health (worker depends on
+      # postgres/redis/text-service/paco directly instead), so this is for
+      # `docker compose ps` visibility today, not a gate.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
       redis:
         condition: service_started

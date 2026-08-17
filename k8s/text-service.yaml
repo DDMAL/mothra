@@ -26,13 +26,19 @@ spec:
               containerPort: 8002
           # No env required (port fixed in the image CMD). Kraken/HTR + the
           # baked-in Tridis OCR model make this a memory-heavy container.
+          # httpGet /healthz (mothra#220 row 29) replaces bare tcpSocket probes --
+          # text-service has no DB/broker of its own to distinguish readiness
+          # from liveness on (see main.py's healthz() docstring), so both probes
+          # point at the same endpoint, unlike backend.yaml's split.
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8002
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8002
             initialDelaySeconds: 30
             periodSeconds: 15

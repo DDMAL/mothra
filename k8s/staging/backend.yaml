@@ -41,13 +41,18 @@ spec:
           volumeMounts:
             - name: stored-models
               mountPath: /app/scripts/stored_models
+          # See k8s/backend.yaml's identical comment (mothra#220 row 29) --
+          # readinessProbe checks dependencies (/healthz), livenessProbe
+          # deliberately does not (/healthz/live).
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8001
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz/live
               port: 8001
             initialDelaySeconds: 30
             periodSeconds: 15
