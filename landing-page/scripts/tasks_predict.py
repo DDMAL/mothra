@@ -32,10 +32,14 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     thread.join() instead of inside _stave_pipeline would silently break
     the fallback path below.
 
-    Returns (yolo_txt, staffline_source_arr) — the merged text+music+stave
-    YOLO lines, and whichever image array the stave boxes were actually
-    detected against, so run_staffline_detection crops the SAME image the
-    stave model saw (not always the raw page).
+    Returns (yolo_txt, staffline_source_arr, classifier_image_bytes) — the
+    merged text+music+stave YOLO lines, whichever image array the stave
+    boxes were actually detected against (so run_staffline_detection crops
+    the SAME image the stave model saw, not always the raw page), and the
+    classifier's stafflines-only PNG bytes for persisting alongside the
+    detection (see mothra#207). `classifier_image_bytes` is None whenever
+    the classifier pass failed and this fell back to raw-page stave
+    detection — there's no classifier PNG to show in that case.
 
     If `job_id` is given, waits on the background thread by polling
     check_cancelled() every _CANCEL_POLL_INTERVAL_S instead of an

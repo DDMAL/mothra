@@ -1041,12 +1041,22 @@ def _component_zone_ids(
     if total <= 0:
         return None
     span = glyph.lrx - glyph.ulx
-    zone_ids = []
-    x = glyph.ulx
+    # Precompute every rounded boundary before creating any <zone> at all.
+    # A narrow glyph (span smaller than the component count) can round two
+    # adjacent boundaries to the same x, which would register a zero-width
+    # zone that <nc>'s @facs then points at -- worse than the shared-zone
+    # fallback this function exists to avoid. Bail out to that fallback
+    # instead of emitting invalid facsimile geometry.
+    boundaries = [glyph.ulx]
     cumulative = 0.0
-    for j, w in enumerate(weights):
+    for w in weights:
         cumulative += w
-        x_next = glyph.ulx + round(span * cumulative / total)
+        boundaries.append(glyph.ulx + round(span * cumulative / total))
+    for prev, nxt in zip(boundaries, boundaries[1:]):
+        if nxt <= prev:
+            return None
+    zone_ids = []
+    for j, (x, x_next) in enumerate(zip(boundaries, boundaries[1:])):
         zone_id = f"z-{glyph.id}-{j}"
         ET.SubElement(surface, _tag("zone"), {
             XML_ID: zone_id,
@@ -1056,7 +1066,6 @@ def _component_zone_ids(
             "lry": str(glyph.lry),
         })
         zone_ids.append(zone_id)
-        x = x_next
     return zone_ids
     
 def _tag(local: str) -> str:
