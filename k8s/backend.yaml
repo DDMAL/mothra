@@ -6,7 +6,11 @@ metadata:
   labels:
     app: backend
 spec:
-  replicas: 1                    # keep at 1 until a migration Job exists (init_db runs at import)
+  # mothra#220 row 31: init_db()/_migrate_db() no longer run at import (see
+  # k8s/migrate-job.yaml) -- backend no longer has a schema-migration reason
+  # to stay at 1 replica. Left at 1 here as an operational decision, not a
+  # code constraint; raise when actually needed.
+  replicas: 1
   selector:
     matchLabels:
       app: backend

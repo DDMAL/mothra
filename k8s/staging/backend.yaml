@@ -7,7 +7,8 @@ metadata:
     app: backend-staging
     mothra.env: staging
 spec:
-  replicas: 1                    # keep at 1 until a migration Job exists (init_db runs at import)
+  # See k8s/backend.yaml's identical comment (mothra#220 row 31).
+  replicas: 1
   selector:
     matchLabels:
       app: backend-staging
