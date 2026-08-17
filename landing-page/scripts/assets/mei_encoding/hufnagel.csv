@@ -50,20 +50,20 @@ Podatus 5,neume.podatus5,"[1, 1]","<neume>
     <nc  tilt=""s""  intm=""4S""/>
 </neume>"
 Clivis 2a,neume.clivis2a,"[1, 1]","<neume>
-    <nc tilt=""s""/>
-    <nc  tilt=""n"" con=""e"" intm=""-1S""/>
+    <nc tilt=""s"" ligated=""true""/>
+    <nc  tilt=""n"" ligated=""true"" intm=""-1S""/>
 </neume>"
 Clivis 3a,neume.clivis3a,"[1, 1]","<neume>
-    <nc tilt=""s""/>
-    <nc  tilt=""n"" con=""e"" intm=""-2S""/>
+    <nc tilt=""s"" ligated=""true""/>
+    <nc  tilt=""n"" ligated=""true"" intm=""-2S""/>
 </neume>"
 Clivis 4a,neume.clivis4a,"[1, 1]","<neume>
-    <nc tilt=""s""/>
-    <nc  tilt=""n"" con=""e"" intm=""-3S""/>
+    <nc tilt=""s"" ligated=""true""/>
+    <nc  tilt=""n"" ligated=""true"" intm=""-3S""/>
 </neume>"
 Clivis 5a,neume.clivis5a,"[1, 1]","<neume>
-    <nc tilt=""s""/>
-    <nc  tilt=""n"" con=""e"" intm=""-4S""/>
+    <nc tilt=""s"" ligated=""true""/>
+    <nc  tilt=""n"" ligated=""true"" intm=""-4S""/>
 </neume>"
 Clivis 2b,neume.clivis2b,"[1, 1]","<neume>
     <nc/>
@@ -83,41 +83,41 @@ Clivis 5b,neume.clivis5b,"[1, 1]","<neume>
 </neume>"
 Torculus22,neume.torculus22,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""1S""/>
-    <nc tilt=""n"" con=""e""  intm=""-1S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""1S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-1S""/>
 </neume>"
 Torculus23,neume.torculus23,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""1S""/>
-    <nc tilt=""n"" con=""e""  intm=""-2S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""1S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-2S""/>
 </neume>"
 Torculus24,neume.torculus24,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""1S""/>
-    <nc tilt=""n"" con=""e""  intm=""-3S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""1S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-3S""/>
 </neume>"
 Torculus32,neume.torculus32,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""2S""/>
-    <nc tilt=""n"" con=""e""  intm=""-1S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""2S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-1S""/>
 </neume>"
 Torculus33,neume.torculus33,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""2S""/>
-    <nc tilt=""n"" con=""e""  intm=""-2S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""2S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-2S""/>
 </neume>"
 Torculus34,neume.torculus34,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""2S""/>
-    <nc tilt=""n"" con=""e""  intm=""-3S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""2S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-3S""/>
 </neume>"
 Torculus42,neume.torculus42,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""3S""/>
-    <nc tilt=""n"" con=""e""  intm=""-1S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""3S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-1S""/>
 </neume>"
 Torculus43,neume.torculus43,"[1, 1, 1]","<neume>
     <nc/>
-    <nc tilt=""s"" intm=""3S""/>
-    <nc tilt=""n"" con=""e""  intm=""-2S""/>
+    <nc tilt=""s"" ligated=""true"" intm=""3S""/>
+    <nc tilt=""n"" ligated=""true"" intm=""-2S""/>
 </neume>"
