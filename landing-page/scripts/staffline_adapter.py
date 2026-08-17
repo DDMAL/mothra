@@ -12,6 +12,45 @@ dependencies just to build MEI from an already-computed detection.
 
 from encode_to_mei import StaveBbox
 
+# SF-7: aspect-ratio tolerance for treating a predict-time/encode-time
+# dimension mismatch as "the same page at a different resolution" (safe to
+# scale) rather than "a genuinely different image" (reject, fall through to
+# tier 2). A resize (e.g. imageResize.ts's client-side downscale, or SF-2's
+# original_data vs. working-copy pixel-dimension difference) preserves aspect
+# ratio; a wrong/stale image generally won't.
+ASPECT_RATIO_TOLERANCE = 0.02
+
+
+def scale_jsomr_records(jsomr_records: list[dict], scale_x: float, scale_y: float) -> list[dict]:
+    """Returns a new list of JSOMR records with every absolute-pixel field
+    (bounding_box, centerline_page) scaled by (scale_x, scale_y) -- used when
+    the predict-time image these coordinates were computed against differs
+    in resolution from the encode-time image tasks_encode.py is actually
+    building MEI zones against (see SF-7 in ALPHA_TRANSITION_PLAN.md).
+
+    Deliberately does not touch `centerline` (crop-local coordinates, unused
+    by staves_from_jsomr/y_values_at) or any non-geometric field -- only the
+    two page-absolute-pixel fields those functions actually read.
+    """
+    scaled = []
+    for r in jsomr_records:
+        r = dict(r)
+        bbox = r.get("bounding_box")
+        if bbox:
+            r["bounding_box"] = {
+                "ulx": bbox["ulx"] * scale_x, "uly": bbox["uly"] * scale_y,
+                "lrx": bbox["lrx"] * scale_x, "lry": bbox["lry"] * scale_y,
+            }
+        cl_page = r.get("centerline_page")
+        if cl_page:
+            r["centerline_page"] = {
+                "x_start": cl_page["x_start"] * scale_x,
+                "x_end": cl_page["x_end"] * scale_x,
+                "y_values": [y * scale_y for y in cl_page["y_values"]],
+            }
+        scaled.append(r)
+    return scaled
+
 
 def y_values_at(stave_records: list[dict], x_page: float) -> list[float]:
     """Per-stave, per-column y lookup: for each line record (in the order

@@ -177,8 +177,17 @@ def fit_centerline(
         filter_result: Output of component_filter.filter_components.
         scale_unit: Page-level scale unit h (median staffline box height).
             Used to size the Huber transition distance.
-        crop: The original (BGR-preprocessed) crop the filter ran on. Only
-            required if save_path is provided; used for the diagnostic overlay.
+        crop: The original RGB crop the filter ran on (matches
+            component_filter.py's own RGB convention -- see SF-4 in
+            ALPHA_TRANSITION_PLAN.md; this docstring previously said
+            "BGR-preprocessed", which was never accurate). Used as the
+            line-following seed for high-residual fits (crop.shape[0] feeds
+            seed_y below when the initial residual exceeds the refit
+            trigger) -- CodeRabbit review on PR #219 caught that the
+            previous "only required if save_path" wording was itself still
+            wrong, since that refit path is independent of save_path. If
+            save_path is also provided, crop is additionally used for the
+            diagnostic overlay.
         save_path: If provided, save a single-panel diagnostic (crop with the
             fitted centerline overlaid). If None, no visualization is produced.
 

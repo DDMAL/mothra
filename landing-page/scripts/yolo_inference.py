@@ -7,6 +7,19 @@ from models_api import get_model_file_path
 
 CATEGORY_TO_SLOT = {"text": 0, "music": 1, "staves": 2}
 
+# SF-1 fix (primary cause of #213): the stave-class YOLO pass needs its own
+# default, decoupled from the shared/text-music confidence_threshold (0.5).
+# staff-finding's own standalone CLI (detect_stafflines.py --conf) and its
+# internal derivation comments (run_page.py's DEFAULT_FALLBACK_CONF) both
+# anchor to 0.25 as the proven default for stave-class boxes -- landing was
+# running at 2x that, which the 2026-08-10 parity harness measured as
+# catastrophic (MS234_64 collapsed from 8 staves/mode 4 to 1 stave/mode 9 at
+# conf 0.5; see ALPHA_TRANSITION_PLAN.md's SF-1 row). This is deliberately its
+# own constant, not derived from confidence_threshold, so a caller setting a
+# custom shared confidence_threshold doesn't unintentionally drag the stave
+# pass back toward a value never validated for that class.
+DEFAULT_STAVE_CONFIDENCE = 0.25
+
 
 def _cuda_available() -> bool:
     try:
@@ -165,7 +178,7 @@ def resolve_yolo_models(
         ) from exc
 
     tm_threshold = text_music_confidence_threshold if text_music_confidence_threshold is not None else confidence_threshold
-    st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else confidence_threshold
+    st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else DEFAULT_STAVE_CONFIDENCE
     # Resolve to the GPU when one is present, else CPU (guards an explicit
     # cuda request on a CPU-only node from crashing ultralytics/torch).
     device = resolve_device(device)

@@ -15,7 +15,10 @@ Manifest CSV columns (order does not matter, extra columns are ignored):
     variant      — pipeline variant label, e.g. 'sauvola_no_bgr'
 
 Optional manifest columns:
-    staffline_class   — YOLO class id for stafflines (default 2, "staves")
+    staffline_class   — YOLO class id for stafflines (default 0, "staffline";
+        see SF-9 in ALPHA_TRANSITION_PLAN.md -- the bundled single-class
+        stave-detector checkpoint outputs raw class 0, not merged-project
+        class 2)
 
 Usage:
     python eval_batch.py --manifest eval_manifest.csv --output eval_results.csv
@@ -152,7 +155,11 @@ def main() -> None:
         if args.staffline_class is not None:
             staffline_class = args.staffline_class
         else:
-            staffline_class = int(row.get("staffline_class", 2) or 2)
+            # SF-9 fix: was defaulting to 2 (merged-project class), which
+            # silently matched nothing against the bundled single-class
+            # model's real class-0 output. See run_page.py's
+            # DEFAULT_STAFFLINE_CLASS comment for the full explanation.
+            staffline_class = int(row.get("staffline_class", 0) or 0)
 
         print(f"\n[{i}/{len(manifest_rows)}] {page}  |  {variant}")
 

@@ -60,10 +60,14 @@ class BatchRunBody(BaseModel):
     # YOLO layer-separation settings, mirroring inference_api.py's PredictBody
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     model_id: Optional[str] = None
-    yolo_confidence_threshold: float = 0.5
+    yolo_confidence_threshold: float = 0.5  # shared text/music default
     yolo_device: str = "auto"   # auto → GPU if present else CPU (resolved in yolo_inference)
     text_music_confidence_threshold: Optional[float] = None
     text_music_device: Optional[str] = None
+    # SF-1: None here falls back to yolo_inference.DEFAULT_STAVE_CONFIDENCE
+    # (0.25) via the shared resolve_yolo_models() call below, same as
+    # inference_api.py's PredictBody -- already correct, not a duplicate of
+    # the bug fixed there (that field default was already None, not 0.5).
     stave_confidence_threshold: Optional[float] = None
     stave_device: Optional[str] = None
     debug_mode: bool = False

@@ -156,7 +156,7 @@ def test_stale_staffline_detection_is_ignored_in_favor_of_current_annotation(mon
 
     cursor = FakeCursor(
         annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
-        staffline_row_by_annotation_id={stale_annotation_id: (stale_jsomr,)},
+        staffline_row_by_annotation_id={stale_annotation_id: (stale_jsomr, {})},
         text_alignment_row=None,
     )
     monkeypatch.setattr(tasks_encode, "get_db_conn", lambda: FakeConnection())
@@ -195,7 +195,7 @@ def test_current_staffline_detection_still_wins_when_it_matches():
         ]
         cursor = FakeCursor(
             annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
-            staffline_row_by_annotation_id={current_annotation_id: (fresh_jsomr,)},
+            staffline_row_by_annotation_id={current_annotation_id: (fresh_jsomr, {})},
             text_alignment_row=None,
         )
         monkeypatch.setattr(tasks_encode, "get_db_conn", lambda: FakeConnection())
@@ -210,6 +210,111 @@ def test_current_staffline_detection_still_wins_when_it_matches():
         assert len(_yolo_stave_hints) == 1
     finally:
         monkeypatch.undo()
+
+
+def test_frame_matching_dimensions_pass_through_unchanged(monkeypatch, capsys):
+    """SF-7: predict-time and encode-time dimensions match exactly -- tier 1
+    is used as-is, no scaling, no log noise."""
+    current_annotation_id = "ann-current"
+    jsomr = [{"stave_id": 0, "within_stave_index": 0,
+              "bounding_box": {"ulx": 0, "uly": 0, "lrx": 700, "lry": 10},
+              "centerline_page": {"x_start": 0, "x_end": 700, "y_values": [5.0] * 701}}]
+    cursor = FakeCursor(
+        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02", "img-1"),
+        staffline_row_by_annotation_id={
+            current_annotation_id: (jsomr, {"predict_image_width": 1000, "predict_image_height": 1000}),
+        },
+        text_alignment_row=None,
+    )
+    _patch_db_conn(monkeypatch, cursor)
+
+    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
+    )
+
+    assert stave_source == "staffline_detection"
+    assert yolo_stave_hints[0].ulx == 0 and yolo_stave_hints[0].lrx == 700  # unscaled
+    assert "frame mismatch" not in capsys.readouterr().err
+
+
+def test_frame_resize_is_scaled_not_rejected(monkeypatch, capsys):
+    """SF-7: predict-time image was half the encode-time image's resolution
+    (same aspect ratio, e.g. a client-side resize) -- coordinates are scaled
+    up by 2x rather than either used unscaled (silently misplacing every
+    stave) or rejected (unnecessarily falling through to tier 2)."""
+    current_annotation_id = "ann-current"
+    jsomr = [{"stave_id": 0, "within_stave_index": 0,
+              "bounding_box": {"ulx": 0, "uly": 0, "lrx": 350, "lry": 5},
+              "centerline_page": {"x_start": 0, "x_end": 350, "y_values": [2.5] * 351}}]
+    cursor = FakeCursor(
+        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02", "img-1"),
+        staffline_row_by_annotation_id={
+            current_annotation_id: (jsomr, {"predict_image_width": 500, "predict_image_height": 500}),
+        },
+        text_alignment_row=None,
+    )
+    _patch_db_conn(monkeypatch, cursor)
+
+    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
+    )
+
+    assert stave_source == "staffline_detection"
+    assert yolo_stave_hints[0].lrx == 700  # 350 * (1000/500) scale_x
+    stderr = capsys.readouterr().err
+    assert "scaled by" in stderr
+    assert "frame mismatch" not in stderr
+
+
+def test_frame_genuine_mismatch_is_rejected_and_logged(monkeypatch, capsys):
+    """SF-7: predict-time and encode-time dimensions have a genuinely
+    different aspect ratio (not just a resize) -- tier 1 is rejected and
+    logged, falling through to tier 2, instead of silently misplacing every
+    stave with a same-page-different-resolution scale factor that doesn't
+    actually apply here."""
+    current_annotation_id = "ann-current"
+    jsomr = [{"stave_id": 0, "within_stave_index": 0,
+              "bounding_box": {"ulx": 0, "uly": 0, "lrx": 700, "lry": 10},
+              "centerline_page": {"x_start": 0, "x_end": 700, "y_values": [5.0] * 701}}]
+    cursor = FakeCursor(
+        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
+        staffline_row_by_annotation_id={
+            # 1000x1000 (square) predict-time vs 2000x500 (4:1) encode-time --
+            # not a plain resize, aspect ratio is genuinely different.
+            current_annotation_id: (jsomr, {"predict_image_width": 1000, "predict_image_height": 1000}),
+        },
+        text_alignment_row=None,
+    )
+    _patch_db_conn(monkeypatch, cursor)
+
+    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        project_id=1, image_name="page.jpg", page_w=2000, page_h=500,
+    )
+
+    assert stave_source == "yolo_annotation"  # fell through to tier 2
+    assert "frame mismatch" in capsys.readouterr().err
+
+
+def test_tier1_failure_is_logged_not_silently_swallowed(monkeypatch, capsys):
+    """SF-7: the tier-1 except used to be a bare `except: pass`. A malformed
+    JSOMR row (missing required keys) must now be logged before falling
+    through to tier 2, matching this function's other two lookups."""
+    current_annotation_id = "ann-current"
+    malformed_jsomr = [{"stave_id": 0}]  # missing bounding_box/centerline_page entirely
+    cursor = FakeCursor(
+        annotations_row=(current_annotation_id, "2 0.5 0.3 0.9 0.02\n2 0.5 0.35 0.9 0.02", "img-1"),
+        staffline_row_by_annotation_id={current_annotation_id: (malformed_jsomr, {})},
+        text_alignment_row=None,
+    )
+    _patch_db_conn(monkeypatch, cursor)
+
+    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
+    )
+
+    assert stave_source != "staffline_detection"
+    stderr = capsys.readouterr().err
+    assert "staffline-detection lookup failed" in stderr
 
 
 if __name__ == "__main__":

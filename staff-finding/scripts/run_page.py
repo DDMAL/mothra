@@ -18,7 +18,7 @@ Usage:
         --yolo /path/to/page.txt \\
         --bgr-model /path/to/best_model.pth \\
         --output /path/to/output_dir \\
-        [--staffline-class 2] \\
+        [--staffline-class 0] \\
         [--crop-padding 2] \\
         [--device cpu] \\
         [--no-bgr]
@@ -54,7 +54,13 @@ from fallback_redetect import (
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_STAFFLINE_CLASS = 2
+# SF-9 fix: the bundled single-class stave-detector checkpoint (produced by
+# train_staffline_detector.py) remaps the merged-project's class 2 down to
+# raw class 0 -- its own docstring says explicitly to pass --staffline-class 0
+# when piping its output into this pipeline. `2` was the wrong default: a run
+# without an explicit override silently matched nothing (every real box is
+# class 0), producing an empty stafflines set with no warning.
+DEFAULT_STAFFLINE_CLASS = 0
 DEFAULT_CROP_PADDING_PX = 2  # small margin around YOLO box; see driver plan
 
 # Mirrors bgr_adapter.py's own defaults, duplicated here rather than imported:
