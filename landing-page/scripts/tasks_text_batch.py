@@ -141,6 +141,10 @@ def run_text_batch_task(job_id, project_id, body):
                     # Explicit rather than relying on the default so this
                     # stays correct if the default ever changes.
                     source_label="raw_page",
+                    # CodeRabbit PR #219: this path's own image fetch above
+                    # (SELECT name, data, mime_type) never reads
+                    # original_data -- always the resized working copy.
+                    storage_variant="working_copy",
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

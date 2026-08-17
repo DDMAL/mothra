@@ -258,7 +258,16 @@ def run_predict_task(job_id, project_id, body):
             if not r:
                 continue
             name, data, mime_type, folio, original_data, original_mime_type = r
-            if original_data is not None:
+            # CodeRabbit (PR #219): source_label alone records which image
+            # PROCESSING variant staffline detection ran against (paco_layer/
+            # raw_page/raw_page_fallback), but not which STORAGE variant the
+            # underlying bytes came from -- a "raw_page" row could mean
+            # either original_data or the resized working copy. Captured
+            # here, at the one place that decides between them, and carried
+            # alongside source_label into settings_json (see
+            # run_staffline_detection's storage_variant parameter).
+            used_original = original_data is not None
+            if used_original:
                 data = original_data
                 mime_type = original_mime_type or mime_type
             r = (name, data, mime_type, folio)
@@ -273,7 +282,7 @@ def run_predict_task(job_id, project_id, body):
             if has_annotation and has_text_alignment:
                 skipped.append(r[0])
                 continue
-            images.append((iid, r[0], r[1], r[2] or "image/png", r[3], has_annotation, has_text_alignment))
+            images.append((iid, r[0], r[1], r[2] or "image/png", r[3], has_annotation, has_text_alignment, used_original))
         publish({"type": "log", "message": f"{len(images)} image(s) ready"})
         if skipped:
             publish({"type": "log", "message": f"skipping {len(skipped)} already fully-processed image(s): {', '.join(skipped)}"})
@@ -286,10 +295,11 @@ def run_predict_task(job_id, project_id, body):
         results = []
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
-        for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment in images:
+        for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original in images:
             check_cancelled(job_id)
             pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
             img_arr = np.array(pil_img)
+            image_storage_variant = "original" if used_original else "working_copy"
             if has_annotation:
                 publish({"type": "log", "message": f"{image_name}: already annotated — skipping YOLO"})
                 # yolo_txt/ann_id are still needed below for the staffline-detection
@@ -373,6 +383,7 @@ def run_predict_task(job_id, project_id, body):
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
                     redetect_fn=redetect_fn, source_label=staffline_source_label,
+                    storage_variant=image_storage_variant,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})

@@ -507,6 +507,7 @@ def compute_staffline_interpolation(image_name: str, image_arr: np.ndarray, yolo
             "predict_image_width": w,  # SF-7 fix, see run_staffline_detection's identical field
             "predict_image_height": h,
             "source_label": "raw_page",  # SF-6 fix: this route always operates on the raw page (see docstring above)
+            "storage_variant": "working_copy",  # CodeRabbit PR #219: this route's caller (inference_api.py) never reads original_data
         },
     }
 
@@ -543,6 +544,7 @@ def run_staffline_detection(
     interpolate_missing: bool = False,
     redetect_fn: Optional[Callable] = None,
     source_label: str = "raw_page",
+    storage_variant: str = "working_copy",
 ) -> Iterator[dict]:
     """Run staffline detection for one image, yielding {"type": "log"|"error",
     "message": ...} event dicts and persisting the result to
@@ -566,13 +568,23 @@ def run_staffline_detection(
     caller that passes a real one, and only for the medieval preset.
 
     source_label (SF-6) is a short provenance string identifying which of
-    the several possible image sources image_arr actually is (e.g.
-    "paco_layer", "raw_page", "raw_page_fallback") -- persisted into
+    the several possible image PROCESSING variants image_arr actually is
+    (e.g. "paco_layer", "raw_page", "raw_page_fallback") -- persisted into
     settings_json alongside the predict-time dimensions (SF-7) so a future
     debugging session can tell which source a given staffline_detections
     row ran against without re-deriving it from code reading. Default
     "raw_page" covers every caller that never had a classifier choice to
     begin with (tasks_text_batch.py, the non-medieval preset).
+
+    storage_variant is a second, independent provenance dimension (raised
+    in CodeRabbit review on PR #219): source_label alone can't distinguish
+    which underlying DB bytes fed image_arr -- "raw_page" means the same
+    thing whether those bytes came from project_images.original_data or its
+    resized project_images.data working copy (SF-2). "original" / "working_copy"
+    covers that; default "working_copy" matches every caller that doesn't
+    read original_data at all (tasks_text_batch.py, the interpolate-preview/
+    confirm route) -- only tasks_predict.py's own fetch, which does prefer
+    original_data, passes "original" explicitly when it applies.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
 
@@ -621,6 +633,7 @@ def run_staffline_detection(
             "predict_image_width": w,
             "predict_image_height": h,
             "source_label": source_label,  # SF-6 fix, see this function's docstring
+            "storage_variant": storage_variant,  # CodeRabbit PR #219, see this function's docstring
             # SF-8 fix: page-level grouping flags (e.g.
             # "reconciled_duplicate_fits:N", "mode_count_below_typical",
             # "staves_with_unexpected_count:...") were computed by
