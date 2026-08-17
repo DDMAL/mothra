@@ -18,7 +18,7 @@ Usage:
         --yolo /path/to/page.txt \\
         --bgr-model /path/to/best_model.pth \\
         --output /path/to/output_dir \\
-        [--staffline-class 2] \\
+        [--staffline-class 0] \\
         [--crop-padding 2] \\
         [--device cpu] \\
         [--no-bgr]
@@ -61,7 +61,13 @@ from inference_simple import (  # noqa: E402  (sys.path insertion above)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_STAFFLINE_CLASS = 2
+# SF-9 fix (see run_page.py's own comment for the full explanation): the
+# bundled single-class stave-detector checkpoint outputs raw class 0, not the
+# merged-project class 2 this used to default to. NOTE: this file is slated
+# for eventual deletion once the parity harness fully supersedes it
+# (ALPHA_TRANSITION_PLAN.md decision DL-7) -- fixed here anyway since it's
+# still live/imported/tested today, not to encourage continued use.
+DEFAULT_STAFFLINE_CLASS = 0
 DEFAULT_CROP_PADDING_PX = 2  # small margin around YOLO box; see driver plan
 DEFAULT_BGR_WINDOW_SIZE = 512
 DEFAULT_BGR_STRIDE = 256
