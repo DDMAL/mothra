@@ -1133,6 +1133,15 @@ def build_mei(
             "lry": str(zone_lry),
         })
         stave_zone_ids[i] = zone_id
+        
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: f"sz-raw-{stave.id}",
+            "type": "staff-raw",
+            "ulx": str(stave.ulx),
+            "uly": str(stave.uly),
+            "lrx": str(stave.lrx),
+            "lry": str(stave.lry),
+        })
         # Clef zone: left edge of stave, roughly square (height ≈ staff height)
         clef_zone_id = f"cz-{stave.id}"
         stave_h = max(zone_lry - zone_uly, 1)
@@ -1646,15 +1655,19 @@ def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
 def _reconstruct_mei_state(
     root: ET.Element,
 ) -> tuple[list[StaveBbox], dict[int, list[Glyph]], dict[str, ET.Element],
-           dict[int, list[tuple[Optional[str], tuple[str, ...]]]]]:
+           dict[int, list[tuple[Optional[str], tuple[str, ...], Optional[dict]]]]]:
     """Reverse of what build_mei writes: walks an already-built MEI document
     back into (staves, glyphs_by_stave) -- the same shape build_mei
     originally took as input -- plus a glyph_id -> <neume> element map (so
     verify_and_correct_syllables can re-parent an existing, already
     pitch-computed <neume> element under a corrected <syllable> without
     recomputing pitch at all) and, per stave_idx, the CURRENT sequence of
-    (syl_text, glyph_ids) actually encoded, for comparison against a
-    freshly recomputed one.
+    (syl_text, glyph_ids, syl_box) actually encoded, for comparison against
+    a freshly recomputed one. syl_box (the syllable's own facs-linked zone,
+    {"ul": [x, y], "lr": [x, y]}, or None if it has none) lets
+    verify_and_correct_syllables's duplicate guard tell "this is the same
+    physical mothra-text box, just re-bucketed" apart from "this is a
+    different, legitimately repeated word" -- see that function's comments.
 
     Trusts the existing <sb>-delimited stave groupings as-is -- see
     verify_and_correct_syllables's docstring for why this does not redo
@@ -1679,8 +1692,16 @@ def _reconstruct_mei_state(
     staves: list[StaveBbox] = []
     zone_id_to_stave_idx: dict[str, int] = {}
     for i, zid in enumerate(staff_zone_ids):
-        ulx, uly, lrx, lry = _box(zones[zid])
-        staves.append(StaveBbox(id=zid.removeprefix("sz-"), ulx=ulx, uly=uly, lrx=lrx, lry=lry))
+        stave_id = zid.removeprefix("sz-")
+        # Prefer the raw (pre-_stave_zone_bounds) box-assignment geometry
+        # build_mei originally ran _assign_boxes_to_staves against, when
+        # present -- see build_mei's "staff-raw" zone comment (mothra#208).
+        # Falls back to the rendered zone's own (already Verovio-spacing-
+        # distorted) bounds for MEI files encoded before this fix existed,
+        # same as today's behavior.
+        raw_zone = zones.get(f"sz-raw-{stave_id}")
+        ulx, uly, lrx, lry = _box(raw_zone) if raw_zone is not None else _box(zones[zid])
+        staves.append(StaveBbox(id=stave_id, ulx=ulx, uly=uly, lrx=lrx, lry=lry))
         zone_id_to_stave_idx[zid] = i
 
     layer = root.find(f".//{ns}layer")
@@ -1699,6 +1720,13 @@ def _reconstruct_mei_state(
             elif tag == "syllable" and current_stave_idx is not None:
                 syl_el = child.find(f"{ns}syl")
                 syl_text = syl_el.text if syl_el is not None else None
+                syl_box: Optional[dict] = None
+                if syl_el is not None:
+                    syl_facs = (syl_el.get("facs") or "").lstrip("#")
+                    syl_zone = zones.get(syl_facs)
+                    if syl_zone is not None:
+                        ulx, uly, lrx, lry = _box(syl_zone)
+                        syl_box = {"ul": [ulx, uly], "lr": [lrx, lry]}
                 glyph_ids: list[str] = []
                 for neume in child.findall(f"{ns}neume"):
                     facs = (neume.get("facs") or "").lstrip("#")
@@ -1714,8 +1742,34 @@ def _reconstruct_mei_state(
                     ))
                     neume_elements[glyph_id] = neume
                     glyph_ids.append(glyph_id)
-                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids)))
+                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids), syl_box))
     return staves, glyphs_by_stave, neume_elements, current_syllables
+
+def _same_physical_box(a: dict, b: dict, min_iou: float = 0.3) -> bool:
+    """True if boxes a/b are almost certainly the same underlying
+    mothra-text detection (allowing for the sub-pixel rounding
+    scale_text_alignment's independent X/Y factors can introduce), as
+    opposed to two boxes that just happen to hold the same text -- e.g. a
+    genuinely repeated word like "Alleluia" appearing twice on the page.
+    Compared by intersection-over-union rather than exact coordinate
+    equality for exactly that rounding-tolerance reason; verify_and_
+    correct_syllables's duplicate guard needs this because a real
+    fragment-pooling duplicate is the SAME box re-bucketed to the wrong
+    stave, while a real repeated word is a DIFFERENT, spatially distant
+    box that happens to share the same syl text."""
+    ax0, ay0 = a["ul"]
+    ax1, ay1 = a["lr"]
+    bx0, by0 = b["ul"]
+    bx1, by1 = b["lr"]
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return False
+    intersection = (ix1 - ix0) * (iy1 - iy0)
+    area_a = max(ax1 - ax0, 1) * max(ay1 - ay0, 1)
+    area_b = max(bx1 - bx0, 1) * max(by1 - by0, 1)
+    union = area_a + area_b - intersection
+    return union > 0 and intersection / union >= min_iou
 
 def verify_and_correct_syllables(
         mei_bytes: bytes,
@@ -1779,12 +1833,11 @@ def verify_and_correct_syllables(
     # whether this exact text is ALREADY backed by real glyphs somewhere
     # else in the document; if so, this glyph-less copy is that duplicate,
     # not new content.
-    old_texts_with_glyphs_anywhere = {
-        syl_text
-        for stave_units in current_syllables.values()
-        for syl_text, glyph_ids in stave_units
-        if glyph_ids
-    }
+    old_boxes_with_glyphs_by_text: dict[str, list[dict]] = {}
+    for stave_units in current_syllables.values():
+        for syl_text, glyph_ids, old_box in stave_units:
+            if glyph_ids and syl_text is not None and old_box is not None:
+                old_boxes_with_glyphs_by_text.setdefault(syl_text, []).append(old_box)
 
     for stave_idx in range(len(staves)):
         neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
@@ -1829,7 +1882,7 @@ def verify_and_correct_syllables(
         # dropped the check entirely, which let the fragment-pooled
         # duplicate case back in — too broad. This is the middle ground.
         old_units = current_syllables.get(stave_idx, [])
-        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
+        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids, _ in old_units}
         reconciled_units = []
         for syl_text, box, glyphs_in_syl in new_units:
             glyph_ids = tuple(g.id for g in glyphs_in_syl)
@@ -1837,13 +1890,17 @@ def verify_and_correct_syllables(
                 old_text = old_text_by_glyphs.get(glyph_ids)
                 if syl_text == "-" and old_text not in (None, "-"):
                     syl_text = old_text
-            elif syl_text in old_texts_with_glyphs_anywhere:
+            elif box is not None and any(
+                _same_physical_box(box, old_box)
+                for old_box in old_boxes_with_glyphs_by_text.get(syl_text, [])
+            ):
                 continue
             reconciled_units.append((syl_text, box, glyphs_in_syl))
         new_units = reconciled_units
 
         new_signature = [(syl_text, tuple(g.id for g in glyphs)) for syl_text, _, glyphs in new_units]
-        if new_signature == current_syllables.get(stave_idx, []):
+        old_signature = [(syl_text, glyph_ids) for syl_text, glyph_ids, _ in old_units]
+        if new_signature == old_signature:
             continue # matches mothra-text
 
         children = list(layer)
