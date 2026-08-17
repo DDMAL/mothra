@@ -275,6 +275,12 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
         "staging_id": staging_id,
         "ic_url": f"{IC_PUBLIC_URL}/?staged={staging_id}&embed=1",
         "resumed": False,
+        # mothra#220 DL-1: ann_format is "json" only on generate_bboxes()'s
+        # placeholder-grid fallback (no real YOLO detections exist yet for
+        # this page) -- surfaced so InteractiveClassifier.tsx can show an
+        # unmissable "no prediction ran" banner instead of a fabricated grid
+        # silently looking like real detections.
+        "synthetic": ann_format == "json",
     }
 
 

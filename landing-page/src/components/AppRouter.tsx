@@ -32,7 +32,11 @@ import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 
-const STEP_TIMING = { intervalMs: 60, completionDelayMs: 4000 } as const;
+// completionDelayMs used to be 4000 -- a purely cosmetic pause after the real
+// work already finished, per mothra#220 DL-10. Trimmed to a brief settle
+// animation instead (<1s, matching ProcessingPage's own progress-bar
+// transition duration) so "done" reads as done.
+const STEP_TIMING = { intervalMs: 60, completionDelayMs: 500 } as const;
 
 // Dev escape hatch for machines that can't run ultralytics: when set, the
 // predict/processing step is bypassed and "Continue" on a fresh project jumps

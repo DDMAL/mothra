@@ -57,6 +57,12 @@ export default function InteractiveClassifier({
   });
   const [icUrl, setIcUrl] = useState<string | null>(null);
   const [icOrigin, setIcOrigin] = useState<string | null>(null);
+  // True when /ic/start staged a fabricated placeholder bbox grid instead of
+  // real YOLO detections (no predict run has happened for this page yet --
+  // the VITE_SKIP_PREDICT dev bypass, or a page reached here some other way
+  // with no annotation row). Not reported on a *resumed* session (IC's own
+  // staging service doesn't track this after the fact) -- mothra#220 DL-1.
+  const [synthetic, setSynthetic] = useState(false);
   // Set only once the user finishes IC's create-session screen (the iframe
   // posts it back); until then there's nothing to encode.
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -107,6 +113,7 @@ export default function InteractiveClassifier({
     setIcUrl(null);
     setIcOrigin(null);
     setSessionId(null);
+    setSynthetic(false);
 
     apiFetch(`/api/projects/${projectId}/ic/start`, {
       method: "POST",
@@ -121,6 +128,7 @@ export default function InteractiveClassifier({
       .then((data) => {
         if (seq !== startSeq.current) return; // superseded by a newer page
         setIcUrl(data.ic_url);
+        setSynthetic(Boolean(data.synthetic));
         try {
           setIcOrigin(new URL(data.ic_url).origin);
         } catch {
@@ -337,7 +345,17 @@ export default function InteractiveClassifier({
       </div>
 
       {/* canvas */}
-      <div className="flex-1 min-h-[750px] bg-[#1D3335] mx-6 rounded-2xl flex flex-col overflow-hidden">
+      <div className="relative flex-1 min-h-[750px] bg-[#1D3335] mx-6 rounded-2xl flex flex-col overflow-hidden">
+        {/* mothra#220 DL-1: the fabricated placeholder bbox grid (no real
+            predict run for this page -- generate_bboxes()'s fallback) must
+            never look like real detections. Overlaid, not just a normal
+            list item, so it can't be scrolled past or missed. */}
+        {synthetic && icUrl && (
+          <div className="absolute top-0 left-0 right-0 z-10 bg-yellow-400 text-[#1D3335] text-sm font-semibold text-center py-1.5">
+            SYNTHETIC — no prediction ran for this page; the boxes below are a
+            placeholder grid, not real detections
+          </div>
+        )}
         {/* IC editor area */}
         <div className="flex-1 min-h-0 flex items-stretch justify-stretch overflow-hidden">
           {images.length === 0 ? (

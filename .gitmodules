@@ -7,6 +7,15 @@
 [submodule "mothra-text"]
 	path = mothra-text
 	url = https://github.com/DDMAL/mothra-text.git
+# mothra#220 DL-3: pinned to a personal branch (not main/a tag) because it
+# ships the production model.h5 weights this submodule bundles -- see
+# CLAUDE.md's "Updating the bundled medieval models"-adjacent staffline
+# section and documentation_allons-y/ALPHA_TRANSITION_PLAN.md's decision log.
+# Decided 2026-08-17: FREEZE this pin -- no `git submodule update --remote`
+# bumps -- until gianna/calvo-training-script merges upstream to main/a
+# tagged release, then re-pin there. A full CODEOWNERS mapping (including
+# this submodule) is tracked separately under Phase 6 repo-professionalization
+# work, not created here.
 [submodule "paco-classifier"]
 	path = paco-classifier
 	url = https://github.com/DDMAL/Paco_classifier.git
