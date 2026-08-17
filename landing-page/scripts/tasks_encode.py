@@ -285,7 +285,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "log", "message": "MEI built successfully" if not validation_warnings else "MEI built with warnings"})
         mei_b64 = base64.b64encode(mei_bytes_out).decode()
         manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
-        session_put(session_id, mei_bytes_out, stem, manifest)
+        session_put(session_id, mei_bytes_out, stem, manifest, project_id=project_id)
 
         result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest, "stave_source": stave_source}
         if include_name_fields:
