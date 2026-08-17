@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 export type IcMode = "auto" | "manual";
+export type NotationType = "square" | "hufnagel";
 
 export interface IcSettings {
   /** "auto" skips the classifier interface entirely — every page is
@@ -9,6 +10,13 @@ export interface IcSettings {
   mode: IcMode;
   trainingPresets: string[];
   trainingFiles: File[];
+  /** Which bundled neume-to-MEI mapping the encoder uses (see
+   *  encode_to_mei.py's resolve_neume_mapping) — a project-wide choice made
+   *  once here, same as mode/training set above, rather than per-page or
+   *  per-encode-run (mothra#210: it used to live disconnected on each IC
+   *  view's own local state, so auto mode — the default — had no way to
+   *  set it at all). */
+  notationType: NotationType;
 }
 
 /**
@@ -26,6 +34,7 @@ export function useIcSettings() {
   const [mode, setMode] = useState<IcMode>("auto");
   const [trainingPresets, setTrainingPresets] = useState<string[]>([]);
   const [trainingFiles, setTrainingFiles] = useState<File[]>([]);
+  const [notationType, setNotationType] = useState<NotationType>("square");
 
   return {
     mode,
@@ -34,6 +43,8 @@ export function useIcSettings() {
     setTrainingPresets,
     trainingFiles,
     setTrainingFiles,
+    notationType,
+    setNotationType,
     // "the user made a settings choice" — what gates auto mode (classify
     // needs a non-empty training pool) and what decides whether the manual
     // classifier gets a prefill at all.

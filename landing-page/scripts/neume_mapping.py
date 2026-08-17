@@ -11,14 +11,13 @@ whole point of moving to CSVs is that a new attribute or notation type
 shouldn't need a code change here.
 
 The `width` column (bbox-splitting for a <zone> per component; see the
-issue's discussion) is parsed and kept on NeumeEntry.width but is NOT acted
-on yet — every <nc> in a multi-component neume still points at one shared
-glyph zone, same as before this module existed. Wiring that up is a
-separate, later step.
+issue's discussion) is parsed, kept on NeumeEntry.width, and consumed by 
+encode_to_mei.py's _component_zone_ids(), with graceful fallback on mismatch.
 """
 from __future__ import annotations
 
 import csv
+import json
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -102,6 +101,28 @@ def load_neume_mapping(csv_path: Path) -> dict[str, NeumeEntry]:
                 width=(row.get("width") or "").strip()
             )
     return mapping
+
+def parse_width(raw: str) -> list[float] | None:
+    """Parse a CSV row's width column into a list of relative horizontal
+    weights, one per <nc> component (e.g. "[1, 1]" -> [1.0, 1.0]), for
+    splitting a compound neume's glyph zone into side-by-side per-component
+    sub-zones (see encode_to_mei.py's build_mei). Returns None for anything
+    that isn't a bracketed list -- single-component rows use a bare scalar
+    like "1" or "2" in the bundled CSVs, and there's nothing to split for
+    one component, so a plain scalar is "no width data", not an error --
+    or that fails to parse as JSON."""
+    raw = (raw or "").strip()
+    if not raw.startswith("["):
+        return None
+    try: 
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, list) or not parsed or not all(
+        isinstance(v, (int, float)) for v in parsed
+    ):
+        return None
+    return [float(v) for v in parsed]
 
 _BUNDLED_CSVS = {
     "square": "square.csv",

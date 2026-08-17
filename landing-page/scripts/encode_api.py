@@ -34,6 +34,7 @@ async def encode_upload(
     image_name: Optional[str] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
+    notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
 ):
     xml_bytes = await xml_file.read()
@@ -58,6 +59,7 @@ async def encode_upload(
         "image_name": image_name,
         "clef_shape": clef_shape,
         "clef_line": clef_line,
+        "notation_type": notation_type,
         "allow_synthetic_lines": allow_synthetic_lines,
     }
     create_job(job_id, "encode_upload", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates
@@ -100,6 +102,7 @@ async def encode_batch(
     project_id: Optional[int] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
+    notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
 ):
     if len(xml_files) != len(image_files):
@@ -127,13 +130,14 @@ async def encode_batch(
             "image_filename": img.filename,
             "image_name": name,
         })
-    
+
     job_id = new_job_id()
     kwargs = {
         "items": items,
         "project_id": project_id,
         "clef_shape": clef_shape,
         "clef_line": clef_line,
+        "notation_type": notation_type,
         "allow_synthetic_lines": allow_synthetic_lines,
     }
     create_job(job_id, "encode_batch", project_id, params=kwargs)  # dedupe_seconds=0 (default): always creates

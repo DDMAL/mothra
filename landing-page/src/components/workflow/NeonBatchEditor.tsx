@@ -24,6 +24,42 @@ interface NeonBatchEditorProps {
 const BTN_BASE =
   "px-3.5 py-1.5 rounded-md text-white text-[13px] whitespace-nowrap";
 
+// Neon's own Square/Hufnagel font toggle (its Display panel's "notation"
+// dropdown -- see neon/src/DisplayPanel/DisplayControls.ts's
+// setNotationTypeControls()) only ever reflects a per-BROWSER LocalSettings
+// value from whichever option was last clicked -- it never looks at the
+// document it just loaded, so switching between a square- and a
+// hufnagel-encoded file here would otherwise keep whatever font the last
+// file happened to leave selected. Mirrors triggerNeonSave() below: drive
+// Neon's own UI via a synthetic DOM interaction inside the iframe's
+// contentDocument rather than patching the neon submodule itself.
+//
+// notationtype is read straight off the MEI's own <staffDef> (written by
+// encode_to_mei.py's build_mei -- see mothra#210) rather than threaded
+// through as a separate prop, since the MEI itself is the single source of
+// truth for which notation a given file actually uses.
+function applyNotationTypeFont(iframe: HTMLIFrameElement, xmlContent?: string) {
+  if (!xmlContent) return;
+  const isHufnagel = /notationtype="neume\.hufnagel"/.test(xmlContent);
+  const targetId = isHufnagel ? "notation-type-hufnagel" : "notation-type-square";
+  // Neon's Display panel doesn't exist yet the instant the iframe's `load`
+  // event fires -- its own manifest fetch + NeonView/SingleView init still
+  // need to run inside the iframe first. Poll briefly rather than assume a
+  // fixed delay (matches the tolerance markCurrentDone() already gives
+  // Neon's own async save, just for the opposite direction: waiting for
+  // something to appear instead of finish).
+  let attempts = 0;
+  const tryClick = () => {
+    const el = iframe.contentDocument?.getElementById(targetId);
+    if (el) {
+      el.click();
+      return;
+    }
+    if (attempts++ < 40) setTimeout(tryClick, 250);
+  };
+  tryClick();
+}
+
 export default function NeonBatchEditor({
   project,
   meiFiles,
@@ -233,6 +269,9 @@ export default function NeonBatchEditor({
           src={`/neon/editor.html?manifest=${currentSession.session_id}`}
           className="flex-1 border-none w-full"
           title={`Neon editor - ${currentFile?.name ?? ""}`}
+          onLoad={(e) =>
+            applyNotationTypeFont(e.currentTarget, currentFile?.xmlContent)
+          }
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-[#ef4444]">

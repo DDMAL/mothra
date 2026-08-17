@@ -38,7 +38,7 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 import sys
 
-from neume_mapping import NcTemplate, resolve_neume_mapping
+from neume_mapping import NcTemplate, resolve_neume_mapping, parse_width
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
@@ -1007,6 +1007,58 @@ def _component_pitches(
         pitches.append(_pitch_from_step(step, clef_note, clef_oct))
     return pitches
 
+def _component_zone_ids(
+    surface: ET.Element,
+    glyph: Glyph,
+    components: list[NcTemplate],
+    width_raw: Optional[str],
+) -> Optional[list[str]]:
+    """For a multi-component neume (clivis, podatus, torculus, ...), split
+    the glyph's own zone horizontally into one side-by-side sub-zone per
+    component, proportional to the mapping CSV's width column (e.g.
+    "[1, 1]" -> two equal-width halves), registering each as a new <zone>
+    under `surface`. Returns None (caller falls back to the single shared
+    "z-{glyph.id}" zone, today's pre-existing behaviour) whenever there's
+    nothing to split: a single-component neume, no width column for this
+    classification, or a width list that doesn't parse or whose length
+    doesn't match the component count (e.g. square.csv's
+    neume.scandicus22a/22b: a "[1, 2]"/2-weight width against 3 <nc>
+    components -- a real, pre-existing inconsistency in the bundled CSV
+    data, not something to silently paper over here).
+
+    Only the horizontal (x) extent is split -- the full glyph height is
+    kept for every sub-zone. Pitch is unaffected either way: pname/oct
+    already come from @intm-chaining in _component_pitches, entirely
+    independent of zone geometry -- these sub-zones only change where a
+    component's bounding box points for facsimile display/click-to-
+    correct in Neon."""
+    if len(components) <= 1:
+        return None
+    weights = parse_width(width_raw) if width_raw else None
+    if weights is None or len(weights) != len(components):
+        return None
+    total = sum(weights)
+    if total <= 0:
+        return None
+    span = glyph.lrx - glyph.ulx
+    zone_ids = []
+    x = glyph.ulx
+    cumulative = 0.0
+    for j, w in enumerate(weights):
+        cumulative += w
+        x_next = glyph.ulx + round(span * cumulative / total)
+        zone_id = f"z-{glyph.id}-{j}"
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: zone_id,
+            "ulx": str(round(x)),
+            "uly": str(glyph.uly),
+            "lrx": str(round(x_next)),
+            "lry": str(glyph.lry),
+        })
+        zone_ids.append(zone_id)
+        x = x_next
+    return zone_ids
+    
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
 
@@ -1028,6 +1080,7 @@ def build_mei(
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
     neume_mapping = resolve_neume_mapping(notation_type)
     missing_classes: set[str] = set()
+    mismatched_widths: set[str] = set()
 
     # meiHead
 
@@ -1142,7 +1195,17 @@ def build_mei(
         XML_ID: f"staffdef-{staff_grp_id}",
         "n": "1",
         "lines": str(STAFF_LINES),
-        "notationtype": "neume",
+        # Neon (landing-page/neon submodule)'s own font-selection code
+        # (ConvertMei.ts's stripHufnagelForVerovio/setNotationTypeInMei)
+        # keys off this exact "neume.square"/"neume.hufnagel" suffix on
+        # <staffDef> to pick which notation font to render with -- a bare
+        # "neume" (Neon's Verovio-compatibility working copy value, not a
+        # real subtype) tells it nothing, so every generated MEI rendered
+        # identically regardless of notation_type until this matched
+        # Neon's own convention (mothra#210).
+        "notationtype": (
+            f"neume.{notation_type}" if notation_type in ("square", "hufnagel") else "neume"
+        ),
         "clef.shape": clef_shape,
         "clef.line": str(clef_line),
     })
@@ -1264,11 +1327,18 @@ def build_mei(
                     missing_classes.add(glyph.class_name)
                 anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
                 pitches = _component_pitches(anchor_step, components)
+                component_zone_ids = _component_zone_ids(
+                    surface, glyph, components,
+                    entry.width if entry is not None else None,
+                )
+                if len(components) > 1 and component_zone_ids is None:
+                    mismatched_widths.add(glyph.class_name)
                 for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
                     nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
+                    zone_id = component_zone_ids[j] if component_zone_ids is not None else f"z-{glyph.id}"
                     nc_attrs: dict[str, str] = {
                         XML_ID: f"nc-{nc_id}",
-                        "facs": f"#z-{glyph.id}",
+                        "facs": f"#{zone_id}",
                         "pname": pname,
                         "oct": oct_str,
                     }
@@ -1281,6 +1351,13 @@ def build_mei(
         print(
             f" [neume-mapping:{notation_type}] {len(missing_classes)} classification(s) not found in "
             f"the mapping — encoded as a single plain <nc>: {', '.join(sorted(missing_classes))}",
+            file=sys.stderr,
+        )
+    if mismatched_widths:
+        print(
+            f" [neume-mapping:{notation_type}] {len(mismatched_widths)} classification(s) have a width column "
+            f"that doesn't match their component count — encoded with a shared (unsplit) zone: "
+            f"{', '.join(sorted(mismatched_widths))}",
             file=sys.stderr,
         )
 
