@@ -26,11 +26,8 @@ like a stream_text_finding failure would.
 
 import json
 import numpy as np
-import psycopg2
 import uuid as _uuid
 from typing import Callable, Iterator, Optional
-
-import numpy as np
 
 from job_store import check_cancelled, JobCancelled
 
@@ -532,6 +529,13 @@ def persist_staffline_detection(cur, con, project_id: str, image_id: str, image_
     call itself failed and fell back to the raw page. Stored verbatim (no
     re-encoding) so it's byte-identical to what paco-classifier-service
     actually returned."""
+    # Local import, not module-level: this module's own docstring documents
+    # that heavy/DB-adjacent imports stay deferred into function bodies, so
+    # merely importing staffline_stage never requires a Postgres driver to
+    # be installed (test_staffline_stage_flags.py and other DB-independent
+    # tests rely on this). mothra#207 added this as a top-level import,
+    # which broke that contract -- moved back down here on merge.
+    import psycopg2
     new_id = _uuid.uuid4().hex
     records = computed["records"]
     cur.execute(
@@ -699,6 +703,7 @@ def run_staffline_detection(
     except Exception as e:
         con.rollback()
         try:
+            import psycopg2  # local import, see persist_staffline_detection's comment
             cur.execute(
                 "INSERT INTO staffline_detections"
                 " (id, project_id, image_id, image_name, annotation_id, jsomr_json,"
