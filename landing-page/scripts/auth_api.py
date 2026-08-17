@@ -48,14 +48,28 @@ def release_db_conn(con) -> None:
 
 router = APIRouter()
 
-# Falls back to a fresh random secret rather than refusing to start, so a
-# bare local checkout with no .env still runs. Cost: this evaluates at
-# import time, so any process started without MOTHRA_SECRET set (backend,
-# worker, a future replica) gets its OWN random secret -- silently
-# invalidating every previously-issued access/refresh token and Neon
-# edit-session token on that process's next restart, with no error to flag
-# it as a misconfiguration rather than "random logouts after every deploy."
-SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
+def _require_secret_key() -> str:
+    """MOTHRA_SECRET signs every access/refresh token and Neon edit-session
+    token. This used to fall back to a fresh secrets.token_hex(32) so a bare
+    local checkout with no .env still ran -- but that fallback evaluates at
+    import time, so any process started without MOTHRA_SECRET set (backend,
+    worker, a future replica) got its OWN random secret, silently
+    invalidating every previously-issued token on that process's next
+    restart with no error to flag it as a misconfiguration rather than
+    "random logouts after every deploy." Fails fast instead, like
+    DATABASE_URL above."""
+    key = os.environ.get("MOTHRA_SECRET")
+    if not key:
+        raise RuntimeError(
+            "MOTHRA_SECRET is not set. Set it in landing-page/scripts/.env "
+            "(see ../README.md's Prerequisites) or the process environment "
+            "before starting the backend/worker -- there is no safe default, "
+            "since a randomly-generated one would silently invalidate every "
+            "issued token on the next restart."
+        )
+    return key
+
+SECRET_KEY = _require_secret_key()
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
