@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File as FAPIFile, Form
+from fastapi import APIRouter, Depends, UploadFile, File as FAPIFile, Form
 from fastapi.responses import Response, JSONResponse
 from pathlib import Path
 import sys
@@ -6,13 +6,10 @@ import uuid as _uuid
 from typing import Optional
 import xml.etree.ElementTree as ET
 
-from config import MOCK_DATA_DIR
+from auth_api import get_current_user, db_cursor, require_project_owner
 sys.path.insert(0, str(Path(__file__).parent))
-from encode_to_mei import (
-    parse_gamera_xml, parse_staves, assign_glyphs_to_staves, build_mei,
-    build_neon_manifest, validate_mei,
-)
-from job_store import stage_upload, session_get, manifest_get, new_job_id, create_job
+from encode_to_mei import validate_mei
+from job_store import stage_upload, session_get, manifest_get, session_project_id, new_job_id, create_job
 from tasks_encode import run_encode_upload_task, run_encode_batch_task
 
 router = APIRouter()
@@ -35,15 +32,6 @@ def _check_notation_type(notation_type: Optional[str]) -> Optional[JSONResponse]
     return None
 
 
-@router.post("/encode")
-def encode():
-    glyphs = parse_gamera_xml(MOCK_DATA_DIR / "mock_page.xml")
-    staves, image_w, image_h = parse_staves(MOCK_DATA_DIR / "mock_staves.json")
-    glyphs_by_stave, staves = assign_glyphs_to_staves(glyphs, staves, image_w, image_h)
-    image_path = MOCK_DATA_DIR / "mock_page.jpg"
-    mei_bytes = build_mei(glyphs_by_stave, staves, image_path, image_w, image_h, "mock_page")
-    return build_neon_manifest(mei_bytes, str(image_path), "mock_page")
-
 @router.post("/encode-upload")
 async def encode_upload(
     xml_file: UploadFile = FAPIFile(...),
@@ -54,7 +42,14 @@ async def encode_upload(
     clef_line: Optional[int] = Form(None),
     notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
+    user=Depends(get_current_user),
 ):
+    # project_id is optional (an ad-hoc encode with no project context is a
+    # real, supported flow -- see AppRouter.tsx's encode-upload kickoff) --
+    # only check ownership when a project is actually named.
+    if project_id is not None:
+        with db_cursor() as (con, cur):
+            require_project_owner(cur, project_id, user["id"])
     if (err := _check_notation_type(notation_type)) is not None:
         return err
 
@@ -88,7 +83,7 @@ async def encode_upload(
     return JSONResponse({"job_id": job_id})
 
 @router.post("/validate-mei")
-async def validate_mei_endpoint(file: UploadFile = FAPIFile(...)):
+async def validate_mei_endpoint(file: UploadFile = FAPIFile(...), user=Depends(get_current_user)):
     xml_bytes = await file.read()
     try:
         ET.fromstring(xml_bytes)
@@ -97,15 +92,33 @@ async def validate_mei_endpoint(file: UploadFile = FAPIFile(...)):
     warnings = validate_mei(xml_bytes)
     return {"valid": len(warnings) == 0, "warnings": warnings}
 
+def _check_session_owner(session_id: str, user_id: int) -> Optional[JSONResponse]:
+    """Returns a 404/403 response if this session_id doesn't exist or belongs
+    to a project this user doesn't own; None if the caller may proceed.
+    A session with no recorded project_id (predates mothra#220's job_sessions
+    migration) is allowed through rather than denied -- see auth_api.py's
+    _ADDED_COLUMNS entry for job_sessions.project_id."""
+    info = session_project_id(session_id)
+    if not info["exists"]:
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    if info["project_id"] is not None:
+        with db_cursor() as (con, cur):
+            require_project_owner(cur, info["project_id"], user_id)
+    return None
+
 @router.get("/manifest/{session_id}")
-def get_manifest(session_id: str):
+def get_manifest(session_id: str, user=Depends(get_current_user)):
+    if (err := _check_session_owner(session_id, user["id"])) is not None:
+        return err
     manifest = manifest_get(session_id)
     if manifest is not None:
         return JSONResponse(content=manifest)
     return JSONResponse(status_code=404, content={"error": "manifest not found"})
 
 @router.get("/mei/{session_id}")
-def get_mei(session_id: str):
+def get_mei(session_id: str, user=Depends(get_current_user)):
+    if (err := _check_session_owner(session_id, user["id"])) is not None:
+        return err
     s = session_get(session_id)
     if s is None:
         return JSONResponse(status_code=404, content={"error": "not found"})
@@ -125,7 +138,13 @@ async def encode_batch(
     clef_line: Optional[int] = Form(None),
     notation_type: Optional[str] = Form(None),
     allow_synthetic_lines: bool = Form(False),
+    user=Depends(get_current_user),
 ):
+    # see encode_upload above: project_id is optional, ownership is only
+    # checked when one is actually given.
+    if project_id is not None:
+        with db_cursor() as (con, cur):
+            require_project_owner(cur, project_id, user["id"])
     if len(xml_files) != len(image_files):
         return JSONResponse(status_code=400, content={
             "error": f"xml_files ({len(xml_files)}) and image_files ({len(image_files)}) must be the same length",

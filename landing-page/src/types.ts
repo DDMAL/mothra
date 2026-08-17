@@ -131,5 +131,4 @@ export type View =
   | "encoding-completion"
   | "send-completion"
   | "neon-editor"
-  | "neon-completion"
-  | "neon-test";
+  | "neon-completion";
