@@ -117,22 +117,64 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
             if current_annotation_id is not None:
                 try:
                     cur.execute(
-                        "SELECT jsomr_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
+                        "SELECT jsomr_json, settings_json FROM staffline_detections WHERE image_name=%s AND project_id=%s"
                         " AND status='succeeded' AND annotation_id=%s ORDER BY created_at DESC, id DESC LIMIT 1",
                         (image_name, project_id, current_annotation_id),
                     )
                     row = cur.fetchone()
                     if row and row[0]:
                         jsomr_records = row[0] if isinstance(row[0], list) else json.loads(row[0])
-                        yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
-                        if yolo_stave_hints:
-                            stave_source = "staffline_detection"
-                        if ev:
-                            ev({"type": "log", "message":
-                                f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
-                                f" -> {len(yolo_stave_hints)} stave(s) out"})
-                except Exception:
-                    pass
+                        settings = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
+                        # SF-7 fix: tier-1 JSOMR pixel coordinates are in the
+                        # PREDICT-TIME image's frame, but page_w/page_h here
+                        # come from a separate ENCODE-TIME upload -- these can
+                        # be different resolutions of the same page (or, more
+                        # rarely, an actually different image). Compare
+                        # against the predict-time dimensions recorded
+                        # alongside this row (added by staffline_stage.py;
+                        # absent on rows written before this fix, which fall
+                        # through to the pre-existing unchanged behavior).
+                        predict_w = settings.get("predict_image_width")
+                        predict_h = settings.get("predict_image_height")
+                        frame_ok = True
+                        if predict_w and predict_h and page_w and page_h:
+                            if predict_w == page_w and predict_h == page_h:
+                                pass  # exact match, most common case -- no scaling needed
+                            else:
+                                predict_aspect = predict_w / predict_h
+                                encode_aspect = page_w / page_h
+                                aspect_delta = abs(predict_aspect - encode_aspect) / encode_aspect
+                                if aspect_delta <= staffline_adapter.ASPECT_RATIO_TOLERANCE:
+                                    scale_x, scale_y = page_w / predict_w, page_h / predict_h
+                                    jsomr_records = staffline_adapter.scale_jsomr_records(jsomr_records, scale_x, scale_y)
+                                    print(
+                                        f"[resolve-hints] {image_name}: tier-1 JSOMR was computed at "
+                                        f"{predict_w}x{predict_h}px, encode-time image is {page_w}x{page_h}px -- "
+                                        f"scaled by ({scale_x:.4f}, {scale_y:.4f})", file=sys.stderr,
+                                    )
+                                else:
+                                    frame_ok = False
+                                    print(
+                                        f"[resolve-hints] {image_name}: tier-1 JSOMR frame mismatch -- predict-time "
+                                        f"{predict_w}x{predict_h}px vs encode-time {page_w}x{page_h}px "
+                                        f"(aspect delta {aspect_delta:.3f} exceeds tolerance) -- rejecting tier 1,"
+                                        f" falling through to tier 2", file=sys.stderr,
+                                    )
+                        if frame_ok:
+                            yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
+                            if yolo_stave_hints:
+                                stave_source = "staffline_detection"
+                            if ev:
+                                ev({"type": "log", "message":
+                                    f"[trace] {image_name}: staves_from_jsomr: {len(jsomr_records)} JSOMR record(s) in"
+                                    f" -> {len(yolo_stave_hints)} stave(s) out"})
+                except Exception as e:  # noqa: BLE001 - SF-7 fix: was a bare
+                    # `except: pass`, unlike this function's two other lookups
+                    # above -- any tier-1 failure (malformed JSOMR, a
+                    # staves_from_jsomr crash, etc.) now falls through to
+                    # tier 2 exactly as before, but is logged instead of
+                    # silently swallowed.
+                    print(f"[resolve-hints] {image_name}: staffline-detection lookup failed: {e!r}", file=sys.stderr)
             if not yolo_stave_hints and current_yolo_txt:
                 yolo_stave_hints = parse_yolo_stave_hints(current_yolo_txt, page_w, page_h)
                 if yolo_stave_hints:
