@@ -223,6 +223,7 @@ def init_db():
                 mei_bytes BYTEA NOT NULL,
                 stem TEXT NOT NULL,
                 manifest JSONB,
+                project_id INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
@@ -318,6 +319,14 @@ _ADDED_COLUMNS = [
     ("jobs",            "params",                "JSONB"),
     ("jobs",            "retry_of",              "TEXT REFERENCES jobs(job_id)"),
     ("jobs",            "attempt",               "INTEGER NOT NULL DEFAULT 1"),
+
+    # job_sessions.project_id backs encode_api.py's /manifest, /mei ownership
+    # checks (mothra#220 row 25) -- NULL on rows written before this column
+    # existed, which encode_api.py treats as "no recorded owner, allow" rather
+    # than a hard 403 (see get_manifest/get_mei) since job_sessions' 14-day
+    # cleanup (job_store.cleanup_stale_sessions) already bounds how long any
+    # ownerless row can exist.
+    ("job_sessions",    "project_id",            "INTEGER"),
 ]
 
 
