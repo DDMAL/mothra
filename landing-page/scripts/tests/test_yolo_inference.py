@@ -1,12 +1,20 @@
-"""Regression test for yolo_inference.py's conf= passthrough.
+"""Regression tests for yolo_inference.py's conf= passthrough and RGB/BGR
+color-order conversion.
 
-infer()/infer_text_music()/infer_staves() used to call the Ultralytics model
-bare (no conf=), so Ultralytics' own internal default (0.25) governed
-candidate generation regardless of what a caller configured; _append_boxes()
-only discarded boxes below the configured threshold afterward, in Python.
-That meant the effective confidence floor could never go below 0.25 no matter
-what was configured. The fix passes conf= directly into the model call,
-matching infer_staves_raw_boxes()'s already-correct pattern.
+conf= passthrough: infer()/infer_text_music()/infer_staves() used to call the
+Ultralytics model bare (no conf=), so Ultralytics' own internal default (0.25)
+governed candidate generation regardless of what a caller configured;
+_append_boxes() only discarded boxes below the configured threshold
+afterward, in Python. That meant the effective confidence floor could never
+go below 0.25 no matter what was configured. Fixed by passing conf= directly
+into the model call.
+
+RGB/BGR: every image array in this codebase is canonically RGB (PIL's
+default), but Ultralytics treats a raw array input as already BGR (matching
+what its own file-path loader produces via cv2). infer()/infer_text_music()/
+infer_staves()/infer_staves_raw_boxes() now convert via to_bgr() right before
+each model call (see issue #200) -- these tests lock in that every one of
+them does so, and that the caller's original array is never mutated.
 
 yolo_inference.py imports models_api at module scope, which imports auth_api
 (DB side effects at import). This stubs models_api as a bare stand-in in
@@ -26,6 +34,8 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 if "models_api" not in sys.modules:
@@ -34,7 +44,7 @@ if "models_api" not in sys.modules:
     sys.modules["models_api"] = models_api_stub
 
 sys.modules.pop("yolo_inference", None)
-from yolo_inference import YoloModelSet, _append_boxes  # noqa: E402
+from yolo_inference import YoloModelSet, _append_boxes, to_bgr  # noqa: E402
 
 
 class _TensorLike(list):
@@ -58,16 +68,32 @@ class FakeResult:
 
 
 class FakeYoloModel:
-    """Records the conf= it was called with; returns a fixed empty result."""
+    """Records the conf= and array it was called with (via either the bare
+    __call__ shorthand or .predict()); returns a fixed empty result."""
 
     def __init__(self):
         self.last_conf = None
+        self.last_arr = None
         self.call_count = 0
 
     def __call__(self, img_arr, conf=None, device=None, verbose=False):
         self.last_conf = conf
+        self.last_arr = img_arr
         self.call_count += 1
         return [FakeResult(boxes=[])]
+
+    def predict(self, source, conf=None, iou=None, imgsz=None, device=None,
+                save=False, verbose=False):
+        self.last_conf = conf
+        self.last_arr = source
+        self.call_count += 1
+        return [FakeResult(boxes=[])]
+
+
+def _rgb_pixel():
+    """A tiny, real (not opaque-sentinel) RGB image: one pixel, distinct
+    channel values so a channel reversal is unambiguous to assert on."""
+    return np.array([[[10, 20, 30]]], dtype=np.uint8)
 
 
 def _medieval_model_set(tm_threshold, st_threshold):
@@ -88,7 +114,7 @@ def test_infer_passes_conf_to_both_medieval_models():
     model_set, tm_model, st_model = _medieval_model_set(
         tm_threshold=0.10, st_threshold=0.20,
     )
-    model_set.infer(img_arr=object())
+    model_set.infer(img_arr=_rgb_pixel())
     assert tm_model.last_conf == 0.10
     assert st_model.last_conf == 0.20
 
@@ -97,7 +123,7 @@ def test_infer_text_music_passes_conf_to_text_music_model_only():
     model_set, tm_model, st_model = _medieval_model_set(
         tm_threshold=0.10, st_threshold=0.20,
     )
-    model_set.infer_text_music(img_arr=object())
+    model_set.infer_text_music(img_arr=_rgb_pixel())
     assert tm_model.last_conf == 0.10
     assert st_model.call_count == 0
 
@@ -106,19 +132,19 @@ def test_infer_staves_passes_conf_to_stave_model_only():
     model_set, tm_model, st_model = _medieval_model_set(
         tm_threshold=0.10, st_threshold=0.20,
     )
-    model_set.infer_staves(img_arr=object())
+    model_set.infer_staves(img_arr=_rgb_pixel())
     assert st_model.last_conf == 0.20
     assert tm_model.call_count == 0
 
 
 def test_infer_below_quarter_threshold_reaches_the_model_call():
-    """The whole point of the fix: a threshold below Ultralytics' own
-    internal 0.25 default must reach the actual model call, not get
-    silently clamped."""
+    """The whole point of the earlier conf= fix: a threshold below
+    Ultralytics' own internal 0.25 default must reach the actual model
+    call, not get silently clamped."""
     model_set, tm_model, st_model = _medieval_model_set(
         tm_threshold=0.05, st_threshold=0.05,
     )
-    model_set.infer(img_arr=object())
+    model_set.infer(img_arr=_rgb_pixel())
     assert tm_model.last_conf == 0.05
     assert st_model.last_conf == 0.05
 
@@ -133,7 +159,7 @@ def test_infer_custom_model_passes_confidence_threshold():
         confidence_threshold=0.15, device="cpu",
         stored_model_id="model-1", model_label="custom", model_hash="hash",
     )
-    model_set.infer(img_arr=object())
+    model_set.infer(img_arr=_rgb_pixel())
     assert single_model.last_conf == 0.15
 
 
@@ -153,3 +179,68 @@ def test_append_boxes_skips_when_no_boxes():
     assert lines == []
     _append_boxes(lines, FakeResult(boxes=None), {0: 0})
     assert lines == []
+
+
+def test_to_bgr_reverses_channels_without_mutating_input():
+    rgb = _rgb_pixel()
+    bgr = to_bgr(rgb)
+    assert bgr[0, 0].tolist() == [30, 20, 10]
+    assert rgb[0, 0].tolist() == [10, 20, 30]
+
+
+def test_infer_converts_rgb_to_bgr_for_both_medieval_models():
+    model_set, tm_model, st_model = _medieval_model_set(
+        tm_threshold=0.10, st_threshold=0.20,
+    )
+    rgb = _rgb_pixel()
+    model_set.infer(img_arr=rgb)
+    assert tm_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert st_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert rgb[0, 0].tolist() == [10, 20, 30]
+
+
+def test_infer_converts_rgb_to_bgr_for_custom_model():
+    single_model = FakeYoloModel()
+    model_set = YoloModelSet(
+        medieval_models=None, class_maps=None,
+        single_model=single_model, custom_cls_map={0: 0},
+        tm_threshold=0.5, tm_device="cpu",
+        st_threshold=0.5, st_device="cpu",
+        confidence_threshold=0.15, device="cpu",
+        stored_model_id="model-1", model_label="custom", model_hash="hash",
+    )
+    rgb = _rgb_pixel()
+    model_set.infer(img_arr=rgb)
+    assert single_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert rgb[0, 0].tolist() == [10, 20, 30]
+
+
+def test_infer_text_music_converts_rgb_to_bgr():
+    model_set, tm_model, st_model = _medieval_model_set(
+        tm_threshold=0.10, st_threshold=0.20,
+    )
+    rgb = _rgb_pixel()
+    model_set.infer_text_music(img_arr=rgb)
+    assert tm_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert rgb[0, 0].tolist() == [10, 20, 30]
+
+
+def test_infer_staves_converts_rgb_to_bgr():
+    model_set, tm_model, st_model = _medieval_model_set(
+        tm_threshold=0.10, st_threshold=0.20,
+    )
+    rgb = _rgb_pixel()
+    model_set.infer_staves(img_arr=rgb)
+    assert st_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert rgb[0, 0].tolist() == [10, 20, 30]
+
+
+def test_infer_staves_raw_boxes_converts_rgb_to_bgr():
+    model_set, tm_model, st_model = _medieval_model_set(
+        tm_threshold=0.10, st_threshold=0.20,
+    )
+    rgb = _rgb_pixel()
+    model_set.infer_staves_raw_boxes(rgb, conf=0.15, iou=0.7, imgsz=1280)
+    assert st_model.last_arr[0, 0].tolist() == [30, 20, 10]
+    assert st_model.last_conf == 0.15
+    assert rgb[0, 0].tolist() == [10, 20, 30]
