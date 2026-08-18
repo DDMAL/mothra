@@ -305,8 +305,9 @@ def run_predict_task(job_id, project_id, body):
         results = []
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
-        for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original in images:
+        for idx, (image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original) in enumerate(images):
             check_cancelled(job_id)
+            publish({"type": "item_start", "item": idx, "total": len(images), "name": image_name})
             pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
             img_arr = np.array(pil_img)
             image_storage_variant = "original" if used_original else "working_copy"
@@ -405,6 +406,8 @@ def run_predict_task(job_id, project_id, body):
 
             if has_text_alignment:
                 publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
+                publish({"type": "item_done", "item": idx})
+                publish({"type": "stage_done", "name": "processing"})
                 continue
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
@@ -430,7 +433,14 @@ def run_predict_task(job_id, project_id, body):
                     publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
                 elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
                     text_debug_data[image_name] = text_ev["debug_data"]
-        publish({"type": "stage_done", "name": "processing"})
+            publish({"type": "item_done", "item": idx})
+            publish({"type": "stage_done", "name": "processing"})
+        if not images:
+            # mothra#236: no item ever ran (every requested image was already
+            # fully processed -- see the "skipped" bookkeeping in the
+            # validating stage above), so no per-item stage_done fired above
+            # to mark this stage checked -- emit the batch-level one once here.
+            publish({"type": "stage_done", "name": "processing"})
         result_event: dict = {"type": "result", "annotations": results}
         if text_debug_data:
             result_event["text_debug_data"] = text_debug_data

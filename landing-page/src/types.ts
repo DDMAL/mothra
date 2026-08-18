@@ -86,6 +86,7 @@ export interface ProjectModel {
 
 export interface AnnotationSet {
   id: string;
+  imageId?: string;
   imageName: string;
   imageSrc?: string;
   jsonName: string;
@@ -110,6 +111,7 @@ export interface MeiFile {
   name: string;
   xmlContent?: string;
   corrected?: boolean;
+  imageId?: string;
   imageName?: string;
   staveSource?: StaveSource | null;
 }

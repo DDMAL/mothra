@@ -72,6 +72,12 @@ StaveSource = Literal[
 class AddMeiBody(BaseModel):
     name: str
     xmlContent: str
+    # mothra#241: project_images.id of the source page, when the caller has
+    # one (the batch IC->encode path does; the ad-hoc single-image
+    # encode-upload path doesn't, see tasks_encode.py's _encode_one). Lets
+    # create_edit_session/getImageProgress match by id instead of the
+    # not-necessarily-unique imageName.
+    imageId: Optional[str] = None
     imageName: Optional[str] = None
     logs: Optional[list[str]] = None
     staveSource: Optional[StaveSource] = None
@@ -82,8 +88,9 @@ def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
         require_project_owner(cur, project_id, user["id"])
         mei_id = _uuid.uuid4().hex
         cur.execute(
-            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name, stave_source) VALUES (%s,%s,%s,%s,%s,%s)",
-            (mei_id, project_id, body.name, body.xmlContent, body.imageName, body.staveSource))
+            "INSERT INTO mei_files (id, project_id, name, xml_content, image_name, stave_source, image_id)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (mei_id, project_id, body.name, body.xmlContent, body.imageName, body.staveSource, body.imageId))
         if body.logs:
             content = "\n".join(body.logs)
             cur.execute(
@@ -166,31 +173,44 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
 
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
-        cur.execute("SELECT name, image_name, xml_content, corrected FROM mei_files"
+        cur.execute("SELECT name, image_name, xml_content, corrected, image_id FROM mei_files"
                     " WHERE id=%s AND project_id=%s", (mei_id, project_id))
         mei_row = cur.fetchone()
         if not mei_row:
             raise HTTPException(status_code=404, detail="MEI not found")
-        mei_name, image_name, xml_content, corrected = mei_row
+        mei_name, image_name, xml_content, corrected, mei_image_id = mei_row
 
         image_data_uri = None
         image_bytes = None
         image_id = None
-        if image_name:
+        # mothra#241: prefer the MEI row's own recorded image_id over a name
+        # match -- image_name alone is not unique within a project once
+        # duplicate-named uploads are allowed (see mei_files.image_id's
+        # migration comment in auth_api.py). mei_image_id is None for rows
+        # written before the encode round-trip threaded an id through, so
+        # this falls back to the pre-existing name match unchanged for those.
+        img_row = None
+        if mei_image_id:
+            cur.execute(
+                "SELECT id, data, original_data, original_mime_type, mime_type FROM project_images"
+                " WHERE id=%s AND project_id=%s",
+                (mei_image_id, project_id))
+            img_row = cur.fetchone()
+        elif image_name:
             cur.execute(
                 "SELECT id, data, original_data, original_mime_type, mime_type FROM project_images"
                 " WHERE project_id=%s AND name=%s",
                 (project_id, image_name))
             img_row = cur.fetchone()
-            if img_row:
-                image_id, img_data, original_data, original_mime_type, mime_type = img_row
-                image_bytes = bytes(original_data if original_data is not None else img_data)
-                # original_data (when present) can be a different format than
-                # the resized working copy (e.g. PNG vs. the resize's JPEG) —
-                # use its own mime type, falling back to the working copy's
-                # for rows written before original_mime_type existed.
-                mime = (original_mime_type if original_data is not None else mime_type) or mime_type or "image/jpeg"
-                image_data_uri = f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+        if img_row:
+            image_id, img_data, original_data, original_mime_type, mime_type = img_row
+            image_bytes = bytes(original_data if original_data is not None else img_data)
+            # original_data (when present) can be a different format than
+            # the resized working copy (e.g. PNG vs. the resize's JPEG) —
+            # use its own mime type, falling back to the working copy's
+            # for rows written before original_mime_type existed.
+            mime = (original_mime_type if original_data is not None else mime_type) or mime_type or "image/jpeg"
+            image_data_uri = f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
 
         # Silently re-sync syllable text/order against mothra-text before
         # Neon ever sees this MEI — but never touch a file a human has

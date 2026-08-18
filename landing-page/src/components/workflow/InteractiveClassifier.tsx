@@ -18,7 +18,7 @@ interface InteractiveClassifierProps {
   usedImageCount: number;
   projectId: number | null;
   onBack: () => void;
-  onEncodeBatch: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  onEncodeBatch: (pairs: EncodePair[]) => void;
   clefShape: "C" | "F";
   onClefShapeChange: (s: "C" | "F") => void;
   clefLine: number;

@@ -103,8 +103,10 @@ interface AppRouterProps {
     stave_source?: string | null;
     logs?: string[];
   }) => void;
-  pendingBatchPairs: { xmlFile: File; imageFile: File }[];
-  setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  pendingBatchPairs: { xmlFile: File; imageFile: File; imageId: string }[];
+  setPendingBatchPairs: (
+    pairs: { xmlFile: File; imageFile: File; imageId: string }[],
+  ) => void;
   resumeJob: { jobId: string; kind: string; startedAt?: string | null} | null;
   setResumeJob: (
     job: { jobId: string; kind: string; startedAt?: string | null } | null,
@@ -281,7 +283,9 @@ export default function AppRouter({
   };
 
   // Hand a finished IC queue (either mode) to the batch encoder.
-  const startEncodeBatch = (pairs: { xmlFile: File; imageFile: File }[]) => {
+  const startEncodeBatch = (
+    pairs: { xmlFile: File; imageFile: File; imageId: string }[],
+  ) => {
     setPendingBatchPairs(pairs);
     setBatchSummary(null);
     if (selectedProjectId && selectedProject) {
@@ -345,8 +349,16 @@ export default function AppRouter({
           project={selectedProject}
           onBack={() => setView("projects")}
           onContinue={() => {
+            // mothra#241: usedImageNames is name-keyed — resolve to the
+            // actual ProjectImage rows so minNextStep can match by id (see
+            // the same resolution in ProjectDetail.tsx's nextStep memo).
             const step = minNextStep(
-              selectedProject.usedImageNames,
+              selectedProject.usedImageNames
+                .map((n) => selectedProject.images.find((img) => img.name === n))
+                .filter(
+                  (img): img is (typeof selectedProject.images)[number] =>
+                    img != null,
+                ),
               selectedProject.annotations ?? [],
               selectedProject.meiFiles ?? [],
               selectedProject.stepsUnlocked,
@@ -955,6 +967,9 @@ export default function AppRouter({
               );
               pendingBatchPairs.forEach((pair) =>
                 form.append("image_names", pair.imageFile.name),
+              );
+              pendingBatchPairs.forEach((pair) =>
+                form.append("image_ids", pair.imageId),
               );
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));

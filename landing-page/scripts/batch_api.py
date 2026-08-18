@@ -151,16 +151,21 @@ def export_source_annotations(project_id: int, source_id: str, user=Depends(get_
         written = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for image_id, image_name, folio in source_images:
+                # mothra#241: match by image_id, not image_name -- image_id
+                # is already the loop variable here, and image_name alone is
+                # not unique within a project once duplicate-named uploads
+                # are allowed (see auth_api.py's get_latest_text_alignment
+                # docstring for the same rule).
                 cur.execute(
-                    "SELECT yolo_txt FROM annotations WHERE project_id=%s AND image_name=%s"
+                    "SELECT yolo_txt FROM annotations WHERE project_id=%s AND image_id=%s"
                     " ORDER BY created_at DESC LIMIT 1",
-                    (project_id, image_name),
+                    (project_id, image_id),
                 )
                 ann_row = cur.fetchone()
                 cur.execute(
-                    "SELECT alignment_json FROM text_alignments WHERE project_id=%s AND image_name=%s"
+                    "SELECT alignment_json FROM text_alignments WHERE project_id=%s AND image_id=%s"
                     " ORDER BY created_at DESC LIMIT 1",
-                    (project_id, image_name),
+                    (project_id, image_id),
                 )
                 align_row = cur.fetchone()
                 if not ann_row and not align_row:

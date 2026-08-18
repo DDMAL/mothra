@@ -64,7 +64,7 @@ def _music_only_yolo_lines(yolo_txt: str) -> str:
 # Bounding boxes
 # ---------------------------------------------------------------------------
 
-def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tuple[bytes, str]:
+def generate_bboxes(image_bytes: bytes, project_id: int, image_id: str, image_name: str) -> tuple[bytes, str]:
     """Return ``(annotation_bytes, format)`` for ``ic_start()``.
 
     Uses stored YOLO detections when available; falls back to a coarse
@@ -72,11 +72,15 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
     predict run.
     """
     with db_cursor() as (con, cur):
+        # mothra#241: match by image_id, not image_name -- a same-named
+        # duplicate upload now gets its own row/id, and image_name alone is
+        # not unique within a project (see auth_api.py's
+        # get_latest_text_alignment docstring for the same rule).
         cur.execute(
             "SELECT yolo_txt FROM annotations"
-            " WHERE project_id=%s AND image_name=%s"
+            " WHERE project_id=%s AND image_id=%s"
             " ORDER BY created_at DESC LIMIT 1",
-            (project_id, image_name),
+            (project_id, image_id),
         )
         row = cur.fetchone()
         if row and row[0].strip():
@@ -247,7 +251,7 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
         }
 
     # Nothing saved — stage the page + bboxes fresh.
-    annotations, ann_format = generate_bboxes(image_bytes, project_id, body.imageName)
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, body.imageName)
     try:
         status, raw = _post_multipart(
             f"{IC_API_URL}/staging",
@@ -426,7 +430,7 @@ async def ic_auto_queue(
     image_id, image_bytes, mime_type = _project_image(
         project_id, imageName, user["id"]
     )
-    annotations, ann_format = generate_bboxes(image_bytes, project_id, imageName)
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, imageName)
 
     fields = {"annotations_format": ann_format}
     if training_presets:

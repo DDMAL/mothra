@@ -24,7 +24,7 @@ interface AssetGridProps<T extends AssetItem> {
   usedNames: string[];
   totalPages: number;
   renderThumbnail: (item: T) => ReactNode;
-  getItemBadge?: (name: string) => string | null;
+  getItemBadge?: (item: T) => string | null;
   groupBy?: (item: T) => string;
   onUse?: (item: T) => void;
   topLeftBadge?: (item: T) => ReactNode;
@@ -53,7 +53,7 @@ export default function AssetGrid<T extends AssetItem>({
         {pagedItems.map((item, pageIdx) => {
           const idx = pageOffset + pageIdx;
           const used = usedNames.includes(item.name);
-          const badge = used ? (getItemBadge?.(item.name) ?? null) : null;
+          const badge = used ? (getItemBadge?.(item) ?? null) : null;
           const group = groupBy?.(item);
           const prevGroup =
             groupBy && pageIdx > 0

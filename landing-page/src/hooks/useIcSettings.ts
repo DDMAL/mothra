@@ -36,6 +36,12 @@ export function useIcSettings(projectId: number | null) {
   const [trainingFiles, setTrainingFiles] = useState<File[]>([]);
   const [notationType, setNotationType] = useState<NotationType>("square");
 
+  // mothra#222: this hook is instantiated once for the whole app session
+  // (AppRouter.tsx), so without this it kept whatever mode/training set/
+  // notation type the LAST project left behind on switch — e.g. a training
+  // set uploaded for project A silently pre-selecting itself for project
+  // B's auto-classify pass. Reset on every projectId change, including
+  // switches between two projects that share no other distinguishing field.
   useEffect(() => {
     setMode("auto");
     setTrainingPresets([]);
@@ -43,7 +49,7 @@ export function useIcSettings(projectId: number | null) {
     setNotationType("square");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
-  
+
   return {
     mode,
     setMode,

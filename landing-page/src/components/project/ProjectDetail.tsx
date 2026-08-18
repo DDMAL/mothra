@@ -295,12 +295,28 @@ export default function ProjectDetail({
   const nextStep = useMemo(
     () =>
       minNextStep(
-        usedNames.images,
+        // mothra#241: usedImageNames is a name-keyed list (see
+        // Project.usedImageNames in types.ts) — resolve each name to its
+        // ProjectImage so getImageProgress can match by id when possible. If
+        // two images in this project share a name, .find picks whichever
+        // comes first; that ambiguity is a known limitation of this
+        // name-keyed "used images" bookkeeping specifically, not of the
+        // per-image status badges in the grid (ImageTab.tsx), which always
+        // operate on a real ProjectImage and never go through a name lookup.
+        usedNames.images
+          .map((n) => project.images.find((img) => img.name === n))
+          .filter((img): img is Project["images"][number] => img != null),
         project.annotations ?? [],
         project.meiFiles ?? [],
         stepsUnlocked,
       ),
-    [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
+    [
+      usedNames.images,
+      project.images,
+      project.annotations,
+      project.meiFiles,
+      stepsUnlocked,
+    ],
   );
   const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
   // Auto IC classifies server-side, which has no training pool without a
@@ -1145,9 +1161,10 @@ export default function ProjectDetail({
             )}
             <hr className="border-white/40 my-1" />
             {usedNames.images.map((name) => {
+              const img = project.images.find((i) => i.name === name);
               const hasProgress =
                 getImageProgress(
-                  name,
+                  img ?? { id: name, name },
                   project.annotations ?? [],
                   project.meiFiles ?? [],
                   stepsUnlocked,

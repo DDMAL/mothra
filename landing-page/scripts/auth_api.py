@@ -302,6 +302,16 @@ _ADDED_COLUMNS = [
     # CLAUDE.md's "Staffline detection" section. NULL for MEI files encoded
     # before this column existed.
     ("mei_files",       "stave_source",          "TEXT"),
+    # project_images.id of the source page this MEI was encoded from.
+    # Preferred over image_name by imageStep.ts's getImageProgress() and by
+    # mei_api.py's create_edit_session, since image_name alone is not unique
+    # within a project once duplicate-named uploads are allowed (mothra#241).
+    # NULL for rows written before the encode round-trip threaded an id
+    # through (see tasks_encode.py's _encode_one/run_encode_batch_task) and
+    # for the single-image "manual encode-upload" path, which has no id to
+    # give (ICCompletionTestPage.tsx picks a raw local file, not a
+    # project_images row) — both fall back to the old image_name match.
+    ("mei_files",       "image_id",              "TEXT"),
 
     ("project_models",  "file_path",             "TEXT"),
     ("project_models",  "kind",                  "TEXT DEFAULT 'yolo'"),

@@ -44,7 +44,7 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
 
 def _map_annotation_row(aid, img_id, img_name, model_label=None):
     return {
-        "id": aid, "imageName": img_name,
+        "id": aid, "imageId": img_id, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "txtName": f"annotation-{aid}.txt", "jsonName": "",
         "modelLabel": model_label,
@@ -83,8 +83,9 @@ def _project_row_to_dict(cur, row, username):
     images = [{"id": r[0], "name": r[1], "folio": r[2], "sourceId": r[3], "sourceName": r[4]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
-    cur.execute("SELECT id, name, xml_content, corrected, image_name, stave_source FROM mei_files WHERE project_id=%s", (pid,))
-    mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4], "staveSource": r[5]}
+    cur.execute("SELECT id, name, xml_content, corrected, image_name, stave_source, image_id FROM mei_files WHERE project_id=%s", (pid,))
+    mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4],
+            "staveSource": r[5], "imageId": r[6]}
            for r in cur.fetchall()]
     cur.execute("SELECT id, image_id, image_name, model_label FROM annotations WHERE project_id=%s", (pid,))
     annotations = [_map_annotation_row(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
@@ -147,14 +148,14 @@ def list_projects(user=Depends(get_current_user)):
             models_by_pid.setdefault(pid, []).append({"id": mid, "name": mname, "kind": mkind})
 
         cur.execute(
-            "SELECT project_id, id, name, xml_content, corrected, image_name, stave_source"
+            "SELECT project_id, id, name, xml_content, corrected, image_name, stave_source, image_id"
             " FROM mei_files WHERE project_id IN %s", (pids,)
         )
         mei_by_pid: dict = {}
-        for pid, fid, fname, xml, corr, iname, stave_source in cur.fetchall():
+        for pid, fid, fname, xml, corr, iname, stave_source, iid in cur.fetchall():
             mei_by_pid.setdefault(pid, []).append(
                 {"id": fid, "name": fname, "xmlContent": xml, "corrected": bool(corr), "imageName": iname,
-                 "staveSource": stave_source}
+                 "staveSource": stave_source, "imageId": iid}
             )
 
         cur.execute(

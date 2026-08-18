@@ -844,9 +844,9 @@ export default function ImageTab({
                 </span>
               ) : null
             }
-            getItemBadge={(name) =>
+            getItemBadge={(img) =>
               getImageProgress(
-                name,
+                img,
                 project.annotations ?? [],
                 project.meiFiles ?? [],
                 project.stepsUnlocked,

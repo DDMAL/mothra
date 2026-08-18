@@ -5,6 +5,10 @@ import type { ProjectImage } from "../types";
 export interface EncodePair {
   xmlFile: File;
   imageFile: File;
+  // mothra#241: the source project_images.id, threaded through to
+  // tasks_encode.py so hint-resolution and the resulting mei_files row can
+  // be matched by id instead of the not-necessarily-unique image name.
+  imageId: string;
 }
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -29,7 +33,7 @@ export async function buildEncodePair(
   const imageFile = new File([blob], image.name, {
     type: blob.type || "image/png",
   });
-  return { xmlFile, imageFile };
+  return { xmlFile, imageFile, imageId: image.id };
 }
 
 /**
