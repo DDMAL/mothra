@@ -336,6 +336,31 @@ export default function ProcessingPage({
               }
             }
           }
+          if (ev.type === "processing_tick" && ev.total > 0) {
+            // mothra#247 follow-up: a REAL progress signal for the
+            // "processing" stage (today, only the medieval preset's
+            // staffline classifier emits this — see tasks_predict.py's
+            // _run_medieval_inference), not a time-based guess. Always
+            // wins over whatever the interpolation effect has guessed so
+            // far, even if that guess happened to be higher already — a
+            // real tick is authoritative, an interpolated value never is.
+            const ip = itemProgressRef.current;
+            const stagePct = STAGE_PROGRESS["processing"] ?? 0;
+            const fraction = Math.min(Math.max(ev.current / ev.total, 0), 1);
+            const exact = ip
+              ? Math.round(
+                  ((ip.index + (stagePct / 100) * fraction) / ip.total) * 100,
+                )
+              : Math.round(stagePct * fraction);
+            confirmedProgressRef.current = exact;
+            setProgress(exact);
+            // Let the interpolation effect keep creeping smoothly from
+            // THIS fresh, real floor between now and the next tick (or the
+            // stage's real stage_done), instead of either freezing until
+            // the next tick or continuing to extrapolate from a stale
+            // start time.
+            stagePhaseStartRef.current = Date.now();
+          }
           if (ev.type === "log") {
             const ip = itemProgressRef.current;
             const prefix =
