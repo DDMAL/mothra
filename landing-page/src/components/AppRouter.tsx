@@ -520,8 +520,22 @@ export default function AppRouter({
                 Math.max(selectedProject.stepsUnlocked, 1),
               );
             }
+            const wasBatchRun = resumeJob
+              ? resumeJob.kind === "text_batch"
+              : !!batchRunIds;
             setResumeJob(null);
-            setView("completion");
+            // In auto IC mode, "continue to IC" on the completion page is a
+            // no-op confirmation -- IcAutoQueue self-runs the moment it
+            // mounts, so the click accomplishes nothing but an extra step.
+            // Skip straight there for a plain detection run. Batch
+            // text-finding runs still stop here regardless of mode: that
+            // completion page is also the only place to download the batch
+            // zip, which auto-IC has no equivalent for.
+            if (!wasBatchRun && icSettings.mode === "auto") {
+              goToIc();
+            } else {
+              setView("completion");
+            }
           }}
           projectId={selectedProject.id}
           jobKind={resumeJob?.kind ?? (batchRunIds ? "text_batch" : "predict")}
