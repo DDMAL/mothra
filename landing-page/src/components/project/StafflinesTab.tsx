@@ -110,6 +110,17 @@ export default function StafflinesTab({
                   {set.staveCount ?? 0} stave{set.staveCount !== 1 ? "s" : ""}
                   {set.status === "failed" ? " — failed" : ""}
                 </span>
+                {set.hasClassifierFallback && (
+                  <span
+                    className="text-xs font-semibold text-amber-400 truncate"
+                    title={
+                      set.classifierError ??
+                      "staffline classifier was unavailable during detection — used raw-page fallback"
+                    }
+                  >
+                    ⚠ classifier fallback
+                  </span>
+                )}
               </div>
             </Fragment>
           );
