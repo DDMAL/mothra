@@ -17,24 +17,25 @@ export interface InferenceSettings {
 }
 
 export function useInferenceSettings() {
-  const [threshold, setThreshold] = useState(0.5);
+  const [threshold, setThreshold] = useState(0.25); // #242: was 0.5, now matches mothra-text
   const [device, setDevice] = useState<InferenceSettings["device"]>("cpu");
   const [modelPreset, setModelPreset] = useState<ModelPreset>("medieval");
   const [customModelId, setCustomModelId] = useState("");
   const [useSharedDetectorSettings, setUseSharedDetectorSettings] =
     useState(true);
   const [textMusicSettings, setTextMusicSettings] = useState<DetectorSettings>({
-    threshold: 0.5,
+    threshold: 0.25, // #242: was 0.5, now matches mothra-text
     device: "cpu",
   });
   // SF-1 fix (primary cause of #213): stave-class confidence needed its own
-  // default, decoupled from the shared 0.5 used for text/music -- 0.25
-  // matches staff-finding's own proven default (see
-  // yolo_inference.DEFAULT_STAVE_CONFIDENCE's comment for the measured
-  // before/after). This only affects the pre-filled value shown when a user
-  // unchecks "use shared detector settings" and customizes stave threshold
-  // explicitly; the default (shared, unchanged) flow already sends `null`
-  // for stave_confidence_threshold and picks up the same 0.25 server-side.
+  // default, decoupled from the shared text/music one (0.5 at the time,
+  // now also 0.25 per #242) -- 0.25 matches staff-finding's own proven
+  // default (see yolo_inference.DEFAULT_STAVE_CONFIDENCE's comment for the
+  // measured before/after). This only affects the pre-filled value shown
+  // when a user unchecks "use shared detector settings" and customizes
+  // stave threshold explicitly; the default (shared, unchanged) flow
+  // already sends `null` for stave_confidence_threshold and picks up the
+  // same 0.25 server-side.
   const [staveSettings, setStaveSettings] = useState<DetectorSettings>({
     threshold: 0.25,
     device: "cpu",
