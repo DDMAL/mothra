@@ -471,6 +471,16 @@ export default function ProjectDetail({
     count: number,
     onUse: () => void,
     onDelete: () => void,
+    // mothra#247: optional third action -- only images wire this up today.
+    // "use" was the only additive/removal-ish action available before; this
+    // is its symmetric counterpart (deselect without deleting anything).
+    // removeCount is the number of *currently-used* items within the
+    // selection, which can be zero (e.g. right after uploading brand-new,
+    // never-"use"d images and multi-selecting them) -- the button must only
+    // appear when that's actually positive, not whenever anything at all is
+    // selected, or it shows up with nothing meaningful to remove.
+    onRemoveFromSelection?: () => void,
+    removeCount = 0,
   ) => (
     <>
       <button
@@ -480,6 +490,15 @@ export default function ProjectDetail({
         use {count} {noun}
         {count > 1 ? "s" : ""}
       </button>
+      {onRemoveFromSelection && removeCount > 0 && (
+        <button
+          onClick={onRemoveFromSelection}
+          className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
+        >
+          remove {removeCount} {noun}
+          {removeCount > 1 ? "s" : ""} from selection
+        </button>
+      )}
       <button
         onClick={onDelete}
         className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
@@ -667,6 +686,32 @@ export default function ProjectDetail({
                   });
                   imgSection.clearSelection();
                 },
+                () => {
+                  // mothra#247: deselect the selected images -- e.g. a batch
+                  // of pages picked up by accident -- without deleting them
+                  // or anything they've already produced. A no-op for any
+                  // selected image that wasn't in usedNames.images yet.
+                  const names = project.images
+                    .filter((img) => imgSection.selectedIds.has(img.id))
+                    .map((img) => img.name);
+                  onUsedNamesChange({
+                    ...usedNames,
+                    images: usedNames.images.filter(
+                      (n) => !names.includes(n),
+                    ),
+                  });
+                  imgSection.clearSelection();
+                  setValidationError(null);
+                },
+                // mothra#247 fix: only count selected images that are
+                // actually already "used" -- otherwise the button appeared
+                // for any multi-selection at all, including a batch of
+                // brand-new, never-"use"d images right after uploading them.
+                project.images.filter(
+                  (img) =>
+                    imgSection.selectedIds.has(img.id) &&
+                    usedNames.images.includes(img.name),
+                ).length,
               )}
 
             {activeTab === "models" &&
@@ -1172,19 +1217,29 @@ export default function ProjectDetail({
               return (
                 <div key={name} className="flex items-center justify-between">
                   <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
-                  {!hasProgress && (
-                    <button
-                      onClick={() =>
-                        onUsedNamesChange({
-                          ...usedNames,
-                          images: usedNames.images.filter((n) => n !== name),
-                        })
-                      }
-                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                    >
-                      ×
-                    </button>
-                  )}
+                  {/* mothra#247: always removable, regardless of hasProgress
+                      -- this only excludes the page from future predict/IC/
+                      batch runs (usedImageNames), it never deletes its
+                      existing annotations/MEI files, so there's nothing
+                      unsafe about removing a page that already has progress.
+                      Re-"use"-ing it later picks up right where it left off,
+                      same as any other used image. */}
+                  <button
+                    onClick={() =>
+                      onUsedNamesChange({
+                        ...usedNames,
+                        images: usedNames.images.filter((n) => n !== name),
+                      })
+                    }
+                    title={
+                      hasProgress
+                        ? "Remove from selection (its existing annotations/MEI are kept, just excluded from future runs)"
+                        : "Remove from selection"
+                    }
+                    className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                  >
+                    ×
+                  </button>
                 </div>
               );
             })}

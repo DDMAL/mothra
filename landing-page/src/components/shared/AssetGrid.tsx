@@ -27,6 +27,10 @@ interface AssetGridProps<T extends AssetItem> {
   getItemBadge?: (item: T) => string | null;
   groupBy?: (item: T) => string;
   onUse?: (item: T) => void;
+  // mothra#247: symmetric counterpart to onUse -- lets an already-used item
+  // be deselected directly from the grid instead of only via the project
+  // page's "selected:" side list.
+  onRemove?: (item: T) => void;
   topLeftBadge?: (item: T) => ReactNode;
 }
 
@@ -40,6 +44,7 @@ export default function AssetGrid<T extends AssetItem>({
   getItemBadge,
   groupBy,
   onUse,
+  onRemove,
   topLeftBadge,
 }: AssetGridProps<T>) {
   return (
@@ -71,13 +76,24 @@ export default function AssetGrid<T extends AssetItem>({
                 <div
                   className={`group relative aspect-square bg-[#C8E6E3]/40 rounded-xl overflow-hidden cursor-pointer transition-shadow flex items-center justify-center
                           ${section.selectedIds.has(item.id) ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                          ${used ? "opacity-40 cursor-default" : ""}`}
+                          ${used ? "opacity-40" : ""}`}
                   onClick={(e) => {
-                    if (!used) section.handleClick(e, item.id, idx);
+                    // mothra#247: a used item is only selectable when the
+                    // caller wired up onRemove (today, just ImageTab.tsx's
+                    // "remove N from selection" bulk action) -- scoped this
+                    // way rather than relaxing the guard for every AssetGrid
+                    // consumer, since MeiTab.tsx/ModelTab.tsx have no
+                    // deselect concept and their existing multi-select
+                    // "delete N" action should not suddenly gain the
+                    // ability to bulk-delete already-used models/mei files
+                    // that were previously unselectable.
+                    if (!used || onRemove) section.handleClick(e, item.id, idx);
                   }}
                 >
                   {renderThumbnail(item)}
-                  {(topLeftBadge?.(item) || (onUse && !used)) && (
+                  {(topLeftBadge?.(item) ||
+                    (onUse && !used) ||
+                    (onRemove && used)) && (
                     <div className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1">
                       {topLeftBadge?.(item)}
                       {onUse && !used && (
@@ -89,6 +105,18 @@ export default function AssetGrid<T extends AssetItem>({
                           className="px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
                         >
                           use
+                        </button>
+                      )}
+                      {onRemove && used && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemove(item);
+                          }}
+                          title="Remove from selection"
+                          className="px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
+                        >
+                          remove
                         </button>
                       )}
                     </div>

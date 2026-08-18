@@ -861,6 +861,17 @@ export default function ImageTab({
                 setValidationError(null);
               }
             }}
+            // mothra#247: deselect a used image directly from the grid --
+            // this doesn't delete anything, it just excludes the page from
+            // future predict/IC/batch runs (usedImageNames); its existing
+            // annotations/MEI files are untouched and pick back up if the
+            // image is "use"d again later.
+            onRemove={(img) => {
+              onUsedNamesChange({
+                ...usedNames,
+                images: usedNames.images.filter((n) => n !== img.name),
+              });
+            }}
           />
         )}
       </div>
@@ -1060,7 +1071,7 @@ export default function ImageTab({
                 </p>
               )}
               <div className="flex gap-3 justify-center">
-                {!isUsed && (
+                {!isUsed ? (
                   <button
                     onClick={() => {
                       onUsedNamesChange({
@@ -1073,6 +1084,23 @@ export default function ImageTab({
                     className="px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl hover:opacity-90 cursor-pointer text-sm"
                   >
                     Use Image
+                  </button>
+                ) : (
+                  // mothra#247: symmetric counterpart -- deselect without
+                  // deleting anything (see AssetGrid.tsx's onRemove comment).
+                  <button
+                    onClick={() => {
+                      onUsedNamesChange({
+                        ...usedNames,
+                        images: usedNames.images.filter(
+                          (n) => n !== img.name,
+                        ),
+                      });
+                      setQuickLookId(null);
+                    }}
+                    className="px-5 py-2 border-2 border-white/40 text-white rounded-xl hover:opacity-90 cursor-pointer text-sm"
+                  >
+                    Remove from Selection
                   </button>
                 )}
                 <button
