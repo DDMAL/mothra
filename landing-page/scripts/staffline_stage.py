@@ -565,6 +565,7 @@ def run_staffline_detection(
     source_label: str = "raw_page",
     storage_variant: str = "working_copy",
     classifier_image_bytes: Optional[bytes] = None,
+    classifier_error: Optional[str] = None,
 ) -> Iterator[dict]:
     """Run staffline detection for one image, yielding {"type": "log"|"error",
     "message": ...} event dicts and persisting the result to
@@ -611,6 +612,15 @@ def run_staffline_detection(
     stafflines-only PNG bytes, stored verbatim on the row itself (not in
     settings_json) for `GET /stafflines/{id}/classifier-image` to serve.
     See persist_staffline_detection()'s docstring for the storage details.
+
+    classifier_error is a fourth, independent provenance field: None
+    whenever source_label != "raw_page_fallback", else a short categorized
+    reason string (see tasks_predict.py's _classifier_error_reason) for why
+    the paco-classifier call fell back to the raw page. Stored as a sibling
+    key next to source_label inside settings_json rather than its own
+    column -- no migration needed, same JSON blob that's already
+    serialized as a whole. Surfaced by projects_api.py/inference_api.py as
+    `classifierError` for the Stafflines UI's fallback badge.
     """
     from yolo_io import parse_yolo_lines, filter_to_class
 
@@ -659,6 +669,7 @@ def run_staffline_detection(
             "predict_image_width": w,
             "predict_image_height": h,
             "source_label": source_label,  # SF-6 fix, see this function's docstring
+            "classifier_error": classifier_error,  # see this function's docstring; None unless source_label == "raw_page_fallback"
             "storage_variant": storage_variant,  # CodeRabbit PR #219, see this function's docstring
             # SF-8 fix: page-level grouping flags (e.g.
             # "reconciled_duplicate_fits:N", "mode_count_below_typical",
@@ -712,7 +723,13 @@ def run_staffline_detection(
                 " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'failed',%s,%s)",
                 (
                     _uuid.uuid4().hex, project_id, image_id, image_name, annotation_id,
-                    json.dumps([]), scale_unit, 0, None, json.dumps({"error": str(e)}),
+                    json.dumps([]), scale_unit, 0, None,
+                    # source_label/classifier_error included here too (CodeRabbit-
+                    # anticipated edge case): a page can in principle hit both a
+                    # classifier fallback AND this detection-stage crash, and this
+                    # failed-status row would otherwise lose that fallback
+                    # provenance entirely.
+                    json.dumps({"error": str(e), "source_label": source_label, "classifier_error": classifier_error}),
                     psycopg2.Binary(classifier_image_bytes) if classifier_image_bytes is not None else None,
                     "image/png",
                 ),

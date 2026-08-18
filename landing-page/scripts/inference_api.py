@@ -122,7 +122,8 @@ async def get_staffline_detection(
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT s.jsomr_json, s.image_name, s.scale_unit, s.stave_count,"
-            " s.mode_lines_per_stave, s.status, s.classifier_image IS NOT NULL"
+            " s.mode_lines_per_stave, s.status, s.classifier_image IS NOT NULL,"
+            " s.settings_json->>'source_label' = 'raw_page_fallback', s.settings_json->>'classifier_error'"
             " FROM staffline_detections s"
             " JOIN projects p ON p.id = s.project_id"
             " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
@@ -135,6 +136,7 @@ async def get_staffline_detection(
         "jsomrJson": row[0], "imageName": row[1], "scaleUnit": row[2],
         "staveCount": row[3], "modeLinesPerStave": row[4], "status": row[5],
         "hasClassifierImage": row[6],
+        "hasClassifierFallback": row[7], "classifierError": row[8],
     }
 
 @router.get("/projects/{project_id}/stafflines/{detection_id}/classifier-image")
@@ -294,17 +296,24 @@ def confirm_staffline_interpolation(
         # is a reliable insertion-order tiebreak on its own.
         cur.execute(
             "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
-            " classifier_image IS NOT NULL"
+            " classifier_image IS NOT NULL,"
+            " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error'"
             " FROM staffline_detections WHERE id=%s AND project_id=%s",
             (new_detection_id, project_id),
         )
         row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=500, detail="interpolation did not produce a new detection")
-    did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image = row
+    (did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image,
+     has_classifier_fallback, classifier_error) = row
     return {
         "id": did, "imageName": img_name,
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
         "status": status, "hasClassifierImage": has_classifier_image,
+        # Always False/None here in practice -- this route's
+        # compute_staffline_interpolation() hardcodes source_label to
+        # "raw_page", never "raw_page_fallback" -- included for response
+        # shape parity with the other three StafflineSet-building endpoints.
+        "hasClassifierFallback": has_classifier_fallback, "classifierError": classifier_error,
     }

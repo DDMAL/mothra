@@ -61,6 +61,16 @@ export interface StafflineSet {
   modeLinesPerStave?: number | null;
   status?: string;
   hasClassifierImage?: boolean;
+  /** True when this detection's medieval-preset predict run fell back to
+   * raw-page staffline detection because paco-classifier-service was
+   * unreachable/erroring/timed out. Derived from settings_json.source_label
+   * server-side, not from classifierError, so pre-existing fallback rows
+   * still surface this even without a stored reason. */
+  hasClassifierFallback?: boolean;
+  /** Short categorized reason for the fallback above (e.g. "timeout: ...",
+   * "unreachable: ..."); null/undefined on rows written before this was
+   * added, or when hasClassifierFallback is false. */
+  classifierError?: string | null;
 }
 
 // Field names here are snake_case, matching landing-page/scripts/staffline_stage.py's
