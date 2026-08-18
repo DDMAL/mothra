@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type IcMode = "auto" | "manual";
 export type NotationType = "square" | "hufnagel";
@@ -26,7 +26,7 @@ export interface IcSettings {
  * (uploaded training files are in-memory File objects, so a DB-backed
  * selection couldn't round-trip them anyway).
  */
-export function useIcSettings() {
+export function useIcSettings(projectId: number | null) {
   // Defaults to "auto" - the hands-off path is the intended default for the
   // IC step. Note this makes training data effectively required up front: the
   // auto pass can't classify without one, so ProjectDetail blocks Continue
@@ -36,6 +36,14 @@ export function useIcSettings() {
   const [trainingFiles, setTrainingFiles] = useState<File[]>([]);
   const [notationType, setNotationType] = useState<NotationType>("square");
 
+  useEffect(() => {
+    setMode("auto");
+    setTrainingPresets([]);
+    setTrainingFiles([]);
+    setNotationType("square");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+  
   return {
     mode,
     setMode,

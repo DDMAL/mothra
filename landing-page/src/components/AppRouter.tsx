@@ -175,7 +175,7 @@ export default function AppRouter({
   const textFindingSettings = useTextFindingSettings();
   // IC step settings (auto/manual + shared training set), picked on the
   // project page — see IcSettingsSection.
-  const icSettings = useIcSettings();
+  const icSettings = useIcSettings(selectedProjectId);
 
   // batch text-alignment run (run_chain.py) state
   const [batchRunIds, setBatchRunIds] = useState<{
