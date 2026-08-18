@@ -1,4 +1,5 @@
 import io
+import logging
 import threading
 from pathlib import Path
 
@@ -9,11 +10,31 @@ from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
 from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
-from paco_api import classify_stafflines, abort_classify_request, PacoClassifierError
+from paco_api import (
+    classify_stafflines, abort_classify_request, PacoClassifierError,
+    CATEGORY_MALFORMED_RESPONSE,
+)
+
+logger = logging.getLogger(__name__)
 
 # How often the main thread polls check_cancelled() while waiting on the
 # background classifier thread (see _run_medieval_inference below).
 _CANCEL_POLL_INTERVAL_S = 0.5
+
+
+def _classifier_error_reason(e: Exception) -> str:
+    """Short, categorized, human-readable reason for a staffline-classifier
+    pipeline failure — persisted into staffline_detections.settings_json
+    (as classifier_error) and used in the fallback's "warning: "-prefixed
+    SSE log line / the aggregated activity_log entry. `category` comes from
+    PacoClassifierError.category (paco_api.py) when the failure was
+    talking to paco-classifier-service; anything else (e.g. the local
+    yolo_models.infer_staves(arr) call itself throwing on an otherwise-
+    successfully-classified layer — see _stave_pipeline's try block) is
+    reported as "unexpected" rather than silently mislabeling it as a
+    classifier-service problem."""
+    category = getattr(e, "category", "unexpected")
+    return f"{category}: {e}"
 
 
 def _decode_paco_layer(stafflines_png: bytes, expected_shape) -> "np.ndarray":
@@ -31,9 +52,15 @@ def _decode_paco_layer(stafflines_png: bytes, expected_shape) -> "np.ndarray":
 
     arr = cv2.imdecode(np.frombuffer(stafflines_png, np.uint8), cv2.IMREAD_COLOR)
     if arr is None:
-        raise PacoClassifierError("could not decode stafflines PNG from paco-classifier-service")
+        raise PacoClassifierError(
+            "could not decode stafflines PNG from paco-classifier-service",
+            category=CATEGORY_MALFORMED_RESPONSE,
+        )
     if arr.shape[:2] != expected_shape[:2]:
-        raise PacoClassifierError(f"classifier output {arr.shape[:2]} != page {expected_shape[:2]}")
+        raise PacoClassifierError(
+            f"classifier output {arr.shape[:2]} != page {expected_shape[:2]}",
+            category=CATEGORY_MALFORMED_RESPONSE,
+        )
     # SF-4 fix: cv2.imdecode returns BGR (cv2 convention), but every other
     # array in this module (img_arr, the raw-page fallback) is RGB (via
     # PIL's .convert("RGB")) -- convert here so every array reaching
@@ -58,10 +85,10 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     the fallback path below.
 
     Returns (yolo_txt, staffline_source_arr, source_label,
-    classifier_image_bytes) — the merged text+music+stave YOLO lines,
-    whichever image array the stave boxes were actually detected against
-    (so run_staffline_detection crops the SAME image the stave model saw,
-    not always the raw page), a short provenance label (SF-6) recording
+    classifier_image_bytes, classifier_error) — the merged text+music+stave
+    YOLO lines, whichever image array the stave boxes were actually detected
+    against (so run_staffline_detection crops the SAME image the stave model
+    saw, not always the raw page), a short provenance label (SF-6) recording
     which of the two ("paco_layer" / "raw_page_fallback") was actually used
     -- persisted into staffline_detections.settings_json so a debugging
     session can tell which source a given row ran against without
@@ -69,7 +96,10 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     PNG bytes for persisting alongside the detection (mothra#207, merged
     from main). `classifier_image_bytes` is None whenever the classifier
     pass failed and this fell back to raw-page stave detection — there's no
-    classifier PNG to show in that case.
+    classifier PNG to show in that case. `classifier_error` is likewise
+    None on success, else a short categorized reason string (see
+    _classifier_error_reason) also persisted into settings_json alongside
+    source_label, and surfaced in the Stafflines UI's fallback badge.
 
     If `job_id` is given, waits on the background thread by polling
     check_cancelled() every _CANCEL_POLL_INTERVAL_S instead of an
@@ -97,7 +127,9 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
             stave_result["source_arr"] = arr  # RGB by this point -- see _decode_paco_layer's SF-4 comment
             stave_result["classifier_png"] = stafflines_png  # raw bytes, pre-conversion -- see mothra#207
         except Exception as e:
+            logger.warning("staffline classifier failed for %s: %s", image_name, e, exc_info=True)
             stave_result["error"] = e
+            stave_result["error_reason"] = _classifier_error_reason(e)
 
     thread = threading.Thread(target=_stave_pipeline, daemon=True)
     thread.start()
@@ -142,21 +174,25 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
         check_cancelled(job_id)
 
     if "error" in stave_result:
+        reason = stave_result["error_reason"]
         publish({
             "type": "log",
-            "message": f"{image_name}: staffline classifier unavailable ({stave_result['error']}) — falling back to raw-image stave detection",
+            "message": f"warning: {image_name}: staffline classifier unavailable ({stave_result['error']}) — falling back to raw-image stave detection",
+            "reason": reason,
         })
         st_txt = yolo_models.infer_staves(img_arr)
         source_arr = img_arr  # RGB (img_arr is always PIL-decoded) -- see SF-4 comment above
         source_label = "raw_page_fallback"
         classifier_image_bytes = None
+        classifier_error = reason
     else:
         st_txt = stave_result["yolo_txt"]
         source_arr = stave_result["source_arr"]  # already converted to RGB -- see SF-4 comment above
         source_label = "paco_layer"
         classifier_image_bytes = stave_result["classifier_png"]
+        classifier_error = None
 
-    return "\n".join(filter(None, [tm_txt, st_txt])), source_arr, source_label, classifier_image_bytes
+    return "\n".join(filter(None, [tm_txt, st_txt])), source_arr, source_label, classifier_image_bytes, classifier_error
 
 
 def _reused_annotation_staffline_source(img_arr, image_bytes, mime_type, image_name, publish):
@@ -168,19 +204,26 @@ def _reused_annotation_staffline_source(img_arr, image_bytes, mime_type, image_n
     fresh-run path) and falls back to the raw page on any classifier
     failure, matching _run_medieval_inference's own fallback exactly.
 
-    Returns (source_arr, source_label, classifier_image_bytes) -- see
-    _run_medieval_inference's docstring for what source_label (SF-6) and
-    classifier_image_bytes (mothra#207, merged from main) record. The
-    latter is None on any classifier failure (raw-page fallback)."""
+    Returns (source_arr, source_label, classifier_image_bytes,
+    classifier_error) -- see _run_medieval_inference's docstring for what
+    each of these records. `classifier_image_bytes`/`classifier_error` are
+    None/None on success, None/<reason> on any classifier failure
+    (raw-page fallback)."""
     try:
         stafflines_png, _background_png = classify_stafflines(image_bytes, mime_type)
-        return _decode_paco_layer(stafflines_png, img_arr.shape), "paco_layer", stafflines_png
+        return _decode_paco_layer(stafflines_png, img_arr.shape), "paco_layer", stafflines_png, None
     except Exception as e:
+        logger.warning(
+            "staffline classifier failed for %s (reused-annotation path): %s",
+            image_name, e, exc_info=True,
+        )
+        reason = _classifier_error_reason(e)
         publish({
             "type": "log",
-            "message": f"{image_name}: staffline classifier unavailable ({e}) — falling back to raw-image stave detection",
+            "message": f"warning: {image_name}: staffline classifier unavailable ({e}) — falling back to raw-image stave detection",
+            "reason": reason,
         })
-        return img_arr, "raw_page_fallback", None
+        return img_arr, "raw_page_fallback", None, reason
 
 @celery_app.task(name="predict.run")
 def run_predict_task(job_id, project_id, body):
@@ -303,6 +346,7 @@ def run_predict_task(job_id, project_id, body):
 
         publish({"type": "stage", "name": "processing"})
         results = []
+        fallback_images = []  # image names that fell back to raw-page staffline detection this run
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
         for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original in images:
@@ -334,7 +378,7 @@ def run_predict_task(job_id, project_id, body):
             if not has_annotation:
                 publish({"type": "log", "message": f"Processing {image_name}..."})
                 if yolo_models.medieval_models is not None:
-                    yolo_txt, staffline_source_arr, staffline_source_label, classifier_image_bytes = _run_medieval_inference(
+                    yolo_txt, staffline_source_arr, staffline_source_label, classifier_image_bytes, staffline_classifier_error = _run_medieval_inference(
                         yolo_models, img_arr, bytes(image_data), mime_type, image_name, publish,
                         job_id=job_id,
                     )
@@ -343,6 +387,7 @@ def run_predict_task(job_id, project_id, body):
                     staffline_source_arr = img_arr  # RGB -- see SF-4 comment in _run_medieval_inference
                     staffline_source_label = "raw_page"  # non-medieval preset has no classifier to choose between
                     classifier_image_bytes = None
+                    staffline_classifier_error = None
                 ann_id = write_annotation(
                     cur, con, project_id, image_id, image_name, yolo_txt,
                     yolo_models.stored_model_id, yolo_models.model_label, yolo_models.model_hash,
@@ -369,13 +414,17 @@ def run_predict_task(job_id, project_id, body):
                     # never worse than the raw page for Sauvola-binarization-
                     # based line detection, whichever source the existing
                     # boxes actually came from.
-                    staffline_source_arr, staffline_source_label, classifier_image_bytes = _reused_annotation_staffline_source(
+                    staffline_source_arr, staffline_source_label, classifier_image_bytes, staffline_classifier_error = _reused_annotation_staffline_source(
                         img_arr, bytes(image_data), mime_type, image_name, publish,
                     )
                 else:
                     staffline_source_arr = img_arr  # non-medieval preset -- boxes were always raw-page-sourced; RGB, see SF-4 comment
                     staffline_source_label = "raw_page"
                     classifier_image_bytes = None
+                    staffline_classifier_error = None
+
+            if staffline_source_label == "raw_page_fallback":
+                fallback_images.append(image_name)
 
             # Staffline detection is gated only on has_class (fresh stave-class
             # boxes to work from), never on has_text_alignment -- an image can
@@ -397,6 +446,7 @@ def run_predict_task(job_id, project_id, body):
                     redetect_fn=redetect_fn, source_label=staffline_source_label,
                     storage_variant=image_storage_variant,
                     classifier_image_bytes=classifier_image_bytes,
+                    classifier_error=staffline_classifier_error,
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
@@ -430,6 +480,22 @@ def run_predict_task(job_id, project_id, body):
                     publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
                 elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
                     text_debug_data[image_name] = text_ev["debug_data"]
+        if fallback_images:
+            # One aggregated entry per run (not one per image) so a
+            # paco-classifier-service outage spanning a whole batch doesn't
+            # spam activity_log with a row per page. Reuses the existing
+            # "predict_run" action_type -- both GET /projects/{id}/activity
+            # and the logs-download zip's activity_log.txt render any
+            # action_type generically, so this needs no downstream changes.
+            _shown = ", ".join(fallback_images[:5])
+            _more = f" (+{len(fallback_images) - 5} more)" if len(fallback_images) > 5 else ""
+            _log_activity(
+                cur, project_id, "predict_run",
+                f"{len(fallback_images)} image(s) fell back to raw-page staffline detection "
+                f"(paco-classifier-service unavailable): {_shown}{_more}",
+            )
+            con.commit()
+
         publish({"type": "stage_done", "name": "processing"})
         result_event: dict = {"type": "result", "annotations": results}
         if text_debug_data:

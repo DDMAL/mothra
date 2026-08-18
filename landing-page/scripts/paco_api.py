@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import logging
 import socket
 import uuid as _uuid
 from typing import Optional
@@ -35,12 +36,29 @@ from urllib.parse import urlsplit
 
 from config import PACO_API_URL
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_TIMEOUT = 180
+
+# Small, flat failure-category taxonomy — not meant to be exhaustive, just
+# enough for tasks_predict.py to log/report/persist *why* a fallback
+# happened instead of only *that* one happened.
+CATEGORY_TIMEOUT = "timeout"
+CATEGORY_UNREACHABLE = "unreachable"
+CATEGORY_HTTP_ERROR = "http_error"
+CATEGORY_MALFORMED_RESPONSE = "malformed_response"
 
 class PacoClassifierError(RuntimeError):
     """Raised on any failure talking to paco-classifier-service. Callers
     (tasks_predict.py) catch this broadly and fall back to raw-image stave
-    detection rather than failing the whole predict job."""
+    detection rather than failing the whole predict job. `category` is one
+    of the CATEGORY_* constants above, read by tasks_predict.py to build a
+    short human-readable reason it logs/publishes/persists — see
+    _classifier_error_reason() there."""
+
+    def __init__(self, message: str, category: str = CATEGORY_UNREACHABLE):
+        super().__init__(message)
+        self.category = category
 
 def classify_stafflines(
     image_bytes: bytes,
@@ -88,10 +106,27 @@ def classify_stafflines(
         )
         resp = conn.getresponse()
         raw = resp.read()
+    except socket.timeout as exc:
+        # socket.timeout (== TimeoutError) is itself an OSError subclass, so
+        # this must be caught ahead of the broader OSError branch below to
+        # be distinguishable at all.
+        logger.warning(
+            "paco-classifier-service at %s timed out after %ss: %s",
+            PACO_API_URL, timeout, exc,
+        )
+        raise PacoClassifierError(
+            f"paco-classifier-service at {PACO_API_URL} timed out after {timeout}s: {exc}",
+            category=CATEGORY_TIMEOUT,
+        ) from exc
     except (OSError, http.client.HTTPException) as exc:
+        logger.warning(
+            "paco-classifier-service at %s is unreachable or the request was aborted: %s",
+            PACO_API_URL, exc, exc_info=True,
+        )
         raise PacoClassifierError(
             f"paco-classifier-service at {PACO_API_URL} is unreachable or the request "
-            f"was aborted: {exc}"
+            f"was aborted: {exc}",
+            category=CATEGORY_UNREACHABLE,
         ) from exc
     finally:
         conn.close()
@@ -102,15 +137,32 @@ def classify_stafflines(
             detail = json.loads(detail).get("detail", detail)
         except json.JSONDecodeError:
             pass
+        logger.warning(
+            "paco-classifier-service rejected the request (HTTP %s): %s",
+            resp.status, detail,
+        )
         raise PacoClassifierError(
-            f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}"
+            f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}",
+            category=CATEGORY_HTTP_ERROR,
         )
 
-    payload = json.loads(raw.decode())
-    return (
-        base64.b64decode(payload["stafflines_png_base64"]),
-        base64.b64decode(payload["background_png_base64"]),
-    )
+    try:
+        payload = json.loads(raw.decode())
+        return (
+            base64.b64decode(payload["stafflines_png_base64"]),
+            base64.b64decode(payload["background_png_base64"]),
+        )
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        # ValueError also covers base64.b64decode's binascii.Error. Previously
+        # unguarded — a malformed 2xx response raised a raw, uncategorized
+        # exception here.
+        logger.warning(
+            "paco-classifier-service returned a malformed response: %s", exc, exc_info=True,
+        )
+        raise PacoClassifierError(
+            f"paco-classifier-service returned a malformed response: {exc}",
+            category=CATEGORY_MALFORMED_RESPONSE,
+        ) from exc
 
 def abort_classify_request(conn_holder: dict) -> None:
     """Forcibly abort an in-flight classify_stafflines() call, given the
