@@ -45,6 +45,15 @@ def resolve_device(requested: Optional[str]) -> str:
         return "cuda"
     return "cpu"
 
+def to_bgr(arr):
+    """Ultralytics treats a raw array input as already BGR (matching what its own
+    file-path loader produces via cv2). Every image array in this codebase is
+    canonically RGB (PIL's default) by the time it reaches here -- convert right
+    at this boundary, not upstream (see tasks_predict.py's paco-classifier decode
+    and issue #200). Returns a view, not a copy -- safe without mutating the
+    caller's array."""
+    return arr[:, :, ::-1]
+
 def _append_boxes(lines, inference, cls_map):
     if inference.boxes is None or not len(inference.boxes):
         return
@@ -84,10 +93,10 @@ class YoloModelSet:
         if self.medieval_models is not None:
             tm_model, st_model = self.medieval_models
             tm_map, st_map = self.class_maps
-            _append_boxes(lines, tm_model(img_arr, conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
-            _append_boxes(lines, st_model(img_arr, conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
+            _append_boxes(lines, tm_model(to_bgr(img_arr), conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
+            _append_boxes(lines, st_model(to_bgr(img_arr), conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
         else:
-            _append_boxes(lines, self.single_model(img_arr, conf=self.confidence_threshold, device=self.device, verbose=False)[0], self.custom_cls_map)
+            _append_boxes(lines, self.single_model(to_bgr(img_arr), conf=self.confidence_threshold, device=self.device, verbose=False)[0], self.custom_cls_map)
         return "\n".join(lines)
 
     def infer_text_music(self, img_arr) -> str:
@@ -98,7 +107,7 @@ class YoloModelSet:
         tm_model, _ = self.medieval_models
         tm_map, _ = self.class_maps
         lines = []
-        _append_boxes(lines, tm_model(img_arr, conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
+        _append_boxes(lines, tm_model(to_bgr(img_arr), conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
         return "\n".join(lines)
 
     def infer_staves(self, img_arr) -> str:
@@ -111,7 +120,7 @@ class YoloModelSet:
         _, st_model = self.medieval_models
         _, st_map = self.class_maps
         lines = []
-        _append_boxes(lines, st_model(img_arr, conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
+        _append_boxes(lines, st_model(to_bgr(img_arr), conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
         return "\n".join(lines)
 
     def infer_staves_raw_boxes(self, img_arr, conf: float, iou: float, imgsz: int) -> list[dict]:
@@ -138,7 +147,7 @@ class YoloModelSet:
         _, st_model = self.medieval_models
         _, st_map = self.class_maps
         result = st_model.predict(
-            source=img_arr, conf=conf, iou=iou, imgsz=imgsz, device=self.st_device, save=False, verbose=False,
+            source=to_bgr(img_arr), conf=conf, iou=iou, imgsz=imgsz, device=self.st_device, save=False, verbose=False,
         )[0]
         boxes = []
         if result.boxes is not None:
