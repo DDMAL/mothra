@@ -528,3 +528,190 @@ def test_verify_and_correct_syllables_applies_a_genuine_text_disagreement():
     root = ET.fromstring(corrected_bytes)
     syl_texts = [s.find(f"{MEI_NS}syl").text for s in root.findall(f".//{MEI_NS}syllable")]
     assert syl_texts == ["Kyrie"]
+
+def test_verify_and_correct_syllables_keeps_a_distinct_repeated_occurrence():
+    """Regression test for #209: a repeated word ("Alleluia" said twice on
+    the page, common in chant) must not be conflated with the
+    fragment-pooling duplicate case above just because the text matches.
+    Stave 2's own "Alleluia" here is a real, legitimate "text with nothing
+    under it" occurrence -- distinct from, and spatially far from, stave
+    1's real Alleluia-with-glyphs. Before this fix, the old text-only
+    guard treated stave 2's box as a duplicate of stave 1's (same text,
+    anywhere in the document) and silently deleted it on every re-verify --
+    this is the exact "syllables mysteriously missing" bug."""
+    staves = [
+        _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0]),
+        _stave("s2", 300, 360, lrx=1000, line_ys=[300.0, 320.0, 340.0, 360.0]),
+    ]
+    glyphs_by_stave = {
+        0: [_glyph("g1", 10), _glyph("g2", 40), _glyph("g3", 70)],
+        1: [],  # s2 has no notation at all under its own "Alleluia"
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("Alleluia", 5, 95, 128, 148),   # stave 1's real occurrence, has glyphs
+            _box("Alleluia", 5, 95, 328, 348),   # stave 2's real, distinct, glyph-less occurrence
+        ]
+    }
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=2,  # both real/detected -- never eligible for row-pooling merge
+    )
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, text_alignment, 2000, 2000)
+
+    # Re-verifying against the SAME alignment it was built from must be a
+    # no-op -- stave 2's genuinely distinct "Alleluia" must survive.
+    assert logs == []
+    assert corrected_bytes == xml_bytes
+    root = ET.fromstring(corrected_bytes)
+    syl_texts = [s.find(f"{MEI_NS}syl").text for s in root.findall(f".//{MEI_NS}syllable")]
+    assert syl_texts == ["Alleluia", "Alleluia"]
+
+def test_verify_and_correct_syllables_keeps_syllable_on_its_own_stave_despite_zone_distortion():
+    """Regression test for #208: _stave_zone_bounds's Verovio-spacing-
+    matched written zone can diverge sharply from the RAW stave bbox
+    build_mei actually ran _assign_boxes_to_staves against, whenever a
+    stave has fewer real detected lines than the nominal STAFF_LINES=4 (a
+    real, observed condition -- see _step_from_y's docstring, 2-7 lines
+    detected per stave on a real page). "s2" here has only 2 real lines
+    with a wide 34px gap, so its written zone extrapolates up to y=198 --
+    far above its own raw bbox's uly=245 -- reaching up into the gap where
+    "s1"'s own text sits. Before this fix, _reconstruct_mei_state had no
+    way to recover s2's raw bbox, so verify_and_correct_syllables's re-run
+    of _assign_boxes_to_staves used the distorted written-zone band
+    instead, reassigning s1's "Alleluia" to s2's <sb> section and matching
+    it against s2's own (unrelated) neumes: "syllables incorrectly
+    aligning with the neumes in the stave below it." s1 was then left with
+    no syl_boxes of its own, falling to the generic "-" gap-cluster
+    fallback across its entire line -- the linked "blank syllables that
+    take up neumes on an entire line" symptom."""
+    staves = [
+        _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0]),
+        _stave("s2", 245, 300, lrx=1000, line_ys=[266.0, 300.0]),
+    ]
+    glyphs_by_stave = {
+        0: [_glyph("g1", 10), _glyph("g2", 40), _glyph("g3", 70)],
+        1: [_glyph("g4", 10, uly=260), _glyph("g5", 40, uly=260), _glyph("g6", 70, uly=260)],
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("Alleluia", 5, 95, 190, 210),   # genuinely s1's own text
+            _box("Kyrie", 5, 95, 305, 325),        # genuinely s2's own text
+        ]
+    }
+
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, staves,
+        image_path=Path("page.jpg"), image_w=2000, image_h=2000,
+        manuscript_name="test", text_alignment=text_alignment,
+        n_detected_staves=2,
+    )
+    root_before = ET.fromstring(xml_bytes)
+    syllables_before = root_before.findall(f".//{MEI_NS}syllable")
+    assert [s.find(f"{MEI_NS}syl").text for s in syllables_before] == ["Alleluia", "Kyrie"]
+
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, text_alignment, 2000, 2000)
+
+    # Must be a no-op: re-verifying against the SAME alignment must not
+    # migrate "Alleluia" onto s2's section just because s2's written zone
+    # (correctly, for Verovio's sake) doesn't match its raw detection bbox.
+    assert logs == []
+    assert corrected_bytes == xml_bytes
+
+
+# --- special-element (clef/custos/divLine) encoding -- mothra#257 ---
+
+def test_custos_and_divline_interleaved_in_reading_order_between_syllables():
+    """build_mei must emit <custos>/<divLine> as real elements in their own
+    X-position order relative to <syllable>s -- not wrapped inside one (the
+    old punctum-fallback bug), and not all shoved before or after every
+    syllable."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {
+        0: [
+            _glyph("g1", 10, class_name="neume.punctum"),
+            _glyph("gdiv", 40, class_name="divisio.maior"),
+            _glyph("g2", 70, class_name="neume.punctum"),
+            _glyph("gcustos", 100, class_name="custos"),
+        ]
+    }
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="hufnagel",
+    )
+    root = ET.fromstring(xml_bytes)
+    layer = root.find(f".//{MEI_NS}layer")
+    tags = [child.tag.rsplit("}", 1)[-1] for child in layer]
+    # pb, sb, opening clef, syllable(g1), divLine, syllable(g2), custos
+    assert tags == ["pb", "sb", "clef", "syllable", "divLine", "syllable", "custos"]
+
+    div_el = layer.find(f"{MEI_NS}divLine")
+    assert div_el.get("form") == "maior"
+    custos_el = layer.find(f"{MEI_NS}custos")
+    assert custos_el.get("pname") and custos_el.get("oct")
+    # Neither special element was wrapped in a <syllable>/<neume>.
+    assert layer.find(f".//{MEI_NS}syllable/{MEI_NS}neume/{MEI_NS}divLine") is None
+    assert not any(n.get("facs", "").endswith("gcustos") for n in layer.iter(f"{MEI_NS}nc"))
+
+
+def test_divisio_maior_excluded_from_neume_glyph_filter():
+    """Regression test for the substring-matching bug this fix replaced:
+    _SKIP_CLASS_FRAGMENTS = {"custos", "divline", "division"} matched
+    "custos" but never matched "divisio.maior"/"divisio.maxima" (no "n"
+    before the "." in "divisio"), so a divisio glyph fell through into
+    _filter_neume_glyphs's kept list instead of being excluded. Checking
+    special_mapping membership instead must exclude it regardless of the
+    class name's literal substrings."""
+    special_mapping = mei.resolve_special_mapping("hufnagel")
+    glyphs = [_glyph("gdiv", 40, class_name="divisio.maior")]
+    kept = mei._filter_neume_glyphs(glyphs, stave_idx=0, special_mapping=special_mapping)
+    assert kept == []
+
+
+def test_verify_and_correct_syllables_preserves_special_element_position():
+    """A divLine sitting between two syllables must stay between them (by
+    X position) after verify_and_correct_syllables rebuilds the stave's
+    syllables to match new text-finding output -- not get shoved to the
+    end. Exercises the remove-and-reinsert path where element identity and
+    ordering both matter."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {
+        0: [
+            _glyph("g1", 10, class_name="neume.punctum"),
+            _glyph("gdiv", 55, class_name="divisio.maior"),
+            _glyph("g2", 100, class_name="neume.punctum"),
+        ]
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("old1", 5, 45, 90, 110),
+            _box("old2", 95, 135, 90, 110),
+        ]
+    }
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="hufnagel", text_alignment=text_alignment,
+    )
+
+    new_alignment = {
+        "syl_boxes": [
+            _box("new1", 5, 45, 90, 110),
+            _box("new2", 95, 135, 90, 110),
+        ]
+    }
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, new_alignment, 1000, 1000)
+    assert logs != []
+
+    root = ET.fromstring(corrected_bytes)
+    layer = root.find(f".//{MEI_NS}layer")
+    tags = [child.tag.rsplit("}", 1)[-1] for child in layer]
+    assert tags == ["pb", "sb", "clef", "syllable", "divLine", "syllable"]
+    # Exactly one divLine -- no duplication from the remove/reinsert pass.
+    assert len(layer.findall(f"{MEI_NS}divLine")) == 1
+    syl_texts = [s.find(f"{MEI_NS}syl").text for s in layer.findall(f"{MEI_NS}syllable")]
+    assert syl_texts == ["new1", "new2"]

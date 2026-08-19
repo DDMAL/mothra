@@ -38,7 +38,7 @@ from typing import Optional
 import xml.etree.ElementTree as ET
 import sys
 
-from neume_mapping import NcTemplate, resolve_neume_mapping, parse_width
+from neume_mapping import NcTemplate, SpecialEntry, resolve_neume_mapping, resolve_special_mapping, parse_width
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
@@ -52,10 +52,9 @@ MEI_NS = "http://www.music-encoding.org/ns/mei"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 STAVE_BUFFER_PX = 20
 SYLLABLE_GAP_MULTIPLIER = 1.5
-_SKIP_CLASS_FRAGMENTS = frozenset({"custos", "divline", "division"})
 STAFF_LINES = 4  # matches <staffDef lines="..."> below, and the stave zone's
                  # assumed line count (see build_mei's stave-zone construction)
-
+_CLEF_PITCH_REF = {"C": ("c", 4), "F": ("f", 3)}
 _XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8"?>\n'
 _XML_MODEL_PI = (
     '<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng"'
@@ -629,22 +628,65 @@ def _text_box_valid(box: dict, image_w: int, image_h: int) -> bool:
         return False
     return 0 <= ulx < lrx <= image_w and 0 <= uly < lry <= image_h
 
-def _filter_neume_glyphs(staff_glyphs: list[Glyph], stave_idx: int) -> list[Glyph]:
-    """Drop staff-line and custos/divline/division glyphs from one stave's
-    glyph list before syllable-building — extracted from build_mei's
-    per-stave loop so the syllable-row-grouping prepass (see
-    _group_staves_by_row) and the main loop share one skip-glyph
-    definition instead of two copies drifting apart."""
+def _filter_neume_glyphs(
+        staff_glyphs: list[Glyph], stave_idx: int,
+        special_mapping: dict[str, SpecialEntry], 
+) -> list[Glyph]:
+    """Drop staff-line glyphs and any glyph whose classification is one of
+    the notation type's special (non-<neume>) mapping entries — clef,
+    custos, divLine, accid — from one stave's glyph list before
+    syllable-building. Extracted from build_mei's per-stave loop so the
+    syllable-row-grouping prepass (see _group_staves_by_row) and the main
+    loop share one skip-glyph definition instead of two copies drifting
+    apart.
+
+    Checking membership in special_mapping (the real classification
+    strings, from the same CSV that drives _extract_special_glyphs' own
+    encoding below) replaces an earlier substring-fragment check
+    (_SKIP_CLASS_FRAGMENTS = {"custos", "divline", "division"}) that
+    matched "custos" correctly but never matched "divisio.maxima"/
+    "divisio.maior"/"divisio.finalis" (its "divline"/"division" fragments
+    both contain an "n" the real classification strings don't), so a
+    divisio glyph fell through into ordinary neume/<nc> encoding instead
+    of being excluded here — see mothra#257."""
     skip_ids = {
         g.id for g in staff_glyphs
         if (g.nrows > 0 and g.ncols / g.nrows >= 8)
-        or any(frag in g.class_name.lower() for frag in _SKIP_CLASS_FRAGMENTS)
+        or g.class_name.lower().strip() in special_mapping
     }
     if skip_ids:
         skipped = [g for g in staff_glyphs if g.id in skip_ids]
         skip_types = ", ".join(sorted({g.class_name for g in skipped}))
         print(f" [stave {stave_idx}] skipping {len(skip_ids)} glyph(s): {skip_types}")
     return [g for g in staff_glyphs if g.id not in skip_ids]
+
+def _extract_special_glyphs(
+    staff_glyphs: list[Glyph], 
+    special_mapping: dict[str, SpecialEntry],
+) -> list[tuple[Glyph, SpecialEntry]]:
+    """The subset of one stave's raw glyphs that are clef/custos/divLine
+    classifications (per special_mapping), paired with their parsed
+    SpecialEntry, sorted left-to-right by ulx — the order build_mei's
+    per-stave loop interleaves them into the <layer> alongside <syllable>s.
+    A sibling to _filter_neume_glyphs's exclusion of the same glyphs from
+    ordinary neume/<nc> encoding: that function says what to drop, this one
+    says what to do with what was dropped.
+
+    accid entries are deliberately excluded here (though still excluded
+    from ordinary encoding by _filter_neume_glyphs, since they're also in
+    special_mapping): an accidental correctly belongs nested inside the
+    <nc> of the note it modifies, not floating as its own <layer> sibling
+    like a clef/custos/divLine change does, and that nesting isn't
+    implemented yet. accid classifications also aren't currently produced
+    by either trained classifier, so this has no observable effect today —
+    it only avoids fabricating an incorrect standalone element if/when that
+    changes."""
+    pairs: list[tuple[Glyph, SpecialEntry]] = []
+    for g in staff_glyphs:
+        entry = special_mapping.get(g.class_name.lower().strip())
+        if entry is not None and entry.tag != "accid":
+            pairs.append((g, entry))
+    return sorted(pairs, key=lambda p: p[0].ulx)
 
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
     """Parse YOLO annotation text into staff-line glyphs, then cluster them
@@ -1088,6 +1130,7 @@ def build_mei(
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
     neume_mapping = resolve_neume_mapping(notation_type)
+    special_mapping = resolve_special_mapping(notation_type)
     missing_classes: set[str] = set()
     mismatched_widths: set[str] = set()
 
@@ -1133,6 +1176,15 @@ def build_mei(
             "lry": str(zone_lry),
         })
         stave_zone_ids[i] = zone_id
+        
+        ET.SubElement(surface, _tag("zone"), {
+            XML_ID: f"sz-raw-{stave.id}",
+            "type": "staff-raw",
+            "ulx": str(stave.ulx),
+            "uly": str(stave.uly),
+            "lrx": str(stave.lrx),
+            "lry": str(stave.lry),
+        })
         # Clef zone: left edge of stave, roughly square (height ≈ staff height)
         clef_zone_id = f"cz-{stave.id}"
         stave_h = max(zone_lry - zone_uly, 1)
@@ -1258,7 +1310,11 @@ def build_mei(
     row_groups = _group_staves_by_row(staves, effective_n_detected)
     stave_to_group: dict[int, set[int]] = {i: g for g in row_groups for i in g}
     neume_glyphs_by_stave: dict[int, list[Glyph]] = {
-        stave_idx: _filter_neume_glyphs(glyphs_by_stave[stave_idx], stave_idx)
+        stave_idx: _filter_neume_glyphs(glyphs_by_stave[stave_idx], stave_idx, special_mapping)
+        for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0)
+    }
+    special_glyphs_by_stave: dict[int, list[tuple[Glyph, SpecialEntry]]] = {
+        stave_idx: _extract_special_glyphs(glyphs_by_stave[stave_idx], special_mapping)
         for stave_idx in sorted(k for k in glyphs_by_stave if k >= 0)
     }
     group_pool: dict[frozenset, tuple[list[dict], list[list[Glyph]]]] = {
@@ -1273,17 +1329,29 @@ def build_mei(
         staff_glyphs = glyphs_by_stave[stave_idx]
         if not staff_glyphs and not boxes_by_stave.get(stave_idx):
             continue
+        stave = staves[stave_idx] if stave_idx < len(staves) else None
+        line_ys = stave.line_ys if stave else []
         # <sb> marks the start of each stave and links it to its zone
         zone_id = stave_zone_ids.get(stave_idx, str(stave_idx))
         sb_attrs: dict[str, str] = {XML_ID: f"sb-{zone_id}"}
         if stave_idx in stave_zone_ids:
             sb_attrs["facs"] = f"#{zone_id}"
         ET.SubElement(layer, _tag("sb"), sb_attrs)
+
+        stave_clef_shape = clef_shape
+        consumed_special_ids: set[str] = set()
+        for g, entry in special_glyphs_by_stave.get(stave_idx, []):
+            if entry.tag == "clef":
+                stave_clef_shape = entry.attrs.get("shape", clef_shape)
+                consumed_special_ids.add(g.id)
+                break
+        clef_note, clef_oct = _CLEF_PITCH_REF.get(stave_clef_shape, ("c", 4))
+
         # Clef must follow each <sb>; @facs anchors it to the stave's left edge
         clef_id = str(uuid.uuid4()).replace("-", "")[:12]
         clef_attrs: dict[str, str] = {
             XML_ID: f"clef-{clef_id}",
-            "shape": clef_shape,
+            "shape": stave_clef_shape,
             "line": str(clef_line),
         }
         if stave_idx in clef_zone_ids:
@@ -1308,53 +1376,109 @@ def build_mei(
 
         syllable_units = _build_syllable_units(neume_glyphs, stave_boxes, glyph_groups, syllable_gap_mult)
 
-        for syl_text, box, glyphs_in_syl in syllable_units:
-            syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
-            syllable = ET.SubElement(layer, _tag("syllable"), {
-                XML_ID: f"syllable-{syllable_id}",
-            })
-            syl_id = str(uuid.uuid4()).replace("-", "")[:12]
-            syl_attrs: dict[str, str] = {XML_ID: f"syl-{syl_id}"}
-            if box is not None:
-                zone_id = _syl_zone(box)
-                if zone_id is not None:
-                    syl_attrs["facs"] = f"#{zone_id}"
-            syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
-            syl.text = syl_text
-            for glyph in glyphs_in_syl:
-                neume = ET.SubElement(syllable, _tag("neume"), {
-                    XML_ID: f"neume-{glyph.id}",
-                    "facs": f"#z-{glyph.id}",
-                })
-                stave = staves[stave_idx] if stave_idx < len(staves) else None
-                line_ys = stave.line_ys if stave else []
-                entry = neume_mapping.get(glyph.class_name.lower().strip())
-                if entry is not None:
-                    components = entry.components
-                else:
-                    components = [NcTemplate()]
-                    missing_classes.add(glyph.class_name)
-                anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
-                pitches = _component_pitches(anchor_step, components)
-                component_zone_ids = _component_zone_ids(
-                    surface, glyph, components,
-                    entry.width if entry is not None else None,
-                )
-                if len(components) > 1 and component_zone_ids is None:
-                    mismatched_widths.add(glyph.class_name)
-                for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
-                    nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
-                    zone_id = component_zone_ids[j] if component_zone_ids is not None else f"z-{glyph.id}"
-                    nc_attrs: dict[str, str] = {
-                        XML_ID: f"nc-{nc_id}",
-                        "facs": f"#{zone_id}",
+        # Interleave this stave's syllables with its non-opening special
+        # (clef-change/custos/divLine) glyphs by X position, so a divLine
+        # between two phrases (or a custos at the line's end) lands in its
+        # real reading-order position in the <layer> instead of always
+        # before or always after every syllable (mothra#257).
+        layer_items: list[tuple[float, str, tuple]] = [
+            (
+                box["ul"][0] if box is not None else min((g.ulx for g in glyphs_in_syl), default=0.0),
+                "syllable",
+                (syl_text, box, glyphs_in_syl),
+            )
+            for syl_text, box, glyphs_in_syl in syllable_units
+        ]
+        layer_items += [
+            (g.ulx, "special", (g, entry))
+            for g, entry in special_glyphs_by_stave.get(stave_idx, [])
+            if g.id not in consumed_special_ids
+        ]
+        layer_items.sort(key=lambda item: item[0])
+
+        for _, kind, payload in layer_items:
+            if kind == "syllable":
+                syl_text, box, glyphs_in_syl = payload
+                syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
+                syllable = ET.SubElement(layer, _tag("syllable"), {
+                                XML_ID: f"syllable-{syllable_id}",
+                            })
+                syl_id = str(uuid.uuid4()).replace("-", "")[:12]
+                syl_attrs: dict[str, str] = {XML_ID: f"syl-{syl_id}"}
+                if box is not None:
+                    zone_id = _syl_zone(box)
+                    if zone_id is not None:
+                        syl_attrs["facs"] = f"#{zone_id}"
+                syl = ET.SubElement(syllable, _tag("syl"), syl_attrs)
+                syl.text = syl_text
+                for glyph in glyphs_in_syl:
+                    neume = ET.SubElement(syllable, _tag("neume"), {
+                        XML_ID: f"neume-{glyph.id}",
+                        "facs": f"#z-{glyph.id}",
+                    })
+                    entry = neume_mapping.get(glyph.class_name.lower().strip())
+                    if entry is not None:
+                        components = entry.components
+                    else:
+                        components = [NcTemplate()]
+                        missing_classes.add(glyph.class_name)
+                    anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
+                    pitches = _component_pitches(anchor_step, components, clef_note, clef_oct)
+                    component_zone_ids = _component_zone_ids(
+                        surface, glyph, components,
+                        entry.width if entry is not None else None,
+                    )
+                    if len(components) > 1 and component_zone_ids is None:
+                        mismatched_widths.add(glyph.class_name)
+                    for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
+                        nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
+                        zone_id = component_zone_ids[j] if component_zone_ids is not None else f"z-{glyph.id}"
+                        nc_attrs: dict[str, str] = {
+                            XML_ID: f"nc-{nc_id}",
+                            "facs": f"#{zone_id}",
+                            "pname": pname,
+                            "oct": oct_str,
+                        }
+                        nc_attrs.update(comp.attrs)
+                        nc_el = ET.SubElement(neume, _tag("nc"), nc_attrs)
+                        if comp.liquescent:
+                            ET.SubElement(nc_el, _tag("liquescent"))
+            else:
+                glyph, entry = payload
+                if entry.tag == "clef":
+                    attrs: dict[str, str] = {XML_ID: f"clef-{glyph.id}", "facs": f"#z-{glyph.id}"}
+                    attrs.update(entry.attrs)
+                    attrs.setdefault("line", str(clef_line))
+                    ET.SubElement(layer, _tag("clef"), attrs)
+                    # A mid-stave clef change (this isn't the stave's opening
+                    # clef -- that one already set stave_clef_shape/clef_note/
+                    # clef_oct before this loop started) must also rebind the
+                    # pitch reference: every <nc>/<custos> emitted after this
+                    # point in reading order is read against THIS clef, not
+                    # the one the stave opened with. clef_line itself is
+                    # deliberately left alone -- there's no classifier signal
+                    # for which staff line a changed clef sits on (see
+                    # _CLEF_PITCH_REF's comment), so it stays the stave's
+                    # original default either way.
+                    clef_note, clef_oct = _CLEF_PITCH_REF.get(
+                        attrs.get("shape", stave_clef_shape), (clef_note, clef_oct)
+                    )
+                elif entry.tag == "custos":
+                    anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
+                    pname, oct_str = _component_pitches(anchor_step, [NcTemplate()], clef_note, clef_oct)[0]
+                    attrs = {
+                        XML_ID: f"custos-{glyph.id}",
+                        "facs": f"#z-{glyph.id}",
                         "pname": pname,
                         "oct": oct_str,
                     }
-                    nc_attrs.update(comp.attrs)
-                    nc_el = ET.SubElement(neume, _tag("nc"), nc_attrs)
-                    if comp.liquescent:
-                        ET.SubElement(nc_el, _tag("liquescent"))
+                    attrs.update(entry.attrs)
+                    ET.SubElement(layer, _tag("custos"), attrs)
+                elif entry.tag == "divLine":
+                    attrs = {XML_ID: f"divline-{glyph.id}", "facs": f"#z-{glyph.id}"}
+                    attrs.update(entry.attrs)
+                    ET.SubElement(layer, _tag("divLine"), attrs)
+                
 
     if missing_classes:
         print(
@@ -1544,6 +1668,36 @@ def validate_mei(xml_bytes: bytes) -> list[str]:
             if not nc.get(attr):
                 warnings.append(f"nc {ncid or '?'}: missing @{attr}")
 
+    # stave section's very first <clef> (the one immediately following
+    # <sb>), which has no detected-glyph facs to check when no clef glyph
+    # was found on that stave -- see build_mei's opening-clef handling.
+    for layer in layers:
+        seen_opening_clef = False
+        for child in layer:
+            if child.tag == _tag("sb"):
+                seen_opening_clef = False
+            elif child.tag == _tag("clef"):
+                if not seen_opening_clef:
+                    seen_opening_clef = True
+                    continue
+                cid = child.get(XML_ID, "")
+                if not cid:
+                    warnings.append("clef missing xml:id")
+                check_facs(child, f"clef {cid or '?'}")
+            elif child.tag == _tag("custos"):
+                cid = child.get(XML_ID, "")
+                if not cid:
+                    warnings.append("custos missing xml:id")
+                check_facs(child, f"custos {cid or '?'}")
+                for attr in ("pname", "oct"):
+                    if not child.get(attr):
+                        warnings.append(f"custos {cid or '?'}: missing @{attr}")
+            elif child.tag == _tag("divLine"):
+                did = child.get(XML_ID, "")
+                if not did:
+                    warnings.append("divLine missing xml:id")
+                check_facs(child, f"divLine {did or '?'}")
+
     return warnings
 
 
@@ -1646,15 +1800,20 @@ def build_neon_manifest(mei_bytes: bytes, image_ref: str, stem: str) -> dict:
 def _reconstruct_mei_state(
     root: ET.Element,
 ) -> tuple[list[StaveBbox], dict[int, list[Glyph]], dict[str, ET.Element],
-           dict[int, list[tuple[Optional[str], tuple[str, ...]]]]]:
+           dict[int, list[tuple[Optional[str], tuple[str, ...], Optional[dict]]]],
+           dict[int, list[tuple[float, ET.Element]]]]:
     """Reverse of what build_mei writes: walks an already-built MEI document
     back into (staves, glyphs_by_stave) -- the same shape build_mei
     originally took as input -- plus a glyph_id -> <neume> element map (so
     verify_and_correct_syllables can re-parent an existing, already
     pitch-computed <neume> element under a corrected <syllable> without
     recomputing pitch at all) and, per stave_idx, the CURRENT sequence of
-    (syl_text, glyph_ids) actually encoded, for comparison against a
-    freshly recomputed one.
+    (syl_text, glyph_ids, syl_box) actually encoded, for comparison against
+    a freshly recomputed one. syl_box (the syllable's own facs-linked zone,
+    {"ul": [x, y], "lr": [x, y]}, or None if it has none) lets
+    verify_and_correct_syllables's duplicate guard tell "this is the same
+    physical mothra-text box, just re-bucketed" apart from "this is a
+    different, legitimately repeated word" -- see that function's comments.
 
     Trusts the existing <sb>-delimited stave groupings as-is -- see
     verify_and_correct_syllables's docstring for why this does not redo
@@ -1679,8 +1838,16 @@ def _reconstruct_mei_state(
     staves: list[StaveBbox] = []
     zone_id_to_stave_idx: dict[str, int] = {}
     for i, zid in enumerate(staff_zone_ids):
-        ulx, uly, lrx, lry = _box(zones[zid])
-        staves.append(StaveBbox(id=zid.removeprefix("sz-"), ulx=ulx, uly=uly, lrx=lrx, lry=lry))
+        stave_id = zid.removeprefix("sz-")
+        # Prefer the raw (pre-_stave_zone_bounds) box-assignment geometry
+        # build_mei originally ran _assign_boxes_to_staves against, when
+        # present -- see build_mei's "staff-raw" zone comment (mothra#208).
+        # Falls back to the rendered zone's own (already Verovio-spacing-
+        # distorted) bounds for MEI files encoded before this fix existed,
+        # same as today's behavior.
+        raw_zone = zones.get(f"sz-raw-{stave_id}")
+        ulx, uly, lrx, lry = _box(raw_zone) if raw_zone is not None else _box(zones[zid])
+        staves.append(StaveBbox(id=stave_id, ulx=ulx, uly=uly, lrx=lrx, lry=lry))
         zone_id_to_stave_idx[zid] = i
 
     layer = root.find(f".//{ns}layer")
@@ -1689,16 +1856,38 @@ def _reconstruct_mei_state(
     current_syllables: dict[int, list[tuple[Optional[str], tuple[str, ...]]]] = {
         i: [] for i in range(len(staves))
     }
+    special_elements_by_stave: dict[int, list[tuple[float, ET.Element]]] = {
+        i: [] for i in range(len(staves))
+    }
     current_stave_idx: Optional[int] = None
+    seen_opening_clef = False
     if layer is not None:
         for child in layer:
             tag = child.tag.rsplit("}", 1)[-1]
             if tag == "sb":
                 facs = (child.get("facs") or "").lstrip("#")
                 current_stave_idx = zone_id_to_stave_idx.get(facs)
+                seen_opening_clef = False
+            elif tag == "clef" and current_stave_idx is not None and not seen_opening_clef:
+                # build_mei's unconditional per-stave opening clef -- left
+                # untouched by verify_and_correct_syllables entirely (never
+                # removed/re-inserted, unlike everything captured below).
+                seen_opening_clef = True
+            elif tag in ("clef", "custos", "divLine") and current_stave_idx is not None:
+                facs = (child.get("facs") or "").lstrip("#")
+                zone = zones.get(facs)
+                x_key = float(zone.get("ulx", 0)) if zone is not None else 0.0
+                special_elements_by_stave[current_stave_idx].append((x_key, child))
             elif tag == "syllable" and current_stave_idx is not None:
                 syl_el = child.find(f"{ns}syl")
                 syl_text = syl_el.text if syl_el is not None else None
+                syl_box: Optional[dict] = None
+                if syl_el is not None:
+                    syl_facs = (syl_el.get("facs") or "").lstrip("#")
+                    syl_zone = zones.get(syl_facs)
+                    if syl_zone is not None:
+                        ulx, uly, lrx, lry = _box(syl_zone)
+                        syl_box = {"ul": [ulx, uly], "lr": [lrx, lry]}
                 glyph_ids: list[str] = []
                 for neume in child.findall(f"{ns}neume"):
                     facs = (neume.get("facs") or "").lstrip("#")
@@ -1714,8 +1903,34 @@ def _reconstruct_mei_state(
                     ))
                     neume_elements[glyph_id] = neume
                     glyph_ids.append(glyph_id)
-                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids)))
-    return staves, glyphs_by_stave, neume_elements, current_syllables
+                current_syllables[current_stave_idx].append((syl_text, tuple(glyph_ids), syl_box))
+    return staves, glyphs_by_stave, neume_elements, current_syllables, special_elements_by_stave
+
+def _same_physical_box(a: dict, b: dict, min_iou: float = 0.3) -> bool:
+    """True if boxes a/b are almost certainly the same underlying
+    mothra-text detection (allowing for the sub-pixel rounding
+    scale_text_alignment's independent X/Y factors can introduce), as
+    opposed to two boxes that just happen to hold the same text -- e.g. a
+    genuinely repeated word like "Alleluia" appearing twice on the page.
+    Compared by intersection-over-union rather than exact coordinate
+    equality for exactly that rounding-tolerance reason; verify_and_
+    correct_syllables's duplicate guard needs this because a real
+    fragment-pooling duplicate is the SAME box re-bucketed to the wrong
+    stave, while a real repeated word is a DIFFERENT, spatially distant
+    box that happens to share the same syl text."""
+    ax0, ay0 = a["ul"]
+    ax1, ay1 = a["lr"]
+    bx0, by0 = b["ul"]
+    bx1, by1 = b["lr"]
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return False
+    intersection = (ix1 - ix0) * (iy1 - iy0)
+    area_a = max(ax1 - ax0, 1) * max(ay1 - ay0, 1)
+    area_b = max(bx1 - bx0, 1) * max(by1 - by0, 1)
+    union = area_a + area_b - intersection
+    return union > 0 and intersection / union >= min_iou
 
 def verify_and_correct_syllables(
         mei_bytes: bytes,
@@ -1759,7 +1974,7 @@ def verify_and_correct_syllables(
 
     root = ET.fromstring(mei_bytes)
     ns = f"{{{MEI_NS}}}"
-    staves, glyphs_by_stave, neume_elements, current_syllables = _reconstruct_mei_state(root)
+    staves, glyphs_by_stave, neume_elements, current_syllables, special_elements_by_stave = _reconstruct_mei_state(root)
     surface = root.find(f".//{ns}surface")
     layer = root.find(f".//{ns}layer")
     if not staves or surface is None or layer is None:
@@ -1779,12 +1994,11 @@ def verify_and_correct_syllables(
     # whether this exact text is ALREADY backed by real glyphs somewhere
     # else in the document; if so, this glyph-less copy is that duplicate,
     # not new content.
-    old_texts_with_glyphs_anywhere = {
-        syl_text
-        for stave_units in current_syllables.values()
-        for syl_text, glyph_ids in stave_units
-        if glyph_ids
-    }
+    old_boxes_with_glyphs_by_text: dict[str, list[dict]] = {}
+    for stave_units in current_syllables.values():
+        for syl_text, glyph_ids, old_box in stave_units:
+            if glyph_ids and syl_text is not None and old_box is not None:
+                old_boxes_with_glyphs_by_text.setdefault(syl_text, []).append(old_box)
 
     for stave_idx in range(len(staves)):
         neume_glyphs = sorted(glyphs_by_stave.get(stave_idx, []), key=lambda g: g.ulx)
@@ -1829,7 +2043,7 @@ def verify_and_correct_syllables(
         # dropped the check entirely, which let the fragment-pooled
         # duplicate case back in — too broad. This is the middle ground.
         old_units = current_syllables.get(stave_idx, [])
-        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids in old_units}
+        old_text_by_glyphs = {glyph_ids: syl_text for syl_text, glyph_ids, _ in old_units}
         reconciled_units = []
         for syl_text, box, glyphs_in_syl in new_units:
             glyph_ids = tuple(g.id for g in glyphs_in_syl)
@@ -1837,13 +2051,17 @@ def verify_and_correct_syllables(
                 old_text = old_text_by_glyphs.get(glyph_ids)
                 if syl_text == "-" and old_text not in (None, "-"):
                     syl_text = old_text
-            elif syl_text in old_texts_with_glyphs_anywhere:
+            elif box is not None and any(
+                _same_physical_box(box, old_box)
+                for old_box in old_boxes_with_glyphs_by_text.get(syl_text, [])
+            ):
                 continue
             reconciled_units.append((syl_text, box, glyphs_in_syl))
         new_units = reconciled_units
 
         new_signature = [(syl_text, tuple(g.id for g in glyphs)) for syl_text, _, glyphs in new_units]
-        if new_signature == current_syllables.get(stave_idx, []):
+        old_signature = [(syl_text, glyph_ids) for syl_text, glyph_ids, _ in old_units]
+        if new_signature == old_signature:
             continue # matches mothra-text
 
         children = list(layer)
@@ -1859,11 +2077,32 @@ def verify_and_correct_syllables(
             (i for i in range(sb_idx + 1, len(children)) if children[i].tag == f"{ns}sb"),
             len(children),
         )
-        insert_at = sb_idx + 2 # right after <sb>, <clef>
+        # Right after <sb> and the opening <clef>, when that clef is
+        # present. A section whose opening clef was deleted downstream
+        # (e.g. in Neon) must not shift the boundary into real content --
+        # _reconstruct_mei_state only ever treats the FIRST clef/custos/
+        # divLine after <sb> as "the opening clef, leave it alone"; if
+        # that slot instead holds a real special element (opening clef
+        # missing), _reconstruct_mei_state records it as an ordinary one
+        # to preserve, and this boundary must include it in the removal
+        # scan below or it gets re-inserted as a duplicate of itself.
+        insert_at = sb_idx + 1
+        if insert_at < section_end and children[insert_at].tag == f"{ns}clef":
+            insert_at += 1
 
-        # Remove this section's existing <syllable> elements and their
-        # syl-zone <zone> children, to avoid leaving orphaned zones behind.
+        # Remove this section's existing <syllable> elements (and their
+        # syl-zone <zone> children, to avoid leaving orphaned zones behind)
+        # AND any interspersed clef/custos/divLine special elements
+        # (mothra#257) -- those are re-inserted below, merged back in by X
+        # position with the freshly built syllables, rather than left in
+        # place: leaving them in place while only removing <syllable>s and
+        # then re-inserting all new syllables consecutively at insert_at
+        # would silently push every special element after all the new
+        # syllables, regardless of where it actually belongs.
         old_zone_ids: set[str] = set()
+        special_els = special_elements_by_stave.get(stave_idx, [])
+        special_el_ids = {id(el) for _, el in special_els}
+        removed_special_ids: set[int] = set()
         for c in children[insert_at:section_end]:
             if c.tag == f"{ns}syllable":
                 syl_el = c.find(f"{ns}syl")
@@ -1871,15 +2110,24 @@ def verify_and_correct_syllables(
                 if facs.startswith("#"):
                     old_zone_ids.add(facs[1:])
                 layer.remove(c)
+            elif id(c) in special_el_ids:
+                layer.remove(c)
+                removed_special_ids.add(id(c))
         if old_zone_ids:
             for zone_el in list(surface.findall(f"{ns}zone")):
                 if zone_el.get(XML_ID) in old_zone_ids:
                     surface.remove(zone_el)
 
-        # Build fresh <syllable> elements, re-parenting the EXISTING
-        # <neume> element for each glyph (already correctly pitched --
-        # untouched) rather than recomputing anything about it.
-        for offset, (syl_text, box, glyphs_in_syl) in enumerate(new_units):
+        # Build fresh <syllable> elements (re-parenting the EXISTING
+        # <neume> element for each glyph -- already correctly pitched,
+        # untouched) and merge them back in, by X position, with the
+        # preserved special elements removed above -- so a divLine/custos/
+        # inline clef-change keeps its original position relative to the
+        # syllables around it instead of always landing after all of them.
+        merged: list[tuple[float, ET.Element]] = [
+            (x, el) for x, el in special_els if id(el) in removed_special_ids
+        ]
+        for syl_text, box, glyphs_in_syl in new_units:
             syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
             syllable = ET.Element(_tag("syllable"), {XML_ID: f"syllable-{syllable_id}"})
             syl_attrs: dict[str, str] = {XML_ID: f"syl-{str(uuid.uuid4()).replace('-', '')[:12]}"}
@@ -1899,7 +2147,11 @@ def verify_and_correct_syllables(
                 neume_el = neume_elements.get(glyph.id)
                 if neume_el is not None:
                     syllable.append(neume_el)
-            layer.insert(insert_at + offset, syllable)
+            x_key = box["ul"][0] if box is not None else min((g.ulx for g in glyphs_in_syl), default=0.0)
+            merged.append((x_key, syllable))
+
+        for offset, (_, el) in enumerate(sorted(merged, key=lambda item: item[0])):
+            layer.insert(insert_at + offset, el)
 
         logs.append(f" [verify-syllables] stave {stave_idx}: corrected "
                     f"{len(new_units)} syllable(s) to match text-finding")
