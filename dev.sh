@@ -221,7 +221,7 @@ start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" 
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start paco "$C_PACO" "$PACO_BIN" main:app --app-dir "$ROOT/paco-classifier-service" --port "$PACO_PORT"
 start backend "$C_API" env PACO_API_URL="$PACO_API_URL" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
-start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
+start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker -B --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort
 
 echo "${C_DIM}→ open http://localhost:$WEB_PORT${C_RST}"

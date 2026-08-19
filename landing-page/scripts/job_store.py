@@ -315,7 +315,7 @@ def check_cancelled(job_id: str) -> None:
     if get_job_status(job_id) == "cancelled":
         raise JobCancelled()
 
-def cleanup_stale_uplaods(max_age_days: int = 1) -> int:
+def cleanup_stale_uploads(max_age_days: int = 1) -> int:
     """job_uploads is ephemeral staging — a row is created right before enqueuing
     a Celery task and normally dropped within seconds once the task fetches it.
     A row surviving a day means the enqueue or task crashed before consuming it.
@@ -352,3 +352,16 @@ def cleanup_stale_sessions(max_age_days: int = 14) -> int:
         return deleted
     finally:
         release_db_conn(con)
+
+
+def run_periodic_cleanup() -> dict:
+    """Runs the two Postgres-backed cleanups (job_uploads, job_sessions) --
+    both operate on the shared DB, so unlike auth_api.cleanup_stale_neon_manifests
+    (backend-local disk) this is safe to invoke from anywhere, including the
+    worker via Celery beat (see celery_app.py/tasks_cleanup.py). Previously
+    these only ran once at backend startup (main.py), so a long-lived pod
+    that never restarted never got swept again -- mothra#220 row 28."""
+    return {
+        "job_uploads_deleted": cleanup_stale_uploads(),
+        "job_sessions_deleted": cleanup_stale_sessions(),
+    }
