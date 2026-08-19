@@ -1450,6 +1450,19 @@ def build_mei(
                     attrs.update(entry.attrs)
                     attrs.setdefault("line", str(clef_line))
                     ET.SubElement(layer, _tag("clef"), attrs)
+                    # A mid-stave clef change (this isn't the stave's opening
+                    # clef -- that one already set stave_clef_shape/clef_note/
+                    # clef_oct before this loop started) must also rebind the
+                    # pitch reference: every <nc>/<custos> emitted after this
+                    # point in reading order is read against THIS clef, not
+                    # the one the stave opened with. clef_line itself is
+                    # deliberately left alone -- there's no classifier signal
+                    # for which staff line a changed clef sits on (see
+                    # _CLEF_PITCH_REF's comment), so it stays the stave's
+                    # original default either way.
+                    clef_note, clef_oct = _CLEF_PITCH_REF.get(
+                        attrs.get("shape", stave_clef_shape), (clef_note, clef_oct)
+                    )
                 elif entry.tag == "custos":
                     anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
                     pname, oct_str = _component_pitches(anchor_step, [NcTemplate()], clef_note, clef_oct)[0]
@@ -2064,7 +2077,18 @@ def verify_and_correct_syllables(
             (i for i in range(sb_idx + 1, len(children)) if children[i].tag == f"{ns}sb"),
             len(children),
         )
-        insert_at = sb_idx + 2 # right after <sb>, <clef>
+        # Right after <sb> and the opening <clef>, when that clef is
+        # present. A section whose opening clef was deleted downstream
+        # (e.g. in Neon) must not shift the boundary into real content --
+        # _reconstruct_mei_state only ever treats the FIRST clef/custos/
+        # divLine after <sb> as "the opening clef, leave it alone"; if
+        # that slot instead holds a real special element (opening clef
+        # missing), _reconstruct_mei_state records it as an ordinary one
+        # to preserve, and this boundary must include it in the removal
+        # scan below or it gets re-inserted as a duplicate of itself.
+        insert_at = sb_idx + 1
+        if insert_at < section_end and children[insert_at].tag == f"{ns}clef":
+            insert_at += 1
 
         # Remove this section's existing <syllable> elements (and their
         # syl-zone <zone> children, to avoid leaving orphaned zones behind)
@@ -2078,6 +2102,7 @@ def verify_and_correct_syllables(
         old_zone_ids: set[str] = set()
         special_els = special_elements_by_stave.get(stave_idx, [])
         special_el_ids = {id(el) for _, el in special_els}
+        removed_special_ids: set[int] = set()
         for c in children[insert_at:section_end]:
             if c.tag == f"{ns}syllable":
                 syl_el = c.find(f"{ns}syl")
@@ -2087,6 +2112,7 @@ def verify_and_correct_syllables(
                 layer.remove(c)
             elif id(c) in special_el_ids:
                 layer.remove(c)
+                removed_special_ids.add(id(c))
         if old_zone_ids:
             for zone_el in list(surface.findall(f"{ns}zone")):
                 if zone_el.get(XML_ID) in old_zone_ids:
@@ -2098,7 +2124,9 @@ def verify_and_correct_syllables(
         # preserved special elements removed above -- so a divLine/custos/
         # inline clef-change keeps its original position relative to the
         # syllables around it instead of always landing after all of them.
-        merged: list[tuple[float, ET.Element]] = list(special_els)
+        merged: list[tuple[float, ET.Element]] = [
+            (x, el) for x, el in special_els if id(el) in removed_special_ids
+        ]
         for syl_text, box, glyphs_in_syl in new_units:
             syllable_id = glyphs_in_syl[0].id if glyphs_in_syl else str(uuid.uuid4()).replace("-", "")[:12]
             syllable = ET.Element(_tag("syllable"), {XML_ID: f"syllable-{syllable_id}"})

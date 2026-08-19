@@ -620,3 +620,98 @@ def test_verify_and_correct_syllables_keeps_syllable_on_its_own_stave_despite_zo
     # (correctly, for Verovio's sake) doesn't match its raw detection bbox.
     assert logs == []
     assert corrected_bytes == xml_bytes
+
+
+# --- special-element (clef/custos/divLine) encoding -- mothra#257 ---
+
+def test_custos_and_divline_interleaved_in_reading_order_between_syllables():
+    """build_mei must emit <custos>/<divLine> as real elements in their own
+    X-position order relative to <syllable>s -- not wrapped inside one (the
+    old punctum-fallback bug), and not all shoved before or after every
+    syllable."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {
+        0: [
+            _glyph("g1", 10, class_name="neume.punctum"),
+            _glyph("gdiv", 40, class_name="divisio.maior"),
+            _glyph("g2", 70, class_name="neume.punctum"),
+            _glyph("gcustos", 100, class_name="custos"),
+        ]
+    }
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="hufnagel",
+    )
+    root = ET.fromstring(xml_bytes)
+    layer = root.find(f".//{MEI_NS}layer")
+    tags = [child.tag.rsplit("}", 1)[-1] for child in layer]
+    # pb, sb, opening clef, syllable(g1), divLine, syllable(g2), custos
+    assert tags == ["pb", "sb", "clef", "syllable", "divLine", "syllable", "custos"]
+
+    div_el = layer.find(f"{MEI_NS}divLine")
+    assert div_el.get("form") == "maior"
+    custos_el = layer.find(f"{MEI_NS}custos")
+    assert custos_el.get("pname") and custos_el.get("oct")
+    # Neither special element was wrapped in a <syllable>/<neume>.
+    assert layer.find(f".//{MEI_NS}syllable/{MEI_NS}neume/{MEI_NS}divLine") is None
+    assert not any(n.get("facs", "").endswith("gcustos") for n in layer.iter(f"{MEI_NS}nc"))
+
+
+def test_divisio_maior_excluded_from_neume_glyph_filter():
+    """Regression test for the substring-matching bug this fix replaced:
+    _SKIP_CLASS_FRAGMENTS = {"custos", "divline", "division"} matched
+    "custos" but never matched "divisio.maior"/"divisio.maxima" (no "n"
+    before the "." in "divisio"), so a divisio glyph fell through into
+    _filter_neume_glyphs's kept list instead of being excluded. Checking
+    special_mapping membership instead must exclude it regardless of the
+    class name's literal substrings."""
+    special_mapping = mei.resolve_special_mapping("hufnagel")
+    glyphs = [_glyph("gdiv", 40, class_name="divisio.maior")]
+    kept = mei._filter_neume_glyphs(glyphs, stave_idx=0, special_mapping=special_mapping)
+    assert kept == []
+
+
+def test_verify_and_correct_syllables_preserves_special_element_position():
+    """A divLine sitting between two syllables must stay between them (by
+    X position) after verify_and_correct_syllables rebuilds the stave's
+    syllables to match new text-finding output -- not get shoved to the
+    end. Exercises the remove-and-reinsert path where element identity and
+    ordering both matter."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {
+        0: [
+            _glyph("g1", 10, class_name="neume.punctum"),
+            _glyph("gdiv", 55, class_name="divisio.maior"),
+            _glyph("g2", 100, class_name="neume.punctum"),
+        ]
+    }
+    text_alignment = {
+        "syl_boxes": [
+            _box("old1", 5, 45, 90, 110),
+            _box("old2", 95, 135, 90, 110),
+        ]
+    }
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="hufnagel", text_alignment=text_alignment,
+    )
+
+    new_alignment = {
+        "syl_boxes": [
+            _box("new1", 5, 45, 90, 110),
+            _box("new2", 95, 135, 90, 110),
+        ]
+    }
+    corrected_bytes, logs = mei.verify_and_correct_syllables(xml_bytes, new_alignment, 1000, 1000)
+    assert logs != []
+
+    root = ET.fromstring(corrected_bytes)
+    layer = root.find(f".//{MEI_NS}layer")
+    tags = [child.tag.rsplit("}", 1)[-1] for child in layer]
+    assert tags == ["pb", "sb", "clef", "syllable", "divLine", "syllable"]
+    # Exactly one divLine -- no duplication from the remove/reinsert pass.
+    assert len(layer.findall(f"{MEI_NS}divLine")) == 1
+    syl_texts = [s.find(f"{MEI_NS}syl").text for s in layer.findall(f"{MEI_NS}syllable")]
+    assert syl_texts == ["new1", "new2"]
