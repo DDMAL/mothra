@@ -340,10 +340,7 @@ export default function ProcessingPage({
             // mothra#247 follow-up: a REAL progress signal for the
             // "processing" stage (today, only the medieval preset's
             // staffline classifier emits this — see tasks_predict.py's
-            // _run_medieval_inference), not a time-based guess. Always
-            // wins over whatever the interpolation effect has guessed so
-            // far, even if that guess happened to be higher already — a
-            // real tick is authoritative, an interpolated value never is.
+            // _run_medieval_inference), not a time-based guess.
             const ip = itemProgressRef.current;
             const stagePct = STAGE_PROGRESS["processing"] ?? 0;
             const fraction = Math.min(Math.max(ev.current / ev.total, 0), 1);
@@ -352,8 +349,17 @@ export default function ProcessingPage({
                   ((ip.index + (stagePct / 100) * fraction) / ip.total) * 100,
                 )
               : Math.round(stagePct * fraction);
-            confirmedProgressRef.current = exact;
-            setProgress(exact);
+            // CodeRabbit: never let a real tick move the bar BACKWARD —
+            // the interpolation effect's guess can occasionally run ahead
+            // of a real tick's fraction (e.g. it estimated the classifier's
+            // row-based pace slightly too fast), and visually reversing the
+            // bar reads as broken even though the underlying number is, in
+            // isolation, more accurate. Clamp to the current displayed
+            // value instead: a real tick can still advance the floor, just
+            // never retreat it.
+            const monotonicProgress = Math.max(progressRef.current, exact);
+            confirmedProgressRef.current = monotonicProgress;
+            setProgress(monotonicProgress);
             // Let the interpolation effect keep creeping smoothly from
             // THIS fresh, real floor between now and the next tick (or the
             // stage's real stage_done), instead of either freezing until

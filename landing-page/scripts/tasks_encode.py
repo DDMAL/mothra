@@ -104,10 +104,19 @@ def _resolve_hints(
             current_image_id = None
             try:
                 if image_id:
+                    # CodeRabbit: every annotations row has always had a
+                    # non-null image_id (write_annotation() requires it, and
+                    # this column predates any migration on this table) --
+                    # this OR clause is defensive insurance against a
+                    # hypothetical legacy NULL-image_id row rather than a
+                    # known real gap, so an exact id match is still always
+                    # preferred and this can't resolve to a DIFFERENT
+                    # same-named image's row.
                     cur.execute(
-                        "SELECT id, yolo_txt, image_id FROM annotations WHERE image_id = %s AND project_id = %s "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        (image_id, project_id),
+                        "SELECT id, yolo_txt, image_id FROM annotations"
+                        " WHERE project_id = %s AND (image_id = %s OR (image_id IS NULL AND image_name = %s))"
+                        " ORDER BY created_at DESC LIMIT 1",
+                        (project_id, image_id, image_name),
                     )
                 else:
                     cur.execute(

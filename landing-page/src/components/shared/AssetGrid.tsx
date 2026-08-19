@@ -22,6 +22,12 @@ interface AssetGridProps<T extends AssetItem> {
   pageOffset: number;
   section: AssetSection;
   usedNames: string[];
+  // Which item field `usedNames` matches against. Defaults to "name"
+  // (models/MEI files have no duplicate-name concern to fix). mothra#241
+  // follow-up (CodeRabbit): ImageTab.tsx passes "id" instead, since
+  // duplicate-named image uploads need to be matched/selected/removed
+  // independently, which a name match can't do.
+  usedKey?: "name" | "id";
   totalPages: number;
   renderThumbnail: (item: T) => ReactNode;
   getItemBadge?: (item: T) => string | null;
@@ -39,6 +45,7 @@ export default function AssetGrid<T extends AssetItem>({
   pageOffset,
   section,
   usedNames,
+  usedKey = "name",
   totalPages,
   renderThumbnail,
   getItemBadge,
@@ -57,7 +64,7 @@ export default function AssetGrid<T extends AssetItem>({
       >
         {pagedItems.map((item, pageIdx) => {
           const idx = pageOffset + pageIdx;
-          const used = usedNames.includes(item.name);
+          const used = usedNames.includes(item[usedKey]);
           const badge = used ? (getItemBadge?.(item) ?? null) : null;
           const group = groupBy?.(item);
           const prevGroup =

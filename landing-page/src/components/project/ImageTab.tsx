@@ -755,12 +755,12 @@ export default function ImageTab({
     setEditFolioModal(null);
   };
 
-  const handleUseBatch = (names: string[]) => {
-    const newNames = names.filter((n) => !usedNames.images.includes(n));
-    if (newNames.length > 0) {
+  const handleUseBatch = (imageIds: string[]) => {
+    const newIds = imageIds.filter((id) => !usedNames.images.includes(id));
+    if (newIds.length > 0) {
       onUsedNamesChange({
         ...usedNames,
-        images: [...usedNames.images, ...newNames],
+        images: [...usedNames.images, ...newIds],
       });
     }
     onBatchUsed();
@@ -818,6 +818,7 @@ export default function ImageTab({
             pageOffset={section.page * ITEMS_PER_PAGE}
             section={section}
             usedNames={usedNames.images}
+            usedKey="id"
             groupBy={(img) => img.sourceName || "no source"}
             totalPages={totalImagePages}
             renderThumbnail={(img) =>
@@ -853,23 +854,23 @@ export default function ImageTab({
               )?.badge ?? null
             }
             onUse={(img) => {
-              if (!usedNames.images.includes(img.name)) {
+              if (!usedNames.images.includes(img.id)) {
                 onUsedNamesChange({
                   ...usedNames,
-                  images: [...usedNames.images, img.name],
+                  images: [...usedNames.images, img.id],
                 });
                 setValidationError(null);
               }
             }}
             // mothra#247: deselect a used image directly from the grid --
             // this doesn't delete anything, it just excludes the page from
-            // future predict/IC/batch runs (usedImageNames); its existing
+            // future predict/IC/batch runs (usedImageIds); its existing
             // annotations/MEI files are untouched and pick back up if the
             // image is "use"d again later.
             onRemove={(img) => {
               onUsedNamesChange({
                 ...usedNames,
-                images: usedNames.images.filter((n) => n !== img.name),
+                images: usedNames.images.filter((id) => id !== img.id),
               });
             }}
           />
@@ -897,10 +898,10 @@ export default function ImageTab({
                 const img = project.images.find(
                   (i) => i.id === section.menu!.id,
                 );
-                if (img && !usedNames.images.includes(img.name)) {
+                if (img && !usedNames.images.includes(img.id)) {
                   onUsedNamesChange({
                     ...usedNames,
-                    images: [...usedNames.images, img.name],
+                    images: [...usedNames.images, img.id],
                   });
                 }
                 section.setMenu(null);
@@ -983,7 +984,7 @@ export default function ImageTab({
       {quickLookId &&
         (() => {
           const img = project.images.find((i) => i.id === quickLookId)!;
-          const isUsed = usedNames.images.includes(img.name);
+          const isUsed = usedNames.images.includes(img.id);
           return (
             <QuickLookModal onClose={() => setQuickLookId(null)}>
               <div className="flex gap-2">
@@ -1076,7 +1077,7 @@ export default function ImageTab({
                     onClick={() => {
                       onUsedNamesChange({
                         ...usedNames,
-                        images: [...usedNames.images, img.name],
+                        images: [...usedNames.images, img.id],
                       });
                       setValidationError(null);
                       setQuickLookId(null);
@@ -1093,7 +1094,7 @@ export default function ImageTab({
                       onUsedNamesChange({
                         ...usedNames,
                         images: usedNames.images.filter(
-                          (n) => n !== img.name,
+                          (id) => id !== img.id,
                         ),
                       });
                       setQuickLookId(null);

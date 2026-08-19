@@ -95,6 +95,10 @@ def init_db():
                 user_id INTEGER NOT NULL REFERENCES users(id),
                 name TEXT NOT NULL,
                 steps_unlocked INTEGER DEFAULT 0,
+                -- mothra#241 follow-up: column name is legacy (kept as-is to
+                -- avoid a migration -- it's an opaque JSON string blob either
+                -- way), but its contents are now project_images.id values,
+                -- not names -- see projects_api.py's usedImageIds field.
                 used_image_names TEXT DEFAULT '[]',
                 used_model_names TEXT DEFAULT '[]',
                 deleted_at TEXT

@@ -49,6 +49,10 @@ export async function autoQueueImage(
 ): Promise<EncodePair> {
   const form = new FormData();
   form.append("imageName", image.name);
+  // CodeRabbit (ic_api.py#L254): image_name alone can't disambiguate a
+  // duplicate-named upload -- send the real id so the backend resolves the
+  // exact page instead of an arbitrary same-named match.
+  form.append("imageId", image.id);
   if (trainingPresets.length > 0)
     form.append("training_presets", JSON.stringify(trainingPresets));
   trainingFiles.forEach((f) => form.append("training_files", f));

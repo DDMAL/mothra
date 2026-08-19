@@ -56,7 +56,7 @@ function computeBatchRun(
 ): { imageIds: string[]; folios: string[] } | null {
   if (!project.cantusSourceId) return null;
   const used = project.images.filter((img) =>
-    project.usedImageNames.includes(img.name),
+    project.usedImageIds.includes(img.id),
   );
   if (used.length === 0 || !used.every((img) => img.folio)) return null;
   return {
@@ -162,7 +162,7 @@ export default function AppRouter({
     permanentlyDeleteProject,
     duplicateProject,
     updateProjectSteps,
-    updateUsedImageNames,
+    updateUsedImageIds,
     updateUsedModelNames,
     updateUsedAnnotationNames,
     updateCantusSourceId,
@@ -349,16 +349,10 @@ export default function AppRouter({
           project={selectedProject}
           onBack={() => setView("projects")}
           onContinue={() => {
-            // mothra#241: usedImageNames is name-keyed — resolve to the
-            // actual ProjectImage rows so minNextStep can match by id (see
-            // the same resolution in ProjectDetail.tsx's nextStep memo).
             const step = minNextStep(
-              selectedProject.usedImageNames
-                .map((n) => selectedProject.images.find((img) => img.name === n))
-                .filter(
-                  (img): img is (typeof selectedProject.images)[number] =>
-                    img != null,
-                ),
+              selectedProject.images.filter((img) =>
+                selectedProject.usedImageIds.includes(img.id),
+              ),
               selectedProject.annotations ?? [],
               selectedProject.meiFiles ?? [],
               selectedProject.stepsUnlocked,
@@ -409,13 +403,17 @@ export default function AppRouter({
           onUpdateCantusSourceId={(sourceId) =>
             updateCantusSourceId(selectedProject.id, sourceId)
           }
+          // mothra#241 follow-up (CodeRabbit): `images` now holds
+          // project_images.id values, not names -- see
+          // Project.usedImageIds's comment in types.ts. `models`/
+          // `annotations` are unaffected (no duplicate-name concern there).
           usedNames={{
-            images: selectedProject.usedImageNames,
+            images: selectedProject.usedImageIds,
             models: selectedProject.usedModelNames ?? [],
             annotations: selectedProject.usedAnnotationNames ?? [],
           }}
           onUsedNamesChange={(names) => {
-            updateUsedImageNames(selectedProject.id, names.images);
+            updateUsedImageIds(selectedProject.id, names.images);
             updateUsedModelNames(selectedProject.id, names.models);
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
@@ -625,8 +623,11 @@ export default function AppRouter({
                     onJobId,
                   );
                 }
+                // Filtered through selectedProject.images (not used
+                // directly) so a stale usedImageIds entry referencing a
+                // since-deleted image can't leak into the request.
                 const usedImageIds = selectedProject.images
-                  .filter((i) => selectedProject.usedImageNames.includes(i.name))
+                  .filter((i) => selectedProject.usedImageIds.includes(i.id))
                   .map((i) => i.id);
                 return apiFetchJobStream(
                   `/api/projects/${selectedProject.id}/predict`,
@@ -843,7 +844,7 @@ export default function AppRouter({
       if (!selectedProject) return null;
       const pending = pendingIcImages(
         selectedProject.images,
-        selectedProject.usedImageNames,
+        selectedProject.usedImageIds,
         selectedProject.annotations ?? [],
         selectedProject.meiFiles ?? [],
         selectedProject.stepsUnlocked,
@@ -890,7 +891,7 @@ export default function AppRouter({
         <InteractiveClassifier
           images={images}
           initialImageName={resumeImage?.name ?? null}
-          usedImageCount={selectedProject.usedImageNames.length}
+          usedImageCount={selectedProject.usedImageIds.length}
           onBack={() => setView("project")}
           projectId={selectedProjectId}
           clefShape={clefShape}
@@ -909,12 +910,12 @@ export default function AppRouter({
         <IcAutoQueue
           images={pendingIcImages(
             selectedProject.images,
-            selectedProject.usedImageNames,
+            selectedProject.usedImageIds,
             selectedProject.annotations ?? [],
             selectedProject.meiFiles ?? [],
             selectedProject.stepsUnlocked,
           )}
-          usedImageCount={selectedProject.usedImageNames.length}
+          usedImageCount={selectedProject.usedImageIds.length}
           projectId={selectedProjectId}
           trainingPresets={icSettings.trainingPresets}
           trainingFiles={icSettings.trainingFiles}
@@ -1036,7 +1037,7 @@ export default function AppRouter({
       const remainingIcImages = selectedProject
         ? pendingIcImages(
             selectedProject.images,
-            selectedProject.usedImageNames,
+            selectedProject.usedImageIds,
             selectedProject.annotations ?? [],
             selectedProject.meiFiles ?? [],
             selectedProject.stepsUnlocked,

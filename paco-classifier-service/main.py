@@ -31,7 +31,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 
 import cv2
 import numpy as np
@@ -266,27 +266,47 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
 
-    async def _stream():
+    async def _stream() -> AsyncGenerator[str, None]:
         # mothra#247 follow-up: streams progress as it happens instead of
         # only returning a final JSON body once the whole page is done --
         # see this module's docstring for the event shapes. Cancellation
         # behavior (poll request.is_disconnected(), set cancel_event) is
         # otherwise unchanged from before this endpoint streamed anything.
         last_sent = None
-        while thread.is_alive():
-            if await request.is_disconnected():
-                cancel_event.set()
-                break
-            with progress_lock:
-                row, total = progress["row"], progress["total"]
-            if total and (row, total) != last_sent:
-                last_sent = (row, total)
-                yield f"data: {json.dumps({'type': 'progress', 'row': row, 'total': total})}\n\n"
-            await asyncio.sleep(_DISCONNECT_POLL_INTERVAL_S)
+        try:
+            while thread.is_alive():
+                if await request.is_disconnected():
+                    cancel_event.set()
+                    break
+                with progress_lock:
+                    row, total = progress["row"], progress["total"]
+                if total and (row, total) != last_sent:
+                    last_sent = (row, total)
+                    yield f"data: {json.dumps({'type': 'progress', 'row': row, 'total': total})}\n\n"
+                await asyncio.sleep(_DISCONNECT_POLL_INTERVAL_S)
+        finally:
+            # CodeRabbit: Starlette can cancel THIS generator directly at the
+            # ASGI level (its own disconnect handling), independent of --
+            # and possibly before -- our own is_disconnected() poll above
+            # ever runs again. If that happens while suspended at the
+            # `asyncio.sleep()` above, execution never returns to set
+            # cancel_event itself, and the background TensorFlow thread
+            # would otherwise keep running the full page to completion for
+            # a request nobody is listening to anymore (exactly the kind of
+            # wasted, compounding memory pressure implicated in mothra#212's
+            # "Error in input stream" OOM investigation). This runs no
+            # matter how/why the generator is exiting, so cancel_event ends
+            # up set either way -- a harmless no-op on the normal
+            # thread-already-finished path, since process_image_msae's
+            # should_cancel is only ever polled from INSIDE that thread.
+            cancel_event.set()
         # Whether the loop above exited because the thread finished on its
         # own or because we just set cancel_event, the thread may still be
         # running for up to one more patch -- wait for it (off the event
-        # loop) before trusting `outcome`.
+        # loop) before trusting `outcome`. Not reached if the generator
+        # itself was torn down by cancellation (see the finally above) --
+        # nothing downstream would consume it in that case anyway, and
+        # `thread` is a daemon so it can't block shutdown regardless.
         await asyncio.to_thread(thread.join)
 
         if outcome.get("cancelled"):

@@ -86,6 +86,25 @@ class AddMeiBody(BaseModel):
 def add_mei(project_id: int, body: AddMeiBody, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
+        # CodeRabbit: mei_files.image_id has no FK/composite constraint tying
+        # it to project_images(project_id, id) -- require_project_owner only
+        # confirms the caller owns project_id, not that body.imageId (an
+        # arbitrary client-supplied string) actually names one of ITS
+        # images. Reject rather than silently store a dangling/cross-project
+        # reference that create_edit_session/getImageProgress would later
+        # just fail to resolve (confusing, not a real leak -- its own lookup
+        # is already scoped by project_id too -- but a real bug on the
+        # frontend side deserves a loud 400, not a silent "no image" later).
+        if body.imageId is not None:
+            cur.execute(
+                "SELECT 1 FROM project_images WHERE id=%s AND project_id=%s",
+                (body.imageId, project_id),
+            )
+            if cur.fetchone() is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"imageId {body.imageId!r} does not belong to project {project_id}",
+                )
         mei_id = _uuid.uuid4().hex
         cur.execute(
             "INSERT INTO mei_files (id, project_id, name, xml_content, image_name, stave_source, image_id)"

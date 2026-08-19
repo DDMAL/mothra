@@ -111,7 +111,7 @@ export default function InteractiveClassifier({
     apiFetch(`/api/projects/${projectId}/ic/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageName: img.name }),
+      body: JSON.stringify({ imageName: img.name, imageId: img.id }),
     })
       .then(async (r) => {
         if (!r.ok)

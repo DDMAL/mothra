@@ -50,7 +50,10 @@ export function getImageProgress(
 // (InteractiveClassifier renders an explanatory empty state for that).
 export function pendingIcImages(
   images: ProjectImage[],
-  usedImageNames: string[],
+  // mothra#241 follow-up (CodeRabbit): id-keyed, not name-keyed -- lets two
+  // duplicate-named "used" images be queued/skipped independently instead
+  // of a name match pulling in every same-named row as one unit.
+  usedImageIds: string[],
   annotations: AnnotationSet[],
   meiFiles: MeiFile[],
   stepsUnlocked: number,
@@ -59,7 +62,7 @@ export function pendingIcImages(
     getImageProgress(img, annotations, meiFiles, stepsUnlocked);
   return images
     .filter((img) => {
-      if (!usedImageNames.includes(img.name)) return false;
+      if (!usedImageIds.includes(img.id)) return false;
       const p = progressOf(img);
       return p === null || p.nextStep <= 1;
     })

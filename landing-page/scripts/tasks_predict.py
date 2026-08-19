@@ -106,7 +106,7 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
             progress_state["row"] = row
             progress_state["total"] = total
 
-    def _stave_pipeline():
+    def _stave_pipeline() -> None:
         try:
             stafflines_png, _background_png = classify_stafflines(
                 image_bytes, mime_type, conn_holder=conn_holder,

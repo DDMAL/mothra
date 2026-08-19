@@ -295,17 +295,11 @@ export default function ProjectDetail({
   const nextStep = useMemo(
     () =>
       minNextStep(
-        // mothra#241: usedImageNames is a name-keyed list (see
-        // Project.usedImageNames in types.ts) — resolve each name to its
-        // ProjectImage so getImageProgress can match by id when possible. If
-        // two images in this project share a name, .find picks whichever
-        // comes first; that ambiguity is a known limitation of this
-        // name-keyed "used images" bookkeeping specifically, not of the
-        // per-image status badges in the grid (ImageTab.tsx), which always
-        // operate on a real ProjectImage and never go through a name lookup.
-        usedNames.images
-          .map((n) => project.images.find((img) => img.name === n))
-          .filter((img): img is Project["images"][number] => img != null),
+        // mothra#241 follow-up (CodeRabbit): usedNames.images is now
+        // id-keyed (see Project.usedImageIds in types.ts), so this resolves
+        // unambiguously — no more risk of picking an arbitrary same-named
+        // image, unlike the name-based .find() this used to need.
+        project.images.filter((img) => usedNames.images.includes(img.id)),
         project.annotations ?? [],
         project.meiFiles ?? [],
         stepsUnlocked,
@@ -662,14 +656,15 @@ export default function ProjectDetail({
                 "image",
                 imgSection.selectedIds.size,
                 () => {
-                  const names = project.images
-                    .filter((img) => imgSection.selectedIds.has(img.id))
-                    .map((img) => img.name);
+                  // mothra#241 follow-up (CodeRabbit): usedNames.images is
+                  // id-keyed, so selectedIds (already a Set<id>) can feed it
+                  // directly -- no more name round-trip needed.
+                  const ids = [...imgSection.selectedIds];
                   onUsedNamesChange({
                     ...usedNames,
                     images: [
                       ...usedNames.images,
-                      ...names.filter((n) => !usedNames.images.includes(n)),
+                      ...ids.filter((id) => !usedNames.images.includes(id)),
                     ],
                   });
                   imgSection.clearSelection();
@@ -691,14 +686,10 @@ export default function ProjectDetail({
                   // of pages picked up by accident -- without deleting them
                   // or anything they've already produced. A no-op for any
                   // selected image that wasn't in usedNames.images yet.
-                  const names = project.images
-                    .filter((img) => imgSection.selectedIds.has(img.id))
-                    .map((img) => img.name);
+                  const ids = [...imgSection.selectedIds];
                   onUsedNamesChange({
                     ...usedNames,
-                    images: usedNames.images.filter(
-                      (n) => !names.includes(n),
-                    ),
+                    images: usedNames.images.filter((id) => !ids.includes(id)),
                   });
                   imgSection.clearSelection();
                   setValidationError(null);
@@ -707,10 +698,8 @@ export default function ProjectDetail({
                 // actually already "used" -- otherwise the button appeared
                 // for any multi-selection at all, including a batch of
                 // brand-new, never-"use"d images right after uploading them.
-                project.images.filter(
-                  (img) =>
-                    imgSection.selectedIds.has(img.id) &&
-                    usedNames.images.includes(img.name),
+                [...imgSection.selectedIds].filter((id) =>
+                  usedNames.images.includes(id),
                 ).length,
               )}
 
@@ -1205,21 +1194,33 @@ export default function ProjectDetail({
               </>
             )}
             <hr className="border-white/40 my-1" />
-            {usedNames.images.map((name) => {
-              const img = project.images.find((i) => i.name === name);
+            {usedNames.images.map((imageId) => {
+              // mothra#241 follow-up (CodeRabbit): usedNames.images now
+              // holds ids, so this always finds the exact image -- no more
+              // ambiguity between two duplicate-named uploads. The
+              // `{ id: imageId, name: imageId }` fallback only matters if
+              // the image was deleted out from under a still-"used" id.
+              const img = project.images.find((i) => i.id === imageId);
+              const displayName = img?.name ?? imageId;
               const hasProgress =
                 getImageProgress(
-                  img ?? { id: name, name },
+                  img ?? { id: imageId, name: displayName },
                   project.annotations ?? [],
                   project.meiFiles ?? [],
                   stepsUnlocked,
                 ) !== null;
               return (
-                <div key={name} className="flex items-center justify-between">
-                  <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
+                <div
+                  key={imageId}
+                  className="flex items-center justify-between"
+                >
+                  <TruncatedName
+                    name={displayName}
+                    className="flex-1 min-w-0 mr-2"
+                  />
                   {/* mothra#247: always removable, regardless of hasProgress
                       -- this only excludes the page from future predict/IC/
-                      batch runs (usedImageNames), it never deletes its
+                      batch runs (usedImageIds), it never deletes its
                       existing annotations/MEI files, so there's nothing
                       unsafe about removing a page that already has progress.
                       Re-"use"-ing it later picks up right where it left off,
@@ -1228,7 +1229,9 @@ export default function ProjectDetail({
                     onClick={() =>
                       onUsedNamesChange({
                         ...usedNames,
-                        images: usedNames.images.filter((n) => n !== name),
+                        images: usedNames.images.filter(
+                          (id) => id !== imageId,
+                        ),
                       })
                     }
                     title={

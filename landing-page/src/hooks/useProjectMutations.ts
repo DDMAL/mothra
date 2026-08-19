@@ -145,16 +145,18 @@ export function useProjectMutations(setProjects: SetProjects) {
     }
   };
 
-  const updateUsedImageNames = async (id: number, names: string[]) => {
+  // mothra#241 follow-up (CodeRabbit): ids, not names -- see
+  // Project.usedImageIds's comment in types.ts.
+  const updateUsedImageIds = async (id: number, ids: string[]) => {
     try {
       const r = await apiFetch(`/api/projects/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usedImageNames: names }),
+        body: JSON.stringify({ usedImageIds: ids }),
       });
       if (!r.ok) return;
       setProjects((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, usedImageNames: names } : p)),
+        prev.map((p) => (p.id === id ? { ...p, usedImageIds: ids } : p)),
       );
     } catch {
       // internal bookkeeping — silent
@@ -245,7 +247,7 @@ export function useProjectMutations(setProjects: SetProjects) {
     permanentlyDeleteProject,
     duplicateProject,
     updateProjectSteps,
-    updateUsedImageNames,
+    updateUsedImageIds,
     updateUsedModelNames,
     updateUsedAnnotationNames,
     updateCantusSourceId,
