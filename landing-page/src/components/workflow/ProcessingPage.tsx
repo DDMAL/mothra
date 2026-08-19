@@ -692,7 +692,9 @@ export default function ProcessingPage({
                       className={`text-xs font-mono leading-5 ${
                         line.startsWith("error: ")
                           ? "text-red-300"
-                          : "text-white/70"
+                          : line.startsWith("warning: ")
+                            ? "text-amber-300"
+                            : "text-white/70"
                       }`}
                     >
                       {line}

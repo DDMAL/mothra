@@ -38,6 +38,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import logging
 import socket
 import uuid as _uuid
 from typing import Callable, Optional
@@ -45,12 +46,37 @@ from urllib.parse import urlsplit
 
 from config import PACO_API_URL
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_TIMEOUT = 180
+
+# Small, flat failure-category taxonomy — not meant to be exhaustive, just
+# enough for tasks_predict.py to log/report/persist *why* a fallback
+# happened instead of only *that* one happened.
+CATEGORY_TIMEOUT = "timeout"
+CATEGORY_UNREACHABLE = "unreachable"
+CATEGORY_HTTP_ERROR = "http_error"
+CATEGORY_MALFORMED_RESPONSE = "malformed_response"
+# The service committed to a 200 stream and then reported its OWN failure
+# mid-computation (a "type": "error" SSE event -- e.g. a TF inference
+# exception) -- distinct from CATEGORY_HTTP_ERROR (which means the request
+# itself was rejected before any streaming started). Added when the SSE
+# streaming protocol (mothra#247) was reconciled with this categorization
+# system: neither existed at the same time before, so there was no prior
+# category for this case to reuse.
+CATEGORY_SERVICE_ERROR = "service_error"
 
 class PacoClassifierError(RuntimeError):
     """Raised on any failure talking to paco-classifier-service. Callers
     (tasks_predict.py) catch this broadly and fall back to raw-image stave
-    detection rather than failing the whole predict job."""
+    detection rather than failing the whole predict job. `category` is one
+    of the CATEGORY_* constants above, read by tasks_predict.py to build a
+    short human-readable reason it logs/publishes/persists — see
+    _classifier_error_reason() there."""
+
+    def __init__(self, message: str, category: str = CATEGORY_UNREACHABLE):
+        super().__init__(message)
+        self.category = category
 
 def classify_stafflines(
     image_bytes: bytes,
@@ -106,23 +132,39 @@ def classify_stafflines(
         )
         resp = conn.getresponse()
 
-        if resp.status >= 400:
+        # Only 2xx is success -- a 3xx (e.g. a redirect the client never
+        # follows) used to fall through to the streaming block below, where
+        # it read as an empty/garbage stream and surfaced as a generic
+        # "stream ended without a result" instead of the http_error it
+        # actually is. CodeRabbit finding on #252.
+        if not (200 <= resp.status < 300):
             # A pre-stream validation failure (bad upload, oversized image) —
             # the service raises HTTPException for these BEFORE it commits to
             # a streaming response, so this is still a plain JSON error body,
-            # read in one shot exactly as before.
+            # read in one shot rather than line-by-line.
             raw = resp.read()
             detail = raw.decode(errors="ignore")
             try:
-                detail = json.loads(detail).get("detail", detail)
+                parsed_detail = json.loads(detail)
             except json.JSONDecodeError:
                 pass
+            else:
+                # A JSON body that isn't an object (a bare list, string,
+                # number, or null -- all valid JSON) has no .get(); only
+                # dicts do. CodeRabbit finding on #252.
+                if isinstance(parsed_detail, dict):
+                    detail = parsed_detail.get("detail", detail)
+            logger.warning(
+                "paco-classifier-service rejected the request (HTTP %s): %s",
+                resp.status, detail,
+            )
             raise PacoClassifierError(
-                f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}"
+                f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}",
+                category=CATEGORY_HTTP_ERROR,
             )
 
-        # A 200 response is now a stream of SSE `data: {...}\n\n` lines: zero
-        # or more "progress" events, then exactly one terminal "result" or
+        # A 200 response is a stream of SSE `data: {...}\n\n` lines: zero or
+        # more "progress" events, then exactly one terminal "result" or
         # "error" event. Read line-by-line rather than resp.read() so
         # progress events are visible as they arrive instead of only once
         # the whole page finishes classifying.
@@ -134,33 +176,87 @@ def classify_stafflines(
             line = line.decode("utf-8", errors="ignore").strip()
             if not line.startswith("data: "):
                 continue
-            ev = json.loads(line[len("data: "):])
+            try:
+                ev = json.loads(line[len("data: "):])
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "paco-classifier-service sent an unparseable SSE line: %s", exc, exc_info=True,
+                )
+                raise PacoClassifierError(
+                    f"paco-classifier-service sent an unparseable SSE line: {exc}",
+                    category=CATEGORY_MALFORMED_RESPONSE,
+                ) from exc
             ev_type = ev.get("type")
             if ev_type == "progress":
                 if progress_callback is not None:
                     progress_callback(ev.get("row", 0), ev.get("total", 0))
             elif ev_type == "error":
+                # The service committed to the stream (status already sent
+                # as 200) and then failed mid-computation -- a distinct
+                # failure mode from the pre-stream HTTP-error case above,
+                # which never got this far.
+                detail = ev.get("detail", "unknown error")
+                logger.warning(
+                    "paco-classifier-service reported an error: %s", detail,
+                )
                 raise PacoClassifierError(
-                    f"paco-classifier-service reported an error: {ev.get('detail', 'unknown error')}"
+                    f"paco-classifier-service reported an error: {detail}",
+                    category=CATEGORY_SERVICE_ERROR,
                 )
             elif ev_type == "result":
                 result_payload = ev
+    except socket.timeout as exc:
+        # socket.timeout (== TimeoutError) is itself an OSError subclass, so
+        # this must be caught ahead of the broader OSError branch below to
+        # be distinguishable at all.
+        logger.warning(
+            "paco-classifier-service at %s timed out after %ss: %s",
+            PACO_API_URL, timeout, exc, exc_info=True,
+        )
+        raise PacoClassifierError(
+            f"paco-classifier-service at {PACO_API_URL} timed out after {timeout}s: {exc}",
+            category=CATEGORY_TIMEOUT,
+        ) from exc
     except (OSError, http.client.HTTPException) as exc:
+        logger.warning(
+            "paco-classifier-service at %s is unreachable or the request was aborted: %s",
+            PACO_API_URL, exc, exc_info=True,
+        )
         raise PacoClassifierError(
             f"paco-classifier-service at {PACO_API_URL} is unreachable or the request "
-            f"was aborted: {exc}"
+            f"was aborted: {exc}",
+            category=CATEGORY_UNREACHABLE,
         ) from exc
     finally:
         conn.close()
 
     if result_payload is None:
         raise PacoClassifierError(
-            "paco-classifier-service's response stream ended without a result"
+            "paco-classifier-service's response stream ended without a result",
+            category=CATEGORY_MALFORMED_RESPONSE,
         )
-    return (
-        base64.b64decode(result_payload["stafflines_png_base64"]),
-        base64.b64decode(result_payload["background_png_base64"]),
-    )
+    try:
+        return (
+            base64.b64decode(result_payload["stafflines_png_base64"], validate=True),
+            base64.b64decode(result_payload["background_png_base64"], validate=True),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        # ValueError also covers base64.b64decode's binascii.Error (incl. what
+        # validate=True raises for non-base64 characters, instead of silently
+        # ignoring them). TypeError covers a result event that's valid JSON
+        # but not the expected shape -- e.g. one of these fields is a list or
+        # null (result_payload["..."] raises TypeError, not KeyError, when
+        # result_payload itself isn't a dict; base64.b64decode(None, ...) also
+        # raises TypeError) rather than the dict-with-missing-key case KeyError
+        # alone catches. Previously unguarded -- a malformed result event
+        # raised a raw, uncategorized exception here. CodeRabbit finding on #252.
+        logger.warning(
+            "paco-classifier-service returned a malformed response: %s", exc, exc_info=True,
+        )
+        raise PacoClassifierError(
+            f"paco-classifier-service returned a malformed response: {exc}",
+            category=CATEGORY_MALFORMED_RESPONSE,
+        ) from exc
 
 def abort_classify_request(conn_holder: dict) -> None:
     """Forcibly abort an in-flight classify_stafflines() call, given the

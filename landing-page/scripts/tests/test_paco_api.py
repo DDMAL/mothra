@@ -88,7 +88,10 @@ def test_classify_stafflines_raises_on_mid_stream_error_event():
     """A "type": "error" event arrives with HTTP status 200 (the response
     already committed to streaming by the time classification itself
     fails) -- distinct from the pre-stream-validation-failure case below,
-    which is still a plain HTTP error status."""
+    which is still a plain HTTP error status. Categorized CATEGORY_SERVICE_ERROR
+    -- a category that didn't exist before the SSE-streaming protocol
+    (mothra#247) and the error-categorization system (mothra#249-251/#252)
+    were reconciled, since neither existed at the same time before."""
     conn = _fake_stream_connection(200, events=(
         {"type": "error", "detail": "classifier output shape mismatch"},
     ))
@@ -97,6 +100,7 @@ def test_classify_stafflines_raises_on_mid_stream_error_event():
             paco_api.classify_stafflines(b"x", "image/png")
             assert False, "expected PacoClassifierError"
         except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_SERVICE_ERROR
             assert "classifier output shape mismatch" in str(e)
 
 
@@ -108,6 +112,68 @@ def test_classify_stafflines_wraps_http_error():
             assert False, "expected PacoClassifierError"
         except paco_api.PacoClassifierError as e:
             assert "model load failed" in str(e)
+
+
+def test_classify_stafflines_treats_3xx_as_http_error():
+    """A redirect must be categorized http_error, not fall through to the
+    payload-parsing block below and get misreported as a malformed response
+    (CodeRabbit finding on #252 -- only 200-299 is success)."""
+    body = b'{"detail": "moved"}'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(302, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_HTTP_ERROR
+            assert "moved" in str(e)
+
+
+def test_classify_stafflines_http_error_with_non_dict_json_body():
+    """An error body that's valid JSON but not an object (a bare list here)
+    used to raise AttributeError from .get() on the parsed value instead of
+    PacoClassifierError -- CodeRabbit finding on #252."""
+    body = b'["nginx", "502 Bad Gateway"]'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(502, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_HTTP_ERROR
+
+
+def test_classify_stafflines_malformed_payload_is_a_list_not_a_dict():
+    """A "result" event whose fields are the wrong shape (a list, not a
+    base64 string) used to raise a raw TypeError instead of
+    PacoClassifierError -- CodeRabbit finding on #252. The malformed shape
+    lives in the base64 fields themselves (not the whole event, which must
+    still be a dict for ev.get("type") to work at all above this point)."""
+    conn = _fake_stream_connection(200, events=(
+        {"type": "result", "stafflines_png_base64": ["unexpected"], "background_png_base64": None},
+    ))
+    with patch("http.client.HTTPConnection", return_value=conn):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_MALFORMED_RESPONSE
+
+
+def test_classify_stafflines_rejects_non_base64_with_validate():
+    """base64.b64decode(..., validate=True) rejects non-alphabet characters
+    instead of silently ignoring them -- CodeRabbit finding on #252."""
+    conn = _fake_stream_connection(200, events=(
+        {
+            "type": "result",
+            "stafflines_png_base64": "not-valid-base64!!!",
+            "background_png_base64": base64.b64encode(b"b").decode(),
+        },
+    ))
+    with patch("http.client.HTTPConnection", return_value=conn):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_MALFORMED_RESPONSE
 
 
 def test_classify_stafflines_wraps_url_error():

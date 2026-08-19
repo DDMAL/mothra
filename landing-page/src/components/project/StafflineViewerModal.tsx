@@ -340,6 +340,17 @@ export default function StafflineViewerModal({
               {anomalousStaveIds.size} flagged for review
             </span>
           )}
+          {detection.hasClassifierFallback && (
+            <span
+              className="text-xs font-semibold text-[#D97706]"
+              title={
+                detection.classifierError ??
+                "staffline classifier was unavailable during detection — used raw-page fallback"
+              }
+            >
+              ⚠ raw-page fallback
+            </span>
+          )}
           {interpolatePreview ? (
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono text-[#2563EB] italic">
