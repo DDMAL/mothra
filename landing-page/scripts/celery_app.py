@@ -29,10 +29,11 @@ celery_app.conf.update(
     # startup (main.py) -- a long-lived pod that never restarted never got
     # swept again (mothra#220 row 28). Runs via the worker's embedded beat
     # scheduler (-B flag, see dev.sh/docker-compose.yml/k8s/worker.yaml)
-    # rather than a separate beat Deployment: worker is pinned to
-    # replicas=1 anyway (row 31 -- import-time init_db()/_migrate_db()), so
-    # there's no risk yet of multiple beat schedulers double-firing this.
-    # Revisit if/when row 31 unblocks replicas>1.
+    # rather than a separate beat Deployment: this is itself why worker
+    # stays pinned to replicas=1 (see k8s/worker.yaml) -- with `-B` baked
+    # into every replica, scaling out would double-fire this schedule.
+    # Revisit only once beat is split out into its own single-replica
+    # Deployment.
     beat_schedule={
         "cleanup-stale-uploads-and-sessions": {
             "task": "cleanup.run_periodic",
