@@ -346,7 +346,12 @@ def run_predict_task(job_id, project_id, body):
 
         publish({"type": "stage", "name": "processing"})
         results = []
-        fallback_images = []  # image names that fell back to raw-page staffline detection this run
+        # (image_name, classifier_error) pairs that fell back to raw-page
+        # staffline detection this run. classifier_error is
+        # _classifier_error_reason()'s "category: message" string (or None,
+        # for the non-medieval-preset "raw_page" case, which never appends
+        # here at all -- see the check below).
+        fallback_images: list[tuple[str, "str | None"]] = []
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
         for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original in images:
@@ -424,7 +429,7 @@ def run_predict_task(job_id, project_id, body):
                     staffline_classifier_error = None
 
             if staffline_source_label == "raw_page_fallback":
-                fallback_images.append(image_name)
+                fallback_images.append((image_name, staffline_classifier_error))
 
             # Staffline detection is gated only on has_class (fresh stave-class
             # boxes to work from), never on has_text_alignment -- an image can
@@ -487,12 +492,31 @@ def run_predict_task(job_id, project_id, body):
             # "predict_run" action_type -- both GET /projects/{id}/activity
             # and the logs-download zip's activity_log.txt render any
             # action_type generically, so this needs no downstream changes.
-            _shown = ", ".join(fallback_images[:5])
-            _more = f" (+{len(fallback_images) - 5} more)" if len(fallback_images) > 5 else ""
+            #
+            # CodeRabbit finding on #252: this used to hardcode "(paco-
+            # classifier-service unavailable)" for every fallback regardless
+            # of the actual reason, discarding the categorized
+            # classifier_error each fallback already carries -- inaccurate
+            # for HTTP errors, malformed responses, and local unexpected
+            # failures, all of which get bucketed under "unavailable" too.
+            # Grouped by category (the "category: ..." prefix
+            # _classifier_error_reason() produces) rather than one line per
+            # image, so a whole-batch outage still yields one bounded entry
+            # instead of N images' worth of full exception text.
+            _names = [name for name, _ in fallback_images]
+            _shown = ", ".join(_names[:5])
+            _more = f" (+{len(_names) - 5} more)" if len(_names) > 5 else ""
+            _reason_counts: dict[str, int] = {}
+            for _, reason in fallback_images:
+                _category = (reason.split(":", 1)[0] if reason else "unavailable")
+                _reason_counts[_category] = _reason_counts.get(_category, 0) + 1
+            _reasons_summary = ", ".join(
+                f"{count}x {category}" for category, count in sorted(_reason_counts.items())
+            )
             _log_activity(
                 cur, project_id, "predict_run",
                 f"{len(fallback_images)} image(s) fell back to raw-page staffline detection "
-                f"(paco-classifier-service unavailable): {_shown}{_more}",
+                f"({_reasons_summary}): {_shown}{_more}",
             )
             con.commit()
 

@@ -112,7 +112,7 @@ def classify_stafflines(
         # be distinguishable at all.
         logger.warning(
             "paco-classifier-service at %s timed out after %ss: %s",
-            PACO_API_URL, timeout, exc,
+            PACO_API_URL, timeout, exc, exc_info=True,
         )
         raise PacoClassifierError(
             f"paco-classifier-service at {PACO_API_URL} timed out after {timeout}s: {exc}",
@@ -131,12 +131,21 @@ def classify_stafflines(
     finally:
         conn.close()
 
-    if resp.status >= 400:
+    # Only 2xx is success -- a 3xx (e.g. a redirect the client never follows)
+    # used to fall through to the payload-parsing block below, where it
+    # failed as a "malformed response" instead of the http_error it actually
+    # is. CodeRabbit finding on #252.
+    if not (200 <= resp.status < 300):
         detail = raw.decode(errors="ignore")
         try:
-            detail = json.loads(detail).get("detail", detail)
+            parsed_detail = json.loads(detail)
         except json.JSONDecodeError:
             pass
+        else:
+            # A JSON body that isn't an object (a bare list, string, number,
+            # or null -- all valid JSON) has no .get(); only dicts do.
+            if isinstance(parsed_detail, dict):
+                detail = parsed_detail.get("detail", detail)
         logger.warning(
             "paco-classifier-service rejected the request (HTTP %s): %s",
             resp.status, detail,
@@ -149,13 +158,18 @@ def classify_stafflines(
     try:
         payload = json.loads(raw.decode())
         return (
-            base64.b64decode(payload["stafflines_png_base64"]),
-            base64.b64decode(payload["background_png_base64"]),
+            base64.b64decode(payload["stafflines_png_base64"], validate=True),
+            base64.b64decode(payload["background_png_base64"], validate=True),
         )
-    except (json.JSONDecodeError, KeyError, ValueError) as exc:
-        # ValueError also covers base64.b64decode's binascii.Error. Previously
-        # unguarded — a malformed 2xx response raised a raw, uncategorized
-        # exception here.
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        # ValueError also covers base64.b64decode's binascii.Error (incl. what
+        # validate=True raises for non-base64 characters, instead of silently
+        # ignoring them). TypeError covers a payload that's valid JSON but not
+        # the expected shape -- a bare list/string/null (payload["..."] raises
+        # TypeError, not KeyError, on a list; base64.b64decode(None, ...) also
+        # raises TypeError) rather than the dict-with-missing-key case KeyError
+        # alone catches. Previously unguarded -- a malformed 2xx response
+        # raised a raw, uncategorized exception here.
         logger.warning(
             "paco-classifier-service returned a malformed response: %s", exc, exc_info=True,
         )

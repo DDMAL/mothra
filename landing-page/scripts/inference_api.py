@@ -136,7 +136,12 @@ async def get_staffline_detection(
         "jsomrJson": row[0], "imageName": row[1], "scaleUnit": row[2],
         "staveCount": row[3], "modeLinesPerStave": row[4], "status": row[5],
         "hasClassifierImage": row[6],
-        "hasClassifierFallback": row[7], "classifierError": row[8],
+        # bool(...), not the raw SQL value: `settings_json->>'source_label' =
+        # 'raw_page_fallback'` is NULL (not false) when a legacy row has no
+        # source_label at all, which the frontend's `boolean` type can't
+        # represent -- CodeRabbit finding on #252. Matches
+        # projects_api.py's _map_staffline_row, which already does this.
+        "hasClassifierFallback": bool(row[7]), "classifierError": row[8],
     }
 
 @router.get("/projects/{project_id}/stafflines/{detection_id}/classifier-image")
@@ -315,5 +320,8 @@ def confirm_staffline_interpolation(
         # compute_staffline_interpolation() hardcodes source_label to
         # "raw_page", never "raw_page_fallback" -- included for response
         # shape parity with the other three StafflineSet-building endpoints.
-        "hasClassifierFallback": has_classifier_fallback, "classifierError": classifier_error,
+        # bool(...) anyway, not the raw SQL value, so the API contract holds
+        # even if that ever changes -- see get_staffline_detection's identical
+        # fix above (CodeRabbit finding on #252).
+        "hasClassifierFallback": bool(has_classifier_fallback), "classifierError": classifier_error,
     }

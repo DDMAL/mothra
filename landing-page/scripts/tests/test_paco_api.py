@@ -50,6 +50,61 @@ def test_classify_stafflines_wraps_http_error():
             assert "model load failed" in str(e)
 
 
+def test_classify_stafflines_treats_3xx_as_http_error():
+    """A redirect must be categorized http_error, not fall through to the
+    payload-parsing block below and get misreported as a malformed response
+    (CodeRabbit finding on #252 -- only 200-299 is success)."""
+    body = b'{"detail": "moved"}'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(302, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_HTTP_ERROR
+            assert "moved" in str(e)
+
+
+def test_classify_stafflines_http_error_with_non_dict_json_body():
+    """An error body that's valid JSON but not an object (a bare list here)
+    used to raise AttributeError from .get() on the parsed value instead of
+    PacoClassifierError -- CodeRabbit finding on #252."""
+    body = b'["nginx", "502 Bad Gateway"]'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(502, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_HTTP_ERROR
+
+
+def test_classify_stafflines_malformed_payload_is_a_list_not_a_dict():
+    """A 2xx body that's valid JSON but not the expected object shape used to
+    raise a raw TypeError (payload["..."] on a list) instead of
+    PacoClassifierError -- CodeRabbit finding on #252."""
+    body = b'["unexpected", "shape"]'
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(200, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_MALFORMED_RESPONSE
+
+
+def test_classify_stafflines_rejects_non_base64_with_validate():
+    """base64.b64decode(..., validate=True) rejects non-alphabet characters
+    instead of silently ignoring them -- CodeRabbit finding on #252."""
+    body = json.dumps({
+        "stafflines_png_base64": "not-valid-base64!!!",
+        "background_png_base64": base64.b64encode(b"b").decode(),
+    }).encode()
+    with patch("http.client.HTTPConnection", return_value=_fake_connection(200, body)):
+        try:
+            paco_api.classify_stafflines(b"x", "image/png")
+            assert False, "expected PacoClassifierError"
+        except paco_api.PacoClassifierError as e:
+            assert e.category == paco_api.CATEGORY_MALFORMED_RESPONSE
+
+
 def test_classify_stafflines_wraps_url_error():
     conn = MagicMock()
     conn.request.side_effect = OSError("connection refused")
