@@ -199,9 +199,13 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 ```
 
 ## Known follow-ups
-- No real `/healthz` yet → probes are TCP/exec, except `paco-classifier-service`,
-  which has real `/health` + `/ready` HTTP probes. Adding `/healthz` to the others
-  is recommended.
+- ~~No real `/healthz` yet~~ **done (mothra#220 row 28)** — `backend`/`text-service`
+  now have real `httpGet` probes too, matching `paco-classifier-service`'s
+  existing `/health` + `/ready`. `backend`'s readinessProbe (`/healthz`) checks
+  Postgres + Celery broker reachability; its livenessProbe (`/healthz/live`)
+  deliberately does not, so a transient DB/broker outage pulls the pod out of
+  rotation instead of killing and restarting it. `text-service` has no
+  DB/broker of its own, so both its probes point at the same `/healthz`.
 - `init_db()`/`_migrate_db()` run at import → keep backend/worker at **1 replica**
   until a one-shot migration Job is added, then scale out. This now applies to two
   sets of Deployments, and on a *fresh* database the same import-time migration has
