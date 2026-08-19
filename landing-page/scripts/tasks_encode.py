@@ -20,26 +20,40 @@ from encode_to_mei import (
 )
 import staffline_adapter
 
-def _fetch_original_bytes(project_id: Optional[int], image_name: Optional[str]) -> Optional[bytes]:
-    """Looks up the original (pre-resize) image bytes for (project_id, image_name),
-    if the image was resized at upload time. Returns None if it never was, or
-    project_id/image_name are missing."""
-    if not (project_id and image_name):
+def _fetch_original_bytes(
+    project_id: Optional[int], image_name: Optional[str], image_id: Optional[str] = None,
+) -> Optional[bytes]:
+    """Looks up the original (pre-resize) image bytes for (project_id,
+    image_name), if the image was resized at upload time. Returns None if it
+    never was, or project_id/image_name are missing.
+
+    mothra#241: prefers image_id when given -- image_name alone is not
+    unique within a project once duplicate-named uploads are allowed."""
+    if not project_id or not (image_id or image_name):
         return None
     con = get_db_conn()
     try:
         cur = con.cursor()
-        cur.execute(
-            "SELECT original_data FROM project_images WHERE project_id=%s AND name=%s",
-            (project_id, image_name),
-        )
+        if image_id:
+            cur.execute(
+                "SELECT original_data FROM project_images WHERE project_id=%s AND id=%s",
+                (project_id, image_id),
+            )
+        else:
+            cur.execute(
+                "SELECT original_data FROM project_images WHERE project_id=%s AND name=%s",
+                (project_id, image_name),
+            )
         row = cur.fetchone()
         cur.close()
         return bytes(row[0]) if row and row[0] is not None else None
     finally:
         release_db_conn(con)
 
-def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w, page_h, ev=None):
+def _resolve_hints(
+    project_id: Optional[int], image_name: Optional[str], page_w, page_h, ev=None,
+    image_id: Optional[str] = None,
+):
     """Looks up saved text-alignment + stave annotations for one image.
     Falls back to None/[]/None on any lookup failure or missing
     project_id/image_name, mirroring the try/except-pass behavior of the
@@ -62,12 +76,15 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     silently encode against geometrically stale stave data. Same class of
     staleness inference_api.py's _load_image_and_yolo_for_detection() already
     guards against for the interpolate-preview/confirm routes (there, by
-    re-resolving the current annotation via image_id); here, since this
-    function is only ever called with image_name (not a project_images.id
-    of its own), the equivalent guard is: look up the current
-    annotation_id (and its image_id, reused below for the text_alignment
-    lookup too) for this image first, then require tier 1's
-    staffline_detections row to match it.
+    re-resolving the current annotation via image_id); here the equivalent
+    guard is: look up the current annotation_id (and its image_id, reused
+    below for the text_alignment lookup too) for this image first, then
+    require tier 1's staffline_detections row to match it. mothra#241: the
+    caller now passes its own image_id when it has one (the batch
+    IC->encode path does; the ad-hoc single-image encode-upload path
+    doesn't), which is preferred over image_name for this first lookup --
+    image_name alone is not unique within a project once duplicate-named
+    uploads are allowed.
 
     ev, if given, is _encode_one's own event-publishing closure -- used here
     only to emit [trace] lines confirming staves_from_jsomr()'s input/output
@@ -78,7 +95,7 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
     text_alignment = None
     yolo_stave_hints = []
     stave_source = None
-    if project_id and image_name:
+    if project_id and (image_id or image_name):
         con = get_db_conn()
         try:
             cur = con.cursor()
@@ -86,11 +103,27 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
             current_yolo_txt = None
             current_image_id = None
             try:
-                cur.execute(
-                    "SELECT id, yolo_txt, image_id FROM annotations WHERE image_name = %s AND project_id = %s "
-                    "ORDER BY created_at DESC LIMIT 1",
-                    (image_name, project_id),
-                )
+                if image_id:
+                    # CodeRabbit: every annotations row has always had a
+                    # non-null image_id (write_annotation() requires it, and
+                    # this column predates any migration on this table) --
+                    # this OR clause is defensive insurance against a
+                    # hypothetical legacy NULL-image_id row rather than a
+                    # known real gap, so an exact id match is still always
+                    # preferred and this can't resolve to a DIFFERENT
+                    # same-named image's row.
+                    cur.execute(
+                        "SELECT id, yolo_txt, image_id FROM annotations"
+                        " WHERE project_id = %s AND (image_id = %s OR (image_id IS NULL AND image_name = %s))"
+                        " ORDER BY created_at DESC LIMIT 1",
+                        (project_id, image_id, image_name),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT id, yolo_txt, image_id FROM annotations WHERE image_name = %s AND project_id = %s "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (image_name, project_id),
+                    )
                 row = cur.fetchone()
                 if row:
                     current_annotation_id, current_yolo_txt, current_image_id = row
@@ -187,10 +220,16 @@ def _resolve_hints(project_id: Optional[int], image_name: Optional[str], page_w,
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
                 include_name_fields=False, allow_synthetic_lines=False,
-                notation_type=None):
+                notation_type=None, image_id=None):
     """Runs the checking/validating/processing pipeline for one XML+image
     pair, publishing the same event sequence the old synchronous generator
-    yielded. Returns (session_id, result_payload)."""
+    yielded. Returns (session_id, result_payload).
+
+    mothra#241: image_id (project_images.id), when the caller has one, is
+    preferred over image_name for hint resolution and is echoed back in the
+    result payload so add_mei can store it on the resulting mei_files row --
+    image_name alone is not unique within a project once duplicate-named
+    uploads are allowed."""
     def ev(obj):
         if item is not None:
             obj = {**obj, "item": item}
@@ -224,7 +263,9 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(project_id, image_name, page_w, page_h, ev=ev)
+        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(
+            project_id, image_name, page_w, page_h, ev=ev, image_id=image_id,
+        )
         if text_alignment:
             ev({"type": "log", "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
         if yolo_stave_hints:
@@ -269,7 +310,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         )
         for msg in trace_stave_zone_parity(staves, mei_bytes_out):
             ev({"type": "log", "message": msg})
-        original_bytes = _fetch_original_bytes(project_id, image_name)
+        original_bytes = _fetch_original_bytes(project_id, image_name, image_id=image_id)
         if original_bytes and page_w:
             try:
                 orig_w, _orig_h = Image.open(io.BytesIO(original_bytes)).size
@@ -290,6 +331,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest, "stave_source": stave_source}
         if include_name_fields:
             result["image_name"] = image_filename
+            result["image_id"] = image_id
             result["stem"] = stem
         ev({"type": "result", **result})
         ev({"type": "stage_done", "name": "processing"})
@@ -336,7 +378,7 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
                 publish, xml_bytes, item["xml_filename"], image_bytes, item["image_filename"],
                 project_id, item["image_name"], clef_shape, clef_line,
                 item=i, include_name_fields=True, allow_synthetic_lines=allow_synthetic_lines,
-                notation_type=notation_type,
+                notation_type=notation_type, image_id=item.get("image_id"),
             )
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})

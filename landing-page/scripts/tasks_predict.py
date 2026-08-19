@@ -83,14 +83,34 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
     for exactly this disconnect and cancels cooperatively between patches
     (see paco_api.py's module docstring and recognition_engine's
     should_cancel param) — it's no longer a fire-and-forget abandoned call.
+
+    mothra#247 follow-up: the same cancel-poll loop also relays the
+    classifier's real sliding-window progress (paco_api.py's
+    progress_callback, ultimately from recognition_engine's own "row N of
+    total" signal) as `{"type": "processing_tick", ...}` job events, instead
+    of only a static 20s "still running" heartbeat -- gives
+    ProcessingPage.tsx a genuine progress signal for the slow half of a
+    medieval-preset predict job instead of a time-based guess. The
+    background thread itself never calls publish() (see this function's own
+    "no shared DB state" invariant above) -- it only writes into
+    `progress_state` under `progress_lock`, and the MAIN thread's poll loop
+    below reads that and publishes.
     """
     stave_result = {}
     conn_holder: dict = {}
+    progress_lock = threading.Lock()
+    progress_state: dict = {"row": 0, "total": 0}
 
-    def _stave_pipeline():
+    def _on_paco_progress(row: int, total: int) -> None:
+        with progress_lock:
+            progress_state["row"] = row
+            progress_state["total"] = total
+
+    def _stave_pipeline() -> None:
         try:
             stafflines_png, _background_png = classify_stafflines(
                 image_bytes, mime_type, conn_holder=conn_holder,
+                progress_callback=_on_paco_progress,
             )
             arr = _decode_paco_layer(stafflines_png, img_arr.shape)
             stave_result["yolo_txt"] = yolo_models.infer_staves(arr)
@@ -117,8 +137,13 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
         # success events moments later. Piggybacking on the existing
         # cancel-poll loop (rather than adding a second timer) keeps this
         # cheap and resets the stream's idle counter well under the timeout.
+        # A real processing_tick also resets it (see below), so the
+        # "still running" log line only fires when there's been no real
+        # progress signal in the last 20s either (classifier unreachable
+        # mid-call, or between two widely-spaced ticks on a huge page).
         _HEARTBEAT_INTERVAL_S = 20.0
         elapsed_s = 0.0
+        last_reported_progress = None
         while thread.is_alive():
             try:
                 check_cancelled(job_id)
@@ -128,7 +153,13 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
                 raise
             thread.join(timeout=_CANCEL_POLL_INTERVAL_S)
             elapsed_s += _CANCEL_POLL_INTERVAL_S
-            if elapsed_s >= _HEARTBEAT_INTERVAL_S:
+            with progress_lock:
+                row, total = progress_state["row"], progress_state["total"]
+            if total and (row, total) != last_reported_progress:
+                last_reported_progress = (row, total)
+                elapsed_s = 0.0
+                publish({"type": "processing_tick", "current": row, "total": total})
+            elif elapsed_s >= _HEARTBEAT_INTERVAL_S:
                 elapsed_s = 0.0
                 publish({"type": "log", "message": f"{image_name}: staffline classifier still running..."})
 
@@ -171,9 +202,20 @@ def _reused_annotation_staffline_source(img_arr, image_bytes, mime_type, image_n
     Returns (source_arr, source_label, classifier_image_bytes) -- see
     _run_medieval_inference's docstring for what source_label (SF-6) and
     classifier_image_bytes (mothra#207, merged from main) record. The
-    latter is None on any classifier failure (raw-page fallback)."""
+    latter is None on any classifier failure (raw-page fallback).
+
+    mothra#247 follow-up: unlike _run_medieval_inference, this call is
+    already synchronous on the main thread (no background thread to keep
+    off shared DB state), so its progress_callback can call publish()
+    directly instead of needing the lock/poll-loop indirection that
+    function uses."""
     try:
-        stafflines_png, _background_png = classify_stafflines(image_bytes, mime_type)
+        stafflines_png, _background_png = classify_stafflines(
+            image_bytes, mime_type,
+            progress_callback=lambda row, total: publish(
+                {"type": "processing_tick", "current": row, "total": total}
+            ),
+        )
         return _decode_paco_layer(stafflines_png, img_arr.shape), "paco_layer", stafflines_png
     except Exception as e:
         publish({
@@ -305,8 +347,9 @@ def run_predict_task(job_id, project_id, body):
         results = []
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
-        for image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original in images:
+        for idx, (image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original) in enumerate(images):
             check_cancelled(job_id)
+            publish({"type": "item_start", "item": idx, "total": len(images), "name": image_name})
             pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
             img_arr = np.array(pil_img)
             image_storage_variant = "original" if used_original else "working_copy"
@@ -405,6 +448,8 @@ def run_predict_task(job_id, project_id, body):
 
             if has_text_alignment:
                 publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
+                publish({"type": "item_done", "item": idx})
+                publish({"type": "stage_done", "name": "processing"})
                 continue
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
@@ -430,7 +475,14 @@ def run_predict_task(job_id, project_id, body):
                     publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
                 elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
                     text_debug_data[image_name] = text_ev["debug_data"]
-        publish({"type": "stage_done", "name": "processing"})
+            publish({"type": "item_done", "item": idx})
+            publish({"type": "stage_done", "name": "processing"})
+        if not images:
+            # mothra#236: no item ever ran (every requested image was already
+            # fully processed -- see the "skipped" bookkeeping in the
+            # validating stage above), so no per-item stage_done fired above
+            # to mark this stage checked -- emit the batch-level one once here.
+            publish({"type": "stage_done", "name": "processing"})
         result_event: dict = {"type": "result", "annotations": results}
         if text_debug_data:
             result_event["text_debug_data"] = text_debug_data

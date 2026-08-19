@@ -56,7 +56,7 @@ function computeBatchRun(
 ): { imageIds: string[]; folios: string[] } | null {
   if (!project.cantusSourceId) return null;
   const used = project.images.filter((img) =>
-    project.usedImageNames.includes(img.name),
+    project.usedImageIds.includes(img.id),
   );
   if (used.length === 0 || !used.every((img) => img.folio)) return null;
   return {
@@ -103,8 +103,10 @@ interface AppRouterProps {
     stave_source?: string | null;
     logs?: string[];
   }) => void;
-  pendingBatchPairs: { xmlFile: File; imageFile: File }[];
-  setPendingBatchPairs: (pairs: { xmlFile: File; imageFile: File }[]) => void;
+  pendingBatchPairs: { xmlFile: File; imageFile: File; imageId: string }[];
+  setPendingBatchPairs: (
+    pairs: { xmlFile: File; imageFile: File; imageId: string }[],
+  ) => void;
   resumeJob: { jobId: string; kind: string; startedAt?: string | null} | null;
   setResumeJob: (
     job: { jobId: string; kind: string; startedAt?: string | null } | null,
@@ -160,7 +162,7 @@ export default function AppRouter({
     permanentlyDeleteProject,
     duplicateProject,
     updateProjectSteps,
-    updateUsedImageNames,
+    updateUsedImageIds,
     updateUsedModelNames,
     updateUsedAnnotationNames,
     updateCantusSourceId,
@@ -175,7 +177,7 @@ export default function AppRouter({
   const textFindingSettings = useTextFindingSettings();
   // IC step settings (auto/manual + shared training set), picked on the
   // project page — see IcSettingsSection.
-  const icSettings = useIcSettings();
+  const icSettings = useIcSettings(selectedProjectId);
 
   // batch text-alignment run (run_chain.py) state
   const [batchRunIds, setBatchRunIds] = useState<{
@@ -281,7 +283,9 @@ export default function AppRouter({
   };
 
   // Hand a finished IC queue (either mode) to the batch encoder.
-  const startEncodeBatch = (pairs: { xmlFile: File; imageFile: File }[]) => {
+  const startEncodeBatch = (
+    pairs: { xmlFile: File; imageFile: File; imageId: string }[],
+  ) => {
     setPendingBatchPairs(pairs);
     setBatchSummary(null);
     if (selectedProjectId && selectedProject) {
@@ -346,7 +350,9 @@ export default function AppRouter({
           onBack={() => setView("projects")}
           onContinue={() => {
             const step = minNextStep(
-              selectedProject.usedImageNames,
+              selectedProject.images.filter((img) =>
+                selectedProject.usedImageIds.includes(img.id),
+              ),
               selectedProject.annotations ?? [],
               selectedProject.meiFiles ?? [],
               selectedProject.stepsUnlocked,
@@ -397,13 +403,17 @@ export default function AppRouter({
           onUpdateCantusSourceId={(sourceId) =>
             updateCantusSourceId(selectedProject.id, sourceId)
           }
+          // mothra#241 follow-up (CodeRabbit): `images` now holds
+          // project_images.id values, not names -- see
+          // Project.usedImageIds's comment in types.ts. `models`/
+          // `annotations` are unaffected (no duplicate-name concern there).
           usedNames={{
-            images: selectedProject.usedImageNames,
+            images: selectedProject.usedImageIds,
             models: selectedProject.usedModelNames ?? [],
             annotations: selectedProject.usedAnnotationNames ?? [],
           }}
           onUsedNamesChange={(names) => {
-            updateUsedImageNames(selectedProject.id, names.images);
+            updateUsedImageIds(selectedProject.id, names.images);
             updateUsedModelNames(selectedProject.id, names.models);
             updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
@@ -613,8 +623,11 @@ export default function AppRouter({
                     onJobId,
                   );
                 }
+                // Filtered through selectedProject.images (not used
+                // directly) so a stale usedImageIds entry referencing a
+                // since-deleted image can't leak into the request.
                 const usedImageIds = selectedProject.images
-                  .filter((i) => selectedProject.usedImageNames.includes(i.name))
+                  .filter((i) => selectedProject.usedImageIds.includes(i.id))
                   .map((i) => i.id);
                 return apiFetchJobStream(
                   `/api/projects/${selectedProject.id}/predict`,
@@ -831,7 +844,7 @@ export default function AppRouter({
       if (!selectedProject) return null;
       const pending = pendingIcImages(
         selectedProject.images,
-        selectedProject.usedImageNames,
+        selectedProject.usedImageIds,
         selectedProject.annotations ?? [],
         selectedProject.meiFiles ?? [],
         selectedProject.stepsUnlocked,
@@ -878,7 +891,7 @@ export default function AppRouter({
         <InteractiveClassifier
           images={images}
           initialImageName={resumeImage?.name ?? null}
-          usedImageCount={selectedProject.usedImageNames.length}
+          usedImageCount={selectedProject.usedImageIds.length}
           onBack={() => setView("project")}
           projectId={selectedProjectId}
           clefShape={clefShape}
@@ -897,12 +910,12 @@ export default function AppRouter({
         <IcAutoQueue
           images={pendingIcImages(
             selectedProject.images,
-            selectedProject.usedImageNames,
+            selectedProject.usedImageIds,
             selectedProject.annotations ?? [],
             selectedProject.meiFiles ?? [],
             selectedProject.stepsUnlocked,
           )}
-          usedImageCount={selectedProject.usedImageNames.length}
+          usedImageCount={selectedProject.usedImageIds.length}
           projectId={selectedProjectId}
           trainingPresets={icSettings.trainingPresets}
           trainingFiles={icSettings.trainingFiles}
@@ -955,6 +968,9 @@ export default function AppRouter({
               );
               pendingBatchPairs.forEach((pair) =>
                 form.append("image_names", pair.imageFile.name),
+              );
+              pendingBatchPairs.forEach((pair) =>
+                form.append("image_ids", pair.imageId),
               );
               form.append("clef_shape", clefShape);
               form.append("clef_line", String(clefLine));
@@ -1021,7 +1037,7 @@ export default function AppRouter({
       const remainingIcImages = selectedProject
         ? pendingIcImages(
             selectedProject.images,
-            selectedProject.usedImageNames,
+            selectedProject.usedImageIds,
             selectedProject.annotations ?? [],
             selectedProject.meiFiles ?? [],
             selectedProject.stepsUnlocked,

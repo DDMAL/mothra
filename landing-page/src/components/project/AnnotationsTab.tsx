@@ -6,6 +6,10 @@ import TruncatedName from "../shared/TruncatedName";
 import type { useAssetSection } from "../../hooks/useAssetSection";
 import { sortBySourceThenFolio, sourceGroupLabel } from "../../utils/folio";
 
+// mothra#241 follow-up (CodeRabbit): despite the name, `images` holds
+// project_images.id values, not names, since duplicate-named uploads need
+// to be selected/removed independently -- see Project.usedImageIds's
+// comment in types.ts. `models`/`annotations` are unaffected (still names).
 type UsedNames = { images: string[]; models: string[]; annotations: string[] };
 
 interface AnnotationsTabProps {

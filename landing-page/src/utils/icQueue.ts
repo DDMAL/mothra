@@ -5,6 +5,10 @@ import type { ProjectImage } from "../types";
 export interface EncodePair {
   xmlFile: File;
   imageFile: File;
+  // mothra#241: the source project_images.id, threaded through to
+  // tasks_encode.py so hint-resolution and the resulting mei_files row can
+  // be matched by id instead of the not-necessarily-unique image name.
+  imageId: string;
 }
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
@@ -29,7 +33,7 @@ export async function buildEncodePair(
   const imageFile = new File([blob], image.name, {
     type: blob.type || "image/png",
   });
-  return { xmlFile, imageFile };
+  return { xmlFile, imageFile, imageId: image.id };
 }
 
 /**
@@ -45,6 +49,10 @@ export async function autoQueueImage(
 ): Promise<EncodePair> {
   const form = new FormData();
   form.append("imageName", image.name);
+  // CodeRabbit (ic_api.py#L254): image_name alone can't disambiguate a
+  // duplicate-named upload -- send the real id so the backend resolves the
+  // exact page instead of an arbitrary same-named match.
+  form.append("imageId", image.id);
   if (trainingPresets.length > 0)
     form.append("training_presets", JSON.stringify(trainingPresets));
   trainingFiles.forEach((f) => form.append("training_files", f));

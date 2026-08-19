@@ -28,18 +28,21 @@ async def upload_image(
         image_bytes = await file.read()
         original_bytes = await original_file.read() if original_file else None
 
-        # Re-uploading a file with the same name reuses the existing image_id
-        # (updates its bytes in place) instead of minting a new row - otherwise
-        # annotations/text-alignments tied to the old id are orphaned while a
-        # second, independent set accumulates under the new id.
+        # mothra#241: every upload mints a brand-new row, even when a
+        # same-named image already exists in the project. This used to reuse
+        # the existing row (matched by filename) to avoid orphaning
+        # annotations/text-alignments tied to the old id — but that made a
+        # same-named re-upload silently inherit whatever pipeline state the
+        # OLD image had already reached, instead of starting fresh at step 1.
+        # A new id with no rows yet in the child tables IS the correct
+        # "fresh, unprocessed image" state; the original and its history are
+        # untouched under their own id.
+        image_id = _uuid.uuid4().hex
         cur.execute(
-            "SELECT id, octet_length(data) + COALESCE(octet_length(original_data), 0)"
-            " FROM project_images WHERE project_id=%s AND name=%s",
+            "SELECT 1 FROM project_images WHERE project_id=%s AND name=%s LIMIT 1",
             (project_id, file.filename),
         )
-        existing = cur.fetchone()
-        image_id = existing[0] if existing else _uuid.uuid4().hex
-        existing_bytes = existing[1] if existing else 0
+        is_duplicate_name = cur.fetchone() is not None
 
         cur.execute("""
             SELECT COALESCE(SUM(octet_length(data) + COALESCE(octet_length(original_data), 0)), 0)
@@ -49,7 +52,7 @@ async def upload_image(
         current_bytes = cur.fetchone()[0]
 
         new_bytes_len = len(image_bytes) + (len(original_bytes) if original_bytes else 0)
-        if current_bytes - existing_bytes + new_bytes_len > STORAGE_QUOTA_BYTES:
+        if current_bytes + new_bytes_len > STORAGE_QUOTA_BYTES:
             raise HTTPException(
                 status_code=413,
                 detail=f"Storage quota exceeded ({STORAGE_QUOTA_BYTES // (1024*1024)} MB limit)"
@@ -58,26 +61,19 @@ async def upload_image(
         mime_type = file.content_type or "image/png"
         original_data = psycopg2.Binary(original_bytes) if original_bytes else None
         original_mime_type = original_file.content_type if (original_file and original_bytes) else None
-        if existing:
-            cur.execute(
-                "UPDATE project_images SET mime_type=%s, data=%s, folio=%s, source_id=%s, source_name=%s,"
-                " original_data=%s, original_mime_type=%s WHERE id=%s",
-                (mime_type, psycopg2.Binary(image_bytes), folio or None, source_id or None,
-                 source_name or None, original_data, original_mime_type, image_id)
-            )
-        else:
-            cur.execute(
-                "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name,"
-                " original_data, original_mime_type)"
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes),
-                 folio or None, source_id or None, source_name or None, original_data, original_mime_type)
-            )
+        cur.execute(
+            "INSERT INTO project_images (id, project_id, name, mime_type, data, folio, source_id, source_name,"
+            " original_data, original_mime_type)"
+            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (image_id, project_id, file.filename, mime_type, psycopg2.Binary(image_bytes),
+             folio or None, source_id or None, source_name or None, original_data, original_mime_type)
+        )
         _log_activity(cur, project_id, "image_imported", file.filename)
         con.commit()
         return {
             "id": image_id, "name": file.filename, "folio": folio or None,
             "sourceId": source_id or None, "sourceName": source_name or None,
+            "duplicateName": is_duplicate_name,
         }
 
 
