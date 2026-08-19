@@ -243,6 +243,17 @@ jobs:
               || { echo "::error::image tag not pinned in $f"; exit 1; }
           done
 
+      - name: Apply ConfigMap (must exist before the migration Job runs)
+        run: |
+          set -euo pipefail
+          # A first deployment has no ConfigMap yet, so the migration Job
+          # below can't start without this; a ConfigMap change could also
+          # otherwise let the Job migrate against the old DATABASE_URL while
+          # the backend later starts with the new one. Apply this ahead of
+          # the migration Job rather than lumping it in with the rest of the
+          # manifests further down.
+          kubectl apply -f "$DIR/configmap.yaml"
+
       - name: Run DB migration Job (mothra#220 row 31)
         run: |
           set -euo pipefail
@@ -258,11 +269,10 @@ jobs:
           kubectl -n mothra wait --for=condition=complete "job/migrate${SUFFIX}" --timeout=120s \
             || { kubectl -n mothra logs "job/migrate${SUFFIX}" --all-containers; exit 1; }
 
-      - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
+      - name: Apply manifests (deployments, ingress; NOT redis/postgres/secrets/configmap)
         run: |
           set -euo pipefail
           kubectl apply \
-            -f "$DIR/configmap.yaml" \
             -f "$DIR/backend.yaml" \
             -f "$DIR/worker.yaml" \
             -f "$DIR/ic.yaml" \
