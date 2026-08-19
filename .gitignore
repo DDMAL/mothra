@@ -14,6 +14,11 @@ staff-finding/models/
 .claude/
 zzzz/
 staff-finding/addtl-gt/
+# Per-component debug crops from staff-finding pipeline runs (hundreds per run,
+# named box_0000.png / box_0000_fit.png) — not the summary outputs. Keep this
+# scoped to the box_*.png name shape, not e2e_tests/**/*.png, so the useful
+# per-run json/txt/csv logs and *_stave_grouping*.png overview images stay tracked.
+staff-finding/e2e_tests/**/box_*.png
 
 # Personal per-user config for the DDMAL HuggingFace sync tooling — hardcodes
 # absolute paths specific to the machine it was generated on (see the file's

@@ -38,7 +38,13 @@ from yolo_io import filter_to_class, parse_yolo_txt
 # Config
 # ---------------------------------------------------------------------------
 
-STAFFLINE_CLASS_DEFAULT = 2  # YOLO class id for "staves" (see run_inference.py CLASS_NAMES)
+# SF-9 fix: the bundled single-class stave-detector checkpoint remaps the
+# merged-project's class 2 down to raw class 0 (see
+# train_staffline_detector.py's SOURCE_CLASS=2/TARGET_CLASS=0 remap) -- the
+# previous comment here cited a run_inference.py/CLASS_NAMES that doesn't
+# exist anywhere in this repo. `2` silently matched nothing against this
+# model's real (class-0) output.
+STAFFLINE_CLASS_DEFAULT = 0
 MATCH_THRESHOLD_MULTIPLIER = 0.5  # fraction of scale_unit → max y-distance for a match
 
 

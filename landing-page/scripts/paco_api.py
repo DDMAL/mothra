@@ -22,6 +22,16 @@ should_cancel param, instead of running the whole page to completion for a
 result nobody will read. Without this abort, that /classify call would
 otherwise block the calling thread for up to DEFAULT_TIMEOUT seconds
 regardless of whether Mothra's own job was already cancelled.
+
+/classify streams its response as SSE-shaped `data: {...}\n\n` lines rather
+than one blocking JSON body (mothra#247 follow-up) — a "progress" event per
+sliding-window row (see recognition_engine.process_image_msae's
+progress_callback param) so the real "row N of total" signal the TF loop
+already produces in-process can reach tasks_predict.py's job-progress
+reporting instead of only a time-based guess, followed by exactly one
+terminal "result" or "error" event. http.client's HTTPResponse is read
+line-by-line (`resp.readline()`) for this rather than one `resp.read()`,
+same underlying socket, no new dependency.
 """
 from __future__ import annotations
 
@@ -30,7 +40,7 @@ import http.client
 import json
 import socket
 import uuid as _uuid
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from config import PACO_API_URL
@@ -47,6 +57,7 @@ def classify_stafflines(
     mime_type: str,
     timeout: int = DEFAULT_TIMEOUT,
     conn_holder: Optional[dict] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> tuple[bytes, bytes]:
     """POSTs one page image to paco-classifier-service's /classify.
 
@@ -65,6 +76,13 @@ def classify_stafflines(
     that exception propagate as a plain PacoClassifierError, and the
     caller is expected to already know it triggered the abort (see
     tasks_predict.py's _run_medieval_inference).
+
+    `progress_callback`, if given, is called as progress_callback(row,
+    total) once per "progress" SSE event the service emits while the
+    sliding-window pass is running (mothra#247 follow-up) — real,
+    deterministic progress from the TF inference loop itself, not a
+    time-based guess. Optional and defaults to None so every existing
+    caller keeps working unchanged.
     """
     boundary = _uuid.uuid4().hex
     body = bytearray()
@@ -87,7 +105,46 @@ def classify_stafflines(
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
         resp = conn.getresponse()
-        raw = resp.read()
+
+        if resp.status >= 400:
+            # A pre-stream validation failure (bad upload, oversized image) —
+            # the service raises HTTPException for these BEFORE it commits to
+            # a streaming response, so this is still a plain JSON error body,
+            # read in one shot exactly as before.
+            raw = resp.read()
+            detail = raw.decode(errors="ignore")
+            try:
+                detail = json.loads(detail).get("detail", detail)
+            except json.JSONDecodeError:
+                pass
+            raise PacoClassifierError(
+                f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}"
+            )
+
+        # A 200 response is now a stream of SSE `data: {...}\n\n` lines: zero
+        # or more "progress" events, then exactly one terminal "result" or
+        # "error" event. Read line-by-line rather than resp.read() so
+        # progress events are visible as they arrive instead of only once
+        # the whole page finishes classifying.
+        result_payload = None
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            line = line.decode("utf-8", errors="ignore").strip()
+            if not line.startswith("data: "):
+                continue
+            ev = json.loads(line[len("data: "):])
+            ev_type = ev.get("type")
+            if ev_type == "progress":
+                if progress_callback is not None:
+                    progress_callback(ev.get("row", 0), ev.get("total", 0))
+            elif ev_type == "error":
+                raise PacoClassifierError(
+                    f"paco-classifier-service reported an error: {ev.get('detail', 'unknown error')}"
+                )
+            elif ev_type == "result":
+                result_payload = ev
     except (OSError, http.client.HTTPException) as exc:
         raise PacoClassifierError(
             f"paco-classifier-service at {PACO_API_URL} is unreachable or the request "
@@ -96,20 +153,13 @@ def classify_stafflines(
     finally:
         conn.close()
 
-    if resp.status >= 400:
-        detail = raw.decode(errors="ignore")
-        try:
-            detail = json.loads(detail).get("detail", detail)
-        except json.JSONDecodeError:
-            pass
+    if result_payload is None:
         raise PacoClassifierError(
-            f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}"
+            "paco-classifier-service's response stream ended without a result"
         )
-
-    payload = json.loads(raw.decode())
     return (
-        base64.b64decode(payload["stafflines_png_base64"]),
-        base64.b64decode(payload["background_png_base64"]),
+        base64.b64decode(result_payload["stafflines_png_base64"]),
+        base64.b64decode(result_payload["background_png_base64"]),
     )
 
 def abort_classify_request(conn_holder: dict) -> None:

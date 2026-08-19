@@ -13,18 +13,30 @@ below is ported from Paco_classifier's own Classifiers/run_classifier.py
 evaluateRodan(), which is the old Rodan-job wrapper and pulls in a Rodan-
 specific ConfigParser.loadConfig() we don't want anywhere near this
 service).
+
+The response streams as SSE `data: {...}\n\n` lines (mothra#247 follow-up)
+rather than one blocking JSON body: zero or more `{"type": "progress", ...}`
+events as the sliding-window TF pass advances (recognition_engine's own
+"row N / total" print, now also handed to a progress_callback), then
+exactly one terminal `{"type": "result", ...}` or `{"type": "error", ...}`
+event. This only applies once the request has actually started streaming
+(HTTP 200) — a request that fails validation before classification even
+starts (bad upload, oversized image) still gets a normal HTTP 4xx JSON
+error body, since nothing has been streamed yet at that point.
 """
 import asyncio
 import base64
+import json
 import os
 import sys
 import threading
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from tensorflow.keras.models import load_model
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
@@ -223,6 +235,18 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
     # letting the whole page finish for a result nobody will ever read.
     cancel_event = threading.Event()
     outcome: dict = {}
+    # mothra#247 follow-up: process_image_msae() calls this once per
+    # sliding-window row from the BACKGROUND thread -- it only ever writes
+    # two ints, and simple dict-item assignment is already atomic under the
+    # GIL, but the lock keeps this correct even if the shape of `progress`
+    # ever grows beyond that.
+    progress_lock = threading.Lock()
+    progress: dict = {"row": 0, "total": 0}
+
+    def _on_progress(row: int, total: int) -> None:
+        with progress_lock:
+            progress["row"] = row
+            progress["total"] = total
 
     def _run():
         try:
@@ -232,6 +256,7 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
                 PATCH_HEIGHT, PATCH_WIDTH,
                 mode="logical",
                 should_cancel=cancel_event.is_set,
+                progress_callback=_on_progress,
             )
         except recognition_engine.ClassificationCancelled:
             outcome["cancelled"] = True
@@ -240,41 +265,79 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
-    while thread.is_alive():
-        if await request.is_disconnected():
+
+    async def _stream() -> AsyncGenerator[str, None]:
+        # mothra#247 follow-up: streams progress as it happens instead of
+        # only returning a final JSON body once the whole page is done --
+        # see this module's docstring for the event shapes. Cancellation
+        # behavior (poll request.is_disconnected(), set cancel_event) is
+        # otherwise unchanged from before this endpoint streamed anything.
+        last_sent = None
+        try:
+            while thread.is_alive():
+                if await request.is_disconnected():
+                    cancel_event.set()
+                    break
+                with progress_lock:
+                    row, total = progress["row"], progress["total"]
+                if total and (row, total) != last_sent:
+                    last_sent = (row, total)
+                    yield f"data: {json.dumps({'type': 'progress', 'row': row, 'total': total})}\n\n"
+                await asyncio.sleep(_DISCONNECT_POLL_INTERVAL_S)
+        finally:
+            # CodeRabbit: Starlette can cancel THIS generator directly at the
+            # ASGI level (its own disconnect handling), independent of --
+            # and possibly before -- our own is_disconnected() poll above
+            # ever runs again. If that happens while suspended at the
+            # `asyncio.sleep()` above, execution never returns to set
+            # cancel_event itself, and the background TensorFlow thread
+            # would otherwise keep running the full page to completion for
+            # a request nobody is listening to anymore (exactly the kind of
+            # wasted, compounding memory pressure implicated in mothra#212's
+            # "Error in input stream" OOM investigation). This runs no
+            # matter how/why the generator is exiting, so cancel_event ends
+            # up set either way -- a harmless no-op on the normal
+            # thread-already-finished path, since process_image_msae's
+            # should_cancel is only ever polled from INSIDE that thread.
             cancel_event.set()
-            break
-        await asyncio.sleep(_DISCONNECT_POLL_INTERVAL_S)
-    # Whether the loop above exited because the thread finished on its own
-    # or because we just set cancel_event, the thread may still be running
-    # for up to one more patch -- wait for it (off the event loop) before
-    # trusting `outcome`.
-    await asyncio.to_thread(thread.join)
+        # Whether the loop above exited because the thread finished on its
+        # own or because we just set cancel_event, the thread may still be
+        # running for up to one more patch -- wait for it (off the event
+        # loop) before trusting `outcome`. Not reached if the generator
+        # itself was torn down by cancellation (see the finally above) --
+        # nothing downstream would consume it in that case anyway, and
+        # `thread` is a daemon so it can't block shutdown regardless.
+        await asyncio.to_thread(thread.join)
 
-    if outcome.get("cancelled"):
-        # The client that would have read this response is already gone
-        # (that's what set cancel_event above) -- this just ends the
-        # request cleanly instead of returning a result nobody asked for
-        # anymore. 499 (client closed request) isn't in the HTTP spec but
-        # is the conventional code for exactly this case.
-        raise HTTPException(status_code=499, detail="client disconnected; classification cancelled")
-    if "error" in outcome:
-        raise HTTPException(status_code=500, detail=str(outcome["error"]))
+        if outcome.get("cancelled"):
+            # The client that would have read this response is already gone
+            # (that's what set cancel_event above) -- nothing reads this
+            # event, but emit it anyway rather than leaving the stream to
+            # end on nothing.
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'client disconnected; classification cancelled'})}\n\n"
+            return
+        if "error" in outcome:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(outcome['error'])})}\n\n"
+            return
 
-    label_map = outcome["label_map"]
-    # process_image_msae restores full input resolution internally when
-    # resize_ratio/max_dimension are used (neither is passed here, so this
-    # should always hold) — re-checked because the Mothra side needs the
-    # two models' box coordinates to share one frame.
-    if label_map.shape[:2] != img.shape[:2]:
-        raise HTTPException(
-            status_code=500,
-            detail=f"classifier output shape {label_map.shape[:2]} != input {img.shape[:2]}",
-        )
+        label_map = outcome["label_map"]
+        # process_image_msae restores full input resolution internally when
+        # resize_ratio/max_dimension are used (neither is passed here, so
+        # this should always hold) — re-checked because the Mothra side
+        # needs the two models' box coordinates to share one frame.
+        if label_map.shape[:2] != img.shape[:2]:
+            yield (
+                f"data: {json.dumps({'type': 'error', 'detail': f'classifier output shape {label_map.shape[:2]} != input {img.shape[:2]}'})}"
+                "\n\n"
+            )
+            return
 
-    background_png = _layer_to_rgba_png(img, label_map, BACKGROUND_LABEL)
-    stafflines_png = _layer_to_rgba_png(img, label_map, STAFFLINES_LABEL)
-    return {
-        "background_png_base64": base64.b64encode(background_png).decode(),
-        "stafflines_png_base64": base64.b64encode(stafflines_png).decode(),
-    }
+        background_png = _layer_to_rgba_png(img, label_map, BACKGROUND_LABEL)
+        stafflines_png = _layer_to_rgba_png(img, label_map, STAFFLINES_LABEL)
+        yield "data: " + json.dumps({
+            "type": "result",
+            "background_png_base64": base64.b64encode(background_png).decode(),
+            "stafflines_png_base64": base64.b64encode(stafflines_png).decode(),
+        }) + "\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")

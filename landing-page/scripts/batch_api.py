@@ -60,10 +60,15 @@ class BatchRunBody(BaseModel):
     # YOLO layer-separation settings, mirroring inference_api.py's PredictBody
     model_preset: Literal["medieval", "printed", "custom"] = "medieval"
     model_id: Optional[str] = None
-    yolo_confidence_threshold: float = 0.5
+    yolo_confidence_threshold: float = 0.25  # shared text/music default (#242: was 0.5, now matches mothra-text)
     yolo_device: str = "auto"   # auto → GPU if present else CPU (resolved in yolo_inference)
     text_music_confidence_threshold: Optional[float] = None
     text_music_device: Optional[str] = None
+    # SF-1: None here falls back to yolo_inference.DEFAULT_STAVE_CONFIDENCE
+    # (0.25) via the shared resolve_yolo_models() call below, same as
+    # inference_api.py's PredictBody -- kept as its own constant rather than
+    # derived from yolo_confidence_threshold even though both now happen to
+    # be 0.25 (#242).
     stave_confidence_threshold: Optional[float] = None
     stave_device: Optional[str] = None
     debug_mode: bool = False
@@ -147,16 +152,27 @@ def export_source_annotations(project_id: int, source_id: str, user=Depends(get_
         written = 0
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for image_id, image_name, folio in source_images:
+                # mothra#241: match by image_id, not image_name -- image_id
+                # is already the loop variable here, and image_name alone is
+                # not unique within a project once duplicate-named uploads
+                # are allowed (see auth_api.py's get_latest_text_alignment
+                # docstring for the same rule). CodeRabbit: the
+                # "image_id IS NULL" arm is defensive insurance against a
+                # hypothetical legacy row with no image_id ever recorded,
+                # not a known real gap -- an exact id match always wins, so
+                # this can't fall back onto a different same-named image.
                 cur.execute(
-                    "SELECT yolo_txt FROM annotations WHERE project_id=%s AND image_name=%s"
+                    "SELECT yolo_txt FROM annotations"
+                    " WHERE project_id=%s AND (image_id=%s OR (image_id IS NULL AND image_name=%s))"
                     " ORDER BY created_at DESC LIMIT 1",
-                    (project_id, image_name),
+                    (project_id, image_id, image_name),
                 )
                 ann_row = cur.fetchone()
                 cur.execute(
-                    "SELECT alignment_json FROM text_alignments WHERE project_id=%s AND image_name=%s"
+                    "SELECT alignment_json FROM text_alignments"
+                    " WHERE project_id=%s AND (image_id=%s OR (image_id IS NULL AND image_name=%s))"
                     " ORDER BY created_at DESC LIMIT 1",
-                    (project_id, image_name),
+                    (project_id, image_id, image_name),
                 )
                 align_row = cur.fetchone()
                 if not ann_row and not align_row:

@@ -49,6 +49,15 @@ def run_text_batch_task(job_id, project_id, body):
 
         images = []
         for iid in image_ids:
+            # NOTE (SF-2, ALPHA_TRANSITION_PLAN.md): tasks_predict.py's own
+            # image fetch now prefers original_data over this resized
+            # working copy, since staffline_stage.py's JSOMR is resolution-
+            # sensitive. That fix was NOT backported here on purpose -- this
+            # is a different job type, wasn't part of the measured #213
+            # regression, and expanding the behavior change here multiplies
+            # verification surface without a measured justification. If a
+            # #213-class regression is ever reported for the text-batch
+            # path specifically, this is the place to revisit.
             cur.execute("SELECT name, data, mime_type FROM project_images WHERE id=%s AND project_id=%s", (iid, project_id))
             row = cur.fetchone()
             if not row:
@@ -127,6 +136,15 @@ def run_text_batch_task(job_id, project_id, body):
                     f" '{yolo_models.model_label}' (hash {yolo_models.model_hash or 'n/a'})"})
                 for sf_ev in run_staffline_detection(
                     job_id, cur, con, project_id, image_id, name, ann_id, img_arr, yolo_txt,
+                    # SF-6: this path never has a classifier choice -- img_arr
+                    # is always the raw page (see the PIL decode above).
+                    # Explicit rather than relying on the default so this
+                    # stays correct if the default ever changes.
+                    source_label="raw_page",
+                    # CodeRabbit PR #219: this path's own image fetch above
+                    # (SELECT name, data, mime_type) never reads
+                    # original_data -- always the resized working copy.
+                    storage_variant="working_copy",
                 ):
                     if sf_ev.get("type") == "error":
                         publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
@@ -163,6 +181,12 @@ def run_text_batch_task(job_id, project_id, body):
         if body.get("column_count") is not None:
             fields["column_count"] = str(body["column_count"])
 
+        # mothra#236: first item's start -- there's no earlier per-item signal
+        # from the text-service to key off of, so this one fires
+        # unconditionally before the stream starts (images is always
+        # non-empty here; an empty image_ids list already returned early
+        # above).
+        publish({"type": "item_start", "item": 0, "total": len(images), "name": images[0][0]})
         for line in _stream_multipart(f"{TEXT_API_URL}/batch-run", fields=fields,
                                       files=[("images", n, m, d) for n, d, m in images], timeout=1800):
             check_cancelled(job_id)
@@ -190,6 +214,19 @@ def run_text_batch_task(job_id, project_id, body):
                 con.commit()
                 if ev.get("debug_data"):
                     text_debug_data[image_name] = ev["debug_data"]
+                # mothra#236: routes this batch's per-item timing into the
+                # same avgItemMsRef/ETA mechanism tasks_encode.py's
+                # run_encode_batch_task already drives (ProcessingPage.tsx's
+                # stage_done handler records the sample once it sees
+                # "processing" complete for an item). Assumes folio_result
+                # events arrive in increasing image_index order (true today
+                # -- the text-service processes the submitted list
+                # sequentially); if that ever changes, the bar/ETA just
+                # degrade to "roughly right" rather than crashing.
+                publish({"type": "item_done", "item": idx})
+                publish({"type": "stage_done", "name": "processing"})
+                if idx + 1 < len(images):
+                    publish({"type": "item_start", "item": idx + 1, "total": len(images), "name": images[idx + 1][0]})
                 continue
             if ev.get("type") == "result":
                 if text_debug_data:

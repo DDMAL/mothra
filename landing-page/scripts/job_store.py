@@ -249,16 +249,36 @@ def drop_upload(upload_id: str) -> None:
         release_db_conn(con)
 
 
-def session_put(session_id: str, mei_bytes: bytes, stem: str, manifest: Optional[dict]) -> None:
+def session_put(session_id: str, mei_bytes: bytes, stem: str, manifest: Optional[dict],
+                 project_id: Optional[int] = None) -> None:
     con = get_db_conn()
     try:
         cur = con.cursor()
         cur.execute(
-            "INSERT INTO job_sessions (session_id, mei_bytes, stem, manifest) VALUES (%s, %s, %s, %s)",
-            (session_id, mei_bytes, stem, json.dumps(manifest) if manifest is not None else None),
+            "INSERT INTO job_sessions (session_id, mei_bytes, stem, manifest, project_id) VALUES (%s, %s, %s, %s, %s)",
+            (session_id, mei_bytes, stem, json.dumps(manifest) if manifest is not None else None, project_id),
         )
         con.commit()
         cur.close()
+    finally:
+        release_db_conn(con)
+
+
+def session_project_id(session_id: str) -> Optional[dict]:
+    """Returns {"exists": bool, "project_id": int|None} for a job_sessions row --
+    used by encode_api.py's ownership checks before serving its manifest/MEI.
+    A None project_id means either the session doesn't exist (exists=False) or
+    it predates the project_id column (exists=True, project_id=None) -- callers
+    must check "exists" first to tell those two apart."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT project_id FROM job_sessions WHERE session_id=%s", (session_id,))
+        row = cur.fetchone()
+        cur.close()
+        if row is None:
+            return {"exists": False, "project_id": None}
+        return {"exists": True, "project_id": row[0]}
     finally:
         release_db_conn(con)
 

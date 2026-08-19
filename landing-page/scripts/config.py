@@ -16,7 +16,6 @@ def _url(env_var: str, cfg_key: str) -> str:
 
 MODELS_DIR = _path("models_dir")
 NEON_MANIFESTS_DIR = _path("neon_manifests_dir")
-MOCK_DATA_DIR = _path("mock_data_dir")
 MEDIEVAL_MODELS_DIR = _path("medieval_models_dir")
 MEI_ENCODING_DIR = _path("mei_encoding_dir")
 

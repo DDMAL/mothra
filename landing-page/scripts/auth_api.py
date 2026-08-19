@@ -48,14 +48,28 @@ def release_db_conn(con) -> None:
 
 router = APIRouter()
 
-# Falls back to a fresh random secret rather than refusing to start, so a
-# bare local checkout with no .env still runs. Cost: this evaluates at
-# import time, so any process started without MOTHRA_SECRET set (backend,
-# worker, a future replica) gets its OWN random secret -- silently
-# invalidating every previously-issued access/refresh token and Neon
-# edit-session token on that process's next restart, with no error to flag
-# it as a misconfiguration rather than "random logouts after every deploy."
-SECRET_KEY = os.environ.get("MOTHRA_SECRET", secrets.token_hex(32))
+def _require_secret_key() -> str:
+    """MOTHRA_SECRET signs every access/refresh token and Neon edit-session
+    token. This used to fall back to a fresh secrets.token_hex(32) so a bare
+    local checkout with no .env still ran -- but that fallback evaluates at
+    import time, so any process started without MOTHRA_SECRET set (backend,
+    worker, a future replica) got its OWN random secret, silently
+    invalidating every previously-issued token on that process's next
+    restart with no error to flag it as a misconfiguration rather than
+    "random logouts after every deploy." Fails fast instead, like
+    DATABASE_URL above."""
+    key = os.environ.get("MOTHRA_SECRET")
+    if not key:
+        raise RuntimeError(
+            "MOTHRA_SECRET is not set. Set it in landing-page/scripts/.env "
+            "(see ../README.md's Prerequisites) or the process environment "
+            "before starting the backend/worker -- there is no safe default, "
+            "since a randomly-generated one would silently invalidate every "
+            "issued token on the next restart."
+        )
+    return key
+
+SECRET_KEY = _require_secret_key()
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 72
 STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
@@ -95,6 +109,10 @@ def init_db():
                 user_id INTEGER NOT NULL REFERENCES users(id),
                 name TEXT NOT NULL,
                 steps_unlocked INTEGER DEFAULT 0,
+                -- mothra#241 follow-up: column name is legacy (kept as-is to
+                -- avoid a migration -- it's an opaque JSON string blob either
+                -- way), but its contents are now project_images.id values,
+                -- not names -- see projects_api.py's usedImageIds field.
                 used_image_names TEXT DEFAULT '[]',
                 used_model_names TEXT DEFAULT '[]',
                 deleted_at TEXT
@@ -223,6 +241,7 @@ def init_db():
                 mei_bytes BYTEA NOT NULL,
                 stem TEXT NOT NULL,
                 manifest JSONB,
+                project_id INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
@@ -301,6 +320,16 @@ _ADDED_COLUMNS = [
     # CLAUDE.md's "Staffline detection" section. NULL for MEI files encoded
     # before this column existed.
     ("mei_files",       "stave_source",          "TEXT"),
+    # project_images.id of the source page this MEI was encoded from.
+    # Preferred over image_name by imageStep.ts's getImageProgress() and by
+    # mei_api.py's create_edit_session, since image_name alone is not unique
+    # within a project once duplicate-named uploads are allowed (mothra#241).
+    # NULL for rows written before the encode round-trip threaded an id
+    # through (see tasks_encode.py's _encode_one/run_encode_batch_task) and
+    # for the single-image "manual encode-upload" path, which has no id to
+    # give (ICCompletionTestPage.tsx picks a raw local file, not a
+    # project_images row) — both fall back to the old image_name match.
+    ("mei_files",       "image_id",              "TEXT"),
 
     ("project_models",  "file_path",             "TEXT"),
     ("project_models",  "kind",                  "TEXT DEFAULT 'yolo'"),
@@ -318,6 +347,14 @@ _ADDED_COLUMNS = [
     ("jobs",            "params",                "JSONB"),
     ("jobs",            "retry_of",              "TEXT REFERENCES jobs(job_id)"),
     ("jobs",            "attempt",               "INTEGER NOT NULL DEFAULT 1"),
+
+    # job_sessions.project_id backs encode_api.py's /manifest, /mei ownership
+    # checks (mothra#220 row 25) -- NULL on rows written before this column
+    # existed, which encode_api.py treats as "no recorded owner, allow" rather
+    # than a hard 403 (see get_manifest/get_mei) since job_sessions' 14-day
+    # cleanup (job_store.cleanup_stale_sessions) already bounds how long any
+    # ownerless row can exist.
+    ("job_sessions",    "project_id",            "INTEGER"),
 ]
 
 

@@ -11,7 +11,9 @@ interface BatchTabProps {
   batchImages: BatchImage[];
   folioSequence: string[];
   cantusFolios?: string[];
-  onUseBatch: (names: string[]) => void;
+  // mothra#241 follow-up (CodeRabbit): image ids, not names -- see
+  // Project.usedImageIds's comment in types.ts.
+  onUseBatch: (imageIds: string[]) => void;
   onDiscardBatch: (imageIds: string[]) => void;
 }
 
@@ -93,7 +95,7 @@ export default function BatchTab({
       {!confirmDiscard ? (
         <div className="flex items-center gap-3">
           <button
-            onClick={() => onUseBatch(batchImages.map((b) => b.name))}
+            onClick={() => onUseBatch(batchImages.map((b) => b.id))}
             disabled={
               countMismatch ||
               batchImages.length === 0 ||

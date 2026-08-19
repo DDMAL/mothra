@@ -7,6 +7,19 @@ from models_api import get_model_file_path
 
 CATEGORY_TO_SLOT = {"text": 0, "music": 1, "staves": 2}
 
+# SF-1 fix (primary cause of #213): the stave-class YOLO pass needs its own
+# default, decoupled from the shared/text-music confidence_threshold (0.5).
+# staff-finding's own standalone CLI (detect_stafflines.py --conf) and its
+# internal derivation comments (run_page.py's DEFAULT_FALLBACK_CONF) both
+# anchor to 0.25 as the proven default for stave-class boxes -- landing was
+# running at 2x that, which the 2026-08-10 parity harness measured as
+# catastrophic (MS234_64 collapsed from 8 staves/mode 4 to 1 stave/mode 9 at
+# conf 0.5; see ALPHA_TRANSITION_PLAN.md's SF-1 row). This is deliberately its
+# own constant, not derived from confidence_threshold, so a caller setting a
+# custom shared confidence_threshold doesn't unintentionally drag the stave
+# pass back toward a value never validated for that class.
+DEFAULT_STAVE_CONFIDENCE = 0.25
+
 
 def _cuda_available() -> bool:
     try:
@@ -31,6 +44,15 @@ def resolve_device(requested: Optional[str]) -> str:
             return requested
         return "cuda"
     return "cpu"
+
+def to_bgr(arr):
+    """Ultralytics treats a raw array input as already BGR (matching what its own
+    file-path loader produces via cv2). Every image array in this codebase is
+    canonically RGB (PIL's default) by the time it reaches here -- convert right
+    at this boundary, not upstream (see tasks_predict.py's paco-classifier decode
+    and issue #200). Returns a view, not a copy -- safe without mutating the
+    caller's array."""
+    return arr[:, :, ::-1]
 
 def _append_boxes(lines, inference, cls_map):
     if inference.boxes is None or not len(inference.boxes):
@@ -71,10 +93,10 @@ class YoloModelSet:
         if self.medieval_models is not None:
             tm_model, st_model = self.medieval_models
             tm_map, st_map = self.class_maps
-            _append_boxes(lines, tm_model(img_arr, conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
-            _append_boxes(lines, st_model(img_arr, conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
+            _append_boxes(lines, tm_model(to_bgr(img_arr), conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
+            _append_boxes(lines, st_model(to_bgr(img_arr), conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
         else:
-            _append_boxes(lines, self.single_model(img_arr, conf=self.confidence_threshold, device=self.device, verbose=False)[0], self.custom_cls_map)
+            _append_boxes(lines, self.single_model(to_bgr(img_arr), conf=self.confidence_threshold, device=self.device, verbose=False)[0], self.custom_cls_map)
         return "\n".join(lines)
 
     def infer_text_music(self, img_arr) -> str:
@@ -85,7 +107,7 @@ class YoloModelSet:
         tm_model, _ = self.medieval_models
         tm_map, _ = self.class_maps
         lines = []
-        _append_boxes(lines, tm_model(img_arr, conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
+        _append_boxes(lines, tm_model(to_bgr(img_arr), conf=self.tm_threshold, device=self.tm_device, verbose=False)[0], tm_map)
         return "\n".join(lines)
 
     def infer_staves(self, img_arr) -> str:
@@ -98,7 +120,7 @@ class YoloModelSet:
         _, st_model = self.medieval_models
         _, st_map = self.class_maps
         lines = []
-        _append_boxes(lines, st_model(img_arr, conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
+        _append_boxes(lines, st_model(to_bgr(img_arr), conf=self.st_threshold, device=self.st_device, verbose=False)[0], st_map)
         return "\n".join(lines)
 
     def infer_staves_raw_boxes(self, img_arr, conf: float, iou: float, imgsz: int) -> list[dict]:
@@ -125,7 +147,7 @@ class YoloModelSet:
         _, st_model = self.medieval_models
         _, st_map = self.class_maps
         result = st_model.predict(
-            source=img_arr, conf=conf, iou=iou, imgsz=imgsz, device=self.st_device, save=False, verbose=False,
+            source=to_bgr(img_arr), conf=conf, iou=iou, imgsz=imgsz, device=self.st_device, save=False, verbose=False,
         )[0]
         boxes = []
         if result.boxes is not None:
@@ -165,7 +187,7 @@ def resolve_yolo_models(
         ) from exc
 
     tm_threshold = text_music_confidence_threshold if text_music_confidence_threshold is not None else confidence_threshold
-    st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else confidence_threshold
+    st_threshold = stave_confidence_threshold if stave_confidence_threshold is not None else DEFAULT_STAVE_CONFIDENCE
     # Resolve to the GPU when one is present, else CPU (guards an explicit
     # cuda request on a CPU-only node from crashing ultralytics/torch).
     device = resolve_device(device)
