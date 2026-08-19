@@ -225,9 +225,10 @@ params) now coexist as distinct buttons. For `encode_upload`/`encode_batch`
 retry to work at all, `tasks_encode.py` had to stop dropping staged
 `job_uploads` rows in a blanket `finally` — they're now only dropped on the
 success path, so a failed job's XML/image bytes survive long enough to be
-retried. **This is the other half of the "known gap" above**: those rows now
-leak indefinitely for jobs that fail and are never retried, since there's
-still no TTL/cleanup job for `job_uploads`.
+retried. Those rows no longer leak indefinitely: the hourly periodic sweep
+described above (`job_store.run_periodic_cleanup()`) now catches
+`job_uploads` left behind by jobs that fail and are never retried, so the
+worst case is about a day of retention rather than forever.
 
 **The worker must run with `--pool=threads`, not Celery's default `prefork`.**
 `prefork` works by `fork()`-ing a child process per worker slot; PyTorch (and
