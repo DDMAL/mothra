@@ -148,7 +148,7 @@ loudly instead of silently redeploying a stale image.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
-kubectl delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
+kubectl -n mothra delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
   && kubectl -n mothra wait --for=condition=complete job/migrate --timeout=120s
 kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml \
               -f k8s/paco-classifier-service.yaml \
@@ -159,7 +159,7 @@ kubectl apply -f k8s/ingress.yaml
 kubectl apply -f k8s/staging/secret.yaml -f k8s/staging/configmap.yaml
 kubectl apply -f k8s/staging/stored-models-pv.yaml -f k8s/staging/stored-models-pvc.yaml
 kubectl apply -f k8s/staging/redis.yaml
-kubectl delete job/migrate-staging --ignore-not-found && kubectl apply -f k8s/staging/migrate-job.yaml \
+kubectl -n mothra delete job/migrate-staging --ignore-not-found && kubectl apply -f k8s/staging/migrate-job.yaml \
   && kubectl -n mothra wait --for=condition=complete job/migrate-staging --timeout=120s
 kubectl apply -f k8s/staging/ic.yaml -f k8s/staging/text-service.yaml \
               -f k8s/staging/paco-classifier-service.yaml \

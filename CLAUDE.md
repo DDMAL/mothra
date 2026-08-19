@@ -417,7 +417,7 @@ staging delete destroy a production checkpoint.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
-kubectl delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
+kubectl -n mothra delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
   && kubectl -n mothra wait --for=condition=complete job/migrate --timeout=120s
 kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/paco-classifier-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
