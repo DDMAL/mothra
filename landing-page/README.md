@@ -109,14 +109,17 @@ MOTHRA_SECRET=<any long random string>
 - `DATABASE_URL` is **required** — the backend fails to start without it.
   Points at your local Postgres (per above) — tables are created
   automatically on first run (see `auth_api.py:init_db`).
-- `MOTHRA_SECRET` signs JWTs. If omitted, a random one is generated each
-  process start, which invalidates every existing login token on restart —
-  set a real value so sessions survive a backend restart.
+- `MOTHRA_SECRET` is **required** too — it signs JWTs, refresh tokens, and
+  Neon edit-session tokens. The backend/worker fail to start without it,
+  rather than silently generating a random one each process start (which
+  used to invalidate every existing login token on restart with no error to
+  flag the misconfiguration).
 - Optional overrides (all have working defaults, only set if you're running
   services on non-default ports/hosts): `STORAGE_QUOTA_MB` (default 500),
   `IC_API_URL` / `IC_PUBLIC_URL` (default `http://localhost:8000`),
   `TEXT_API_URL` (default `http://localhost:8002`), `CELERY_BROKER_URL`
-  (default `redis://localhost:6379/0`), `ALLOWED_ORIGINS` (default `*`).
+  (default `redis://localhost:6379/0`), `ALLOWED_ORIGINS` (default
+  `http://localhost:5173`, matching Vite's dev port -- not a wildcard).
   These (and a few filesystem paths) have their non-secret defaults in
   `landing-page/scripts/config.yaml` — `.env`/environment only needs to set
   them if you're overriding a default, and `DATABASE_URL`/`MOTHRA_SECRET`
@@ -355,10 +358,10 @@ npm run preview   # preview a production build locally
 - **"missing landing-page venv" / "missing IC venv" / "missing text-finding
   venv" from `dev.sh`** — run the setup command it prints; it's the exact
   command from the relevant step above.
-- **Backend crashes on startup with a `KeyError` for `DATABASE_URL`** — you
-  haven't created `landing-page/scripts/.env` yet.
-- **Logged out every time you restart the backend** — set `MOTHRA_SECRET`
-  in `.env` instead of relying on the auto-generated fallback.
+- **Backend crashes on startup with a `KeyError` for `DATABASE_URL`, or a
+  `RuntimeError` for `MOTHRA_SECRET`** — you haven't created
+  `landing-page/scripts/.env` yet, or it's missing one of these two required
+  values. Both fail fast at import rather than falling back to a default.
 - **IC iframe shows old/broken UI after pulling changes** — rebuild it with
   `./dev.sh -b`.
 - **A port is already in use** — `./dev.sh -f`, or find and stop whatever's
