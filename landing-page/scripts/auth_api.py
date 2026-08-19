@@ -339,6 +339,13 @@ _ADDED_COLUMNS = [
     # file actually was (PNG, TIFF, ...) — serving/embedding original_data
     # under the working copy's mime_type mislabels it.
     ("project_images",  "original_mime_type",    "TEXT"),
+    # Set by ic_api.py's ic_start() the first time a page is staged into IC,
+    # so the "synthetic placeholder grid, not real detections" warning
+    # (mothra#220 DL-1) survives session resume/reload -- IC's own
+    # /sessions/lookup response doesn't carry this flag, so mothra has to
+    # remember it itself rather than only returning it on the fresh-staging
+    # path. NULL/FALSE for images staged before this column existed.
+    ("project_images",  "ic_synthetic",          "BOOLEAN"),
 
     ("mei_files",       "image_name",            "TEXT"),
     # Records which of tasks_encode.py's 3-tier stave-source fallback actually
