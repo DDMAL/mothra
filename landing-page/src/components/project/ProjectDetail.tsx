@@ -295,12 +295,22 @@ export default function ProjectDetail({
   const nextStep = useMemo(
     () =>
       minNextStep(
-        usedNames.images,
+        // mothra#241 follow-up (CodeRabbit): usedNames.images is now
+        // id-keyed (see Project.usedImageIds in types.ts), so this resolves
+        // unambiguously — no more risk of picking an arbitrary same-named
+        // image, unlike the name-based .find() this used to need.
+        project.images.filter((img) => usedNames.images.includes(img.id)),
         project.annotations ?? [],
         project.meiFiles ?? [],
         stepsUnlocked,
       ),
-    [usedNames.images, project.annotations, project.meiFiles, stepsUnlocked],
+    [
+      usedNames.images,
+      project.images,
+      project.annotations,
+      project.meiFiles,
+      stepsUnlocked,
+    ],
   );
   const sourceLocked = !(usedNames.images.length === 0 || nextStep === 0);
   // Auto IC classifies server-side, which has no training pool without a
@@ -455,6 +465,16 @@ export default function ProjectDetail({
     count: number,
     onUse: () => void,
     onDelete: () => void,
+    // mothra#247: optional third action -- only images wire this up today.
+    // "use" was the only additive/removal-ish action available before; this
+    // is its symmetric counterpart (deselect without deleting anything).
+    // removeCount is the number of *currently-used* items within the
+    // selection, which can be zero (e.g. right after uploading brand-new,
+    // never-"use"d images and multi-selecting them) -- the button must only
+    // appear when that's actually positive, not whenever anything at all is
+    // selected, or it shows up with nothing meaningful to remove.
+    onRemoveFromSelection?: () => void,
+    removeCount = 0,
   ) => (
     <>
       <button
@@ -464,6 +484,15 @@ export default function ProjectDetail({
         use {count} {noun}
         {count > 1 ? "s" : ""}
       </button>
+      {onRemoveFromSelection && removeCount > 0 && (
+        <button
+          onClick={onRemoveFromSelection}
+          className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
+        >
+          remove {removeCount} {noun}
+          {removeCount > 1 ? "s" : ""} from selection
+        </button>
+      )}
       <button
         onClick={onDelete}
         className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
@@ -627,14 +656,15 @@ export default function ProjectDetail({
                 "image",
                 imgSection.selectedIds.size,
                 () => {
-                  const names = project.images
-                    .filter((img) => imgSection.selectedIds.has(img.id))
-                    .map((img) => img.name);
+                  // mothra#241 follow-up (CodeRabbit): usedNames.images is
+                  // id-keyed, so selectedIds (already a Set<id>) can feed it
+                  // directly -- no more name round-trip needed.
+                  const ids = [...imgSection.selectedIds];
                   onUsedNamesChange({
                     ...usedNames,
                     images: [
                       ...usedNames.images,
-                      ...names.filter((n) => !usedNames.images.includes(n)),
+                      ...ids.filter((id) => !usedNames.images.includes(id)),
                     ],
                   });
                   imgSection.clearSelection();
@@ -651,6 +681,26 @@ export default function ProjectDetail({
                   });
                   imgSection.clearSelection();
                 },
+                () => {
+                  // mothra#247: deselect the selected images -- e.g. a batch
+                  // of pages picked up by accident -- without deleting them
+                  // or anything they've already produced. A no-op for any
+                  // selected image that wasn't in usedNames.images yet.
+                  const ids = [...imgSection.selectedIds];
+                  onUsedNamesChange({
+                    ...usedNames,
+                    images: usedNames.images.filter((id) => !ids.includes(id)),
+                  });
+                  imgSection.clearSelection();
+                  setValidationError(null);
+                },
+                // mothra#247 fix: only count selected images that are
+                // actually already "used" -- otherwise the button appeared
+                // for any multi-selection at all, including a batch of
+                // brand-new, never-"use"d images right after uploading them.
+                [...imgSection.selectedIds].filter((id) =>
+                  usedNames.images.includes(id),
+                ).length,
               )}
 
             {activeTab === "models" &&
@@ -1144,30 +1194,55 @@ export default function ProjectDetail({
               </>
             )}
             <hr className="border-white/40 my-1" />
-            {usedNames.images.map((name) => {
+            {usedNames.images.map((imageId) => {
+              // mothra#241 follow-up (CodeRabbit): usedNames.images now
+              // holds ids, so this always finds the exact image -- no more
+              // ambiguity between two duplicate-named uploads. The
+              // `{ id: imageId, name: imageId }` fallback only matters if
+              // the image was deleted out from under a still-"used" id.
+              const img = project.images.find((i) => i.id === imageId);
+              const displayName = img?.name ?? imageId;
               const hasProgress =
                 getImageProgress(
-                  name,
+                  img ?? { id: imageId, name: displayName },
                   project.annotations ?? [],
                   project.meiFiles ?? [],
                   stepsUnlocked,
                 ) !== null;
               return (
-                <div key={name} className="flex items-center justify-between">
-                  <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
-                  {!hasProgress && (
-                    <button
-                      onClick={() =>
-                        onUsedNamesChange({
-                          ...usedNames,
-                          images: usedNames.images.filter((n) => n !== name),
-                        })
-                      }
-                      className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                    >
-                      ×
-                    </button>
-                  )}
+                <div
+                  key={imageId}
+                  className="flex items-center justify-between"
+                >
+                  <TruncatedName
+                    name={displayName}
+                    className="flex-1 min-w-0 mr-2"
+                  />
+                  {/* mothra#247: always removable, regardless of hasProgress
+                      -- this only excludes the page from future predict/IC/
+                      batch runs (usedImageIds), it never deletes its
+                      existing annotations/MEI files, so there's nothing
+                      unsafe about removing a page that already has progress.
+                      Re-"use"-ing it later picks up right where it left off,
+                      same as any other used image. */}
+                  <button
+                    onClick={() =>
+                      onUsedNamesChange({
+                        ...usedNames,
+                        images: usedNames.images.filter(
+                          (id) => id !== imageId,
+                        ),
+                      })
+                    }
+                    title={
+                      hasProgress
+                        ? "Remove from selection (its existing annotations/MEI are kept, just excluded from future runs)"
+                        : "Remove from selection"
+                    }
+                    className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
+                  >
+                    ×
+                  </button>
                 </div>
               );
             })}

@@ -15,7 +15,15 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
-  streamRequest?: (
+  // Required, not optional: every current caller already provides this
+  // (real SSE-driven progress). It used to be optional to support a
+  // fake-progress fallback for callers that omitted it -- that fallback was
+  // removed as dead code (mothra#220 row 24), leaving a silent no-op (the
+  // page just sits at 0% forever) as the only behavior for a caller that
+  // forgets to pass it. Required here turns that into a compile-time error
+  // instead. (CodeRabbit finding on #223, applied as a follow-up since #223
+  // had already merged.)
+  streamRequest: (
     signal: AbortSignal,
     onJobId?: (id: string) => void,
   ) => Promise<Response>;
@@ -30,14 +38,22 @@ interface ProcessingPageProps {
 }
 
 const STAGE_LABELS = ["checking", "validating", "processing"];
+// mothra#236: the item-progress banner used to hardcode "encoding" — fine
+// while encode_batch was the only job kind emitting item_start, but
+// predict/text_batch now do too.
+const ITEM_ACTION_LABELS: Record<string, string> = {
+  encode_batch: "encoding",
+  predict: "processing",
+  text_batch: "finding text in",
+};
 const STAGE_IDX: Record<string, number> = {
   checking: 0,
   validating: 1,
   processing: 2,
 };
 const STAGE_PROGRESS: Record<string, number> = {
-  checking: 33,
-  validating: 66,
+  checking: 3,
+  validating: 6,
   processing: 100,
 };
 
@@ -108,6 +124,10 @@ export default function ProcessingPage({
     total: number;
     name?: string;
   } | null>(null);
+
+  const confirmedProgressRef = useRef(0);
+  const stageCeilingRef = useRef<number | null>(null);
+  const stagePhaseStartRef = useRef<number | null>(null);
 
   const [streamError, setStreamError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
@@ -185,6 +205,24 @@ export default function ProcessingPage({
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (progressRef.current >= 100) return;
+      const ceiling = stageCeilingRef.current;
+      const floor = confirmedProgressRef.current;
+      const phaseStart = stagePhaseStartRef.current;
+      if (ceiling == null || ceiling <= floor || !phaseStart) return;
+      const ip = itemProgressRef.current;
+
+      const estMs = ip && ip.total > 1 ? avgItemMsRef.current : estimatedTotalMsRef.current;
+      if (!estMs) return;
+      const frac = Math.min((Date.now() - phaseStart) / estMs, 0.95);
+      const interpolated = floor + frac * (ceiling - floor);
+      if (interpolated > progressRef.current) setProgress(interpolated);
+    }, 150);
+    return () => clearInterval(timer);
+  }, []);
+
   // extracted so a server-tracked job retry (handleRetryJob below) can feed a
   // freshly-opened job stream through the exact same parsing/progress logic
   // without re-running the kickoff effect below
@@ -238,18 +276,35 @@ export default function ProcessingPage({
                 `${jobKind ?? "unknown"}:item`,
               );
             }
-            setStages([
-              { text: false, check: false },
-              { text: false, check: false },
-              { text: false, check: false },
-            ]);
+            // mothra#236: stage checkmarks are no longer reset here — each
+            // stage's own re-arrival (the "stage" handler below) now clears
+            // its own checkmark when it legitimately restarts (encode_batch's
+            // per-item pipeline). predict/text_batch never re-emit
+            // "stage"/checking|validating per item, so those stay lit across
+            // the whole batch instead of flickering blank.
+            //
+            // mothra#233/#236 follow-up: predict/text_batch also never
+            // re-emit "stage" for "processing" per item (only once, before
+            // the loop), so item_start is this job kind's only per-item
+            // signal — set the animation ceiling/phase-start here too. This
+            // is a harmless redundant overwrite for encode_batch, which
+            // follows up with its own real "stage" event a moment later.
+            const stagePct = STAGE_PROGRESS["processing"] ?? 0;
+            stageCeilingRef.current = Math.round(
+              ((ev.item + stagePct / 100) / ev.total) * 100,
+            );
+            stagePhaseStartRef.current = Date.now();
           }
           if (ev.type === "stage") {
             const idx = STAGE_IDX[ev.name];
-            if (idx !== undefined)
+            if (idx !== undefined) {
               setStages((prev) =>
-                prev.map((s, i) => (i === idx ? { ...s, text: true } : s)),
-              );
+                prev.map((s, i) => (i === idx ? { ...s, text: true, check: false } : s)));
+              const ip = itemProgressRef.current;
+              const stagePct = STAGE_PROGRESS[ev.name] ?? 0;
+              stageCeilingRef.current = ip ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100) : stagePct;
+              stagePhaseStartRef.current = Date.now();
+            }
           }
           if (ev.type === "stage_done") {
             const idx = STAGE_IDX[ev.name];
@@ -259,11 +314,15 @@ export default function ProcessingPage({
               );
               const stagePct = STAGE_PROGRESS[ev.name] ?? 0;
               const ip = itemProgressRef.current;
-              setProgress(
-                ip
-                  ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100)
-                  : stagePct,
-              );
+              const exact = ip
+                ? Math.round(((ip.index + stagePct / 100) / ip.total) * 100)
+                : stagePct;
+              // Keep the animation's floor in exact sync with every real,
+              // event-driven progress update — the interpolation tick only
+              // ever reads this, never writes it, so it always has an exact
+              // value to animate from.
+              confirmedProgressRef.current = exact;
+              setProgress(exact);
               if (
                 ev.name === "processing" &&
                 ip &&
@@ -284,6 +343,37 @@ export default function ProcessingPage({
                 );
               }
             }
+          }
+          if (ev.type === "processing_tick" && ev.total > 0) {
+            // mothra#247 follow-up: a REAL progress signal for the
+            // "processing" stage (today, only the medieval preset's
+            // staffline classifier emits this — see tasks_predict.py's
+            // _run_medieval_inference), not a time-based guess.
+            const ip = itemProgressRef.current;
+            const stagePct = STAGE_PROGRESS["processing"] ?? 0;
+            const fraction = Math.min(Math.max(ev.current / ev.total, 0), 1);
+            const exact = ip
+              ? Math.round(
+                  ((ip.index + (stagePct / 100) * fraction) / ip.total) * 100,
+                )
+              : Math.round(stagePct * fraction);
+            // CodeRabbit: never let a real tick move the bar BACKWARD —
+            // the interpolation effect's guess can occasionally run ahead
+            // of a real tick's fraction (e.g. it estimated the classifier's
+            // row-based pace slightly too fast), and visually reversing the
+            // bar reads as broken even though the underlying number is, in
+            // isolation, more accurate. Clamp to the current displayed
+            // value instead: a real tick can still advance the floor, just
+            // never retreat it.
+            const monotonicProgress = Math.max(progressRef.current, exact);
+            confirmedProgressRef.current = monotonicProgress;
+            setProgress(monotonicProgress);
+            // Let the interpolation effect keep creeping smoothly from
+            // THIS fresh, real floor between now and the next tick (or the
+            // stage's real stage_done), instead of either freezing until
+            // the next tick or continuing to extrapolate from a stale
+            // start time.
+            stagePhaseStartRef.current = Date.now();
           }
           if (ev.type === "log") {
             const ip = itemProgressRef.current;
@@ -346,7 +436,6 @@ export default function ProcessingPage({
   }, [consumeStream]);
 
   useEffect(() => {
-    if (!streamRequest) return;
     setStreamError(null);
     setProgress(0);
     setDone(false);
@@ -364,13 +453,16 @@ export default function ProcessingPage({
     avgItemMsRef.current = null;
     itemDurationsRef.current = [];
     currentItemStartRef.current = null;
+    confirmedProgressRef.current = 0;
+    stageCeilingRef.current = null;
+    stagePhaseStartRef.current = null;
 
     const abort = new AbortController();
     streamAbortRef.current = abort;
 
     async function run() {
       try {
-        const resp = await streamRequest!(abort.signal, (id) => {
+        const resp = await streamRequest(abort.signal, (id) => {
           jobIdRef.current = id;
           registerActiveJobs(id, projectId ?? null, jobKind ?? "unknown");
         });
@@ -419,6 +511,9 @@ export default function ProcessingPage({
       avgItemMsRef.current = null;
       itemDurationsRef.current = [];
       currentItemStartRef.current = null;
+      confirmedProgressRef.current = 0;
+      stageCeilingRef.current = null;
+      stagePhaseStartRef.current = null;
       setProgress(0);
       setStages([
         { text: false, check: false },
@@ -443,7 +538,8 @@ export default function ProcessingPage({
       <div className="w-full max-w-2xl">
         {itemProgress && (
           <div className="text-white/70 text-sm font-mono mb-2">
-            encoding {itemProgress.index + 1} of {itemProgress.total}
+            {ITEM_ACTION_LABELS[jobKind ?? ""] ?? "processing"}{" "}
+            {itemProgress.index + 1} of {itemProgress.total}
             {itemProgress.name ? ` - ${itemProgress.name}` : ""}
           </div>
         )}

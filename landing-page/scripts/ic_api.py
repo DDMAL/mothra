@@ -64,7 +64,7 @@ def _music_only_yolo_lines(yolo_txt: str) -> str:
 # Bounding boxes
 # ---------------------------------------------------------------------------
 
-def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tuple[bytes, str]:
+def generate_bboxes(image_bytes: bytes, project_id: int, image_id: str, image_name: str) -> tuple[bytes, str]:
     """Return ``(annotation_bytes, format)`` for ``ic_start()``.
 
     Uses stored YOLO detections when available; falls back to a coarse
@@ -72,11 +72,19 @@ def generate_bboxes(image_bytes: bytes, project_id: int, image_name: str) -> tup
     predict run.
     """
     with db_cursor() as (con, cur):
+        # mothra#241: match by image_id, not image_name -- a same-named
+        # duplicate upload now gets its own row/id, and image_name alone is
+        # not unique within a project (see auth_api.py's
+        # get_latest_text_alignment docstring for the same rule).
+        # CodeRabbit: the "image_id IS NULL" arm is defensive insurance
+        # against a hypothetical legacy row with no image_id ever recorded,
+        # not a known real gap -- an exact id match always wins, so this
+        # can't fall back onto a different same-named image's annotation.
         cur.execute(
             "SELECT yolo_txt FROM annotations"
-            " WHERE project_id=%s AND image_name=%s"
+            " WHERE project_id=%s AND (image_id=%s OR (image_id IS NULL AND image_name=%s))"
             " ORDER BY created_at DESC LIMIT 1",
-            (project_id, image_name),
+            (project_id, image_id, image_name),
         )
         row = cur.fetchone()
         if row and row[0].strip():
@@ -187,19 +195,38 @@ def _ic_unreachable(exc: Exception) -> HTTPException:
 
 class IcStartRequest(BaseModel):
     imageName: str
+    # mothra#241 / CodeRabbit: image_name alone is not unique within a
+    # project once duplicate-named uploads are allowed -- prefer this when
+    # the caller has it (both frontend call sites do, since they always
+    # start from a real ProjectImage). Optional so any caller that only
+    # sends imageName still resolves via the name fallback below.
+    imageId: Optional[str] = None
 
 
 def _project_image(
-    project_id: int, image_name: str, user_id: int
+    project_id: int, image_name: str, user_id: int, image_id: Optional[str] = None,
 ) -> tuple[str, bytes, str]:
-    """Return ``(image_id, data, mime_type)`` for a project image the user owns."""
+    """Return ``(image_id, data, mime_type)`` for a project image the user owns.
+
+    Prefers an exact ``image_id`` match when given -- ``image_name`` alone is
+    not unique within a project once duplicate-named uploads are allowed
+    (mothra#241), so a name-only lookup here could resolve to an arbitrary
+    same-named image before its bytes/id are ever handed to IC.
+    """
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user_id)
-        cur.execute(
-            "SELECT id, data, mime_type FROM project_images"
-            " WHERE project_id=%s AND name=%s",
-            (project_id, image_name),
-        )
+        if image_id:
+            cur.execute(
+                "SELECT id, data, mime_type FROM project_images"
+                " WHERE project_id=%s AND id=%s",
+                (project_id, image_id),
+            )
+        else:
+            cur.execute(
+                "SELECT id, data, mime_type FROM project_images"
+                " WHERE project_id=%s AND name=%s",
+                (project_id, image_name),
+            )
         img = cur.fetchone()
         if not img:
             raise HTTPException(status_code=404, detail="image not found")
@@ -223,7 +250,7 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
       id comes back via postMessage.
     """
     image_id, image_bytes, mime_type = _project_image(
-        project_id, body.imageName, user["id"]
+        project_id, body.imageName, user["id"], image_id=body.imageId
     )
 
     # Resume a previously-saved session for this page, if one exists.
@@ -247,7 +274,7 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
         }
 
     # Nothing saved — stage the page + bboxes fresh.
-    annotations, ann_format = generate_bboxes(image_bytes, project_id, body.imageName)
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, body.imageName)
     try:
         status, raw = _post_multipart(
             f"{IC_API_URL}/staging",
@@ -403,6 +430,9 @@ def ic_training_presets(user=Depends(get_current_user)) -> list[str]:
 async def ic_auto_queue(
     project_id: int,
     imageName: Annotated[str, Form()],
+    # mothra#241 / CodeRabbit: see IcStartRequest.imageId's comment -- same
+    # disambiguation, optional Form field so this stays backward compatible.
+    imageId: Annotated[Optional[str], Form()] = None,
     training_presets: Annotated[Optional[str], Form()] = None,
     training_files: Annotated[Optional[List[UploadFile]], File()] = None,
     user=Depends(get_current_user),
@@ -424,9 +454,9 @@ async def ic_auto_queue(
     enforces this before calling.
     """
     image_id, image_bytes, mime_type = _project_image(
-        project_id, imageName, user["id"]
+        project_id, imageName, user["id"], image_id=imageId
     )
-    annotations, ann_format = generate_bboxes(image_bytes, project_id, imageName)
+    annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, imageName)
 
     fields = {"annotations_format": ann_format}
     if training_presets:

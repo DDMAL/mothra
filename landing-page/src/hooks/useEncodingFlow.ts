@@ -21,7 +21,7 @@ export function useEncodingFlow(
     stem: string;
   } | null>(null);
   const [pendingBatchPairs, setPendingBatchPairs] = useState<
-    { xmlFile: File; imageFile: File }[]
+    { xmlFile: File; imageFile: File; imageId: string }[]
   >([]);
   const [batchResults, setBatchResults] = useState<
     {
@@ -38,6 +38,7 @@ export function useEncodingFlow(
     mei_base64: string;
     manifest: Record<string, unknown> | null;
     image_name?: string;
+    image_id?: string;
     stem?: string;
     stave_source?: string | null;
     logs?: string[];
@@ -49,6 +50,10 @@ export function useEncodingFlow(
       pair?.xmlFile.name.replace(/\.xml$/i, "") ??
       `item-${ev.item}`;
     const imageName = pair?.imageFile.name ?? ev.image_name;
+    // mothra#241: pair.imageId (from the real ProjectImage this pair was
+    // built from, via icQueue.ts's buildEncodePair) is the primary source —
+    // ev.image_id is only a fallback for a caller that somehow has no pair.
+    const imageId = pair?.imageId ?? ev.image_id;
     const xmlBytes = Uint8Array.from(atob(ev.mei_base64), (c) =>
       c.charCodeAt(0),
     );
@@ -58,6 +63,7 @@ export function useEncodingFlow(
       name: `${stem}.mei`,
       xmlContent: xmlText,
       corrected: false,
+      imageId,
       imageName,
       staveSource: (ev.stave_source as MeiFile["staveSource"]) ?? null,
     };
@@ -68,6 +74,7 @@ export function useEncodingFlow(
         body: JSON.stringify({
           name: newMeiFile.name,
           xmlContent: xmlText,
+          imageId: imageId ?? null,
           imageName: imageName ?? null,
           logs: ev.logs ?? [],
           staveSource: ev.stave_source ?? null,

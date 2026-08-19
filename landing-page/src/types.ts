@@ -17,7 +17,12 @@ export interface Project {
   annotations: AnnotationSet[];
   meiFiles: MeiFile[];
   stepsUnlocked: number;
-  usedImageNames: string[];
+  // mothra#241 follow-up (CodeRabbit): renamed from usedImageNames and now
+  // holds project_images.id values, not names -- a name-keyed list couldn't
+  // let two duplicate-named uploads be selected/removed/run independently,
+  // which defeats the actual point of allowing duplicates (e.g. testing the
+  // pipeline against multiple copies of the same page).
+  usedImageIds: string[];
   usedModelNames: string[];
   usedAnnotationNames: string[];
   deletedAt?: string;
@@ -96,6 +101,7 @@ export interface ProjectModel {
 
 export interface AnnotationSet {
   id: string;
+  imageId?: string;
   imageName: string;
   imageSrc?: string;
   jsonName: string;
@@ -120,6 +126,7 @@ export interface MeiFile {
   name: string;
   xmlContent?: string;
   corrected?: boolean;
+  imageId?: string;
   imageName?: string;
   staveSource?: StaveSource | null;
 }

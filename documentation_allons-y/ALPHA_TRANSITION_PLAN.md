@@ -71,33 +71,33 @@ The standalone 10aug run was: `detect_stafflines.py --conf 0.25` (imgsz 640, iou
 
 **SAFE — remove, no replacement needed** (Phase 3, one PR):
 
-| Item | Where |
-|---|---|
-| Dead unauthenticated `POST /api/encode` + entire `MOCK_DATA_DIR` chain (mock dir is gitignored and absent → route 500s everywhere; frontend never calls it) | `encode_api.py:9,20-27`, `config.py:19`, `config.yaml:9` |
-| `"neon-test"` View union member (zero references) | `landing-page/src/types.ts:123` |
-| Dormant fake-progress timer block (dead in all current call paths; only runs when no `streamRequest`) | `ProcessingPage.tsx:146-186` |
-| "mock XML data will be used" string (describes an unreachable path) | `ICCompletionTestPage.tsx:139` |
-| Committed `staff-finding/config.yaml` (its own header says never commit it) | `staff-finding/config.yaml` |
-| Foreign-developer absolute path | `scripts/convert2greyscale.py:11` |
-| `z_quicktest/` scratch dir (untracked; duplicate `.pt` copy) | repo root |
+| Item | Where | Status |
+|---|---|---|
+| Dead unauthenticated `POST /api/encode` + entire `MOCK_DATA_DIR` chain (mock dir is gitignored and absent → route 500s everywhere; frontend never calls it) | `encode_api.py:9,20-27`, `config.py:19`, `config.yaml:9` | **fixed 2026-08-17** — route + `MOCK_DATA_DIR` removed; #223 |
+| `"neon-test"` View union member (zero references) | `landing-page/src/types.ts:123` | **fixed 2026-08-17** — #223 |
+| Dormant fake-progress timer block (dead in all current call paths; only runs when no `streamRequest`) | `ProcessingPage.tsx:146-186` | **fixed 2026-08-17** — removed; also fixed the `singleLabel` completion checkmark/`done` gate it left permanently unreachable — #223 |
+| "mock XML data will be used" string (describes an unreachable path) | `ICCompletionTestPage.tsx:139` | **fixed 2026-08-17** — #223 |
+| Committed `staff-finding/config.yaml` (its own header says never commit it) | `staff-finding/config.yaml` | **n/a** — already gitignored and absent from disk, confirmed 2026-08-17 |
+| Foreign-developer absolute path | `scripts/convert2greyscale.py:11` | **fixed 2026-08-17** — repo-relative default + `argv[1]` override; #223 |
+| `z_quicktest/` scratch dir (untracked; duplicate `.pt` copy) | repo root | **n/a** — already absent, confirmed 2026-08-17 |
 
 **REPLACE — must have a substitute before alpha** (Phase 3):
 
-| Item | Where | Replacement |
-|---|---|---|
-| No auth on any `encode_api.py` route; caller-supplied `project_id`, no ownership check | `encode_api.py` (all 6 routes) | `Depends(get_current_user)` + `require_project_owner`, matching every other router |
-| `MOTHRA_SECRET` silent random fallback (JWTs invalidated per restart; backend/worker diverge) | `auth_api.py:51` | fail-fast like `DATABASE_URL` (`auth_api.py:31`) |
-| CORS `*` defaults: backend env default, text-service unconditional | `landing-page/scripts/main.py:32`, `text-service/main.py:42`, `docker-compose.yml:74` | explicit origin allowlist, env-configured, no `*` default |
-| Cleanup functions run only at process start | `main.py:53-54`, `job_store.py:287,306` (note typo `cleanup_stale_uplaods`) | Celery beat schedule (or equivalent periodic invocation) |
-| No `/healthz` on backend/text-service (TCP probes only; paco already has real `/health`+`/ready`) | `k8s/backend.yaml:36-45`, `k8s/text-service.yaml:29,34` | real health endpoints checking DB/broker reachability, wired to probes |
-| `BATCH_DIR` + `NEON_MANIFESTS_DIR` node-local disk state | `text-service/main.py:26`, `config.py:18`, `mei_api.py:212-213` | Postgres-backed (like `job_sessions`) or shared storage |
-| `init_db()`/`_migrate_db()` at import → replicas pinned to 1 | `auth_api.py:253,624`, `k8s/backend.yaml:9` | one-shot migration Job; remove import-time side effect |
-| 800 ms sleep hoping Neon's save lands before `PATCH .../corrected` | `NeonBatchEditor.tsx:108` | real completion signal from Neon's `updateDatabase()` |
-| Triplicated inline 86400 s cleanup sweeps at import/request time | `auth_api.py:617-623`, `mei_api.py:115-120`, `text-service/main.py:29-34` | fold into the periodic cleanup above |
+| Item | Where | Replacement | Status |
+|---|---|---|---|
+| No auth on any `encode_api.py` route; caller-supplied `project_id`, no ownership check | `encode_api.py` (all 6 routes) | `Depends(get_current_user)` + `require_project_owner`, matching every other router | **fixed 2026-08-17** — plus a new `job_sessions.project_id` column so `/manifest`/`/mei` have ownership data to check at all; #224 |
+| `MOTHRA_SECRET` silent random fallback (JWTs invalidated per restart; backend/worker diverge) | `auth_api.py:51` | fail-fast like `DATABASE_URL` (`auth_api.py:31`) | **fixed 2026-08-17** — row 26 |
+| CORS `*` defaults: backend env default, text-service unconditional | `landing-page/scripts/main.py:32`, `text-service/main.py:42`, `docker-compose.yml:74` | explicit origin allowlist, env-configured, no `*` default | **fixed 2026-08-17** — both now default to `http://localhost:5173` (Vite's dev origin) when `ALLOWED_ORIGINS` is unset, no wildcard; prod/staging k8s configmaps were already explicit; row 27 |
+| Cleanup functions run only at process start | `main.py:53-54`, `job_store.py:287,306` (note typo `cleanup_stale_uplaods`) | Celery beat schedule (or equivalent periodic invocation) | open — row 28 |
+| No `/healthz` on backend/text-service (TCP probes only; paco already has real `/health`+`/ready`) | `k8s/backend.yaml:36-45`, `k8s/text-service.yaml:29,34` | real health endpoints checking DB/broker reachability, wired to probes | open — row 29 |
+| `BATCH_DIR` + `NEON_MANIFESTS_DIR` node-local disk state | `text-service/main.py:26`, `config.py:18`, `mei_api.py:212-213` | Postgres-backed (like `job_sessions`) or shared storage | open — row 30 |
+| `init_db()`/`_migrate_db()` at import → replicas pinned to 1 | `auth_api.py:253,624`, `k8s/backend.yaml:9` | one-shot migration Job; remove import-time side effect | open — row 31 |
+| 800 ms sleep hoping Neon's save lands before `PATCH .../corrected` | `NeonBatchEditor.tsx:108` | real completion signal from Neon's `updateDatabase()` | open — row 32 |
+| Triplicated inline 86400 s cleanup sweeps at import/request time | `auth_api.py:617-623`, `mei_api.py:115-120`, `text-service/main.py:29-34` | fold into the periodic cleanup above | open — row 28 |
 
 **DECIDE — decision log §4** (recommendation included there): SKIP_PREDICT/SKIP_YOLO/placeholder-bbox-grid triad · `ICCompletionTestPage` + hardcoded "ta-da!" copy · paco-classifier personal-branch pin · checked-in artifact corpus (HF-first policy, §5.8) · eslint disabled in CI · tests not a required check · `run_pageOG.py` · unauth'd `GET /jobs/{id}/stream` · `bgr_adapter.py` machine paths · ProcessingPage cosmetic pacing (drip-feed + 4 s completion delay) · "printed text coming soon" pill · `OLD-annotator/`, root `scripts/`, `configs/` legacy dirs · null `confidence` placeholder in JSOMR output.
 
-**Stale documentation to correct now:** CLAUDE.md claims fake `setTimeout` timers are gone (dormant, not gone) and that no `job_uploads`/`job_sessions` cleanup exists (exists, but start-only).
+**Stale documentation to correct now:** CLAUDE.md still describes the fake `setTimeout` timer block as "dormant, not gone" -- it's actually gone as of #223 (2026-08-17), CLAUDE.md's own "SSE/streaming for encoding" bullet needs its wording updated to match. CLAUDE.md also claims no `job_uploads`/`job_sessions` cleanup exists (exists, but start-only) -- still true, pending row 28.
 
 ---
 

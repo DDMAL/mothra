@@ -133,6 +133,13 @@ async def encode_batch(
     xml_files: list[UploadFile] = FAPIFile(...),
     image_files: list[UploadFile] = FAPIFile(...),
     image_names: Optional[list[str]] = Form(None),
+    # mothra#241: project_images.id per item, when the caller has one (the
+    # batch IC->encode path does, via icQueue.ts's buildEncodePair -- the
+    # ad-hoc single-image encode-upload path above has no id to give and
+    # doesn't send this). Threaded through to tasks_encode.py so hint
+    # resolution and the resulting mei_files row can match by id instead of
+    # the not-necessarily-unique image name.
+    image_ids: Optional[list[str]] = Form(None),
     project_id: Optional[int] = Form(None),
     clef_shape: Optional[str] = Form(None),
     clef_line: Optional[int] = Form(None),
@@ -153,6 +160,10 @@ async def encode_batch(
         return JSONResponse(status_code=400, content={
             "error": f"image_names ({len(image_names)}) must match xml_files ({len(xml_files)}) if provided",
         })
+    if image_ids is not None and len(image_ids) != len(xml_files):
+        return JSONResponse(status_code=400, content={
+            "error": f"image_ids ({len(image_ids)}) must match xml_files ({len(xml_files)}) if provided",
+        })
     if (err := _check_notation_type(notation_type)) is not None:
         return err
 
@@ -171,6 +182,7 @@ async def encode_batch(
             "image_upload_id": image_upload_id,
             "image_filename": img.filename,
             "image_name": name,
+            "image_id": image_ids[i] if image_ids else None,
         })
 
     job_id = new_job_id()

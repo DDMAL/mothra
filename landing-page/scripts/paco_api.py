@@ -22,6 +22,16 @@ should_cancel param, instead of running the whole page to completion for a
 result nobody will read. Without this abort, that /classify call would
 otherwise block the calling thread for up to DEFAULT_TIMEOUT seconds
 regardless of whether Mothra's own job was already cancelled.
+
+/classify streams its response as SSE-shaped `data: {...}\n\n` lines rather
+than one blocking JSON body (mothra#247 follow-up) — a "progress" event per
+sliding-window row (see recognition_engine.process_image_msae's
+progress_callback param) so the real "row N of total" signal the TF loop
+already produces in-process can reach tasks_predict.py's job-progress
+reporting instead of only a time-based guess, followed by exactly one
+terminal "result" or "error" event. http.client's HTTPResponse is read
+line-by-line (`resp.readline()`) for this rather than one `resp.read()`,
+same underlying socket, no new dependency.
 """
 from __future__ import annotations
 
@@ -31,7 +41,7 @@ import json
 import logging
 import socket
 import uuid as _uuid
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from config import PACO_API_URL
@@ -47,6 +57,14 @@ CATEGORY_TIMEOUT = "timeout"
 CATEGORY_UNREACHABLE = "unreachable"
 CATEGORY_HTTP_ERROR = "http_error"
 CATEGORY_MALFORMED_RESPONSE = "malformed_response"
+# The service committed to a 200 stream and then reported its OWN failure
+# mid-computation (a "type": "error" SSE event -- e.g. a TF inference
+# exception) -- distinct from CATEGORY_HTTP_ERROR (which means the request
+# itself was rejected before any streaming started). Added when the SSE
+# streaming protocol (mothra#247) was reconciled with this categorization
+# system: neither existed at the same time before, so there was no prior
+# category for this case to reuse.
+CATEGORY_SERVICE_ERROR = "service_error"
 
 class PacoClassifierError(RuntimeError):
     """Raised on any failure talking to paco-classifier-service. Callers
@@ -65,6 +83,7 @@ def classify_stafflines(
     mime_type: str,
     timeout: int = DEFAULT_TIMEOUT,
     conn_holder: Optional[dict] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> tuple[bytes, bytes]:
     """POSTs one page image to paco-classifier-service's /classify.
 
@@ -83,6 +102,13 @@ def classify_stafflines(
     that exception propagate as a plain PacoClassifierError, and the
     caller is expected to already know it triggered the abort (see
     tasks_predict.py's _run_medieval_inference).
+
+    `progress_callback`, if given, is called as progress_callback(row,
+    total) once per "progress" SSE event the service emits while the
+    sliding-window pass is running (mothra#247 follow-up) — real,
+    deterministic progress from the TF inference loop itself, not a
+    time-based guess. Optional and defaults to None so every existing
+    caller keeps working unchanged.
     """
     boundary = _uuid.uuid4().hex
     body = bytearray()
@@ -105,7 +131,80 @@ def classify_stafflines(
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
         resp = conn.getresponse()
-        raw = resp.read()
+
+        # Only 2xx is success -- a 3xx (e.g. a redirect the client never
+        # follows) used to fall through to the streaming block below, where
+        # it read as an empty/garbage stream and surfaced as a generic
+        # "stream ended without a result" instead of the http_error it
+        # actually is. CodeRabbit finding on #252.
+        if not (200 <= resp.status < 300):
+            # A pre-stream validation failure (bad upload, oversized image) —
+            # the service raises HTTPException for these BEFORE it commits to
+            # a streaming response, so this is still a plain JSON error body,
+            # read in one shot rather than line-by-line.
+            raw = resp.read()
+            detail = raw.decode(errors="ignore")
+            try:
+                parsed_detail = json.loads(detail)
+            except json.JSONDecodeError:
+                pass
+            else:
+                # A JSON body that isn't an object (a bare list, string,
+                # number, or null -- all valid JSON) has no .get(); only
+                # dicts do. CodeRabbit finding on #252.
+                if isinstance(parsed_detail, dict):
+                    detail = parsed_detail.get("detail", detail)
+            logger.warning(
+                "paco-classifier-service rejected the request (HTTP %s): %s",
+                resp.status, detail,
+            )
+            raise PacoClassifierError(
+                f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}",
+                category=CATEGORY_HTTP_ERROR,
+            )
+
+        # A 200 response is a stream of SSE `data: {...}\n\n` lines: zero or
+        # more "progress" events, then exactly one terminal "result" or
+        # "error" event. Read line-by-line rather than resp.read() so
+        # progress events are visible as they arrive instead of only once
+        # the whole page finishes classifying.
+        result_payload = None
+        while True:
+            line = resp.readline()
+            if not line:
+                break
+            line = line.decode("utf-8", errors="ignore").strip()
+            if not line.startswith("data: "):
+                continue
+            try:
+                ev = json.loads(line[len("data: "):])
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "paco-classifier-service sent an unparseable SSE line: %s", exc, exc_info=True,
+                )
+                raise PacoClassifierError(
+                    f"paco-classifier-service sent an unparseable SSE line: {exc}",
+                    category=CATEGORY_MALFORMED_RESPONSE,
+                ) from exc
+            ev_type = ev.get("type")
+            if ev_type == "progress":
+                if progress_callback is not None:
+                    progress_callback(ev.get("row", 0), ev.get("total", 0))
+            elif ev_type == "error":
+                # The service committed to the stream (status already sent
+                # as 200) and then failed mid-computation -- a distinct
+                # failure mode from the pre-stream HTTP-error case above,
+                # which never got this far.
+                detail = ev.get("detail", "unknown error")
+                logger.warning(
+                    "paco-classifier-service reported an error: %s", detail,
+                )
+                raise PacoClassifierError(
+                    f"paco-classifier-service reported an error: {detail}",
+                    category=CATEGORY_SERVICE_ERROR,
+                )
+            elif ev_type == "result":
+                result_payload = ev
     except socket.timeout as exc:
         # socket.timeout (== TimeoutError) is itself an OSError subclass, so
         # this must be caught ahead of the broader OSError branch below to
@@ -131,45 +230,26 @@ def classify_stafflines(
     finally:
         conn.close()
 
-    # Only 2xx is success -- a 3xx (e.g. a redirect the client never follows)
-    # used to fall through to the payload-parsing block below, where it
-    # failed as a "malformed response" instead of the http_error it actually
-    # is. CodeRabbit finding on #252.
-    if not (200 <= resp.status < 300):
-        detail = raw.decode(errors="ignore")
-        try:
-            parsed_detail = json.loads(detail)
-        except json.JSONDecodeError:
-            pass
-        else:
-            # A JSON body that isn't an object (a bare list, string, number,
-            # or null -- all valid JSON) has no .get(); only dicts do.
-            if isinstance(parsed_detail, dict):
-                detail = parsed_detail.get("detail", detail)
-        logger.warning(
-            "paco-classifier-service rejected the request (HTTP %s): %s",
-            resp.status, detail,
-        )
+    if result_payload is None:
         raise PacoClassifierError(
-            f"paco-classifier-service rejected the request (HTTP {resp.status}): {detail}",
-            category=CATEGORY_HTTP_ERROR,
+            "paco-classifier-service's response stream ended without a result",
+            category=CATEGORY_MALFORMED_RESPONSE,
         )
-
     try:
-        payload = json.loads(raw.decode())
         return (
-            base64.b64decode(payload["stafflines_png_base64"], validate=True),
-            base64.b64decode(payload["background_png_base64"], validate=True),
+            base64.b64decode(result_payload["stafflines_png_base64"], validate=True),
+            base64.b64decode(result_payload["background_png_base64"], validate=True),
         )
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         # ValueError also covers base64.b64decode's binascii.Error (incl. what
         # validate=True raises for non-base64 characters, instead of silently
-        # ignoring them). TypeError covers a payload that's valid JSON but not
-        # the expected shape -- a bare list/string/null (payload["..."] raises
-        # TypeError, not KeyError, on a list; base64.b64decode(None, ...) also
+        # ignoring them). TypeError covers a result event that's valid JSON
+        # but not the expected shape -- e.g. one of these fields is a list or
+        # null (result_payload["..."] raises TypeError, not KeyError, when
+        # result_payload itself isn't a dict; base64.b64decode(None, ...) also
         # raises TypeError) rather than the dict-with-missing-key case KeyError
-        # alone catches. Previously unguarded -- a malformed 2xx response
-        # raised a raw, uncategorized exception here.
+        # alone catches. Previously unguarded -- a malformed result event
+        # raised a raw, uncategorized exception here. CodeRabbit finding on #252.
         logger.warning(
             "paco-classifier-service returned a malformed response: %s", exc, exc_info=True,
         )
