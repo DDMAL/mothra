@@ -32,7 +32,20 @@ app = FastAPI()
 # safe. k8s/configmap.yaml (prod/staging) already sets this explicitly; the
 # fallback here only covers local dev, where Vite serves the frontend at
 # :5173 -- not a wildcard.
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+#
+# CodeRabbit finding (PR #238): bare .split(",") preserves whitespace, so
+# "https://a.example, https://b.example" (a space after the comma, the
+# natural way to write a list) registers the second origin with a leading
+# space -- CORSMiddleware compares this literally against the Origin header,
+# which never has leading whitespace, so that origin is silently rejected.
+# Strip each entry, and fail fast on an empty one (leftover from a stray
+# comma) rather than silently registering a "" origin that matches nothing.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
+if any(not o for o in ALLOWED_ORIGINS):
+    raise RuntimeError(
+        f"ALLOWED_ORIGINS has an empty entry after splitting on commas: {ALLOWED_ORIGINS!r} "
+        "-- check for a leading/trailing/double comma."
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,

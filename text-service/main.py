@@ -46,7 +46,18 @@ app = FastAPI()
 # traffic today, but an unconditional wildcard is still the wrong default to
 # leave in code for whenever that changes. Falls back to the same local-dev
 # Vite origin as the backend when unset.
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+#
+# CodeRabbit finding (PR #238): strip whitespace from each entry (a bare
+# .split(",") would otherwise register "https://b.example" with a leading
+# space from "a.example, b.example", which never matches a real Origin
+# header) and fail fast on an empty entry -- see landing-page/scripts/main.py's
+# identical fix for the full rationale.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173").split(",")]
+if any(not o for o in ALLOWED_ORIGINS):
+    raise RuntimeError(
+        f"ALLOWED_ORIGINS has an empty entry after splitting on commas: {ALLOWED_ORIGINS!r} "
+        "-- check for a leading/trailing/double comma."
+    )
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 # run_pipeline.main() resolves this as the --recognition-model CLI default
