@@ -15,7 +15,15 @@ interface ProcessingPageProps {
   intervalMs?: number;
   completionDelayMs?: number;
   logs?: string[];
-  streamRequest?: (
+  // Required, not optional: every current caller already provides this
+  // (real SSE-driven progress). It used to be optional to support a
+  // fake-progress fallback for callers that omitted it -- that fallback was
+  // removed as dead code (mothra#220 row 24), leaving a silent no-op (the
+  // page just sits at 0% forever) as the only behavior for a caller that
+  // forgets to pass it. Required here turns that into a compile-time error
+  // instead. (CodeRabbit finding on #223, applied as a follow-up since #223
+  // had already merged.)
+  streamRequest: (
     signal: AbortSignal,
     onJobId?: (id: string) => void,
   ) => Promise<Response>;
@@ -428,7 +436,6 @@ export default function ProcessingPage({
   }, [consumeStream]);
 
   useEffect(() => {
-    if (!streamRequest) return;
     setStreamError(null);
     setProgress(0);
     setDone(false);
@@ -455,7 +462,7 @@ export default function ProcessingPage({
 
     async function run() {
       try {
-        const resp = await streamRequest!(abort.signal, (id) => {
+        const resp = await streamRequest(abort.signal, (id) => {
           jobIdRef.current = id;
           registerActiveJobs(id, projectId ?? null, jobKind ?? "unknown");
         });
