@@ -1,0 +1,41 @@
+# One-shot DB schema migration -- mothra#220 row 31. init_db()/_migrate_db()
+# (auth_api.py/migrate.py) no longer run as an import-time side effect of
+# backend/worker; this Job runs them once per deploy instead, applied and
+# waited-on (kubectl wait --for=condition=complete) by
+# .github/workflows/build-images.yml BEFORE backend/worker are applied --
+# see that workflow's "deploy" job. Reuses the backend image; no probes,
+# ports, or stored-models volume needed for a batch Job that runs migrate.py
+# and exits.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: mothra
+spec:
+  # A rerun deploy needs a fresh Job object (Jobs are immutable once created);
+  # the deploy workflow deletes any prior migrate Job before applying this one
+  # (see build-images.yml) rather than relying on backoffLimit/ttl alone.
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/ddmal/mothra-backend:sha-6bf1c19
+          imagePullPolicy: IfNotPresent
+          command: ["python", "migrate.py"]
+          envFrom:
+            - configMapRef:
+                name: mothra-config
+            - secretRef:
+                name: mothra-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

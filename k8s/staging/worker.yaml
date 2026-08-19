@@ -7,6 +7,7 @@ metadata:
     app: worker-staging
     mothra.env: staging
 spec:
+  # See k8s/worker.yaml's identical comment (mothra#220 row 31 / row 28).
   replicas: 1
   selector:
     matchLabels:
