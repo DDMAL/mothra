@@ -1,8 +1,11 @@
 imagePath,imagesBinary,name,folio,description,classification,width,mei,review,dob,project,
 [],[],C clef,001r,clef.c,clef.c,1,"<clef shape=""C""/>",No,,5d39e8755fbd53216a2fa442,
 [],[],F Clef,001r,,clef.f,1,"<clef shape=""F""/>",No,,5d39e8755fbd53216a2fa442,
+[],[],F Clef other one,001r,,clef.f2,1,"<clef shape=""F""/>",No,,5d39e8755fbd53216a2fa442,
 [],[],Custos,001r,,custos,1,<custos/>,No,,5d39e8755fbd53216a2fa442,
 ,,Divisio,001r,,divisio.maxima,1,"<divLine form=""maxima""/>",,,,
+,,Divisio,001r,,divisio.maior,1,"<divLine form=""maior""/>",,,,
+,,Divisio finalis,001r,,divisio.finalis,1,"<divLine form=""finalis""/>",,,,
 ,,Flat,001r,,accidental.flat,1,"<accid accid=""f""/>",,,,
 ,,Natural,001r,,accidental.natural,1,"<accid accid=""n""/>",,,,
 [],[],Punctum,001r,,neume.punctum,1,"<neume>
