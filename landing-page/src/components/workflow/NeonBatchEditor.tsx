@@ -215,10 +215,13 @@ export default function NeonBatchEditor({
   // Tracks which notification ids already existed before the save so a
   // stale, not-yet-auto-cleared toast from an earlier save can't be
   // mistaken for this one's completion.
+  // Returns whether the success toast was actually observed -- a timeout is
+  // not confirmation, so callers must not treat it as success (see
+  // markCurrentDone below, mothra CodeRabbit review on #256).
   function waitForNeonSaveComplete(
     iframe: HTMLIFrameElement,
     timeoutMs = 5000,
-  ): Promise<void> {
+  ): Promise<boolean> {
     return new Promise((resolve) => {
       const container =
         iframe.contentDocument?.getElementById("notification-content");
@@ -234,8 +237,12 @@ export default function NeonBatchEditor({
                 !seenIds.has(el.id),
             )
           : undefined;
-        if (newSuccessToast || Date.now() - start > timeoutMs) {
-          resolve();
+        if (newSuccessToast) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeoutMs) {
+          resolve(false);
           return;
         }
         setTimeout(poll, 100);
@@ -244,11 +251,17 @@ export default function NeonBatchEditor({
     });
   }
 
-  async function markCurrentDone() {
-    if (!currentFile || corrected.has(currentFile.id)) return;
+  // Returns whether the file was actually marked corrected -- false when the
+  // Neon save was never confirmed (iframe unavailable, save failed, or the
+  // toast timed out), so the caller knows not to advance past unsaved edits.
+  async function markCurrentDone(): Promise<boolean> {
+    if (!currentFile || corrected.has(currentFile.id)) return false;
     triggerNeonSave();
-    if (iframeRef.current) {
-      await waitForNeonSaveComplete(iframeRef.current);
+    if (
+      !iframeRef.current ||
+      !(await waitForNeonSaveComplete(iframeRef.current))
+    ) {
+      return false;
     }
     await apiFetch(`/api/projects/${project.id}/mei/${currentFile.id}`, {
       method: "PATCH",
@@ -257,10 +270,11 @@ export default function NeonBatchEditor({
     });
     setCorrected((prev) => new Set([...prev, currentFile.id]));
     onFileCorrected?.(currentFile.id);
+    return true;
   }
 
   async function handleDoneAndNext() {
-    await markCurrentDone();
+    if (!(await markCurrentDone())) return;
     const next = nearestUncorrected(currentIndex, 1);
     if (next !== -1) setCurrentIndex(next);
   }
