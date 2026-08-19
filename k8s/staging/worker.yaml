@@ -50,6 +50,11 @@ spec:
             - -A
             - celery_app.celery_app
             - worker
+            # -B: embedded beat scheduler, see celery_app.py's beat_schedule
+            # (mothra#220 row 28). Safe only while worker is replicas=1 (row
+            # 31); staging's own redis-staging broker keeps this independent
+            # of production's beat schedule.
+            - -B
             - --loglevel=info
             - --pool=threads
             - --concurrency=2

@@ -65,6 +65,19 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=
 # OCR text) since we call it directly instead of going through main()/argparse.
 RECOGNITION_MODEL = _find_tridis_model()
 
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """text-service has no DB/broker of its own -- unlike the backend's
+    /healthz (mothra#220 row 29), there's no external dependency to check
+    reachability of. Still a real improvement over the bare tcpSocket probe
+    it replaces (k8s/text-service.yaml): confirms this process is actually
+    serving HTTP, not just that the OS has a listener on the port. Always
+    returns 200 -- a missing recognition_model means text-finding silently
+    runs in stub mode (segmentation/YOLO still work, no OCR text), which is
+    a real but degraded capability, not a reason to fail the probe and pull
+    this pod out of rotation; recognition_model is reported for visibility."""
+    return {"status": "ok", "recognition_model": RECOGNITION_MODEL is not None}
+
 import urllib.error
 from datetime import datetime, timedelta
 

@@ -30,13 +30,16 @@ spec:
               containerPort: 8002
           # No env required (port fixed in the image CMD). Kraken/HTR + the
           # baked-in Tridis OCR model make this a memory-heavy container.
+          # See k8s/text-service.yaml's identical comment (mothra#220 row 29).
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8002
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: 8002
             initialDelaySeconds: 30
             periodSeconds: 15

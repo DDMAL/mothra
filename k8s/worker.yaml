@@ -41,6 +41,11 @@ spec:
             - -A
             - celery_app.celery_app
             - worker
+            # -B: embedded beat scheduler, see celery_app.py's beat_schedule
+            # (mothra#220 row 28). Safe only while worker is replicas=1 (row
+            # 31); revisit if that ever changes, to avoid duplicate beat
+            # schedulers double-firing periodic tasks.
+            - -B
             - --loglevel=info
             - --pool=threads
             - --concurrency=2

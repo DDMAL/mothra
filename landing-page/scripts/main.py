@@ -2,12 +2,13 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
-from auth_api import limiter
+from auth_api import limiter, cleanup_stale_neon_manifests, get_db_conn, release_db_conn
+from celery_app import celery_app
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -24,7 +25,7 @@ from text_api import router as text_router
 from cantus_api import router as cantus_router
 from batch_api import router as batch_router
 from jobs_api import router as jobs_router
-from job_store import cleanup_stale_sessions, cleanup_stale_uplaods
+from job_store import cleanup_stale_sessions, cleanup_stale_uploads
 
 app = FastAPI()
 # No "*" default: an unset ALLOWED_ORIGINS used to silently allow every
@@ -69,13 +70,60 @@ app.include_router(jobs_router, prefix="/api")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Runs once per process start, not on a schedule -- there's no Celery beat
-# job for this. Rides the deploy cadence as a low-effort mitigation rather
-# than true periodic cleanup: good enough since deploys happen often enough
-# in practice, but a backend that stays up for a long stretch without
-# restarting won't get either table swept in the meantime.
-cleanup_stale_uplaods()
+@app.get("/healthz/live", include_in_schema=False)
+def healthz_live():
+    """Liveness only: confirms this process is actually serving HTTP (not
+    just that the OS has a listener on the port, which is all a bare
+    tcpSocket probe -- k8s/backend.yaml's probes before this PR -- can tell).
+    Deliberately checks NO external dependency. A livenessProbe failure gets
+    k8s to kill and restart the pod -- if it also failed on a transient
+    Postgres/Redis blip (like /healthz below does), a downstream outage would
+    cause a restart storm that does nothing to fix the actual outage. That
+    check belongs in readinessProbe (via /healthz), which only pulls the pod
+    out of load-balancing rotation instead of killing it."""
+    return {"status": "ok"}
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Readiness: confirms /healthz/live's process-alive signal AND that
+    this backend's two real dependencies are reachable -- Postgres and the
+    Celery broker (Redis). Point readinessProbe here, NOT livenessProbe --
+    see healthz_live's docstring for why."""
+    try:
+        con = get_db_conn()
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            cur.close()
+        finally:
+            release_db_conn(con)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"database unreachable: {exc}")
+
+    try:
+        conn = celery_app.connection()
+        try:
+            conn.ensure_connection(max_retries=1, interval_start=0, timeout=2)
+        finally:
+            conn.release()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"celery broker unreachable: {exc}")
+
+    return {"status": "ok"}
+
+# job_uploads/job_sessions also get a periodic Celery-beat sweep now
+# (celery_app.py's beat_schedule, tasks_cleanup.py) -- this immediate
+# call just means a fresh deploy doesn't wait a full beat interval for
+# its first cleanup.
+cleanup_stale_uploads()
 cleanup_stale_sessions()
+# Neon-editor manifest files live on this backend container's own local
+# disk (not the shared stored_models NFS mount), so unlike the two calls
+# above, this can only run from the backend process itself -- see
+# auth_api.cleanup_stale_neon_manifests's docstring. mei_api.py's
+# create_edit_session also calls it proactively on each new edit session.
+cleanup_stale_neon_manifests()
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():

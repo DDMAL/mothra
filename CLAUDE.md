@@ -143,9 +143,11 @@ cd paco-classifier-service && .venv/bin/uvicorn main:app --port 8003
 cd landing-page/scripts && source .venv/bin/activate
 uvicorn main:app --reload --port 8001
 
-# Terminal 5 — Celery worker (predict/encode jobs)
+# Terminal 5 — Celery worker (predict/encode jobs; -B runs the embedded
+# beat scheduler for periodic job_uploads/job_sessions cleanup, see
+# celery_app.py's beat_schedule)
 cd landing-page/scripts && source .venv/bin/activate
-celery -A celery_app.celery_app worker --loglevel=info --pool=threads --concurrency=2
+celery -A celery_app.celery_app worker -B --loglevel=info --pool=threads --concurrency=2
 
 # Terminal 6 — landing-page frontend (:5173)
 cd landing-page && npm run dev
@@ -189,10 +191,15 @@ kickoff-then-stream wiring in `AppRouter.tsx` (via `apiFetchJobStream()` in
 `lib/apiFetch.ts`, which also reports the kickoff's `job_id` back via an
 `onJobId` callback so the frontend can cancel/retry it later). Redis is purely
 the Celery broker; Postgres (`jobs`/`job_events`) is the single source of
-truth for job status, so there's no Celery result backend configured. Known
-gaps: no periodic cleanup of `job_uploads`/`job_sessions` rows yet (see the
-retry note below — this got slightly more important, not less), and a dead
-worker is detected via a ~90s staleness timeout rather than immediately.
+truth for job status, so there's no Celery result backend configured.
+`job_uploads`/`job_sessions` get an hourly periodic sweep via the worker's
+embedded Celery beat scheduler (`celery_app.py`'s `beat_schedule`,
+`tasks_cleanup.py`'s `cleanup.run_periodic` task calling
+`job_store.run_periodic_cleanup()`) plus an immediate one at backend startup
+(`main.py`) — previously this only ran once at backend startup, so a
+long-lived pod never got swept again (see the retry note below — this got
+slightly more important, not less). Known gap: a dead worker is still
+detected via a ~90s staleness timeout rather than immediately.
 
 **Job cancellation** (`POST /api/jobs/{id}/cancel`, `jobs_api.py`) calls
 `celery_app.control.revoke(job_id, terminate=True)` **and** flips a
@@ -543,10 +550,10 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups (incl. `siglum`) to the text-service |
 | `landing-page/scripts/model_validation.py` | Validates uploaded YOLO checkpoints, derives text/music/staves class maps |
 | `landing-page/scripts/config.py` / `config.yaml` | Centralized non-secret paths + service URLs, env-var overridable |
-| `landing-page/scripts/celery_app.py` | Celery app instance/config; entrypoint for `celery -A celery_app.celery_app worker` |
-| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage |
+| `landing-page/scripts/celery_app.py` | Celery app instance/config incl. `beat_schedule` (hourly periodic cleanup); entrypoint for `celery -A celery_app.celery_app worker -B` |
+| `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage, `run_periodic_cleanup()` |
 | `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
-| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work, run out-of-request |
+| `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` / `tasks_cleanup.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work / periodic `job_uploads`+`job_sessions` cleanup, run out-of-request |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
 | `landing-page/scripts/paco_api.py` | Bridges to `paco-classifier-service` (`classify_stafflines()`) — medieval-preset staffline/background layer separation, called from `tasks_predict.py`'s `_run_medieval_inference()`; see **Staffline detection** above |
@@ -684,13 +691,6 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
 
 ## Things that don't exist yet (planned)
 
-- *Periodic* cleanup of `job_uploads`/`job_sessions` rows — `job_store.py` has real cleanup
-  functions (`cleanup_stale_uplaods(max_age_days=1)` — note the typo — and
-  `cleanup_stale_sessions(max_age_days=14)`, invoked from `main.py`), but they run **once at
-  process start only**; there is no scheduler, so a long-lived pod never sweeps again. Rows
-  still accumulate between restarts (and matter slightly more now: failed-but-not-yet-retried
-  encode jobs keep their staged `job_uploads` rows around on purpose, so retry can still fetch
-  them — see **Job queue** above)
 - Health/status page — no way to check backend/Postgres/Redis/Celery-worker/IC/text-service
   liveness from the app; not implemented
 - IIIF manifest import — no way to bulk-import project images from a IIIF manifest URL; not
@@ -706,6 +706,13 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   can't actually kill an already-running task; see **Job queue** above
 - **Job retry** — `POST /api/jobs/{id}/retry` replays a failed job's stored `params` as a new,
   lineage-tracked job; see **Job queue** above
+- **Periodic job_uploads/job_sessions cleanup** — the worker's embedded Celery beat scheduler
+  runs `tasks_cleanup.py`'s `cleanup.run_periodic` task hourly (`celery_app.py`'s
+  `beat_schedule`); previously `job_store.py`'s `cleanup_stale_uploads()` (typo now fixed --
+  was `cleanup_stale_uplaods`) and `cleanup_stale_sessions()` only ran once at backend startup.
+  Neon-editor manifest cleanup (`auth_api.cleanup_stale_neon_manifests`) stays a backend-only,
+  non-Celery sweep since it cleans the backend container's own local disk, which a task running
+  on the worker pod can't reach; see **Job queue** above
 - **Real JWT refresh** — a separate, rotating, revocable refresh token (`refresh_tokens` table)
   replaces the old `/api/auth/refresh`, which depended on the very access token it was meant to
   refresh and so never worked once that token actually expired; see **Backend** above
