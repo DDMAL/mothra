@@ -5,6 +5,28 @@ import { AuthImage } from "../shared/AuthImage";
 import { computeRhythmGaps } from "../../lib/rhythmGaps";
 import RhythmChart from "./RhythmChart";
 
+interface YoloBox {
+  cls: number;
+  cx: number;
+  cy: number;
+  bw: number;
+  bh: number;
+}
+
+// Matches AnnotationViewerModal's parseYolo -- same merged YOLO-txt format
+// (annotations.yolo_txt), just kept here instead of imported since that
+// module filters cls===2 (staves) *out* while this one wants only cls===2.
+function parseYolo(txt: string): YoloBox[] {
+  return txt
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [cls, cx, cy, bw, bh] = line.trim().split(/\s+/).map(Number);
+      return { cls, cx, cy, bw, bh };
+    });
+}
+
 type ViewState =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -13,6 +35,10 @@ type ViewState =
       imageUrl: string;
       records: JsomrLineRecord[];
       prettyJson: string;
+      // Raw phase-1 stave-class (cls===2) boxes straight from
+      // annotations.yolo_txt -- unprocessed by staffline_stage.py's
+      // centerline fitting/grouping, unlike records[*].bounding_box above.
+      yoloBoxes: YoloBox[];
     };
 
 // Matches AnnotationViewerModal's class-color palette, extended here to
@@ -31,6 +57,10 @@ const UNASSIGNED_COLOR = "#888888";
 // red rubrics/staff-lines common in these manuscripts (see the pages this
 // viewer is actually used on).
 const ANOMALY_COLOR = "#2563EB";
+// A single flat color for the "yolo boxes" tab -- these are unprocessed,
+// unassigned model output, so there's no stave-id/anomaly distinction to
+// color-code the way the overlay tab's fitted lines have.
+const YOLO_BOX_COLOR = "#F76B6B";
 
 interface Props {
   detection: StafflineSet;
@@ -53,7 +83,9 @@ export default function StafflineViewerModal({
 }: Props) {
   const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
   const [notesOpen, setNotesOpen] = useState(false);
-  const [tab, setTab] = useState<"overlay" | "rhythm" | "raw" | "classifier">("overlay");
+  const [tab, setTab] = useState<
+    "overlay" | "rhythm" | "raw" | "classifier" | "yolo"
+  >("overlay");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   // Non-null once interpolate-preview has returned -- presence alone means
@@ -68,6 +100,8 @@ export default function StafflineViewerModal({
   const [interpolateError, setInterpolateError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const yoloCanvasRef = useRef<HTMLCanvasElement>(null);
+  const yoloImgRef = useRef<HTMLImageElement>(null);
 
 
   const handleCopyText = (text: string) => {
@@ -108,7 +142,10 @@ export default function StafflineViewerModal({
   );
 
   const visibleTabs = useMemo(() => {
-    const tabs: Array<"overlay" | "rhythm" | "raw" | "classifier"> = ["overlay"];
+    const tabs: Array<"overlay" | "rhythm" | "raw" | "classifier" | "yolo"> = [
+      "overlay",
+      "yolo",
+    ];
     if (rhythmSummary) tabs.push("rhythm");
     if (detection.hasClassifierImage) tabs.push("classifier");
     tabs.push("raw");
@@ -196,6 +233,44 @@ export default function StafflineViewerModal({
     drawOverlay();
   }, [drawOverlay]);
 
+  const staveBoxCount = useMemo(
+    () =>
+      viewState.status === "ready"
+        ? viewState.yoloBoxes.filter((b) => b.cls === 2).length
+        : 0,
+    [viewState],
+  );
+
+  const drawYoloOverlay = useCallback(() => {
+    if (viewState.status !== "ready") return;
+    const canvas = yoloCanvasRef.current;
+    const img = yoloImgRef.current;
+    if (!canvas || !img || !img.naturalWidth) return;
+    const dw = img.clientWidth;
+    const dh = img.clientHeight;
+    canvas.width = dw;
+    canvas.height = dh;
+    const ctx = canvas.getContext("2d")!;
+    ctx.clearRect(0, 0, dw, dh);
+    viewState.yoloBoxes
+      .filter((b) => b.cls === 2) // stave class only -- see STAFFLINE_CLASS_ID
+      .forEach((b) => {
+        const x = (b.cx - b.bw / 2) * dw;
+        const y = (b.cy - b.bh / 2) * dh;
+        const w = b.bw * dw;
+        const h = b.bh * dh;
+        ctx.fillStyle = YOLO_BOX_COLOR + "20";
+        ctx.strokeStyle = YOLO_BOX_COLOR;
+        ctx.lineWidth = 1;
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+      });
+  }, [viewState]);
+
+  useEffect(() => {
+    drawYoloOverlay();
+  }, [drawYoloOverlay]);
+
   useEffect(() => {
     let disposed = false;
     let imageUrl: string | undefined;
@@ -222,8 +297,15 @@ export default function StafflineViewerModal({
       apiFetch(detection.imageSrc).then((r) =>
         r.ok ? r.blob() : Promise.reject("image fetch failed"),
       ),
+      // Best-effort: if the current annotation is somehow gone (shouldn't
+      // happen -- predict always writes one before staffline detection
+      // runs), the "yolo boxes" tab just renders empty rather than failing
+      // the whole modal load.
+      apiFetch(`/api/projects/${projectId}/stafflines/${detection.id}/yolo-txt`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
     ])
-      .then(([data, blob]) => {
+      .then(([data, blob, yoloData]) => {
         imageUrl = URL.createObjectURL(blob);
         if (disposed) {
           URL.revokeObjectURL(imageUrl);
@@ -232,6 +314,7 @@ export default function StafflineViewerModal({
         // jsomrJson is a native array (JSONB column) -- no JSON.parse needed.
         const records =
           (data as { jsomrJson: JsomrLineRecord[] }).jsomrJson ?? [];
+        const yoloTxt = (yoloData as { yoloTxt?: string } | null)?.yoloTxt ?? "";
         setViewState({
           status: "ready",
           imageUrl,
@@ -239,6 +322,7 @@ export default function StafflineViewerModal({
           // Pretty-printed purely for the "raw" tab's readability, same
           // as TextAlignmentViewerModal's prettyJson.
           prettyJson: JSON.stringify(records, null, 2),
+          yoloBoxes: parseYolo(yoloTxt),
         });
       })
       .catch(() => {
@@ -441,6 +525,29 @@ export default function StafflineViewerModal({
               <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
                 paco-classifier's stafflines-only layer — the image the stave
                 model actually detected boxes against, not the raw page.
+              </p>
+            </div>
+          ) : !interpolatePreview && tab === "yolo" ? (
+            <div className="p-4 flex flex-col items-center">
+              <div className="relative inline-block">
+                <img
+                  ref={yoloImgRef}
+                  src={viewState.imageUrl}
+                  alt={`${detection.imageName} — raw YOLO stave boxes`}
+                  className="block max-w-full"
+                  onLoad={drawYoloOverlay}
+                />
+                <canvas
+                  ref={yoloCanvasRef}
+                  className="absolute inset-0 pointer-events-none"
+                />
+              </div>
+              <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
+                {staveBoxCount} raw stave-class box
+                {staveBoxCount !== 1 ? "es" : ""} — the model's unprocessed
+                phase-1 predictions, before staffline_stage.py's centerline
+                fitting/grouping. Compare against the overlay tab to see
+                what happened to them downstream.
               </p>
             </div>
           ) : !interpolatePreview && tab === "raw" ? (

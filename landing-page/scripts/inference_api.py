@@ -172,6 +172,49 @@ def get_staffline_classifier_image(
         raise HTTPException(status_code=404, detail="no classifier image stored for this detection")
     return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
 
+
+@router.get("/projects/{project_id}/stafflines/{detection_id}/yolo-txt")
+async def get_staffline_yolo_txt(
+    project_id: int,
+    detection_id: str,
+    user=Depends(get_current_user),
+):
+    """Returns the raw merged YOLO-txt (all classes, normalized coords) for
+    this detection's image -- lets the frontend isolate the unprocessed
+    phase-1 stave-class (cls==2) box predictions from staffline_stage.py's
+    downstream centerline-fitting/grouping, for diagnosing whether a bad
+    staffline result traces back to the model or to that stage. Deliberately
+    a plain, decode-free query rather than a call into
+    _load_image_and_yolo_for_detection below (which also loads/decodes the
+    image array for the interpolation routes' actual compute step -- dead
+    weight here). Looks up the CURRENT annotation by image_id, not this
+    detection's own annotation_id, for the same reason documented on that
+    helper: a later re-annotate replaces the annotations row entirely via
+    write_annotation()'s delete+insert, which would leave an older
+    detection's annotation_id pointing at nothing."""
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT s.image_id FROM staffline_detections s"
+            " JOIN projects p ON p.id = s.project_id"
+            " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
+            (detection_id, project_id, user["id"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="staffline detection not found")
+        image_id = row[0]
+
+        cur.execute(
+            "SELECT yolo_txt FROM annotations WHERE project_id=%s AND image_id=%s"
+            " ORDER BY created_at DESC LIMIT 1",
+            (project_id, image_id),
+        )
+        ann_row = cur.fetchone()
+    if not ann_row:
+        raise HTTPException(status_code=404, detail=f"no current annotation for image {image_id}")
+    return {"yoloTxt": ann_row[0]}
+
+
 def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, user_id: int):
     """Looks up a staffline_detections row's image_id/image_name, then loads
     that image's bytes and its CURRENT annotation's yolo_txt -- deliberately
