@@ -39,6 +39,13 @@ type ViewState =
       // annotations.yolo_txt -- unprocessed by staffline_stage.py's
       // centerline fitting/grouping, unlike records[*].bounding_box above.
       yoloBoxes: YoloBox[];
+      // Base image for the "yolo boxes" tab -- the paco-classifier's
+      // stafflines-only layer when this detection has one (matching what
+      // the stave model actually ran against for a medieval-preset
+      // detection), else the same raw page image as `imageUrl`. Drawing
+      // boxes over the full-color page made them hard to see; the
+      // separated-ink layer is also what the pipeline actually uses.
+      yoloBaseImageUrl: string;
     };
 
 // Matches AnnotationViewerModal's class-color palette, extended here to
@@ -53,10 +60,17 @@ const PALETTE = [
   "#F7E16B",
 ];
 const UNASSIGNED_COLOR = "#888888";
-// Blue rather than red -- red overlay lines were getting lost against the
-// red rubrics/staff-lines common in these manuscripts (see the pages this
-// viewer is actually used on).
-const ANOMALY_COLOR = "#2563EB";
+// Selectable colors for the overlay tab's flagged-stave trace lines.
+// Started as a hardcoded blue, which got lost against the parchment on
+// pages where most/all staves are flagged (a wall of one color).  Pink is
+// the default; the small swatch picker next to the overlay caption lets it
+// be switched per-viewing without a code change.
+const TRACE_COLORS = {
+  pink: "#F03AD7",
+  green: "#22C55E",
+  blue: "#2563EB",
+} as const;
+type TraceColorName = keyof typeof TRACE_COLORS;
 // A single flat color for the "yolo boxes" tab -- these are unprocessed,
 // unassigned model output, so there's no stave-id/anomaly distinction to
 // color-code the way the overlay tab's fitted lines have.
@@ -86,6 +100,7 @@ export default function StafflineViewerModal({
   const [tab, setTab] = useState<
     "overlay" | "rhythm" | "raw" | "classifier" | "yolo"
   >("overlay");
+  const [traceColor, setTraceColor] = useState<TraceColorName>("pink");
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   // Non-null once interpolate-preview has returned -- presence alone means
@@ -191,7 +206,7 @@ export default function StafflineViewerModal({
       const isAnomalous =
         r.stave_id !== null && anomalousStaveIds.has(r.stave_id);
       const color = isAnomalous
-        ? ANOMALY_COLOR
+        ? TRACE_COLORS[traceColor]
         : r.stave_id !== null
           ? PALETTE[r.stave_id % PALETTE.length]
           : UNASSIGNED_COLOR;
@@ -224,7 +239,7 @@ export default function StafflineViewerModal({
       ctx.stroke();
     });
     ctx.setLineDash([]);
-  }, [activeRecords, anomalousStaveIds]);
+  }, [activeRecords, anomalousStaveIds, traceColor]);
 
   // The image itself doesn't reload when only interpolatePreview changes
   // (same detection, same imageUrl), so re-draw explicitly rather than
@@ -274,6 +289,7 @@ export default function StafflineViewerModal({
   useEffect(() => {
     let disposed = false;
     let imageUrl: string | undefined;
+    let classifierImageUrl: string | undefined;
     setViewState({ status: "loading" });
     // A fresh detection (e.g. onAccepted swapping in the just-confirmed
     // one) means any prior preview is stale -- clear it rather than
@@ -304,11 +320,25 @@ export default function StafflineViewerModal({
       apiFetch(`/api/projects/${projectId}/stafflines/${detection.id}/yolo-txt`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
+      // Same best-effort treatment -- the "yolo boxes" tab base image just
+      // falls back to the raw page (see below) if this isn't available or
+      // fails, rather than failing the whole modal load.
+      detection.hasClassifierImage
+        ? apiFetch(
+            `/api/projects/${projectId}/stafflines/${detection.id}/classifier-image`,
+          )
+            .then((r) => (r.ok ? r.blob() : null))
+            .catch(() => null)
+        : Promise.resolve(null),
     ])
-      .then(([data, blob, yoloData]) => {
+      .then(([data, blob, yoloData, classifierBlob]) => {
         imageUrl = URL.createObjectURL(blob);
+        classifierImageUrl = classifierBlob
+          ? URL.createObjectURL(classifierBlob)
+          : undefined;
         if (disposed) {
           URL.revokeObjectURL(imageUrl);
+          if (classifierImageUrl) URL.revokeObjectURL(classifierImageUrl);
           return;
         }
         // jsomrJson is a native array (JSONB column) -- no JSON.parse needed.
@@ -323,6 +353,11 @@ export default function StafflineViewerModal({
           // as TextAlignmentViewerModal's prettyJson.
           prettyJson: JSON.stringify(records, null, 2),
           yoloBoxes: parseYolo(yoloTxt),
+          // Draw the raw boxes over the separated-ink layer (what the
+          // pipeline actually detected against) when available, else the
+          // same raw page as `imageUrl` -- full-color pages made the boxes
+          // hard to make out.
+          yoloBaseImageUrl: classifierImageUrl ?? imageUrl,
         });
       })
       .catch(() => {
@@ -336,8 +371,9 @@ export default function StafflineViewerModal({
     return () => {
       disposed = true;
       if (imageUrl) URL.revokeObjectURL(imageUrl);
+      if (classifierImageUrl) URL.revokeObjectURL(classifierImageUrl);
     };
-  }, [detection.id, detection.imageSrc, projectId]);
+  }, [detection.id, detection.imageSrc, detection.hasClassifierImage, projectId]);
 
   const anomalyNotes = Array.from(
     new Map(
@@ -532,7 +568,7 @@ export default function StafflineViewerModal({
               <div className="relative inline-block">
                 <img
                   ref={yoloImgRef}
-                  src={viewState.imageUrl}
+                  src={viewState.yoloBaseImageUrl}
                   alt={`${detection.imageName} — raw YOLO stave boxes`}
                   className="block max-w-full"
                   onLoad={drawYoloOverlay}
@@ -544,10 +580,14 @@ export default function StafflineViewerModal({
               </div>
               <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
                 {staveBoxCount} raw stave-class box
-                {staveBoxCount !== 1 ? "es" : ""} — the model's unprocessed
-                phase-1 predictions, before staffline_stage.py's centerline
-                fitting/grouping. Compare against the overlay tab to see
-                what happened to them downstream.
+                {staveBoxCount !== 1 ? "es" : ""} on the{" "}
+                {detection.hasClassifierImage
+                  ? "paco-classifier stafflines layer"
+                  : "raw page"}{" "}
+                — the model's unprocessed phase-1 predictions, before
+                staffline_stage.py's centerline fitting/grouping. Compare
+                against the overlay tab to see what happened to them
+                downstream.
               </p>
             </div>
           ) : !interpolatePreview && tab === "raw" ? (
@@ -591,11 +631,33 @@ export default function StafflineViewerModal({
                   className="absolute inset-0 pointer-events-none"
                 />
               </div>
-              <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
-                {interpolatePreview
-                  ? "previewing unpersisted interpolated lines -- accept or discard above"
-                  : "dashed = interpolated · gray = unassigned · blue = flagged for review"}
-              </p>
+              <div className="mt-2 flex items-center gap-3">
+                <p className="text-[#1D3335]/50 text-[11px] font-mono">
+                  {interpolatePreview
+                    ? "previewing unpersisted interpolated lines -- accept or discard above"
+                    : `dashed = interpolated · gray = unassigned · ${traceColor} = flagged for review`}
+                </p>
+                {!interpolatePreview && (
+                  <div className="flex items-center gap-1">
+                    {(Object.keys(TRACE_COLORS) as TraceColorName[]).map(
+                      (name) => (
+                        <button
+                          key={name}
+                          onClick={() => setTraceColor(name)}
+                          title={`${name} flagged-stave trace lines`}
+                          aria-label={`${name} flagged-stave trace lines`}
+                          className={`w-3.5 h-3.5 rounded-full cursor-pointer border-2 ${
+                            traceColor === name
+                              ? "border-[#1D3335]"
+                              : "border-transparent"
+                          }`}
+                          style={{ backgroundColor: TRACE_COLORS[name] }}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
+              </div>
               {anomalyNotes.length > 0 && (
                 <div className="mt-4 w-full">
                   <button
