@@ -16,6 +16,14 @@ services. auth_api.py itself no longer calls these at import, so backend/worker
 starting without this having run first will fail loudly (missing tables) rather
 than silently each re-creating the schema themselves.
 """
+# In k8s (k8s/migrate-job.yaml) DATABASE_URL/MOTHRA_SECRET arrive from the
+# Secret, but a local run (dev.sh, or by hand before docker-compose) has only
+# landing-page/scripts/.env -- and auth_api reads both AT IMPORT, so the
+# .env has to be loaded before that import, not after. main.py and
+# celery_app.py do the same thing for the same reason.
+from dotenv import load_dotenv
+load_dotenv()
+
 from auth_api import init_db, _migrate_db
 
 if __name__ == "__main__":
