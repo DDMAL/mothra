@@ -523,6 +523,11 @@ def run_predict_task(job_id, project_id, body):
                 source_id=body.get("text_source_id") if image_folio else None,
                 folio_override=image_folio,
                 debug_mode=text_debug_mode,
+                # mothra#260: image_data is original_data whenever used_original
+                # (see the SF-2 comment above) -- syl_boxes come back in that
+                # frame, so the viewer needs to know to display against
+                # /original rather than the resized working copy.
+                storage_variant="original" if used_original else "working_copy",
             ):
                 if text_ev.get("type") == "log":
                     publish(text_ev)

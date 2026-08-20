@@ -177,6 +177,7 @@ def stream_text_finding(
         source_id: Optional[int] = None,
         folio_override: Optional[str] = None,
         debug_mode: bool = False,
+        storage_variant: str = "working_copy",
     ):
     """Run text-finding for one image, yielding raw event dicts (not
     SSE-formatted) and persisting the result to text_alignments on completion.
@@ -186,6 +187,16 @@ def stream_text_finding(
     produces this same image's boxes — mothra-text's music-region filter
     (_music_boxes_for_image) is re-derived here from whatever annotation
     row is freshest at call time, so it picks up boxes YOLO just committed.
+
+    storage_variant ("original" / "working_copy") records which
+    project_images column image_bytes actually came from -- mirrors
+    staffline_stage.py's run_staffline_detection param of the same name.
+    syl_boxes' ul/lr are absolute pixels in image_bytes' own frame, so
+    projects_api.py's _map_text_alignment_row needs this to pick the imageSrc
+    that matches (mothra#260). Default 'working_copy' matches this function's
+    only caller that doesn't read original_data at all -- the standalone
+    /text-finding/run endpoint below, via _project_image(). tasks_predict.py
+    passes "original" explicitly when it used original_data.
     """
     music_boxes = _music_boxes_for_image(project_id, image_name, image_bytes)
     mask_json = mask_json_override
@@ -230,13 +241,14 @@ def stream_text_finding(
                     cur.execute(
                         "INSERT INTO text_alignments"
                         " (id, project_id, image_id, image_name, alignment_json,"
-                        " median_line_spacing, syllable_count, log_text)"
-                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        " median_line_spacing, syllable_count, log_text, storage_variant)"
+                        " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (aid, project_id, image_id, image_name,
                             json.dumps(alignment),
                             alignment.get("median_line_spacing", 0.0),
                             len(alignment.get("syl_boxes", [])),
                             "\n".join(collected_logs),
+                            storage_variant,
                         ),
                     )
                     con.commit()
