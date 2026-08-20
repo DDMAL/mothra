@@ -205,32 +205,43 @@ class IcStartRequest(BaseModel):
 
 def _project_image(
     project_id: int, image_name: str, user_id: int, image_id: Optional[str] = None,
-) -> tuple[str, bytes, str]:
-    """Return ``(image_id, data, mime_type)`` for a project image the user owns.
+) -> tuple[str, bytes, str, bool]:
+    """Return ``(image_id, data, mime_type, ic_synthetic)`` for a project image the user owns.
 
     Prefers an exact ``image_id`` match when given -- ``image_name`` alone is
     not unique within a project once duplicate-named uploads are allowed
     (mothra#241), so a name-only lookup here could resolve to an arbitrary
-    same-named image before its bytes/id are ever handed to IC.
+    same-named image before its bytes/id are ever handed to IC. ``ic_synthetic``
+    is the mothra#220 DL-1 placeholder-grid flag (see _set_project_image_synthetic).
     """
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user_id)
         if image_id:
             cur.execute(
-                "SELECT id, data, mime_type FROM project_images"
+                "SELECT id, data, mime_type, ic_synthetic FROM project_images"
                 " WHERE project_id=%s AND id=%s",
                 (project_id, image_id),
             )
         else:
             cur.execute(
-                "SELECT id, data, mime_type FROM project_images"
+                "SELECT id, data, mime_type, ic_synthetic FROM project_images"
                 " WHERE project_id=%s AND name=%s",
                 (project_id, image_name),
             )
         img = cur.fetchone()
         if not img:
             raise HTTPException(status_code=404, detail="image not found")
-        return img[0], bytes(img[1]), (img[2] or "image/png")
+        return img[0], bytes(img[1]), (img[2] or "image/png"), bool(img[3])
+
+
+def _set_project_image_synthetic(project_id: int, image_id: str, synthetic: bool) -> None:
+    """Persist the mothra#220 DL-1 synthetic flag so it survives IC session resume."""
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "UPDATE project_images SET ic_synthetic=%s WHERE id=%s AND project_id=%s",
+            (synthetic, image_id, project_id),
+        )
+        con.commit()
 
 
 @router.post("/projects/{project_id}/ic/start")
@@ -249,7 +260,7 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
       session is created by the user on IC's create-session screen and its
       id comes back via postMessage.
     """
-    image_id, image_bytes, mime_type = _project_image(
+    image_id, image_bytes, mime_type, ic_synthetic = _project_image(
         project_id, body.imageName, user["id"], image_id=body.imageId
     )
 
@@ -271,6 +282,12 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
             "session_id": existing,
             "ic_url": f"{IC_PUBLIC_URL}/?session={existing}&embed=1",
             "resumed": True,
+            # mothra#220 DL-1: IC's own /sessions/lookup doesn't carry this
+            # flag, so read it back from where ic_start() persisted it the
+            # first time this page was staged (see the fresh-staging branch
+            # below) -- otherwise a placeholder-grid session would silently
+            # lose its "no prediction ran" warning on resume/reload.
+            "synthetic": ic_synthetic,
         }
 
     # Nothing saved — stage the page + bboxes fresh.
@@ -298,10 +315,21 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
     if not staging_id:
         raise HTTPException(status_code=502, detail="IC /staging returned no staging id")
 
+    # mothra#220 DL-1: ann_format is "json" only on generate_bboxes()'s
+    # placeholder-grid fallback (no real YOLO detections exist yet for this
+    # page) -- surfaced so InteractiveClassifier.tsx can show an unmissable
+    # "no prediction ran" banner instead of a fabricated grid silently
+    # looking like real detections. Persisted on project_images so a later
+    # resume (the `existing` branch above) can still see it -- IC's own
+    # session doesn't carry it.
+    synthetic = ann_format == "json"
+    _set_project_image_synthetic(project_id, image_id, synthetic)
+
     return {
         "staging_id": staging_id,
         "ic_url": f"{IC_PUBLIC_URL}/?staged={staging_id}&embed=1",
         "resumed": False,
+        "synthetic": synthetic,
     }
 
 
@@ -453,7 +481,7 @@ async def ic_auto_queue(
     present, since classify needs a non-empty training pool — the frontend
     enforces this before calling.
     """
-    image_id, image_bytes, mime_type = _project_image(
+    image_id, image_bytes, mime_type, _ic_synthetic = _project_image(
         project_id, imageName, user["id"], image_id=imageId
     )
     annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, imageName)

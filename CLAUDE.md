@@ -225,9 +225,10 @@ params) now coexist as distinct buttons. For `encode_upload`/`encode_batch`
 retry to work at all, `tasks_encode.py` had to stop dropping staged
 `job_uploads` rows in a blanket `finally` — they're now only dropped on the
 success path, so a failed job's XML/image bytes survive long enough to be
-retried. **This is the other half of the "known gap" above**: those rows now
-leak indefinitely for jobs that fail and are never retried, since there's
-still no TTL/cleanup job for `job_uploads`.
+retried. Those rows no longer leak indefinitely: the hourly periodic sweep
+described above (`job_store.run_periodic_cleanup()`) now catches
+`job_uploads` left behind by jobs that fail and are never retried, so the
+worst case is about a day of retention rather than forever.
 
 **The worker must run with `--pool=threads`, not Celery's default `prefork`.**
 `prefork` works by `fork()`-ing a child process per worker slot; PyTorch (and
@@ -346,15 +347,19 @@ active branches auto-deploy into it would only thrash both.
    (`auto`/`staging`/`production`, default `auto`) so staging can be redeployed from
    `main`; dispatching `production` from a non-`main` ref is refused.
 3. **deploy** (needs `build` + `resolve`) — using the `KUBECONFIG` repo secret, pins
-   `$dir/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml`/`paco-classifier-service.yaml`
+   `$dir/backend.yaml`/`worker.yaml`/`ic.yaml`/`text-service.yaml`/`paco-classifier-service.yaml`/`migrate-job.yaml`
    to this commit's
    `sha-<short>` tag (and now *fails* if that `sed` matched nothing, since `sed`
-   exits 0 on no-match and would otherwise ship a stale tag), applies those plus
-   `$dir/configmap.yaml`/`ingress.yaml`, then `kubectl rollout status` on
+   exits 0 on no-match and would otherwise ship a stale tag), then **runs the
+   migration Job to completion** (deletes any prior same-named Job, applies
+   `$dir/migrate-job.yaml`, `kubectl wait --for=condition=complete`, dumping its
+   logs and failing the deploy if it doesn't — mothra#220 row 31) *before*
+   applying `$dir/backend.yaml`/`worker.yaml`/`configmap.yaml`/`ingress.yaml`,
+   then `kubectl rollout status` on
    `backend{suffix}`/`worker{suffix}`/`ic{suffix}`/`text-service{suffix}`/`paco-classifier-service{suffix}`.
    redis, postgres, secrets and the PV/PVC are excluded from CD. `concurrency` is keyed on
    the resolved environment, so production and staging deploys don't block each other.
-   **Every one of those five manifests must be pinned via `$dir`, never a hardcoded
+   **Every one of those six manifests must be pinned via `$dir`, never a hardcoded
    `k8s/` path.** `paco-classifier-service.yaml` was briefly both hardcoded to `k8s/`
    *and* missing from the `sed` list: a staging deploy would then have applied
    *production*'s paco Deployment with the unrewritten `sha-0000000` placeholder,
@@ -412,21 +417,22 @@ staging delete destroy a production checkpoint.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
+kubectl -n mothra delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
+  && kubectl -n mothra wait --for=condition=complete job/migrate --timeout=120s
 kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml -f k8s/paco-classifier-service.yaml -f k8s/backend.yaml -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
 ```
+The migration Job (`k8s/migrate-job.yaml`, mothra#220 row 31) must complete before
+backend/worker are applied -- `init_db()`/`_migrate_db()` no longer run as an
+import-time side effect of `auth_api.py`, so backend/worker now fail loudly on
+missing tables instead of silently creating the schema themselves.
 Same commands with `k8s/staging/` for staging. `kubectl apply -f k8s/` does not
 recurse into `k8s/staging/` (that needs `-R`), so the two can't be mixed up by a
 directory-wide apply. Staging's one-time prerequisites (its Postgres deployment, the
 NFS export, DNS/proxy vhosts, its Secret, and the first-boot ordering) are in
 `k8s/README.md` — none of them are created by this repo.
 
-**Known follow-ups** (from `k8s/README.md`): no real `/healthz` yet, so probes
-are TCP/exec only; `init_db()`/`_migrate_db()` run at import, so keep
-`backend`/`worker` at **1 replica** until a one-shot migration Job replaces
-that (and on a *fresh* database, backend and worker racing that import-time
-migration can `CrashLoopBackOff` once before self-healing — bring backend up first);
-`text-service`'s `/batch-download/{id}` uses local disk keyed by
+**Known follow-ups** (from `k8s/README.md`): `text-service`'s `/batch-download/{id}` uses local disk keyed by
 `batch_id`, so it needs shared storage (or a single replica) if batch
 downloads are used at scale. Both `worker` Deployments are pinned to
 `k3s-gpu-node-1` and share one MIG instance with no scheduler arbitration, so
@@ -540,7 +546,8 @@ rollout restart`) remains the safer habit.
 | Path | Role |
 |---|---|
 | `landing-page/scripts/main.py` | FastAPI app, CORS, mounts routers |
-| `landing-page/scripts/auth_api.py` | Auth endpoints incl. refresh-token issuance/rotation/logout, DB init (incl. job-queue + `refresh_tokens` tables), project CRUD, image storage |
+| `landing-page/scripts/auth_api.py` | Auth endpoints incl. refresh-token issuance/rotation/logout, `init_db()`/`_migrate_db()` (schema init/migration, called explicitly by `migrate.py` -- not at import), project CRUD, image storage |
+| `landing-page/scripts/migrate.py` | One-shot DB migration entrypoint (`init_db()`/`_migrate_db()`), run via `k8s/migrate-job.yaml` before backend/worker start |
 | `landing-page/scripts/account_api.py` | Profile update, password change, account delete |
 | `landing-page/scripts/projects_api.py` | Project CRUD, export/duplicate, activity/log-download endpoints |
 | `landing-page/scripts/images_api.py` | Project image upload/fetch/delete endpoints |
@@ -713,6 +720,14 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   Neon-editor manifest cleanup (`auth_api.cleanup_stale_neon_manifests`) stays a backend-only,
   non-Celery sweep since it cleans the backend container's own local disk, which a task running
   on the worker pod can't reach; see **Job queue** above
+- **Real health endpoints** — `GET /healthz` (readiness, checks Postgres + Celery broker) and
+  `GET /healthz/live` (liveness, no dependency check) on the backend; `GET /healthz` on
+  text-service. k8s probes now use `httpGet` instead of bare `tcpSocket`; see **Deployment** above
+- **One-shot DB migration** — `landing-page/scripts/migrate.py` runs `init_db()`/`_migrate_db()`
+  explicitly, once per deploy, via `k8s/migrate-job.yaml` (applied and waited-on by
+  `build-images.yml`'s `deploy` job before `backend`/`worker` are applied). `auth_api.py` no
+  longer runs these as an import-time side effect — importing it just defines the functions;
+  see **Deployment** above
 - **Real JWT refresh** — a separate, rotating, revocable refresh token (`refresh_tokens` table)
   replaces the old `/api/auth/refresh`, which depended on the very access token it was meant to
   refresh and so never worked once that token actually expired; see **Backend** above

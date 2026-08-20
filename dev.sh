@@ -91,6 +91,7 @@ free_port() {
 # --- preflight: required venvs / deps --------------------------------------
 IC_BIN="$ROOT/ic/api/.venv/bin/ic-api"
 API_UVICORN="$ROOT/landing-page/scripts/.venv/bin/uvicorn"
+API_PYTHON="$ROOT/landing-page/scripts/.venv/bin/python"
 TEXT_BIN="$ROOT/text-service/.venv/bin/uvicorn"
 PACO_BIN="$ROOT/paco-classifier-service/.venv/bin/uvicorn"
 WORKER_BIN="$ROOT/landing-page/scripts/.venv/bin/celery"
@@ -220,6 +221,14 @@ PACO_API_URL="${PACO_API_URL:-http://localhost:$PACO_PORT}"
 start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
 start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start paco "$C_PACO" "$PACO_BIN" main:app --app-dir "$ROOT/paco-classifier-service" --port "$PACO_PORT"
+
+# init_db()/_migrate_db() no longer run as an import-time side effect of
+# auth_api.py (mothra#220 row 31) -- run migrate.py once, synchronously,
+# before starting backend/worker (which would otherwise fail loudly on
+# missing tables rather than silently creating the schema themselves).
+echo "${C_DIM}→ running DB migration...${C_RST}"
+"$API_PYTHON" "$ROOT/landing-page/scripts/migrate.py" || die "migration failed -- see output above"
+
 start backend "$C_API" env PACO_API_URL="$PACO_API_URL" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
 start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker -B --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort

@@ -773,7 +773,13 @@ def _write_jsomr_json(
                 "n_pixels_total": fit.n_pixels_total,
             },
             "quality": {
-                "confidence": None,  # not yet computed; placeholder per §5.8
+                # confidence intentionally left null -- DL-13
+                # (ALPHA_TRANSITION_PLAN.md) is still open on whether/how to
+                # compute this. Matches landing-page/scripts/staffline_stage.py's
+                # identical field (the live landing-app path); this file is the
+                # standalone CLI, kept in sync so JSOMR output shape doesn't
+                # silently diverge between the two.
+                "confidence": None,
                 "flags": all_flags,
             },
             "scale_unit": scale_unit,

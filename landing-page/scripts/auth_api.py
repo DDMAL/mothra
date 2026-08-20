@@ -298,13 +298,19 @@ def init_db():
         cur.close()
         release_db_conn(con)
 
-init_db()
+# init_db()/_migrate_db() no longer run as a side effect of importing this
+# module (mothra#220 row 31) -- previously this ran at import time in BOTH
+# the backend and the Celery worker (every process that transitively imports
+# auth_api), racing each other on a fresh database and occasionally
+# CrashLoopBackOff-ing once before self-healing (see k8s/README.md's former
+# "Known follow-ups"). migrate.py is now the one explicit entrypoint that
+# calls both, run once per deploy as a k8s Job (k8s/migrate-job.yaml) before
+# backend/worker start -- see that file and .github/workflows/build-images.yml.
 
 # Columns added to tables that predate them, as (table, column, definition).
 #
-# _migrate_db() runs at import time in BOTH the backend and the Celery worker
-# (see k8s/README.md's "Known follow-ups"), so every entry re-executes on every
-# pod start and has to be idempotent *without raising*. These used to be bare
+# Each entry still has to be idempotent *without raising* -- migrate.py can be
+# re-run manually, and a Job can retry on failure. These used to be bare
 # `ALTER TABLE ... ADD COLUMN` statements using `except DuplicateColumn` as
 # control flow. The application handled that fine, but Postgres logs a
 # server-side ERROR for a failed statement before the client ever sees it
@@ -333,6 +339,13 @@ _ADDED_COLUMNS = [
     # file actually was (PNG, TIFF, ...) — serving/embedding original_data
     # under the working copy's mime_type mislabels it.
     ("project_images",  "original_mime_type",    "TEXT"),
+    # Set by ic_api.py's ic_start() the first time a page is staged into IC,
+    # so the "synthetic placeholder grid, not real detections" warning
+    # (mothra#220 DL-1) survives session resume/reload -- IC's own
+    # /sessions/lookup response doesn't carry this flag, so mothra has to
+    # remember it itself rather than only returning it on the fresh-staging
+    # path. NULL/FALSE for images staged before this column existed.
+    ("project_images",  "ic_synthetic",          "BOOLEAN"),
 
     ("mei_files",       "image_name",            "TEXT"),
     # Records which of tasks_encode.py's 3-tier stave-source fallback actually
@@ -489,8 +502,6 @@ def _migrate_db():
         con.rollback()
     finally:
         cur.close(); release_db_conn(con)
-
-_migrate_db()
 
 def _pre_hash(pw: str) -> str:
     """SHA-256+base64 the password before bcrypt ever sees it.

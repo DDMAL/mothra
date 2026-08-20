@@ -230,7 +230,7 @@ jobs:
           TAG="sha-${GITHUB_SHA:0:7}"   # matches metadata-action type=sha,format=short
           echo "Deploying image tag: $TAG"
           FILES=("$DIR/backend.yaml" "$DIR/worker.yaml" "$DIR/ic.yaml" "$DIR/text-service.yaml" \
-                 "$DIR/paco-classifier-service.yaml")
+                 "$DIR/paco-classifier-service.yaml" "$DIR/migrate-job.yaml")
           sed -i -E "s#(ghcr\.io/ddmal/mothra-[a-z-]+):sha-[0-9a-f]{7}#\1:${TAG}#g" "${FILES[@]}"
           grep -H 'image: ghcr.io' "${FILES[@]}"
           # sed exits 0 when it matches nothing, so a drifted placeholder would
@@ -243,11 +243,36 @@ jobs:
               || { echo "::error::image tag not pinned in $f"; exit 1; }
           done
 
-      - name: Apply manifests (config, deployments, ingress; NOT redis/postgres/secrets)
+      - name: Apply ConfigMap (must exist before the migration Job runs)
+        run: |
+          set -euo pipefail
+          # A first deployment has no ConfigMap yet, so the migration Job
+          # below can't start without this; a ConfigMap change could also
+          # otherwise let the Job migrate against the old DATABASE_URL while
+          # the backend later starts with the new one. Apply this ahead of
+          # the migration Job rather than lumping it in with the rest of the
+          # manifests further down.
+          kubectl apply -f "$DIR/configmap.yaml"
+
+      - name: Run DB migration Job (mothra#220 row 31)
+        run: |
+          set -euo pipefail
+          # Jobs are immutable once created -- delete any prior run before
+          # applying, rather than relying on backoffLimit/ttl alone (a
+          # same-named Job with a different image tag would otherwise fail
+          # to apply at all). Object name carries SUFFIX (migrate/migrate-staging),
+          # matching every other deployed object's naming convention.
+          kubectl -n mothra delete "job/migrate${SUFFIX}" --ignore-not-found
+          kubectl apply -f "$DIR/migrate-job.yaml"
+          # Must complete before backend/worker start querying tables that
+          # may not exist yet -- see auth_api.py's/migrate.py's comments.
+          kubectl -n mothra wait --for=condition=complete "job/migrate${SUFFIX}" --timeout=120s \
+            || { kubectl -n mothra logs "job/migrate${SUFFIX}" --all-containers; exit 1; }
+
+      - name: Apply manifests (deployments, ingress; NOT redis/postgres/secrets/configmap)
         run: |
           set -euo pipefail
           kubectl apply \
-            -f "$DIR/configmap.yaml" \
             -f "$DIR/backend.yaml" \
             -f "$DIR/worker.yaml" \
             -f "$DIR/ic.yaml" \

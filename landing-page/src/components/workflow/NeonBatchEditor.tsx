@@ -202,11 +202,67 @@ export default function NeonBatchEditor({
     }
   }
 
-  async function markCurrentDone() {
-    if (!currentFile || corrected.has(currentFile.id)) return;
+  // Neon's own "s" keydown handler (EditControls.ts) calls
+  // neonView.save().then(() => Notification.queueNotification('Saved',
+  // 'success')) -- that Promise is the real completion signal for the async
+  // PUT inside updateDatabase(), but nothing forwards it out of the iframe's
+  // private keydown listener. Rather than guessing a fixed delay (the former
+  // 800ms here) or patching the neon submodule to expose it, poll for the
+  // "Saved" toast Notification.ts actually renders into
+  // #notification-content -- same bounded-polling idiom as
+  // applyNotationTypeFont above, just watching for something to *appear*
+  // instead of *finish* being the opposite direction of the same tolerance.
+  // Tracks which notification ids already existed before the save so a
+  // stale, not-yet-auto-cleared toast from an earlier save can't be
+  // mistaken for this one's completion.
+  // Returns whether the success toast was actually observed -- a timeout is
+  // not confirmation, so callers must not treat it as success (see
+  // markCurrentDone below, mothra CodeRabbit review on #256).
+  function waitForNeonSaveComplete(
+    iframe: HTMLIFrameElement,
+    timeoutMs = 5000,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const container =
+        iframe.contentDocument?.getElementById("notification-content");
+      const seenIds = new Set(
+        container ? Array.from(container.children).map((el) => el.id) : [],
+      );
+      const start = Date.now();
+      const poll = () => {
+        const newSuccessToast = container
+          ? Array.from(container.children).find(
+              (el) =>
+                el.classList.contains("neon-notification-success") &&
+                !seenIds.has(el.id),
+            )
+          : undefined;
+        if (newSuccessToast) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(poll, 100);
+      };
+      poll();
+    });
+  }
+
+  // Returns whether the file was actually marked corrected -- false when the
+  // Neon save was never confirmed (iframe unavailable, save failed, or the
+  // toast timed out), so the caller knows not to advance past unsaved edits.
+  async function markCurrentDone(): Promise<boolean> {
+    if (!currentFile || corrected.has(currentFile.id)) return false;
     triggerNeonSave();
-    // brief wait for the async PUT inside Neon's updateDatabase() to complete
-    await new Promise((r) => setTimeout(r, 800));
+    if (
+      !iframeRef.current ||
+      !(await waitForNeonSaveComplete(iframeRef.current))
+    ) {
+      return false;
+    }
     await apiFetch(`/api/projects/${project.id}/mei/${currentFile.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -214,10 +270,11 @@ export default function NeonBatchEditor({
     });
     setCorrected((prev) => new Set([...prev, currentFile.id]));
     onFileCorrected?.(currentFile.id);
+    return true;
   }
 
   async function handleDoneAndNext() {
-    await markCurrentDone();
+    if (!(await markCurrentDone())) return;
     const next = nearestUncorrected(currentIndex, 1);
     if (next !== -1) setCurrentIndex(next);
   }

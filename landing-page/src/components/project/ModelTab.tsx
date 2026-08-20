@@ -379,9 +379,15 @@ export default function ModelTab({
                   className="accent-[#1D3335] mt-0.5"
                 />
                 <span>
-                  printed text{" "}
+                  printed music notation{" "}
                   <span className="bg-[#1D3335]/80 text-white text-xs px-2 py-0.5 rounded-full">
                     coming soon
+                  </span>
+                  <br />
+                  <span className="text-white/50 text-xs">
+                    for early-modern printed sources, not lyric/syllable
+                    text-finding (that's a separate step later in the
+                    pipeline)
                   </span>
                 </span>
               </label>

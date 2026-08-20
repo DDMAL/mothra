@@ -62,8 +62,9 @@ k8s/
   paco-classifier-service.yaml  # Deployment + Service :8003
   backend.yaml           # Deployment + Service :8001
   worker.yaml            # Deployment (celery worker; no Service)
+  migrate-job.yaml       # one-shot Job: DB schema migration, run+waited-on before backend/worker
   ingress.yaml           # Traefik: ic-frame-ancestors Middleware + one Ingress per host
-  staging/               # same 12 filenames, same `mothra` namespace,
+  staging/               # same 13 filenames, same `mothra` namespace,
                          #   every object name/label/selector suffixed -staging
 ```
 
@@ -101,11 +102,10 @@ k8s/
    `mount.nfs4: ... No such file or directory` with the pod in `ContainerCreating`.
 4. **DNS + campus-proxy vhost** for `mothra.staging.simssa.ca` and
    `mothra-ic.staging.simssa.ca`.
-5. **First boot only:** bring `backend-staging` up alone (or `worker-staging` at
-   `replicas: 0`), confirm the tables exist, then start the worker. On a brand-new
-   empty database two processes racing `init_db()`/`_migrate_db()` can hit an
-   uncaught `UndefinedTable` → `CrashLoopBackOff`; it self-heals on restart but can
-   redden the first rollout. Every later deploy hits the already-migrated path.
+5. ~~**First boot only:** bring `backend-staging` up alone...~~ **No longer
+   needed (mothra#220 row 31)** — `migrate-job.yaml` creates the schema once,
+   before `backend`/`worker` are ever applied, so there's no first-boot race
+   between them to worry about on a brand-new empty database.
 
 ## Deploy
 **CI/CD (preferred)** — `.github/workflows/build-images.yml` (`ci-cd`) builds the
@@ -148,6 +148,8 @@ loudly instead of silently redeploying a stale image.
 kubectl apply -f k8s/secret.yaml -f k8s/configmap.yaml
 kubectl apply -f k8s/stored-models-pv.yaml -f k8s/stored-models-pvc.yaml
 kubectl apply -f k8s/redis.yaml
+kubectl -n mothra delete job/migrate --ignore-not-found && kubectl apply -f k8s/migrate-job.yaml \
+  && kubectl -n mothra wait --for=condition=complete job/migrate --timeout=120s
 kubectl apply -f k8s/ic.yaml -f k8s/text-service.yaml \
               -f k8s/paco-classifier-service.yaml \
               -f k8s/backend.yaml -f k8s/worker.yaml
@@ -157,13 +159,18 @@ kubectl apply -f k8s/ingress.yaml
 kubectl apply -f k8s/staging/secret.yaml -f k8s/staging/configmap.yaml
 kubectl apply -f k8s/staging/stored-models-pv.yaml -f k8s/staging/stored-models-pvc.yaml
 kubectl apply -f k8s/staging/redis.yaml
+kubectl -n mothra delete job/migrate-staging --ignore-not-found && kubectl apply -f k8s/staging/migrate-job.yaml \
+  && kubectl -n mothra wait --for=condition=complete job/migrate-staging --timeout=120s
 kubectl apply -f k8s/staging/ic.yaml -f k8s/staging/text-service.yaml \
               -f k8s/staging/paco-classifier-service.yaml \
               -f k8s/staging/backend.yaml -f k8s/staging/worker.yaml
 kubectl apply -f k8s/staging/ingress.yaml
 ```
 `kubectl apply -f k8s/` does **not** recurse into `k8s/staging/` (that needs `-R`),
-so a directory-wide production apply can't pick up staging by accident.
+so a directory-wide production apply can't pick up staging by accident. The
+migration Job (`migrate-job.yaml`, mothra#220 row 31) must complete before
+`backend.yaml`/`worker.yaml` are applied -- they no longer create the schema
+themselves at import.
 
 ## Verify
 ```
@@ -199,17 +206,22 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 ```
 
 ## Known follow-ups
-- ~~No real `/healthz` yet~~ **done (mothra#220 row 28)** — `backend`/`text-service`
+- ~~No real `/healthz` yet~~ **done (mothra#220 row 29)** — `backend`/`text-service`
   now have real `httpGet` probes too, matching `paco-classifier-service`'s
   existing `/health` + `/ready`. `backend`'s readinessProbe (`/healthz`) checks
   Postgres + Celery broker reachability; its livenessProbe (`/healthz/live`)
   deliberately does not, so a transient DB/broker outage pulls the pod out of
   rotation instead of killing and restarting it. `text-service` has no
   DB/broker of its own, so both its probes point at the same `/healthz`.
-- `init_db()`/`_migrate_db()` run at import → keep backend/worker at **1 replica**
-  until a one-shot migration Job is added, then scale out. This now applies to two
-  sets of Deployments, and on a *fresh* database the same import-time migration has
-  a race that can `CrashLoopBackOff` once (see staging setup step 5).
+- ~~`init_db()`/`_migrate_db()` run at import → keep backend/worker at 1 replica~~
+  **done (mothra#220 row 31)** — a one-shot `migrate-job.yaml` now runs the
+  schema migration once per deploy, applied and waited-on by
+  `build-images.yml`'s `deploy` job before `backend`/`worker` are applied.
+  `backend`/`worker` no longer create/alter the schema themselves. Both are
+  still left at **1 replica** as an operational choice, not a code
+  constraint — except `worker`, which has a *different* reason to stay at 1:
+  its embedded Celery beat scheduler (row 28) would double-fire periodic
+  tasks if run by more than one replica.
 - text-service `/batch-download/{id}` uses local disk keyed by batch_id → needs
   shared storage or a single replica if batch downloads are used.
 - Sharing the `mothra` namespace means no `ResourceQuota` headroom check happens

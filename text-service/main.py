@@ -258,6 +258,17 @@ async def run_text_pipeline(
                 yield event({"type": "log", "message": "running Kraken segmentation + HTR (OCR-only mode, STUB — no recognition model installed, text will be empty)..."})
             if segmentation_model:
                 yield event({"type": "log", "message": f"using custom segmentation model: {segmentation_model}"})
+                if not Path(segmentation_model).exists():
+                    # mothra#220 DL-16/TX-11: custom model paths are backend-
+                    # container filesystem paths (stored_models) sent as plain
+                    # strings -- text-service has no access to that filesystem,
+                    # so this always fails to resolve here. Out of alpha scope
+                    # to actually fix (mount stored_models on text-service, or
+                    # ship bytes via job_uploads); this at least surfaces WHY
+                    # clearly instead of an opaque Kraken load error downstream.
+                    yield event({"type": "log", "message": f"[warn] custom segmentation_model path does not exist on this container: {segmentation_model} -- text-service can't reach the backend's stored_models filesystem (mothra#220 DL-16); the run below will likely fail to load it"})
+            if recognition_model and not Path(recognition_model).exists():
+                yield event({"type": "log", "message": f"[warn] custom recognition_model path does not exist on this container: {recognition_model} -- same stored_models-not-mounted limitation as segmentation_model above (mothra#220 DL-16)"})
             if column_count:
                 yield event({"type": "log", "message": f"column count forced to {column_count}"})
 
@@ -433,6 +444,11 @@ async def run_text_batch(
             yield event({"type": "log", "message": f"running Kraken segmentation + HTR across {len(folio_list)} folio(s) (Cantus-aligned mode, source {source_id})..."})
             if segmentation_model:
                 yield event({"type": "log", "message": f"using custom segmentation model: {segmentation_model}"})
+                if not Path(segmentation_model).exists():
+                    # See run_text_pipeline's identical check above (mothra#220 DL-16/TX-11).
+                    yield event({"type": "log", "message": f"[warn] custom segmentation_model path does not exist on this container: {segmentation_model} -- text-service can't reach the backend's stored_models filesystem (mothra#220 DL-16); the run below will likely fail to load it"})
+            if recognition_model and not Path(recognition_model).exists():
+                yield event({"type": "log", "message": f"[warn] custom recognition_model path does not exist on this container: {recognition_model} -- same stored_models-not-mounted limitation as segmentation_model above (mothra#220 DL-16)"})
             if column_count:
                 yield event({"type": "log", "message": f"column count forced to {column_count}"})
             yield event({"type": "stage_done", "name": "validating"})
