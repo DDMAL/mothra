@@ -81,3 +81,4 @@ landing-page/.vite/
 k8s/secret.yaml
 k8s/staging/secret.yaml
 landing-page/.env.local
+celerybeat-schedule*
