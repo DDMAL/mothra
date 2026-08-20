@@ -205,8 +205,12 @@ def test_batch_run_scopes_log_text_per_folio(monkeypatch):
     tasks_text_batch.run_text_batch_task("job-1", 1, body)
 
     assert len(cursor.inserted_alignments) == 2
-    folio0_log = cursor.inserted_alignments[0][-1]
-    folio1_log = cursor.inserted_alignments[1][-1]
+    # mothra#260: storage_variant is now the last INSERT param, log_text the
+    # one before it -- see tasks_text_batch.py's own INSERT.
+    assert cursor.inserted_alignments[0][-1] == "working_copy"
+    assert cursor.inserted_alignments[1][-1] == "working_copy"
+    folio0_log = cursor.inserted_alignments[0][-2]
+    folio1_log = cursor.inserted_alignments[1][-2]
 
     # Folio 0 gets the batch-global preamble (per-image YOLO logs, the
     # Kraken/HTR stage announcement) plus its own text-service log line and

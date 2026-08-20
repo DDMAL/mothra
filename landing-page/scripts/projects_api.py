@@ -56,19 +56,34 @@ def _map_annotation_row(aid, img_id, img_name, model_label=None):
     }
 
 
-def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count):
+def _image_src(img_id, storage_variant):
+    """Build the imageSrc URL for a row carrying absolute-pixel coordinates
+    (syl_boxes, JSOMR bounding_box/centerline_page). These are computed
+    against whichever project_images column storage_variant names -- serving
+    the other one back to the frontend leaves its scaleX/scaleY (naturalWidth/
+    naturalHeight of whatever imageSrc loads, divided into the displayed
+    size) computed against the wrong resolution, drifting every box further
+    off the further it sits from the top-left corner (mothra#260). See
+    text_api.py's stream_text_finding / staffline_stage.py's
+    run_staffline_detection docstrings for how storage_variant gets set."""
+    if not img_id:
+        return None
+    return f"/api/images/{img_id}/original" if storage_variant == "original" else f"/api/images/{img_id}"
+
+
+def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count, storage_variant="working_copy"):
     return {
         "id": tid, "imageName": img_name,
-        "imageSrc": f"/api/images/{img_id}" if img_id else None,
+        "imageSrc": _image_src(img_id, storage_variant),
         "medianLineSpacing": spacing, "syllableCount": syl_count,
     }
 
 
 def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image=False,
-                        has_classifier_fallback=False, classifier_error=None):
+                        has_classifier_fallback=False, classifier_error=None, storage_variant="working_copy"):
     return {
         "id": did, "imageName": img_name,
-        "imageSrc": f"/api/images/{img_id}" if img_id else None,
+        "imageSrc": _image_src(img_id, storage_variant),
         "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
         "status": status,
         "hasClassifierImage": bool(has_classifier_image),
@@ -103,17 +118,18 @@ def _project_row_to_dict(cur, row, username):
     cur.execute("SELECT id, image_id, image_name, model_label FROM annotations WHERE project_id=%s", (pid,))
     annotations = [_map_annotation_row(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
     cur.execute(
-        "SELECT id, image_id, image_name, median_line_spacing, syllable_count"
+        "SELECT id, image_id, image_name, median_line_spacing, syllable_count, storage_variant"
         " FROM text_alignments WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
-    text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4]) for r in cur.fetchall()]
+    text_alignments = [_map_text_alignment_row(r[0], r[1], r[2], r[3], r[4], r[5]) for r in cur.fetchall()]
     cur.execute(
         "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
         " classifier_image IS NOT NULL,"
-        " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error'"
+        " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error',"
+        " settings_json->>'storage_variant'"
         " FROM staffline_detections WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
-    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in cur.fetchall()]
+    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in cur.fetchall()]
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
@@ -181,27 +197,28 @@ def list_projects(user=Depends(get_current_user)):
             ann_by_pid.setdefault(pid, []).append(_map_annotation_row(aid, img_id, img_name, model_label))
 
         cur.execute(
-            "SELECT project_id, id, image_id, image_name, median_line_spacing, syllable_count"
+            "SELECT project_id, id, image_id, image_name, median_line_spacing, syllable_count, storage_variant"
             " FROM text_alignments WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         text_by_pid: dict = {}
-        for pid, tid, img_id, img_name, spacing, syl_count in cur.fetchall():
+        for pid, tid, img_id, img_name, spacing, syl_count, storage_variant in cur.fetchall():
             text_by_pid.setdefault(pid, []).append(
-                _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count)
+                _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count, storage_variant)
             )
 
         cur.execute(
             "SELECT project_id, id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
             " classifier_image IS NOT NULL,"
-            " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error'"
+            " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error',"
+            " settings_json->>'storage_variant'"
             " FROM staffline_detections WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         stafflines_by_pid: dict = {}
         for (pid, did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image,
-             has_classifier_fallback, classifier_error) in cur.fetchall():
+             has_classifier_fallback, classifier_error, storage_variant) in cur.fetchall():
             stafflines_by_pid.setdefault(pid, []).append(
                 _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status,
-                                    has_classifier_image, has_classifier_fallback, classifier_error)
+                                    has_classifier_image, has_classifier_fallback, classifier_error, storage_variant)
             )
 
         result = [

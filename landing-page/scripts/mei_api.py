@@ -244,21 +244,32 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
             # Either must degrade to "skip the correction, open the file as-is"
             # rather than 500 an edit session that opened fine before this.
             try:
-                text_alignment = get_latest_text_alignment(cur, project_id, image_name, image_id)
+                text_alignment, alignment_storage_variant = get_latest_text_alignment(
+                    cur, project_id, image_name, image_id, include_storage_variant=True,
+                )
                 dims = encode_to_mei.image_dimensions(image_bytes) if text_alignment else None
                 if dims:
                     image_w, image_h = dims
-                    # image_bytes/dims may be original_data (pre-upload-resize) while text_alignment's
-                    # syl_boxes were always computed against the working copy (img_data) -- see
-                    # text_api.py's _project_image. Rescale before comparing/writing zones against
-                    # image_w/image_h. Degrades to factor=1.0 on both axes (today's behavior) if the
+                    # image_bytes/dims is original_data (pre-upload-resize) when present, else the
+                    # working copy (img_data) -- see the img_row unpack above. text_alignment's
+                    # syl_boxes are absolute-pixel in WHICHEVER of those two the predict job actually
+                    # read (alignment_storage_variant, mothra#260 -- SF-2 made that "original" whenever
+                    # original_data exists, no longer unconditionally the working copy as this comment
+                    # used to assume). Only rescale against working_dims when syl_boxes are actually in
+                    # that frame; when they're "original" and image_bytes is itself original_data (the
+                    # common case whenever original_data exists), the two frames already match and
+                    # comparing against the working copy's dims would rescale a box that needs no
+                    # rescaling at all. Degrades to factor=1.0 on both axes (today's behavior) if the
                     # working copy's header can't be read -- image_dimensions returns None rather
                     # than raising. X and Y factors are computed independently, not from one shared
                     # ratio -- imageResize.ts rounds width/height separately after one scalar shrink,
                     # so the two axes' ratios can differ slightly even for a visually uniform resize.
-                    working_dims = encode_to_mei.image_dimensions(bytes(img_data)) if img_data is not None else None
-                    factor_x = (image_w / working_dims[0]) if working_dims and working_dims[0] else 1.0
-                    factor_y = (image_h / working_dims[1]) if working_dims and working_dims[1] else 1.0
+                    image_bytes_variant = "original" if original_data is not None else "working_copy"
+                    factor_x = factor_y = 1.0
+                    if alignment_storage_variant != image_bytes_variant:
+                        working_dims = encode_to_mei.image_dimensions(bytes(img_data)) if img_data is not None else None
+                        factor_x = (image_w / working_dims[0]) if working_dims and working_dims[0] else 1.0
+                        factor_y = (image_h / working_dims[1]) if working_dims and working_dims[1] else 1.0
                     scaled_alignment = encode_to_mei.scale_text_alignment(text_alignment, factor_x, factor_y)
                     corrected_bytes, correction_logs = encode_to_mei.verify_and_correct_syllables(
                         xml_content.encode(), scaled_alignment, image_w, image_h,

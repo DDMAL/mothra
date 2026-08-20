@@ -206,10 +206,18 @@ def run_text_batch_task(job_id, project_id, body):
                 cur.execute(
                     "INSERT INTO text_alignments"
                     " (id, project_id, image_id, image_name, alignment_json,"
-                    " median_line_spacing, syllable_count, log_text)"
-                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    " median_line_spacing, syllable_count, log_text, storage_variant)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (aid, project_id, image_id, image_name, json.dumps(alignment),
-                     alignment.get("median_line_spacing", 0.0), syl_count, log_text),
+                     alignment.get("median_line_spacing", 0.0), syl_count, log_text,
+                     # This path's own image fetch above (SELECT name, data, mime_type)
+                     # never reads original_data -- always the resized working copy
+                     # (see the NOTE at the top of this task) -- so syl_boxes always
+                     # come back in that frame. Explicit rather than relying on the
+                     # column default so this stays correct if the default ever
+                     # changes (mothra#260, mirrors staffline_stage.py's
+                     # storage_variant="working_copy" a few lines above).
+                     "working_copy"),
                 )
                 con.commit()
                 if ev.get("debug_data"):

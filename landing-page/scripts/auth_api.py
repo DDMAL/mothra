@@ -342,6 +342,18 @@ _ADDED_COLUMNS = [
     ("staffline_detections", "classifier_image_mime", "TEXT DEFAULT 'image/png'"),
 
     ("text_alignments", "log_text",              "TEXT"),
+    # Which project_images column syl_boxes' absolute-pixel ul/lr coords were
+    # computed against ("original" / "working_copy") -- mirrors
+    # staffline_detections' settings_json.storage_variant (CodeRabbit PR #219),
+    # added for the same reason: SF-2 made tasks_predict.py's text-finding call
+    # run against original_data whenever it's present, but projects_api.py's
+    # imageSrc used to always point at the resized working copy regardless,
+    # so the "Detected text" viewer scaled these boxes against the wrong
+    # image's naturalWidth/naturalHeight (mothra#260). Default 'working_copy'
+    # matches every caller that doesn't read original_data at all
+    # (tasks_text_batch.py, the standalone /text-finding/run endpoint) and
+    # every pre-existing row written before this column existed.
+    ("text_alignments", "storage_variant",       "TEXT DEFAULT 'working_copy'"),
 
     # jobs : retry lineage + stored kickoff params (needed by cancel/retry)
     ("jobs",            "params",                "JSONB"),
@@ -651,7 +663,8 @@ def logout(x_refresh_token: str = Header(None, alias="X-Refresh-Token"), user=De
     return {"ok": True}
 
 def get_latest_text_alignment(cur, project_id: int, image_name: str,
-                               image_id: Optional[str] = None) -> Optional[dict]:
+                               image_id: Optional[str] = None,
+                               include_storage_variant: bool = False):
     """Return the most recently created text_alignments row's parsed
     alignment_json for this image, or None when there's no row, or the
     stored JSON isn't a dict. Single source of truth for "what is
@@ -677,17 +690,29 @@ def get_latest_text_alignment(cur, project_id: int, image_name: str,
     whatever runs next on it). Callers that want this function's old
     swallow-everything behavior wrap the call in their own try/except, the
     same way tasks_encode.py's _resolve_hints() already does for its two
-    neighboring lookups."""
+    neighboring lookups.
+
+    include_storage_variant (mothra#260): when True, returns
+    (alignment, storage_variant) instead of just alignment -- "None" cases
+    become (None, None). storage_variant is the row's own
+    "original"/"working_copy" tag (see text_api.py's stream_text_finding),
+    needed by a caller that has to know which project_images column
+    syl_boxes' absolute-pixel coords were computed against before comparing
+    them to some other image's dimensions -- mei_api.py's create_edit_session
+    is the only caller that opts in; tasks_encode.py's _resolve_hints() only
+    ever reads syl_boxes' text/order, never their absolute coords, so it
+    doesn't need this and stays on the plain default."""
     try:
+        cols = "alignment_json, storage_variant" if include_storage_variant else "alignment_json"
         if image_id:
             cur.execute(
-                "SELECT alignment_json FROM text_alignments WHERE image_id=%s AND project_id=%s"
+                f"SELECT {cols} FROM text_alignments WHERE image_id=%s AND project_id=%s"
                 " ORDER BY created_at DESC LIMIT 1",
                 (image_id, project_id),
             )
         else:
             cur.execute(
-                "SELECT alignment_json FROM text_alignments WHERE image_name=%s AND project_id=%s"
+                f"SELECT {cols} FROM text_alignments WHERE image_name=%s AND project_id=%s"
                 " ORDER BY created_at DESC LIMIT 1",
                 (image_name, project_id),
             )
@@ -695,10 +720,16 @@ def get_latest_text_alignment(cur, project_id: int, image_name: str,
     except Exception:
         cur.connection.rollback()
         raise
+    empty = (None, None) if include_storage_variant else None
     if not row or not row[0]:
-        return None
+        return empty
     try:
         alignment = json.loads(row[0])
     except (TypeError, ValueError):
-        return None
-    return alignment if isinstance(alignment, dict) else None
+        return empty
+    alignment = alignment if isinstance(alignment, dict) else None
+    if alignment is None:
+        return empty
+    if include_storage_variant:
+        return alignment, (row[1] or "working_copy")
+    return alignment

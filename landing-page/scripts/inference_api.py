@@ -11,6 +11,7 @@ from auth_api import get_current_user, require_project_owner, db_cursor
 from config import SKIP_YOLO
 from job_store import claim_project_job
 from tasks_predict import run_predict_task
+from projects_api import _image_src
 import staffline_stage
 
 router = APIRouter()
@@ -302,7 +303,8 @@ def confirm_staffline_interpolation(
         cur.execute(
             "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
             " classifier_image IS NOT NULL,"
-            " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error'"
+            " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error',"
+            " settings_json->>'storage_variant'"
             " FROM staffline_detections WHERE id=%s AND project_id=%s",
             (new_detection_id, project_id),
         )
@@ -310,10 +312,16 @@ def confirm_staffline_interpolation(
     if not row:
         raise HTTPException(status_code=500, detail="interpolation did not produce a new detection")
     (did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image,
-     has_classifier_fallback, classifier_error) = row
+     has_classifier_fallback, classifier_error, storage_variant) = row
     return {
         "id": did, "imageName": img_name,
-        "imageSrc": f"/api/images/{img_id}" if img_id else None,
+        # mothra#260: use the same storage_variant-aware URL as
+        # projects_api.py's _map_staffline_row -- this route's JSOMR is
+        # always computed against the raw page (compute_staffline_interpolation
+        # hardcodes source_label="raw_page" below), but "raw page" still means
+        # either project_images column depending on which one
+        # _load_image_and_yolo_for_detection read, same as everywhere else.
+        "imageSrc": _image_src(img_id, storage_variant),
         "staveCount": stave_count, "modeLinesPerStave": mode_lines_per_stave,
         "status": status, "hasClassifierImage": has_classifier_image,
         # Always False/None here in practice -- this route's
