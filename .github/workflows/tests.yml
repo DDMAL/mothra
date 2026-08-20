@@ -34,6 +34,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Just this one submodule, not `submodules: recursive`: tests/test_pitch_stage.py
+      # drives the real pitch-finding algorithm end-to-end (and self-skips without
+      # it), while ic/, neon/, mothra-text/ and paco-classifier/ are large,
+      # weights-carrying, and exercised by nothing in this workflow.
+      - name: Check out the pitch-finding submodule
+        run: git submodule update --init pitch-finding
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -46,7 +53,10 @@ jobs:
       # paco_api.py's own config.py import (for PACO_API_URL) -- either
       # way it's config.py loading config.yaml. numpy comes in transitively
       # via staff-finding's diagnostics extras (scipy/scikit-image both
-      # depend on it).
+      # depend on it), and opencv-python via staff-finding's own dependency
+      # list -- which is also what lets test_pitch_stage.py's end-to-end tests
+      # run rather than self-skip (the submodule's glyph_pixels imports cv2 at
+      # module level).
       - name: Install dependencies
         run: pip install -e "./staff-finding[diagnostics]" pytest Pillow PyYAML
 

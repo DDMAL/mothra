@@ -7,6 +7,7 @@ YOLO-based Optical Music Recognition (OMR) for medieval manuscripts, developed a
 Distinct parts live in this repo:
 - **`landing-page/`** — The primary active web application (React + FastAPI)
 - **`staff-finding/`** — Staffline detection (component filtering, centerline fitting, stave grouping); packaged as a local pip distribution and consumed by `landing-page/`'s predict pipeline — see **Staffline detection** below
+- **`pitch-finding/`** — Git submodule (`DDMAL/Standalone-Pitch-Finder`); its algorithm #1 supplies the real pitch for MEI encoding, consumed by `landing-page/`'s encode pipeline — see **Pitch finding** below
 - **`configs/`, `data/`, `OLD-annotator/`** — ML pipeline experiments and legacy tooling (less active)
 
 ---
@@ -318,6 +319,103 @@ needs no re-plumbing):
   YOLO pass) isn't wired up — it needs an already-loaded stave-detector model
   instance, which custom (non-medieval-preset) models don't have one of.
 
+### Pitch finding
+
+`tasks_encode.py` runs a pitch-finding stage (`landing-page/scripts/pitch_stage.py`)
+right before `build_mei()`, wrapping **algorithm #1** of the `pitch-finding/`
+submodule (`DDMAL/Standalone-Pitch-Finder`, `scripts/pitch_finder.py`). This
+replaces what was a documented placeholder: `encode_to_mei.py` used to read
+every `<nc>`'s pname/oct from the glyph bbox's *geometric center* against an
+*assumed* clef (`_step_from_y` + `_pitch_from_step`, C-clef on line 3 by
+default). What the real algorithm adds:
+
+- the anchor is an **ink centroid of a per-class crop** of the glyph (a virga's
+  notehead, not its stem; a podatus's bottom-left head, not the midpoint of
+  both), so the measured row belongs to an actual notehead;
+- a multi-note neume is **decomposed** from that one anchor plus the
+  cheatsheet's interval list, with the anchor bound to whichever note the crop
+  isolated — a torculus's three notes are placed off the head that was
+  measured;
+- the clef is the page's **own detected clef glyph**, resolved per stave and
+  per reading position, and its measured staff line is what gets emitted as
+  `<clef @line>`.
+
+`pitch_stage.py` hands `build_mei()` two **advisory, glyph-id-keyed** tables
+(`pitch_map`, `clef_line_map`) and never changes the MEI's structure: the `<nc>`
+count, `@tilt`/`@ligated` attrs, `<liquescent/>` and per-component zone splitting
+still come from `assets/mei_encoding/{square,hufnagel}.csv` via `neume_mapping.py`,
+which is what Neon corrects against. `encode_to_mei._resolve_pitches()` then picks,
+**per glyph**: the supplied per-component pitches → the supplied *first* pitch with
+the rest chained by `@intm` (`_chain_from_pitch`, for the classes where the two
+component counts disagree: a repeated-note neume resolves to one note, as does an
+unknown class) → the old geometric placeholder. So the placeholder is now a
+per-glyph fallback rather than the whole pitch story, and still covers
+`missing_staff`/`missing_clef`/`no_line_coverage` glyphs, unclassified bboxes, and
+any deployment without a `pitch-finding/` checkout.
+
+`neume_shapes.load_neume_shapes()` is deliberately pointed at **mothra's own**
+`assets/mei_encoding/*.csv`, not the submodule's `neumes-cheatsheet/` copy, so
+the intervals and the emitted `<nc>` list are read from the same file (both
+descend from `ic/core/data/train/csv-*_neume_level_newest.csv`; mothra's carries
+extra rows and a hufnagel variant).
+
+Staff-line input, in preference order: the `staffline_detections` JSOMR records
+`_resolve_hints()` already resolves as its tier-1 stave source (real per-line
+curve fits, so a note's step is read against the fitted line *at that note's x*
+— `_resolve_hints` now returns those raw records alongside the `StaveBbox` list
+`staves_from_jsomr()` flattens them into), else flat lines synthesized from each
+`StaveBbox.line_ys`. Either way they go through the submodule's own
+`staff_regroup`/`staff_io` loaders, so its two-column regrouping and
+fragment-collapsing apply — including for the rows `assign_glyphs_to_staves()`
+recovers.
+
+**Emitting the measured `<clef @line>` is load-bearing, not cosmetic.** Verovio
+positions an `<nc>` from its pname/oct *against the declared clef line*, so a
+clef read off the page at line 1 but declared at line 3 renders that whole
+stave's notes two lines from where the ink is — the same class of silent,
+page-wide offset `_stave_zone_bounds` documents for zone height vs. line
+spacing. `_step_from_y`'s own placeholder reference moves with it for the same
+reason, and a mid-stave clef change now also rebinds it (previously left on the
+stave default, because nothing measured a changed clef's position).
+
+Verified against the submodule's own recorded runs: `pitch_stage.py` reproduces
+`run_pitch_finding.py`'s output **exactly** — 162/162 glyphs on
+`McGill_MS234-064`, 133/133 on `Breviarium_ad_usum_crop` (the two-column
+regrouping case), 21/21 on `GentAnt1475_0017_AC_rightcrop`, same pitches, same
+coverage. On the same pages the clef measurement lands within 0.3 steps of an
+exact staff line every time (5.78–6.02 → line 4, −0.27/−0.12 → line 1), and
+C-clefs come out exactly two lines above the F-clefs on their own staves.
+
+The stage **never raises**: no submodule checkout, no opencv (the submodule's
+`glyph_pixels` imports `cv2` at module level), no usable staff-line geometry, an
+undecodable page image, or an error inside the algorithm all come back as an
+empty result plus a job-log line naming which one it was — following the
+submodule's own "never silently degrade" rule, the log also counts every
+`pitchless_symbol`/`missing_staff`/`missing_clef` reason and every
+`pixel_anchor_unavailable`/`approximate_unknown_shape`/`shape_from_class_name`/
+`sparse_stave_lines`/`clef_after_glyph`/`clef_octave_unconfigured` flag.
+`MOTHRA_PITCH_FINDING=0` forces the placeholder back on without a redeploy.
+
+Not pip-installed, unlike `staff-finding/`: that repo carries its own
+`pyproject.toml` and this one doesn't (it's a prototype driven by its CLIs, with
+flat cross-imports like `import clef_rules`), so `pitch_stage.py` appends its
+`scripts/` dir to `sys.path` instead — the same flat-module resolution its own
+CLIs rely on. `config.py`'s `PITCH_FINDING_DIR` locates it (`config.yaml`
+default `../../pitch-finding/scripts` for a bare-metal checkout; the Dockerfile
+sets the env override, since only it knows where the additional build context
+landed).
+
+**Known limitations, carried over from the submodule and not fixed here:**
+absolute octave numbers ride on `clef_rules.CLEF_OCTAVE_REFERENCE`, an
+unvalidated placeholder register (`C=4/F=3/G=4` — the same assumption
+`encode_to_mei._CLEF_PITCH_REF` already made); letter names and step distances
+from the clef are the trustworthy part. There is still **no human-verified pitch
+ground truth** for either of the submodule's two algorithms, so this is a much
+better prediction, not a validated transcription — a human still corrects it in
+Neon. Algorithm #2 (`rodan_pitch_finder.py`, one pitch per glyph) is
+deliberately not wired up; it exists upstream as an independent baseline to
+compare against.
+
 ### Deployment (Kubernetes, CI/CD via GitHub Actions)
 
 **Merging to `main` deploys production automatically. Staging is deployed on
@@ -340,7 +438,11 @@ active branches auto-deploy into it would only thrash both.
    last). `worker` reuses the `mothra-backend` image, so it isn't built separately.
    Checkout pulls submodules recursively and Git LFS (the bundled medieval `.pt`
    weights — without `lfs: true` they'd check out as pointer stubs and inference
-   would fail at runtime).
+   would fail at runtime). The backend build passes **two** named build contexts,
+   `staff_finding=./staff-finding` and `pitch_finding=./pitch-finding` (a
+   newline-separated list) — a missing one is not silent, BuildKit reads the
+   `COPY --from=<name>` as an *image* reference and fails trying to pull
+   `docker.io/library/<name>:latest`.
 2. **resolve** — maps the ref to an environment: `main` → production, any other ref
    → staging. Outputs `dir` (`k8s` or `k8s/staging`) and `suffix` (`""` or
    `-staging`). `workflow_dispatch` takes an `environment` input
@@ -461,10 +563,18 @@ text). `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level `.env`
 (gitignored, separate from `landing-page/scripts/.env`) that Compose
 auto-loads.
 
+The `pitch-finding/` submodule rides in the same way, as a second additional
+build context (`pitch_finding`) on the same three services — but only its
+`scripts/` dir is copied (the repo also carries ~70MB of sample page images and
+debug renders nothing at runtime reads), it is *not* `pip install`-ed, and the
+Dockerfile sets `PITCH_FINDING_DIR` so `config.py` can find where it landed.
+See **Pitch finding** above for why it's a sys.path directory rather than a
+package.
+
 `staff-finding/` (a sibling directory of `landing-page/`, holding the
 staffline-detection module `staffline_stage.py` imports — see **Staffline
 detection** above) sits outside `landing-page/`'s own Docker build context.
-`docker-compose.yml`'s `backend`/`worker` services and
+`docker-compose.yml`'s `backend`/`worker`/`migrate` services and
 `.github/workflows/build-images.yml`'s backend image build both pass it in as
 a named BuildKit "additional build context" (`staff_finding`), which
 `landing-page/Dockerfile` then `COPY --from=staff_finding`s into the image
@@ -562,6 +672,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
 | `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` / `tasks_cleanup.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work / periodic `job_uploads`+`job_sessions` cleanup, run out-of-request |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
+| `landing-page/scripts/pitch_stage.py` | Real pitch finding for the encode step — wraps the `pitch-finding/` submodule's algorithm #1, hands `build_mei()` a per-glyph pitch map + measured clef lines; called from `tasks_encode.py` — see **Pitch finding** below |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
 | `landing-page/scripts/paco_api.py` | Bridges to `paco-classifier-service` (`classify_stafflines()`) — medieval-preset staffline/background layer separation, called from `tasks_predict.py`'s `_run_medieval_inference()`; see **Staffline detection** above |
 | `landing-page/scripts/yolo_inference.py` | YOLO model loading/inference (`resolve_yolo_models`, `YoloModelSet`, incl. the split `infer_text_music()`/`infer_staves()` medieval-only methods) shared by the predict task and `batch_api.py` |
@@ -690,7 +801,11 @@ The build also compiles the embedded Neon.js editor from the `neon/` submodule �
 staff-finding algorithmic suite (`staff-finding/scripts/test_group_staves.py`
 + `script_tests/`, as several separate `pytest` invocations rather than one
 combined run — see the workflow's own comments for why) and
-`landing-page/scripts/tests/`. It is not yet configured as a required status
+`landing-page/scripts/tests/`. It checks out **one** submodule,
+`pitch-finding`, because `tests/test_pitch_stage.py` drives the real
+pitch-finding algorithm end-to-end (and self-skips without it); `ic/`, `neon/`,
+`mothra-text/` and `paco-classifier/` are large, weights-carrying, and
+exercised by nothing in this workflow. It is not yet configured as a required status
 check in the repo's branch protection settings for `main` — that is a
 separate, repo-admin-level step, done in GitHub's own UI, not this file.
 
@@ -746,6 +861,14 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   `encoding_logs.txt` (that file is unrelated — sourced from `project_logs`'s encoding-step rows,
   see **Workflow pipeline** step 4); surfacing text-finding logs in that zip export would be a
   separate, not-yet-implemented feature.
+- **Real pitch finding** — MEI `<nc>` pname/oct now comes from the `pitch-finding/`
+  submodule's algorithm #1 (per-class ink-centroid anchor, neume decomposition, the
+  page's own detected clef and its measured staff line) via
+  `landing-page/scripts/pitch_stage.py`, instead of `encode_to_mei.py`'s
+  bbox-center-against-an-assumed-clef placeholder — which survives as a per-glyph
+  fallback. Still a prediction, not a validated transcription (no pitch ground
+  truth exists, and clef octave register is still a placeholder); see
+  **Pitch finding** above
 - **YOLO inference** — `POST /api/predict` is live; `ModelTab` `.h5` uploads are wired up
 - **Stave detection** — `estimate_staves_from_glyphs()` in `encode_to_mei.py` uses real staff-line glyph clustering (primary) with neume Y-gap clustering as fallback; `parse_staves()` / `parse_yolo_stave_hints()` handle YOLO-format stave detections
 - **Staffline detection** — `POST /api/predict` runs connected-component filtering, centerline fitting, and stave grouping on stave-class YOLO boxes (`staffline_stage.py`, wrapping the `staff-finding/` package); results are `tasks_encode.py`'s preferred stave source ahead of `parse_yolo_stave_hints()` — see **Staffline detection** above

@@ -3,14 +3,22 @@
 encode_to_mei.py - Convert GameraXML (output from standalone IC) + Mothra inference JSON (stave detections) into
 an MEI-Neume file and Neon manifest JSON-LD.
 
-Every <nc> gets a pname/oct (see _nc_pitch/_pitch_from_step below), but this
-is a geometric placeholder, not a transcription: there is no real pitch-
-recognition step here, only neume *shape* from Ichiro's classifier. Each
-note-component's y-position relative to the reconstructed stave lines is
-converted to a diatonic step below an assumed clef (clef_shape/clef_line,
-default C-clef/line 3) -- good enough for Verovio/Neon to render something
-placed on the staff, not a claim that it's correct. A human corrects it in
-Neon afterward.
+Every <nc> gets a pname/oct. Where it comes from is decided per glyph, by
+_resolve_pitches:
+
+  * normally from pitch_stage.py -- real pitch finding (algorithm #1 of the
+    pitch-finding/ submodule), passed in as `pitch_map`: a per-class ink-centroid
+    anchor on the glyph, the neume decomposed into its own notes from that one
+    anchor, and the page's OWN detected clef glyph (whose measured staff line
+    arrives as `clef_line_map` and is what this file then declares on <clef>);
+  * otherwise from this file's older geometric placeholder -- the glyph bbox's
+    vertical center converted to a diatonic step below an ASSUMED clef
+    (clef_shape/clef_line, default C-clef/line 3), then @intm chaining. That is
+    not a transcription, just something Verovio/Neon can place on the staff.
+
+The placeholder still covers every glyph the algorithm reports it couldn't
+resolve (no stave, no clef, no line coverage), and every deployment without a
+pitch-finding checkout. A human corrects the result in Neon either way.
 
 Usage:
     python scrupts/encode_to_mei.py \
@@ -1049,6 +1057,75 @@ def _component_pitches(
         pitches.append(_pitch_from_step(step, clef_note, clef_oct))
     return pitches
 
+def _resolve_pitches(
+    glyph: Glyph,
+    components: list[NcTemplate],
+    pitch_map: Optional[dict[str, list[tuple[str, str]]]],
+    line_ys: list[float],
+    clef_line: int,
+    clef_note: str,
+    clef_oct: int,
+) -> list[tuple[str, str]]:
+    """(pname, oct) per component for one neume/custos glyph.
+
+    Three sources, strongest first:
+
+    1. `pitch_map[glyph.id]` with one pitch per component -- pitch_stage.py's
+       real pitch finding (algorithm #1 of the pitch-finding/ submodule):
+       per-class ink-centroid anchor, interval decomposition, and the page's own
+       detected clef. This is the normal path for a classified neume on a stave
+       with line data.
+    2. the same measurement for note 1 only, chained by @intm for the rest --
+       when that stage resolved the glyph but to a different note count than
+       this file's CSV `<nc>` list (see _chain_from_pitch).
+    3. the geometric placeholder this file has always used: the glyph bbox's
+       vertical center read as a diatonic step against the ASSUMED clef line
+       (_step_from_y), then @intm chaining (_component_pitches). Reached
+       per glyph, not per page -- a glyph the algorithm reported as
+       missing_staff/missing_clef/no_line_coverage, an unclassified bbox, a
+       deployment with no pitch-finding checkout, or MOTHRA_PITCH_FINDING=0.
+
+    Only pitch differs between the three; the `<nc>` elements themselves, their
+    attributes and their zones are the same either way.
+    """
+    mapped = pitch_map.get(glyph.id) if pitch_map else None
+    if mapped:
+        if len(mapped) == len(components):
+            return list(mapped)
+        return _chain_from_pitch(mapped[0], components)
+    anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
+    return _component_pitches(anchor_step, components, clef_note, clef_oct)
+
+def _chain_from_pitch(
+    first: tuple[str, str],
+    components: list[NcTemplate],
+) -> list[tuple[str, str]]:
+    """(pname, oct) per component, chaining off an ALREADY-ABSOLUTE first pitch.
+
+    The bridge for the case where pitch_stage.py resolved a glyph but with a
+    different note count than this file's own `<nc>` list -- a repeated-note
+    neume (neume.distropha and friends resolve to one pitch there, since every
+    notehead of one carries the same pitch) or a class its interval table only
+    knows as a single approximate note. Rather than throw the measured anchor
+    away and fall back to _step_from_y for the whole glyph, keep it for note 1
+    and place the rest with the same @intm chaining _component_pitches uses.
+
+    @intm is positive for a note ABOVE the previous one, so the absolute
+    diatonic index goes UP by intm -- the mirror of _component_pitches's
+    subtraction, which works in _pitch_from_step's inverted step space (see
+    both docstrings).
+    """
+    pname, oct_str = first
+    try:
+        abs_idx = int(oct_str) * 7 + _PITCH_NOTES.index(pname.lower())
+    except (ValueError, TypeError):
+        return [first] * len(components)
+    pitches = [first]
+    for comp in components[1:]:
+        abs_idx += comp.intm
+        pitches.append((_PITCH_NOTES[abs_idx % 7], str(abs_idx // 7)))
+    return pitches
+
 def _component_zone_ids(
     surface: ET.Element,
     glyph: Glyph,
@@ -1126,6 +1203,8 @@ def build_mei(
     clef_line: int = 3,
     notation_type: str = "square",
     n_detected_staves: Optional[int] = None,
+    pitch_map: Optional[dict[str, list[tuple[str, str]]]] = None,
+    clef_line_map: Optional[dict[str, int]] = None,
 ) -> bytes:
     ET.register_namespace("", MEI_NS)
     mei = ET.Element(_tag("mei"), {"meiversion": "5.0.0-dev"})
@@ -1339,20 +1418,33 @@ def build_mei(
         ET.SubElement(layer, _tag("sb"), sb_attrs)
 
         stave_clef_shape = clef_shape
+        opening_clef_glyph_id: Optional[str] = None
         consumed_special_ids: set[str] = set()
         for g, entry in special_glyphs_by_stave.get(stave_idx, []):
             if entry.tag == "clef":
                 stave_clef_shape = entry.attrs.get("shape", clef_shape)
+                opening_clef_glyph_id = g.id
                 consumed_special_ids.add(g.id)
                 break
         clef_note, clef_oct = _CLEF_PITCH_REF.get(stave_clef_shape, ("c", 4))
+        # Which staff line this stave's clef is DECLARED on. pitch_stage.py
+        # measures it from the clef glyph's own ink centroid when it can (see
+        # its _clef_line_from_step); the clef_line argument is the assumed
+        # default for every stave it couldn't. This matters beyond the emitted
+        # attribute: Verovio positions an <nc> from pname/oct against the
+        # declared clef line, and _step_from_y's own placeholder pitch is
+        # measured relative to it too, so both have to read the same value or
+        # the stave's notes render off by whole lines.
+        effective_clef_line = clef_line
+        if opening_clef_glyph_id and clef_line_map:
+            effective_clef_line = clef_line_map.get(opening_clef_glyph_id, clef_line)
 
         # Clef must follow each <sb>; @facs anchors it to the stave's left edge
         clef_id = str(uuid.uuid4()).replace("-", "")[:12]
         clef_attrs: dict[str, str] = {
             XML_ID: f"clef-{clef_id}",
             "shape": stave_clef_shape,
-            "line": str(clef_line),
+            "line": str(effective_clef_line),
         }
         if stave_idx in clef_zone_ids:
             clef_attrs["facs"] = f"#{clef_zone_ids[stave_idx]}"
@@ -1422,8 +1514,10 @@ def build_mei(
                     else:
                         components = [NcTemplate()]
                         missing_classes.add(glyph.class_name)
-                    anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
-                    pitches = _component_pitches(anchor_step, components, clef_note, clef_oct)
+                    pitches = _resolve_pitches(
+                        glyph, components, pitch_map, line_ys,
+                        effective_clef_line, clef_note, clef_oct,
+                    )
                     component_zone_ids = _component_zone_ids(
                         surface, glyph, components,
                         entry.width if entry is not None else None,
@@ -1448,24 +1542,32 @@ def build_mei(
                 if entry.tag == "clef":
                     attrs: dict[str, str] = {XML_ID: f"clef-{glyph.id}", "facs": f"#z-{glyph.id}"}
                     attrs.update(entry.attrs)
-                    attrs.setdefault("line", str(clef_line))
-                    ET.SubElement(layer, _tag("clef"), attrs)
                     # A mid-stave clef change (this isn't the stave's opening
                     # clef -- that one already set stave_clef_shape/clef_note/
                     # clef_oct before this loop started) must also rebind the
                     # pitch reference: every <nc>/<custos> emitted after this
                     # point in reading order is read against THIS clef, not
-                    # the one the stave opened with. clef_line itself is
-                    # deliberately left alone -- there's no classifier signal
-                    # for which staff line a changed clef sits on (see
-                    # _CLEF_PITCH_REF's comment), so it stays the stave's
-                    # original default either way.
+                    # the one the stave opened with. That now includes the
+                    # LINE it sits on: this used to stay on the stave's
+                    # default because nothing measured a changed clef's
+                    # position, but pitch_stage.py measures every clef glyph
+                    # the same way, so when it has a value for this one, both
+                    # the emitted @line and the placeholder's own reference
+                    # move with it. Absent that, it falls back to the stave
+                    # default exactly as before.
+                    measured_line = (clef_line_map or {}).get(glyph.id)
+                    if measured_line is not None:
+                        effective_clef_line = measured_line
+                    attrs.setdefault("line", str(effective_clef_line))
+                    ET.SubElement(layer, _tag("clef"), attrs)
                     clef_note, clef_oct = _CLEF_PITCH_REF.get(
                         attrs.get("shape", stave_clef_shape), (clef_note, clef_oct)
                     )
                 elif entry.tag == "custos":
-                    anchor_step = _step_from_y(glyph.cy, line_ys, clef_line)
-                    pname, oct_str = _component_pitches(anchor_step, [NcTemplate()], clef_note, clef_oct)[0]
+                    pname, oct_str = _resolve_pitches(
+                        glyph, [NcTemplate()], pitch_map, line_ys,
+                        effective_clef_line, clef_note, clef_oct,
+                    )[0]
                     attrs = {
                         XML_ID: f"custos-{glyph.id}",
                         "facs": f"#z-{glyph.id}",

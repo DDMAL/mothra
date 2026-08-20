@@ -163,7 +163,7 @@ def test_stale_staffline_detection_is_ignored_in_favor_of_current_annotation(mon
     monkeypatch.setattr(tasks_encode, "release_db_conn", lambda con: None)
     monkeypatch.setattr(FakeConnection, "cursor", lambda self: cursor, raising=False)
 
-    _text_alignment, _yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, _yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
     )
 
@@ -202,7 +202,7 @@ def test_current_staffline_detection_still_wins_when_it_matches():
         monkeypatch.setattr(tasks_encode, "release_db_conn", lambda con: None)
         monkeypatch.setattr(FakeConnection, "cursor", lambda self: cursor, raising=False)
 
-        _text_alignment, _yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+        _text_alignment, _yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
             project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
         )
 
@@ -228,7 +228,7 @@ def test_frame_matching_dimensions_pass_through_unchanged(monkeypatch, capsys):
     )
     _patch_db_conn(monkeypatch, cursor)
 
-    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
     )
 
@@ -255,7 +255,7 @@ def test_frame_resize_is_scaled_not_rejected(monkeypatch, capsys):
     )
     _patch_db_conn(monkeypatch, cursor)
 
-    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
     )
 
@@ -287,7 +287,7 @@ def test_frame_genuine_mismatch_is_rejected_and_logged(monkeypatch, capsys):
     )
     _patch_db_conn(monkeypatch, cursor)
 
-    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=2000, page_h=500,
     )
 
@@ -308,7 +308,7 @@ def test_tier1_failure_is_logged_not_silently_swallowed(monkeypatch, capsys):
     )
     _patch_db_conn(monkeypatch, cursor)
 
-    _text_alignment, yolo_stave_hints, stave_source = tasks_encode._resolve_hints(
+    _text_alignment, yolo_stave_hints, stave_source, _jsomr = tasks_encode._resolve_hints(
         project_id=1, image_name="page.jpg", page_w=1000, page_h=1000,
     )
 

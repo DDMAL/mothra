@@ -58,16 +58,20 @@ jobs:
       matrix:
         include:
           # backend: multi-stage Node(SPA + Neon submodule) -> Python/torch.
-          # Needs the LFS-tracked medieval .pt weights baked in, plus the
-          # sibling staff-finding/ dir (outside this context) via the
-          # build-contexts input below, for staffline_stage.py's package.
-          # Without that input BuildKit reads `COPY --from=staff_finding` in
-          # landing-page/Dockerfile as an *image* reference and fails trying to
-          # pull docker.io/library/staff_finding:latest.
+          # Needs the LFS-tracked medieval .pt weights baked in, plus TWO
+          # sibling dirs outside this context via the build-contexts input
+          # below: staff-finding/ for staffline_stage.py's package, and the
+          # pitch-finding/ submodule for pitch_stage.py's algorithm #1.
+          # Without those inputs BuildKit reads `COPY --from=staff_finding` /
+          # `--from=pitch_finding` in landing-page/Dockerfile as *image*
+          # references and fails trying to pull
+          # docker.io/library/staff_finding:latest.
           - name: backend
             context: ./landing-page
             file: ./landing-page/Dockerfile
-            build-contexts: staff_finding=./staff-finding
+            build-contexts: |
+              staff_finding=./staff-finding
+              pitch_finding=./pitch-finding
           # ic: built from the ic submodule (has its own Dockerfile).
           - name: ic
             context: ./ic
@@ -96,7 +100,8 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      # submodules: neon (backend), mothra-text (text-service), ic (ic image),
+      # submodules: neon (backend), pitch-finding (backend — pitch_stage.py's
+      # algorithm #1), mothra-text (text-service), ic (ic image),
       # paco-classifier (paco-classifier-service — code AND weights: its
       # models_v4/model_0.h5/model_1.h5 live inside the submodule itself, so
       # `submodules: recursive` alone is enough for those, no LFS needed here).
