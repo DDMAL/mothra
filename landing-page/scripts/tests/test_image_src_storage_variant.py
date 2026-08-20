@@ -22,6 +22,17 @@ a live Postgres or require MOTHRA_SECRET at import time -- stubbed here as
 bare module stand-ins, mirroring test_resolve_hints_staleness.py's and
 test_tasks_text_batch_logs.py's pattern for tasks_encode/tasks_text_batch.
 
+projects_api.py also imports fastapi/pydantic directly (it's a router
+module), unlike tasks_encode.py/tasks_text_batch.py -- CI's "DB-independent
+scripts tests" step installs only pytest/Pillow/PyYAML/staff-finding[diagnostics]
+(see .github/workflows/tests.yml), no fastapi/pydantic/psycopg2, so importing
+the real package here 500s the whole collection step even though this test
+never touches a route. Stubbed the same way as auth_api/job_store above --
+just enough of APIRouter/Depends/HTTPException/Response/BaseModel for
+projects_api.py's module body (route decorators, BaseModel subclasses,
+Depends(...) default args) to import cleanly; none of it is ever exercised,
+since this test only calls the three plain functions above.
+
 No DB, no FastAPI app, no real auth.
 """
 import sys
@@ -43,6 +54,59 @@ def _install_stubs():
     something it needs."""
     class _JobCancelled(Exception):
         pass
+
+    if "fastapi" not in sys.modules:
+        fastapi_stub = types.ModuleType("fastapi")
+
+        class _APIRouter:
+            # Every one of projects_api.py's @router.get/.post/.put/.delete
+            # decorators just needs to hand the function back unchanged --
+            # nothing here ever gets dispatched through a real ASGI app.
+            def _route(self, *a, **k):
+                def _decorator(fn):
+                    return fn
+                return _decorator
+            get = post = put = delete = _route
+
+        def _Depends(dependency=None):
+            # Used only as a route function's default arg value
+            # (user=Depends(get_current_user)) -- never actually resolved,
+            # since these functions are never called in this test.
+            return dependency
+
+        class _HTTPException(Exception):
+            def __init__(self, status_code=500, detail=None):
+                self.status_code = status_code
+                self.detail = detail
+                super().__init__(detail if detail is not None else status_code)
+
+        fastapi_stub.APIRouter = _APIRouter
+        fastapi_stub.Depends = _Depends
+        fastapi_stub.HTTPException = _HTTPException
+        sys.modules["fastapi"] = fastapi_stub
+
+        fastapi_responses_stub = types.ModuleType("fastapi.responses")
+
+        class _Response:
+            def __init__(self, *a, **k):
+                pass
+
+        fastapi_responses_stub.Response = _Response
+        sys.modules["fastapi.responses"] = fastapi_responses_stub
+        fastapi_stub.responses = fastapi_responses_stub
+
+    if "pydantic" not in sys.modules:
+        pydantic_stub = types.ModuleType("pydantic")
+
+        class _BaseModel:
+            # projects_api.py only ever subclasses this with annotated class
+            # attributes (CreateProjectBody, UpdateProjectBody) -- never
+            # instantiates or validates one in this test, so a bare object
+            # subclass is enough for the class statements to execute.
+            pass
+
+        pydantic_stub.BaseModel = _BaseModel
+        sys.modules["pydantic"] = pydantic_stub
 
     if "auth_api" not in sys.modules:
         sys.modules["auth_api"] = types.ModuleType("auth_api")
