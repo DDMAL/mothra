@@ -47,6 +47,26 @@ const STEPS_UNLOCKED_BY_JOB_KIND: Record<string, number> = {
   encode_batch: 3,
 };
 
+// Views a user can meaningfully return to via the browser Back button.
+// Leaving one of these pushes a fresh history entry for wherever the user
+// is headed; leaving any other view (i.e. anywhere inside a project's
+// processing/IC/encoding/Neon pipeline) instead replaces the current
+// entry -- see the view-history effect below. That collapses the whole
+// pipeline into a single history slot, so Back from any depth inside it
+// (mid-predict, past IC, past encoding, editing in Neon, ...) always lands
+// directly back on the anchor view instead of walking back through
+// now-irrelevant processing/completion screens one hop at a time
+// (issue #272).
+const HISTORY_ANCHOR_VIEWS = new Set<View>([
+  "landing",
+  "login",
+  "register",
+  "account",
+  "docs",
+  "projects",
+  "project",
+]);
+
 export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -80,6 +100,10 @@ export default function App() {
   // they just call these same state setters.
   const isPoppingRef = useRef(false);
   const hasMountedHistoryRef = useRef(false);
+  // The view this effect last saw, i.e. the one being left -- read BEFORE
+  // it's overwritten below, so the push-vs-replace decision reflects where
+  // the user is navigating FROM, not where they just landed.
+  const prevViewRef = useRef<View>(view);
 
   useEffect(() => {
     window.history.replaceState({ view, selectedProjectId }, "");
@@ -89,13 +113,24 @@ export default function App() {
   useEffect(() => {
     if (!hasMountedHistoryRef.current) {
       hasMountedHistoryRef.current = true;
+      prevViewRef.current = view;
       return;
     }
     if (isPoppingRef.current) {
       isPoppingRef.current = false;
+      prevViewRef.current = view;
       return;
     }
-    window.history.pushState({ view, selectedProjectId }, "");
+    // Issue #272: only push a new entry when leaving an anchor view: that's
+    // what creates the single history slot for "somewhere inside a
+    // project's pipeline". Every further hop within the pipeline replaces
+    // that same slot instead of stacking a new one on top of it.
+    if (HISTORY_ANCHOR_VIEWS.has(prevViewRef.current)) {
+      window.history.pushState({ view, selectedProjectId }, "");
+    } else {
+      window.history.replaceState({ view, selectedProjectId }, "");
+    }
+    prevViewRef.current = view;
   }, [view, selectedProjectId]);
 
   useEffect(() => {
@@ -121,10 +156,13 @@ export default function App() {
         window.history.pushState({ view, selectedProjectId }, "");
         neonEditorRef.current.attemptNavigation(() => {
           // Deliberately NOT flagged as a pop: if confirmed, this should
-          // behave like any other forward navigation (a plain setView that
-          // pushes a fresh history entry for the target view), the same as
-          // NeonBatchEditor's in-app Back button already does -- not like a
-          // true history back() to the entry we just pushed over.
+          // behave like any other forward navigation (a plain setView,
+          // handled by the push-vs-replace effect above like any other),
+          // the same as NeonBatchEditor's in-app Back button already does
+          // -- not like a true history back() to the entry we just pushed
+          // over. "neon-editor" isn't a HISTORY_ANCHOR_VIEWS entry, so this
+          // replaces that entry with the target view rather than pushing a
+          // second one on top of it.
           setView(targetView);
           setSelectedProjectId(targetProjectId);
         });

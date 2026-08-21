@@ -945,7 +945,14 @@ export default function AppRouter({
           <ProcessingPage
             {...STEP_TIMING}
             logs={encodingLogs}
-            onBack={() => goToIc()}
+            // issue #272: in auto IC mode, goToIc() would land on "ic-auto",
+            // a page with no UI of its own that immediately re-triggers
+            // auto-classification the moment it mounts -- not a page worth
+            // going "back" to. Manual mode's "ic" is a real, resumable
+            // classifier session, so it keeps the original behavior.
+            onBack={() =>
+              icSettings.mode === "auto" ? setView("project") : goToIc()
+            }
             onComplete={() => {
               if (selectedProjectId && selectedProject) {
                 updateProjectSteps(
@@ -1106,7 +1113,10 @@ export default function AppRouter({
             }
             setView("neon-completion");
           }}
-          onBack={() => setView("encoding-completion")}
+          // issue #272: once you're editing in Neon, none of the
+          // processing/IC/encoding stages that led here are worth
+          // revisiting -- back always returns straight to the project page.
+          onBack={() => setView("project")}
         />
       ) : null;
     case "neon-completion":
