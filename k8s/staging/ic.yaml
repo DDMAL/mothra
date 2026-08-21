@@ -35,6 +35,23 @@ spec:
               value: "0.0.0.0"
             - name: PORT
               value: "8000"
+            # IC's session store is process-local unless a DSN is set: without
+            # this, every ic rollout/restart silently drops in-flight
+            # classification sessions (ic_api/store.py's build_default_store()
+            # reads IC_DATABASE_URL, then DATABASE_URL, else in-memory).
+            # Injected as a single key rather than `envFrom: secretRef` on the
+            # whole Secret — IC has no use for MOTHRA_SECRET.
+            # Staging shares the `mothra` namespace, so the unsuffixed
+            # `mothra-secrets` resolves here too and would point staging IC
+            # at the *production* database — the -staging suffix is the
+            # invariant, same as backend.yaml's.
+            # IC creates its own `ic_sessions` table lazily on first use, so
+            # this needs no migrate Job of its own.
+            - name: IC_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mothra-secrets-staging
+                  key: DATABASE_URL
           readinessProbe:
             tcpSocket:
               port: 8000

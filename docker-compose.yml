@@ -26,6 +26,17 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "8000"
+      # IC's session store is process-local unless a DSN is set: without this,
+      # `docker compose restart ic` silently drops in-flight classification
+      # sessions (ic_api/store.py's build_default_store() reads
+      # IC_DATABASE_URL, then DATABASE_URL, else in-memory). Same default as
+      # backend/worker, so IC and mothra share one database; IC creates its own
+      # `ic_sessions` table lazily on first use, so it needs no migrate gate --
+      # only a reachable Postgres.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   text-service:
     build:
