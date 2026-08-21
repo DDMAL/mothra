@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
 import AppRouter from "./components/AppRouter";
@@ -92,6 +92,27 @@ export default function App() {
   const mutations = useProjectMutations(setProjects);
   const { updateProjectSteps } = mutations;
 
+  // Issue #266/#272: gates any action that would navigate away from the
+  // Neon editor -- not just its own in-app Back/Prev/Next/filmstrip/
+  // arrow-key buttons (which already go through NeonBatchEditor's own
+  // attemptNavigation) -- behind the exact same unsaved-work confirmation.
+  // Covers everything else that's still clickable while the editor is on
+  // screen: the Navbar's nav buttons and logout, and a job-status toast's
+  // "view" action. The popstate handler below reuses this too, on top of
+  // its own extra history bookkeeping (the browser has already moved its
+  // history cursor by the time that event fires, which none of these
+  // other triggers ever do).
+  const guardNeonExit = useCallback(
+    (action: () => void) => {
+      if (view === "neon-editor" && neonEditorRef.current?.isUnsaved()) {
+        neonEditorRef.current.attemptNavigation(action);
+      } else {
+        action();
+      }
+    },
+    [view],
+  );
+
   // Browser back/forward should step through Mothra's own view history
   // instead of leaving the app on the first Back press (issue #133). There's
   // no router/URL sync in this app, so `view`/`selectedProjectId` are pushed
@@ -142,19 +163,17 @@ export default function App() {
       const targetView = state?.view ?? "landing";
       const targetProjectId = state?.selectedProjectId ?? null;
 
-      // Issue #266: the browser Back/Forward buttons drive this same view
-      // history (see the comment above), so a Back press away from the
-      // Neon editor needs the exact same unsaved-work confirmation its
-      // in-app Back/Prev/Next/filmstrip/arrow-key navigation already goes
-      // through (NeonBatchEditor's attemptNavigation, exposed via
-      // neonEditorRef -- see NeonEditorHandle's doc comment).
+      // Issue #266/#272: the browser Back/Forward buttons drive this same
+      // view history (see the comment above), so a Back press away from the
+      // Neon editor needs the same unsaved-work confirmation guardNeonExit
+      // gives every other exit from it.
       if (view === "neon-editor" && neonEditorRef.current?.isUnsaved()) {
         // The browser has already moved its history cursor by the time this
         // event fires -- push the current state straight back on top to
         // undo that move while the confirm modal decides what happens,
         // keeping history in sync with the editor still being on screen.
         window.history.pushState({ view, selectedProjectId }, "");
-        neonEditorRef.current.attemptNavigation(() => {
+        guardNeonExit(() => {
           // Deliberately NOT flagged as a pop: if confirmed, this should
           // behave like any other forward navigation (a plain setView,
           // handled by the push-vs-replace effect above like any other),
@@ -175,7 +194,7 @@ export default function App() {
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [view, selectedProjectId]);
+  }, [view, selectedProjectId, guardNeonExit]);
 
   const {
     pendingXmlFile,
@@ -242,21 +261,22 @@ export default function App() {
       duration: 0,
       action: {
         label: "view",
-        onClick: () => {
-          if (job.projectId) setSelectedProjectId(job.projectId);
-          if (status === "succeeded") {
-            setPendingProjectTab(SUCCESS_TAB_BY_JOB_KIND[job.kind] ?? null);
-            setView("project");
-          } else if (
-            (status === "failed" || status === "cancelled") &&
-            RESUMABLE_JOB_KINDS.has(job.kind)
-          ) {
-            setResumeJob({ jobId: job.jobId, kind: job.kind });
-            setView("processing");
-          } else {
-            setView("project");
-          }
-        },
+        onClick: () =>
+          guardNeonExit(() => {
+            if (job.projectId) setSelectedProjectId(job.projectId);
+            if (status === "succeeded") {
+              setPendingProjectTab(SUCCESS_TAB_BY_JOB_KIND[job.kind] ?? null);
+              setView("project");
+            } else if (
+              (status === "failed" || status === "cancelled") &&
+              RESUMABLE_JOB_KINDS.has(job.kind)
+            ) {
+              setResumeJob({ jobId: job.jobId, kind: job.kind });
+              setView("processing");
+            } else {
+              setView("project");
+            }
+          }),
       },
     });
   });
@@ -270,16 +290,24 @@ export default function App() {
     setView("projects");
   };
 
-  const handleLogout = () => {
+  const doLogout = () => {
     clearToken();
     setCurrentUser(null);
     setProjects([]);
     setSelectedProjectId(null);
     setView("landing");
   };
+  // The user-initiated "logout" button goes through the same unsaved-work
+  // confirmation as any other exit from the Neon editor. The server-driven
+  // forced logout below (a dead/expired session even a refresh couldn't
+  // fix, see apiFetch's registerUnauthenticatedHandler) deliberately calls
+  // doLogout directly instead -- the session is already gone server-side by
+  // that point, so there's nothing a "stay and keep editing" cancel could
+  // actually preserve, only a client UI stuck believing it's still logged in.
+  const handleLogout = () => guardNeonExit(doLogout);
 
   useEffect(() => {
-    registerUnauthenticatedHandler(handleLogout);
+    registerUnauthenticatedHandler(doLogout);
   }, []);
 
   useEffect(() => {
@@ -303,12 +331,12 @@ export default function App() {
       <Navbar
         currentUser={currentUser}
         onLogout={handleLogout}
-        onLogin={() => setView("login")}
-        onGetStarted={() => setView("register")}
-        onMyProjects={() => setView("projects")}
-        onDocs={() => setView("docs")}
-        onHome={() => setView("landing")}
-        onAccount={() => setView("account")}
+        onLogin={() => guardNeonExit(() => setView("login"))}
+        onGetStarted={() => guardNeonExit(() => setView("register"))}
+        onMyProjects={() => guardNeonExit(() => setView("projects"))}
+        onDocs={() => guardNeonExit(() => setView("docs"))}
+        onHome={() => guardNeonExit(() => setView("landing"))}
+        onAccount={() => guardNeonExit(() => setView("account"))}
       />
       <AppRouter
         view={view}
