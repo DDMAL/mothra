@@ -207,9 +207,10 @@ def _resolve_hints(
                                         f" falling through to tier 2", file=sys.stderr,
                                     )
                         if frame_ok:
-                            accepted_jsomr = jsomr_records
-                            yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
-                            if yolo_stave_hints:
+                            converted_staves = staffline_adapter.staves_from_jsomr(jsomr_records)
+                            if converted_staves:
+                                accepted_jsomr = jsomr_records
+                                yolo_stave_hints = converted_staves
                                 stave_source = "staffline_detection"
                             if ev:
                                 ev({"type": "log", "message":
