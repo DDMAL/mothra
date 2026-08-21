@@ -49,6 +49,12 @@ export function dismissToast(id: number) {
   emitChange();
 }
 
+export function clearToasts(): void {
+  if (toasts.length === 0) return;
+  toasts = [];
+  emitChange();
+}
+
 export function subscribeToasts(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -74,4 +80,5 @@ export const toast = {
     opts?: { duration?: number; action?: ToastAction },
   ) => addToast(message, "warning", opts),
   dismiss: dismissToast,
+  clear: clearToasts,
 };

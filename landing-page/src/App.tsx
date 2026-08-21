@@ -12,7 +12,7 @@ import { useEncodingFlow } from "./hooks/useEncodingFlow";
 import { useScrollFade } from "./hooks/useScrollFade";
 import { apiFetch, registerUnauthenticatedHandler } from "./lib/apiFetch";
 import { useActiveJobWatcher } from "./hooks/useActiveJobWatcher";
-import { toast } from "./lib/toast";
+import { toast, clearToasts } from "./lib/toast";
 
 // Where a job-done toast's "view" button should actually land (issue #196):
 // - succeeded: the tab holding what the job produced.
@@ -121,6 +121,10 @@ export default function App() {
   } = useEncodingFlow(selectedProjectId, setProjects);
 
   useScrollFade(view);
+
+  useEffect(() => {
+    clearToasts();
+  }, [view]); // clear any lingering toast(s)
 
   useActiveJobWatcher((job, status) => {
     if (status === "succeeded" && job.projectId != null) {
