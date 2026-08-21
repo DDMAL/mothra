@@ -20,3 +20,14 @@
 	path = paco-classifier
 	url = https://github.com/DDMAL/Paco_classifier.git
 	branch = gianna/calvo-training-script
+# Pitch finding for the MEI encoding step (landing-page/scripts/pitch_stage.py
+# imports its scripts/ as flat modules -- it has no pyproject.toml, so unlike
+# staff-finding/ it is NOT pip-installed). Unpinned to a branch, i.e. tracking
+# default-branch commits the same way ic/, neon/ and mothra-text/ do: the two
+# algorithms in it are explicitly unvalidated prototypes (no pitch ground truth
+# exists yet), so a bump is a change worth reviewing on its own, not a freeze
+# to route around. Bumping it can move every <nc>'s pname/oct on a page --
+# re-run an encode and compare before merging one.
+[submodule "pitch-finding"]
+	path = pitch-finding
+	url = https://github.com/DDMAL/Standalone-Pitch-Finder.git

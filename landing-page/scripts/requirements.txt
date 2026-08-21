@@ -11,6 +11,13 @@ python-dotenv>=1.0.0
 ultralytics
 scipy
 scikit-image
+# Already arrives transitively via ultralytics, and declared again by
+# staff-finding's pyproject -- listed explicitly because pitch_stage.py's
+# algorithm now imports cv2 directly (via the submodule's glyph_pixels), so
+# dropping ultralytics would otherwise silently disable pitch finding.
+# opencv-python, NOT -headless: both provide `cv2` and installing both in one
+# environment is a known conflict (see staff-finding/pyproject.toml).
+opencv-python
 slowapi
 huggingface_hub>=0.20.0
 celery[redis]>=5.3.0

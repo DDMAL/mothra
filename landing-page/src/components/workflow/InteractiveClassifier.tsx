@@ -63,6 +63,11 @@ export default function InteractiveClassifier({
   // with no annotation row). Not reported on a *resumed* session (IC's own
   // staging service doesn't track this after the fact) -- mothra#220 DL-1.
   const [synthetic, setSynthetic] = useState(false);
+  // Whether the user has collapsed the DL-1 banner to its corner chip. The
+  // warning cannot be turned off -- see the render site -- only folded away
+  // once read, and the staging effect clears this per page so acknowledging
+  // one page never carries silently to the next.
+  const [warningDismissed, setWarningDismissed] = useState(false);
   // Set only once the user finishes IC's create-session screen (the iframe
   // posts it back); until then there's nothing to encode.
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -114,6 +119,7 @@ export default function InteractiveClassifier({
     setIcOrigin(null);
     setSessionId(null);
     setSynthetic(false);
+    setWarningDismissed(false);
 
     apiFetch(`/api/projects/${projectId}/ic/start`, {
       method: "POST",
@@ -349,12 +355,39 @@ export default function InteractiveClassifier({
         {/* mothra#220 DL-1: the fabricated placeholder bbox grid (no real
             predict run for this page -- generate_bboxes()'s fallback) must
             never look like real detections. Overlaid, not just a normal
-            list item, so it can't be scrolled past or missed. */}
-        {synthetic && icUrl && (
-          <div className="absolute top-0 left-0 right-0 z-10 bg-yellow-400 text-[#1D3335] text-sm font-semibold text-center py-1.5">
-            SYNTHETIC — no prediction ran for this page; the boxes below are a
-            placeholder grid, not real detections
+            list item, so it can't be scrolled past or missed.
+            Dismissing *collapses* the banner to the chip below -- it does not
+            clear it. The full sentence covers the top of the canvas, which is
+            worth getting out of the way once read, but a page whose boxes are
+            fabricated stays visibly marked for as long as it is on screen, or
+            DL-1's requirement is gone. Reset per page by the staging effect. */}
+        {synthetic && icUrl && !warningDismissed && (
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-start gap-2 pl-3 pr-2 py-1.5 bg-yellow-400 text-[#1D3335] text-sm font-semibold">
+            <span className="flex-1 text-center">
+              SYNTHETIC — no prediction ran for this page; the boxes below are a
+              placeholder grid, not real detections
+            </span>
+            <button
+              type="button"
+              onClick={() => setWarningDismissed(true)}
+              aria-label="Collapse the synthetic-data warning"
+              title="Collapse to a marker. The warning stays until this page has real detections."
+              className="shrink-0 px-1.5 rounded leading-none hover:bg-[#1D3335]/15 cursor-pointer"
+            >
+              ✕
+            </button>
           </div>
+        )}
+        {synthetic && icUrl && warningDismissed && (
+          <button
+            type="button"
+            onClick={() => setWarningDismissed(false)}
+            aria-label="Show the synthetic-data warning"
+            title="SYNTHETIC — no prediction ran for this page; the boxes are a placeholder grid, not real detections"
+            className="absolute top-1.5 right-2 z-10 px-2 py-0.5 rounded bg-yellow-400 text-[#1D3335] text-xs font-bold hover:opacity-90 cursor-pointer"
+          >
+            SYNTHETIC
+          </button>
         )}
         {/* IC editor area */}
         <div className="flex-1 min-h-0 flex items-stretch justify-stretch overflow-hidden">

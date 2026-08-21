@@ -19,6 +19,7 @@ from encode_to_mei import (
     image_dimensions, scale_facsimile, trace_stave_zone_parity,
 )
 import staffline_adapter
+import pitch_stage
 
 def _fetch_original_bytes(
     project_id: Optional[int], image_name: Optional[str], image_id: Optional[str] = None,
@@ -86,6 +87,11 @@ def _resolve_hints(
     image_name alone is not unique within a project once duplicate-named
     uploads are allowed.
 
+    Returns (text_alignment, stave_hints, stave_source, jsomr_records). The
+    last element is tier 1's raw per-line records when tier 1 was accepted,
+    and [] otherwise -- pitch_stage.py reads the fitted centerlines
+    staves_from_jsomr() reduces to one y per line (see accepted_jsomr below).
+
     ev, if given, is _encode_one's own event-publishing closure -- used here
     only to emit [trace] lines confirming staves_from_jsomr()'s input/output
     record counts (and whether any stave fell back to its centerline-derived
@@ -95,6 +101,13 @@ def _resolve_hints(
     text_alignment = None
     yolo_stave_hints = []
     stave_source = None
+    # The tier-1 JSOMR records themselves, returned alongside the StaveBbox
+    # list they were reduced to: pitch_stage.py wants the per-line curve fits
+    # (a note's step read against the fitted line at that note's own x), which
+    # staves_from_jsomr() flattens away to one y per line per stave. Only ever
+    # populated on the accepted tier-1 path -- a frame-mismatch rejection must
+    # not leak geometrically-wrong lines to pitch finding either.
+    accepted_jsomr: list[dict] = []
     if project_id and (image_id or image_name):
         con = get_db_conn()
         try:
@@ -194,8 +207,10 @@ def _resolve_hints(
                                         f" falling through to tier 2", file=sys.stderr,
                                     )
                         if frame_ok:
-                            yolo_stave_hints = staffline_adapter.staves_from_jsomr(jsomr_records)
-                            if yolo_stave_hints:
+                            converted_staves = staffline_adapter.staves_from_jsomr(jsomr_records)
+                            if converted_staves:
+                                accepted_jsomr = jsomr_records
+                                yolo_stave_hints = converted_staves
                                 stave_source = "staffline_detection"
                             if ev:
                                 ev({"type": "log", "message":
@@ -215,7 +230,7 @@ def _resolve_hints(
             cur.close()
         finally:
             release_db_conn(con)
-    return text_alignment, yolo_stave_hints, stave_source
+    return text_alignment, yolo_stave_hints, stave_source, accepted_jsomr
 
 def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
                 project_id, image_name, clef_shape, clef_line, item=None,
@@ -263,7 +278,7 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints, stave_source = _resolve_hints(
+        text_alignment, yolo_stave_hints, stave_source, jsomr_records = _resolve_hints(
             project_id, image_name, page_w, page_h, ev=ev, image_id=image_id,
         )
         if text_alignment:
@@ -298,6 +313,19 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "validating"})
 
         ev({"type": "stage", "name": "processing"})
+        # Real pitch finding (algorithm #1 of the pitch-finding/ submodule),
+        # run against the FINAL stave list -- assign_glyphs_to_staves() can
+        # append recovered rows above, and a glyph on one of those should be
+        # pitched against the same lines its zone is built from. Returns
+        # advisory per-glyph tables; build_mei falls back to its own geometric
+        # placeholder for anything left unresolved, so this never gates the
+        # encode. See pitch_stage.run_pitch_finding's docstring.
+        pitch = pitch_stage.run_pitch_finding(
+            glyphs, staves, jsomr_records, image_bytes,
+            notation_type=notation_type or "square", tmp_dir=tmp_dir,
+        )
+        for line in pitch.log_lines:
+            ev({"type": "log", "message": line})
         stem = Path(image_filename).stem if image_filename else Path(xml_filename).stem
         image_ref = Path(image_filename) if image_filename else Path("")
         mei_bytes_out = build_mei(
@@ -307,6 +335,8 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             notation_type=notation_type or "square",
             text_alignment=text_alignment,
             n_detected_staves=n_input_staves,
+            pitch_map=pitch.pitches_by_glyph,
+            clef_line_map=pitch.clef_lines_by_glyph,
         )
         for msg in trace_stave_zone_parity(staves, mei_bytes_out):
             ev({"type": "log", "message": msg})

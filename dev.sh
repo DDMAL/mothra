@@ -105,6 +105,11 @@ WORKER_BIN="$ROOT/landing-page/scripts/.venv/bin/celery"
 [ -d "$ROOT/landing-page/node_modules" ] || die "landing-page deps not installed
   → cd landing-page && npm install"
 [ -f "$ROOT/landing-page/scripts/.env" ] || echo "${C_ERR}warning:${C_RST} landing-page/scripts/.env not found — backend may fail (DATABASE_URL/MOTHRA_SECRET)" >&2
+# Soft-warn, not die: encoding still works without it, but every <nc> falls
+# back to encode_to_mei.py's geometric placeholder pitch (see pitch_stage.py),
+# and the only sign is one line in the encode job log.
+[ -f "$ROOT/pitch-finding/scripts/pitch_finder.py" ] || echo "${C_ERR}warning:${C_RST} pitch-finding submodule not checked out — MEI encoding will fall back to placeholder pitch
+  → git submodule update --init pitch-finding" >&2
 [ -x "$TEXT_BIN" ] || die "missing text-finding venv: $TEXT_BIN
     → cd text-service && python3.10 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt \
       && pip install git+https://github.com/DDMAL/volpiano-display-utilities.git"

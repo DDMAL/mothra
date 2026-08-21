@@ -58,6 +58,20 @@ RUN pip install --no-cache-dir -r scripts/requirements.txt
 # editable-install pointer back at that same source tree.
 COPY --from=staff_finding . /app/staff-finding/
 RUN pip install --no-cache-dir /app/staff-finding
+# pitch-finding/ is the DDMAL/Standalone-Pitch-Finder submodule, likewise a
+# sibling of this build context -- provided via the "pitch_finding" additional
+# build context. Only its scripts/ dir is copied: the repo also carries ~70MB
+# of sample page images and debug renders that nothing at runtime reads.
+#
+# NOT pip-installed, unlike staff-finding: that repo carries its own
+# pyproject.toml and this one doesn't (it's a prototype driven by its CLIs,
+# with flat cross-imports like `import clef_rules`). pitch_stage.py puts this
+# directory on sys.path instead, which is the same flat-module resolution its
+# own CLIs rely on. PITCH_FINDING_DIR is how config.py finds it here -- the
+# config.yaml default is a bare-metal-checkout-relative path, which this
+# layout is deliberately not.
+COPY --from=pitch_finding scripts/ /app/pitch-finding/scripts/
+ENV PITCH_FINDING_DIR=/app/pitch-finding/scripts
 # Prerequisite: `git lfs pull` before `docker build` — the medieval model
 # checkpoints under scripts/assets/models/medieval/ are Git-LFS pointers
 # until that's run, and this COPY would otherwise ship stub files.
