@@ -559,9 +559,15 @@ that submodule — no LFS involved) and `git lfs pull` (see above — same LFS
 caveat applies locally for the medieval `.pt` weights specifically:
 `git-lfs` must be installed and registered, `brew install git-lfs && git
 lfs install`, *before* pulling, or those files silently stay as pointer
-text). `DATABASE_URL`/`MOTHRA_SECRET` come from a root-level `.env`
+text). `POSTGRES_PASSWORD`/`MOTHRA_SECRET` come from a root-level `.env`
 (gitignored, separate from `landing-page/scripts/.env`) that Compose
-auto-loads.
+auto-loads; both are required (`${VAR:?...}`), so `docker compose up`
+fails at interpolation rather than booting the bundled Postgres on a
+guessable password. `DATABASE_URL` stays optional and defaults to that
+bundled service using `POSTGRES_PASSWORD` — set it only to point at an
+external/managed database. Postgres reads `POSTGRES_PASSWORD` at initdb
+only, so changing it later needs the `pgdata` volume recreated
+(`docker compose down -v`).
 
 The `pitch-finding/` submodule rides in the same way, as a second additional
 build context (`pitch_finding`) on the same three services — but only its

@@ -6,7 +6,13 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: mothra
-      POSTGRES_PASSWORD: mothra
+      # No default: a hardcoded password here would also be the credential
+      # baked into every DATABASE_URL fallback below, so `up` must fail
+      # loudly on a missing one rather than come up on a guessable one --
+      # same required-secret treatment as MOTHRA_SECRET. Set it in .env
+      # (see .env.sample); changing it after first boot needs the pgdata
+      # volume recreated, since Postgres only reads it on initdb.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.sample)}
       POSTGRES_DB: mothra
     ports:
       - "127.0.0.1:5433:5432"   # host-only; 5433 avoids clashing with a host Postgres on 5432
@@ -33,7 +39,7 @@ services:
       # backend/worker, so IC and mothra share one database; IC creates its own
       # `ic_sessions` table lazily on first use, so it needs no migrate gate --
       # only a reachable Postgres.
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:${POSTGRES_PASSWORD}@postgres:5432/mothra}
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,7 +93,7 @@ services:
         staff_finding: ./staff-finding
         pitch_finding: ./pitch-finding
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:${POSTGRES_PASSWORD}@postgres:5432/mothra}
       MOTHRA_SECRET: ${MOTHRA_SECRET}
     command: python migrate.py
     depends_on:
@@ -104,7 +110,11 @@ services:
       - "8001:8001"
     environment:
       # Defaults to the bundled postgres service; set DATABASE_URL in .env to use an external/managed DB.
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+      # ${POSTGRES_PASSWORD} here is deliberately a plain reference, not `:?` --
+      # Compose interpolates this default even when DATABASE_URL *is* set, so a
+      # `:?` would make the external-DB path demand a password it never uses. The
+      # postgres service above carries the `:?`, and is always interpolated.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:${POSTGRES_PASSWORD}@postgres:5432/mothra}
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       IC_API_URL: http://ic:8000
@@ -112,6 +122,14 @@ services:
       TEXT_API_URL: http://text-service:8002
       PACO_API_URL: http://paco-classifier-service:8003
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      # config.py's PITCH_FINDING_ENABLED off switch. A container sees no host
+      # env it isn't handed, so without this line MOTHRA_PITCH_FINDING=0 is
+      # silently ignored under Compose and encoding keeps using real pitch
+      # finding. `:-` (empty default) leaves it on, which is what an empty
+      # value means to config.py. The worker is where the stage actually runs
+      # (tasks_encode.py); backend carries it too so both halves of the same
+      # image agree on the setting.
+      MOTHRA_PITCH_FINDING: ${MOTHRA_PITCH_FINDING:-}
     healthcheck:
       # /healthz (mothra#220 row 29) checks Postgres + Celery broker
       # reachability -- see main.py's healthz() docstring. Nothing in this
@@ -145,11 +163,13 @@ services:
         staff_finding: ./staff-finding
         pitch_finding: ./pitch-finding
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:mothra@postgres:5432/mothra}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:${POSTGRES_PASSWORD}@postgres:5432/mothra}
       MOTHRA_SECRET: ${MOTHRA_SECRET}
       CELERY_BROKER_URL: redis://redis:6379/0
       TEXT_API_URL: http://text-service:8002
       PACO_API_URL: http://paco-classifier-service:8003
+      # See backend above -- this is the service that actually runs the stage.
+      MOTHRA_PITCH_FINDING: ${MOTHRA_PITCH_FINDING:-}
     depends_on:
       redis:
         condition: service_started
