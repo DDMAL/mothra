@@ -3,6 +3,7 @@ import type { AnnotationSet } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import TruncatedName from "../shared/TruncatedName";
 import { useZoomPan, MAX_SCALE } from "../../hooks/useZoomPan";
+import { yoloTxtToJson } from "../../utils/yolo";
 
 interface BBox {
   cls: number;
@@ -243,7 +244,19 @@ export default function AnnotationViewerModal({
                   onClick={() => handleDownload(viewState.rawYolo, "txt")}
                   className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
                 >
-                  download
+                  download (.txt)
+                </button>
+                <button
+                  onClick={() =>
+                    handleDownload(
+                      yoloTxtToJson(viewState.rawYolo, set.imageName),
+                      "json",
+                      "application/json",
+                    )
+                  }
+                  className="text-xs font-mono text-[#1D3335]/60 hover:text-[#1D3335] cursor-pointer"
+                >
+                  download (.json)
                 </button>
                 <button
                   onClick={() => handleCopyText(viewState.rawYolo)}

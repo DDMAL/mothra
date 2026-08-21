@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 import type {
   View,
   Project,
@@ -12,6 +12,7 @@ import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
+import { yoloTxtToJson } from "../utils/yolo";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
@@ -31,6 +32,7 @@ import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
+import type { NeonEditorHandle } from "./workflow/NeonBatchEditor";
 
 // completionDelayMs used to be 4000 -- a purely cosmetic pause after the real
 // work already finished, per mothra#220 DL-10. Trimmed to a brief settle
@@ -67,17 +69,6 @@ function computeBatchRun(
     imageIds: used.map((img) => img.id),
     folios: used.map((img) => img.folio!),
   };
-}
-
-function yoloTxtToJson(yoloTxt: string, imageName: string): string {
-  const annotations = yoloTxt
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [cls, x, y, w, h] = line.trim().split(" ").map(Number);
-      return { class: cls, x_center: x, y_center: y, width: w, height: h };
-    });
-  return JSON.stringify({ imageName, annotations }, null, 2);
 }
 
 interface AppRouterProps {
@@ -117,6 +108,10 @@ interface AppRouterProps {
   ) => void;
   pendingProjectTab: ProjectInitialTab | null;
   setPendingProjectTab: (tab: ProjectInitialTab | null) => void;
+  // Lets App.tsx's browser back/forward popstate handler reuse
+  // NeonBatchEditor's own unsaved-work confirmation gate (issue #266) --
+  // see NeonEditorHandle's doc comment.
+  neonEditorRef: RefObject<NeonEditorHandle | null>;
   handleEncodeBatchResult: (ev: {
     item: number;
     session_id: string;
@@ -156,6 +151,7 @@ export default function AppRouter({
   setResumeJob,
   pendingProjectTab,
   setPendingProjectTab,
+  neonEditorRef,
   handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
@@ -949,7 +945,14 @@ export default function AppRouter({
           <ProcessingPage
             {...STEP_TIMING}
             logs={encodingLogs}
-            onBack={() => goToIc()}
+            // issue #272: in auto IC mode, goToIc() would land on "ic-auto",
+            // a page with no UI of its own that immediately re-triggers
+            // auto-classification the moment it mounts -- not a page worth
+            // going "back" to. Manual mode's "ic" is a real, resumable
+            // classifier session, so it keeps the original behavior.
+            onBack={() =>
+              icSettings.mode === "auto" ? setView("project") : goToIc()
+            }
             onComplete={() => {
               if (selectedProjectId && selectedProject) {
                 updateProjectSteps(
@@ -1083,6 +1086,7 @@ export default function AppRouter({
     case "neon-editor":
       return selectedProject && selectedProject.meiFiles.length > 0 ? (
         <NeonBatchEditor
+          ref={neonEditorRef}
           project={selectedProject}
           meiFiles={selectedProject.meiFiles}
           onFileCorrected={(id) =>
@@ -1109,7 +1113,10 @@ export default function AppRouter({
             }
             setView("neon-completion");
           }}
-          onBack={() => setView("encoding-completion")}
+          // issue #272: once you're editing in Neon, none of the
+          // processing/IC/encoding stages that led here are worth
+          // revisiting -- back always returns straight to the project page.
+          onBack={() => setView("project")}
         />
       ) : null;
     case "neon-completion":

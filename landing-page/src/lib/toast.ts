@@ -49,6 +49,22 @@ export function dismissToast(id: number) {
   emitChange();
 }
 
+// Drops any lingering *persistent* toasts (duration: 0) -- used to clear a
+// job-status toast (see useActiveJobWatcher in App.tsx) once the user
+// navigates away from wherever they were when it appeared, since those are
+// deliberately given no auto-dismiss timer so a background job's
+// completion isn't missed regardless of page. Scoped to duration:0 only:
+// an ordinary self-dismissing toast (e.g. apiFetch's session-expiry notice,
+// fired immediately before the logout that navigates to "landing") already
+// has its own timer and must survive a same-tick navigation long enough to
+// actually be read, not vanish the instant the view changes.
+export function clearToasts(): void {
+  const next = toasts.filter((t) => t.duration !== 0);
+  if (next.length === toasts.length) return;
+  toasts = next;
+  emitChange();
+}
+
 export function subscribeToasts(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -74,4 +90,5 @@ export const toast = {
     opts?: { duration?: number; action?: ToastAction },
   ) => addToast(message, "warning", opts),
   dismiss: dismissToast,
+  clear: clearToasts,
 };
