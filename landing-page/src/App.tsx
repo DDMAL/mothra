@@ -212,9 +212,12 @@ export default function App() {
 
   useScrollFade(view);
 
+  // Issue #265: drop any lingering persistent (duration: 0) toast when the
+  // user navigates to a different view -- see clearToasts's doc comment for
+  // why this is scoped to persistent toasts only, not every toast.
   useEffect(() => {
     clearToasts();
-  }, [view]); // clear any lingering toast(s)
+  }, [view]);
 
   useActiveJobWatcher((job, status) => {
     if (status === "succeeded" && job.projectId != null) {

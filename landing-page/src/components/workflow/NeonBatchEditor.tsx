@@ -415,7 +415,14 @@ const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
           </button>
 
           <button
-            onClick={allCorrected ? onFinish : undefined}
+            onClick={
+              // issue #266 (CodeRabbit): allCorrected only reflects each
+              // file having been marked done at some point -- editing the
+              // current file again afterward doesn't clear its "done" mark,
+              // so this still needs the same unsaved-work gate as every
+              // other exit from the editor.
+              allCorrected ? () => attemptNavigation(onFinish) : undefined
+            }
             disabled={!allCorrected}
             className={`${BTN_BASE} border-none ${
               allCorrected
