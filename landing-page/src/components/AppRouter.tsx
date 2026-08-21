@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 import type {
   View,
   Project,
@@ -12,6 +12,7 @@ import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
+import { yoloTxtToJson } from "../utils/yolo";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
@@ -31,6 +32,7 @@ import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
+import type { NeonEditorHandle } from "./workflow/NeonBatchEditor";
 
 // completionDelayMs used to be 4000 -- a purely cosmetic pause after the real
 // work already finished, per mothra#220 DL-10. Trimmed to a brief settle
@@ -67,17 +69,6 @@ function computeBatchRun(
     imageIds: used.map((img) => img.id),
     folios: used.map((img) => img.folio!),
   };
-}
-
-function yoloTxtToJson(yoloTxt: string, imageName: string): string {
-  const annotations = yoloTxt
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const [cls, x, y, w, h] = line.trim().split(" ").map(Number);
-      return { class: cls, x_center: x, y_center: y, width: w, height: h };
-    });
-  return JSON.stringify({ imageName, annotations }, null, 2);
 }
 
 interface AppRouterProps {
@@ -117,6 +108,10 @@ interface AppRouterProps {
   ) => void;
   pendingProjectTab: ProjectInitialTab | null;
   setPendingProjectTab: (tab: ProjectInitialTab | null) => void;
+  // Lets App.tsx's browser back/forward popstate handler reuse
+  // NeonBatchEditor's own unsaved-work confirmation gate (issue #266) --
+  // see NeonEditorHandle's doc comment.
+  neonEditorRef: RefObject<NeonEditorHandle | null>;
   handleEncodeBatchResult: (ev: {
     item: number;
     session_id: string;
@@ -156,6 +151,7 @@ export default function AppRouter({
   setResumeJob,
   pendingProjectTab,
   setPendingProjectTab,
+  neonEditorRef,
   handleEncodeBatchResult,
 }: AppRouterProps) {
   const {
@@ -1083,6 +1079,7 @@ export default function AppRouter({
     case "neon-editor":
       return selectedProject && selectedProject.meiFiles.length > 0 ? (
         <NeonBatchEditor
+          ref={neonEditorRef}
           project={selectedProject}
           meiFiles={selectedProject.meiFiles}
           onFileCorrected={(id) =>

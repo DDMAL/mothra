@@ -13,6 +13,7 @@ import { useScrollFade } from "./hooks/useScrollFade";
 import { apiFetch, registerUnauthenticatedHandler } from "./lib/apiFetch";
 import { useActiveJobWatcher } from "./hooks/useActiveJobWatcher";
 import { toast, clearToasts } from "./lib/toast";
+import type { NeonEditorHandle } from "./components/workflow/NeonBatchEditor";
 
 // Where a job-done toast's "view" button should actually land (issue #196):
 // - succeeded: the tab holding what the job produced.
@@ -60,6 +61,11 @@ export default function App() {
   } | null>(null);
   const [pendingProjectTab, setPendingProjectTab] =
     useState<ProjectInitialTab | null>(null);
+  // Lets the popstate handler below reuse NeonBatchEditor's own
+  // unsaved-work confirmation gate for the browser back/forward buttons
+  // (issue #266), the same gate its in-app Back/Prev/Next/filmstrip/arrow-key
+  // navigation already goes through.
+  const neonEditorRef = useRef<NeonEditorHandle>(null);
 
   const selectedProject =
     projects.find((p) => p.id === selectedProjectId) ?? null;
@@ -98,13 +104,40 @@ export default function App() {
         view?: View;
         selectedProjectId?: number | null;
       } | null;
+      const targetView = state?.view ?? "landing";
+      const targetProjectId = state?.selectedProjectId ?? null;
+
+      // Issue #266: the browser Back/Forward buttons drive this same view
+      // history (see the comment above), so a Back press away from the
+      // Neon editor needs the exact same unsaved-work confirmation its
+      // in-app Back/Prev/Next/filmstrip/arrow-key navigation already goes
+      // through (NeonBatchEditor's attemptNavigation, exposed via
+      // neonEditorRef -- see NeonEditorHandle's doc comment).
+      if (view === "neon-editor" && neonEditorRef.current?.isUnsaved()) {
+        // The browser has already moved its history cursor by the time this
+        // event fires -- push the current state straight back on top to
+        // undo that move while the confirm modal decides what happens,
+        // keeping history in sync with the editor still being on screen.
+        window.history.pushState({ view, selectedProjectId }, "");
+        neonEditorRef.current.attemptNavigation(() => {
+          // Deliberately NOT flagged as a pop: if confirmed, this should
+          // behave like any other forward navigation (a plain setView that
+          // pushes a fresh history entry for the target view), the same as
+          // NeonBatchEditor's in-app Back button already does -- not like a
+          // true history back() to the entry we just pushed over.
+          setView(targetView);
+          setSelectedProjectId(targetProjectId);
+        });
+        return;
+      }
+
       isPoppingRef.current = true;
-      setView(state?.view ?? "landing");
-      setSelectedProjectId(state?.selectedProjectId ?? null);
+      setView(targetView);
+      setSelectedProjectId(targetProjectId);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [view, selectedProjectId]);
 
   const {
     pendingXmlFile,
@@ -266,6 +299,7 @@ export default function App() {
         setResumeJob={setResumeJob}
         pendingProjectTab={pendingProjectTab}
         setPendingProjectTab={setPendingProjectTab}
+        neonEditorRef={neonEditorRef}
         handleEncodeBatchResult={handleEncodeBatchResult}
       />
       <Footer />
