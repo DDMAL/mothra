@@ -903,14 +903,14 @@ export default function AppRouter({
       ];
       return (
         <InteractiveClassifier
-          // Remount on a resume: `initialImageName` is only read by a lazy
+          // Remount on a resume: `initialImageId` is only read by a lazy
           // useState initializer, so picking sessions from *inside* this
           // view (its own "saved sessions" button) would otherwise change
           // the prop with nothing reading it -- same `view`, same element,
           // no remount, and the click would look like a no-op.
           key={resumeIcSessions.map((r) => r.sessionId).join(",") || "fresh"}
           images={images}
-          initialImageName={resumeImages[0]?.name ?? null}
+          initialImageId={resumeImages[0]?.id ?? null}
           usedImageCount={selectedProject.usedImageIds.length}
           onBack={() => setView("project")}
           projectId={selectedProjectId}

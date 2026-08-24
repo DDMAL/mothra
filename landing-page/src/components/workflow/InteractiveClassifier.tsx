@@ -14,7 +14,11 @@ interface InteractiveClassifierProps {
   // saved session in "manage IC sessions". Nothing session-specific needs to
   // be threaded through beyond this: /ic/start resumes whatever session is
   // saved for the selected page, and IC keeps at most one per page.
-  initialImageName?: string | null;
+  // A project_images.id, not a file name: duplicate-named uploads are allowed
+  // (mothra#241), and the host already resolved the session to one specific
+  // ProjectImage -- matching by name here would throw that away and open
+  // whichever same-named page happens to come first.
+  initialImageId?: string | null;
   // How many pages the project has selected in total, pending or not. Lets the
   // empty state tell "nothing selected yet" apart from "all already encoded".
   usedImageCount: number;
@@ -46,7 +50,7 @@ interface InteractiveClassifierProps {
 
 export default function InteractiveClassifier({
   images,
-  initialImageName = null,
+  initialImageId = null,
   usedImageCount,
   projectId,
   onBack,
@@ -64,8 +68,8 @@ export default function InteractiveClassifier({
   // switches on `view`), and after that the filmstrip owns the selection - a
   // resume shouldn't keep yanking the user back to its page.
   const [currentIdx, setCurrentIdx] = useState(() => {
-    const i = initialImageName
-      ? images.findIndex((im) => im.name === initialImageName)
+    const i = initialImageId
+      ? images.findIndex((im) => im.id === initialImageId)
       : -1;
     return i === -1 ? 0 : i;
   });
@@ -104,8 +108,13 @@ export default function InteractiveClassifier({
   // click on that path, so we run the queue logic ourselves once state settles.
   const [autoQueueRequested, setAutoQueueRequested] = useState(false);
 
-  const queuedNames = useMemo(
-    () => new Set(queue.map((q) => q.image.name)),
+  // Keyed by project_images.id, not name: two pages in one project may share
+  // a file name (mothra#241), and a name-keyed set marks both queued off one
+  // click -- disabling the second page's "queue page" button, ticking its
+  // filmstrip thumbnail, and skipping it on advancement, with no way to queue
+  // it at all.
+  const queuedIds = useMemo(
+    () => new Set(queue.map((q) => q.image.id)),
     [queue],
   );
 
@@ -215,29 +224,29 @@ export default function InteractiveClassifier({
     if (!sessionId || !img) return;
     setError(null);
     setQueue((prev) =>
-      prev.some((q) => q.image.name === img.name)
+      prev.some((q) => q.image.id === img.id)
         ? // Same page re-queued (it stays editable, so this can happen): keep
           //   the newest session id rather than adding a second entry.
           prev.map((q) =>
-            q.image.name === img.name ? { image: img, sessionId } : q,
+            q.image.id === img.id ? { image: img, sessionId } : q,
           )
         : [...prev, { image: img, sessionId }],
     );
     const nextIdx = images.findIndex(
-      (im, idx) => idx > currentIdx && !queuedNames.has(im.name),
+      (im, idx) => idx > currentIdx && !queuedIds.has(im.id),
     );
     if (nextIdx !== -1) setCurrentIdx(nextIdx);
-  }, [sessionId, img, images, currentIdx, queuedNames]);
+  }, [sessionId, img, images, currentIdx, queuedIds]);
 
   // Run the queue path for an auto-exported page once the session id and
   // current page have settled. Gated on the flag (reset immediately) so it
   // fires exactly once per auto-export, and skips a page already queued.
   useEffect(() => {
-    if (autoQueueRequested && sessionId && img && !queuedNames.has(img.name)) {
+    if (autoQueueRequested && sessionId && img && !queuedIds.has(img.id)) {
       setAutoQueueRequested(false);
       handleQueuePage();
     }
-  }, [autoQueueRequested, sessionId, img, queuedNames, handleQueuePage]);
+  }, [autoQueueRequested, sessionId, img, queuedIds, handleQueuePage]);
 
   // Export every queued session's GameraXML and hand the resulting XML +
   // image pairs to the batch encoder. Because the XML is snapshotted here
@@ -382,10 +391,10 @@ export default function InteractiveClassifier({
         {sessionId && (
           <button
             onClick={handleQueuePage}
-            disabled={finalizing || queuedNames.has(img?.name ?? "")}
+            disabled={finalizing || queuedIds.has(img?.id ?? "")}
             className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {queuedNames.has(img?.name ?? "") ? "queued" : "queue page"}
+            {queuedIds.has(img?.id ?? "") ? "queued" : "queue page"}
           </button>
         )}
         {/* A page that has already been encoded is filtered out of `images`,
@@ -530,7 +539,7 @@ export default function InteractiveClassifier({
               {visibleImages.map((thumb, i) => {
                 const globalIdx = start + i;
                 const active = globalIdx === currentIdx;
-                const queued = queuedNames.has(thumb.name);
+                const queued = queuedIds.has(thumb.id);
                 return (
                   <button
                     key={thumb.id}
