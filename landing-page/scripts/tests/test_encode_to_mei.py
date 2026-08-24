@@ -783,9 +783,16 @@ def test_build_mei_podatus_components_share_facs_zone():
     assert ncs[0].get("facs") == ncs[1].get("facs")
 
 
-def test_build_mei_accid_nests_inside_next_nc():
-    """An accidental glyph must nest inside the <nc> of the note immediately
-    to its right, not vanish or float as its own <layer> sibling."""
+def test_build_mei_accid_attaches_beside_next_neume():
+    """An accidental glyph must attach as a <syllable> child immediately
+    preceding the <neume> of the note to its right, not nest inside <nc>/
+    <neume> (not a valid parent per MEI's Neumes module -- confirmed
+    empirically by Neon's own ConvertMei.ts, which only treats <accid>
+    inside <syllable> as invalid when that <syllable> has no <neume>
+    alongside it) and not vanish or float as its own <layer> sibling. It
+    must also carry its own xml:id and a @facs pointing at its own zone --
+    without pname/oct, that's the only render position Verovio has for it
+    (confirmed against a real example in Neon's own schema_test.mei)."""
     stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
     glyphs_by_stave = {
         0: [
@@ -800,9 +807,41 @@ def test_build_mei_accid_nests_inside_next_nc():
     )
     root = ET.fromstring(xml_bytes)
     layer = root.find(f".//{MEI_NS}layer")
-    assert layer.find(f"{MEI_NS}accid") is None      # no standalone <accid> sibling
-    nc_el = root.find(f".//{MEI_NS}nc[@facs='#z-g1']")
-    assert nc_el is not None
-    accid_el = nc_el.find(f"{MEI_NS}accid")
-    assert accid_el is not None
+    assert layer.find(f"{MEI_NS}accid") is None                    # no standalone <layer> sibling
+    syllable = root.find(f".//{MEI_NS}syllable")
+    assert syllable.find(f"{MEI_NS}nc/{MEI_NS}accid") is None       # not nested inside <nc> either
+    assert syllable.find(f"{MEI_NS}neume/{MEI_NS}accid") is None    # nor inside <neume>
+    children = list(syllable)
+    accid_idx = next(i for i, c in enumerate(children) if c.tag == f"{MEI_NS}accid")
+    neume_idx = next(i for i, c in enumerate(children) if c.tag == f"{MEI_NS}neume")
+    assert accid_idx == neume_idx - 1                               # immediately precedes its note
+    accid_el = children[accid_idx]
     assert accid_el.get("accid") == "f"
+    assert accid_el.get(mei.XML_ID) == "accid-gflat"
+    assert accid_el.get("facs") == "#z-gflat"
+    # That zone must be a real, already-registered one (the accid glyph's
+    # own bbox), not a dangling reference.
+    surface = root.find(f".//{MEI_NS}surface")
+    assert surface.find(f"{MEI_NS}zone[@{mei.XML_ID}='z-gflat']") is not None
+
+
+def test_build_mei_drops_and_logs_accid_with_no_neume_on_its_stave(capsys):
+    """An accidental has no valid MEI Neumes-module encoding when its stave
+    has no <neume> at all -- there's nothing for it to modify. It must be
+    dropped (not stuffed into a standalone <syllable>, which Neon's own
+    ConvertMei.ts would flag as invalid and strip back out) but this must
+    be LOGGED -- from the outside a dropped accidental looks identical to
+    the mothra#273 bug it isn't."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {0: [_glyph("gflat", 10, class_name="accidental.flat")]}
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="square",
+    )
+    root = ET.fromstring(xml_bytes)
+    assert root.find(f".//{MEI_NS}accid") is None
+    assert root.find(f".//{MEI_NS}syllable") is None
+    err = capsys.readouterr().err
+    assert "accidental(s) dropped" in err
+    assert "gflat" in err
