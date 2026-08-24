@@ -445,13 +445,14 @@ const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
             src={`/neon/editor.html?manifest=${currentSession.session_id}`}
             className="flex-1 border-none w-full"
             title={`Neon editor - ${currentFile?.name ?? ""}`}
-            onLoad={(e) =>
+            onLoad={(e) => {
+              e.currentTarget.contentWindow?.focus(); // focus new iframe immediately so shortcuts work
               applyNotationTypeFont(
                 e.currentTarget,
                 currentFile?.xmlContent,
                 notationTimerRef,
               )
-            }
+            }}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-[#ef4444]">
