@@ -22,6 +22,7 @@ from xml.etree import ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import encode_to_mei as mei  # noqa: E402
+from neume_mapping import NcTemplate  # noqa: E402
 
 MEI_NS = "{http://www.music-encoding.org/ns/mei}"
 
@@ -715,3 +716,93 @@ def test_verify_and_correct_syllables_preserves_special_element_position():
     assert len(layer.findall(f"{MEI_NS}divLine")) == 1
     syl_texts = [s.find(f"{MEI_NS}syl").text for s in layer.findall(f"{MEI_NS}syllable")]
     assert syl_texts == ["new1", "new2"]
+
+
+# --- component zone splitting / accidental nesting -- mothra#273 ---
+
+def test_component_zone_ids_shares_one_column_for_stacked_pair():
+    """A two-component neume whose width column is a single-element list
+    summing to the component count (podatus/oblique's "[2]") must share ONE
+    column/zone across both components -- only pitch, not x, tells them
+    apart, matching how a stacked pair (or a ligated pair) is actually
+    drawn."""
+    surface = ET.Element("surface")
+    glyph = mei.Glyph(id="g1", ulx=100, uly=50, ncols=20, nrows=40,
+                       class_name="neume.podatus2a", confidence=1.0, state="AUTOMATIC")
+    components = [NcTemplate(), NcTemplate(intm=1)]
+    zones = mei._component_zone_ids(surface, glyph, components, "[2]")
+    assert zones is not None
+    assert len(zones) == 2
+    assert zones[0] == zones[1]                # same zone id AND same ulx/lrx
+    assert len(surface.findall(f"{MEI_NS}zone")) == 1   # only one <zone> registered
+
+
+def test_component_zone_ids_first_alone_rest_grouped():
+    """A three-component neume whose width column sums to (but doesn't
+    match 1:1) the component count (scandicus's "[1, 2]") must give the
+    first component its own column and share a second, wider column
+    between the remaining two."""
+    surface = ET.Element("surface")
+    glyph = mei.Glyph(id="g1", ulx=0, uly=50, ncols=30, nrows=40,
+                       class_name="neume.scandicus23", confidence=1.0, state="AUTOMATIC")
+    components = [NcTemplate(), NcTemplate(intm=1), NcTemplate(intm=2)]
+    zones = mei._component_zone_ids(surface, glyph, components, "[1, 2]")
+    assert zones is not None
+    assert len(zones) == 3
+    assert zones[0][0] != zones[1][0]
+    assert zones[1] == zones[2]
+    assert zones[0][2] <= zones[1][1]           # first column left of the shared second
+    assert len(surface.findall(f"{MEI_NS}zone")) == 2
+
+
+def test_component_zone_ids_mismatched_width_still_bails_out():
+    """A width column that fits neither the 1:1 nor the sums-to-count shape
+    is a genuine data mismatch -- still falls back to None (the caller logs
+    it via mismatched_widths), not a silently-wrong split."""
+    surface = ET.Element("surface")
+    glyph = mei.Glyph(id="g1", ulx=0, uly=50, ncols=30, nrows=40,
+                       class_name="neume.bogus", confidence=1.0, state="AUTOMATIC")
+    components = [NcTemplate(), NcTemplate(intm=1), NcTemplate(intm=-1)]
+    assert mei._component_zone_ids(surface, glyph, components, "[1, 1]") is None
+
+
+def test_build_mei_podatus_components_share_facs_zone():
+    """End-to-end: a podatus glyph's two <nc>s must point at the same @facs
+    zone, so Neon draws them at the same x -- stacked by pitch alone, not
+    side by side."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {0: [_glyph("g1", 10, class_name="neume.podatus2a")]}
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="square",
+    )
+    root = ET.fromstring(xml_bytes)
+    ncs = root.findall(f".//{MEI_NS}neume/{MEI_NS}nc")
+    assert len(ncs) == 2
+    assert ncs[0].get("facs") == ncs[1].get("facs")
+
+
+def test_build_mei_accid_nests_inside_next_nc():
+    """An accidental glyph must nest inside the <nc> of the note immediately
+    to its right, not vanish or float as its own <layer> sibling."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    glyphs_by_stave = {
+        0: [
+            _glyph("gflat", 10, class_name="accidental.flat"),
+            _glyph("g1", 40, class_name="neume.punctum"),
+        ]
+    }
+    xml_bytes = mei.build_mei(
+        glyphs_by_stave, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type="square",
+    )
+    root = ET.fromstring(xml_bytes)
+    layer = root.find(f".//{MEI_NS}layer")
+    assert layer.find(f"{MEI_NS}accid") is None      # no standalone <accid> sibling
+    nc_el = root.find(f".//{MEI_NS}nc[@facs='#z-g1']")
+    assert nc_el is not None
+    accid_el = nc_el.find(f"{MEI_NS}accid")
+    assert accid_el is not None
+    assert accid_el.get("accid") == "f"
