@@ -1,3 +1,4 @@
+import logging
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -20,7 +21,7 @@ from models_api import router as models_router
 from encode_api import router as encode_router
 from account_api import router as account_router
 from inference_api import router as inference_router
-from ic_api import router as ic_router
+from ic_api import router as ic_router, verify_ic_finalize_support
 from text_api import router as text_router
 from cantus_api import router as cantus_router
 from batch_api import router as batch_router
@@ -124,6 +125,19 @@ cleanup_stale_sessions()
 # auth_api.cleanup_stale_neon_manifests's docstring. mei_api.py's
 # create_edit_session also calls it proactively on each new edit session.
 cleanup_stale_neon_manifests()
+
+# Before serving anything: confirm the IC this backend is configured against
+# still supports exporting WITHOUT finalising the session (ic_api.py's
+# `finalize=false`). An IC predating that parameter ignores it and finalises,
+# stranding the user's corrections behind a terminal EXPORT session with no
+# error raised anywhere -- so it is checked here rather than left to fail
+# silently, one encoded page at a time. Raises IcIncompatible (aborting
+# startup) only on a schema that positively shows the parameter missing; an
+# unreachable or unreadable IC warns and continues. See
+# verify_ic_finalize_support's docstring for why unreachable must not abort.
+_ic_compat = verify_ic_finalize_support()
+if _ic_compat != "ok":
+    logging.getLogger(__name__).info("IC finalize-support check: %s", _ic_compat)
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():

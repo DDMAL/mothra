@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import urllib.error
 import urllib.parse
@@ -41,6 +42,8 @@ from pydantic import BaseModel
 from config import IC_API_URL, IC_PUBLIC_URL
 
 from auth_api import get_current_user, db_cursor, require_project_owner
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

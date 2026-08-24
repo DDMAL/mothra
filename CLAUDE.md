@@ -748,7 +748,16 @@ session as *not* resumable, so `ic/start` stages a fresh one for that page.
 **`finalize=false`** (an `ic/`-side parameter, see `ic`'s `complete_session`;
 IC's own in-iframe export button passes it too whenever IC is running
 embedded), so the export is a snapshot and the session stays editable and
-resumable *after* encoding. Before that, encoding a page silently retired the
+resumable *after* encoding. The backend refuses to start against an IC
+whose OpenAPI schema shows that parameter missing (`ic_api.py`'s
+`verify_ic_finalize_support()`, called from `main.py`'s startup section):
+such an IC ignores the unknown query param and finalises, stranding the
+page's corrections with no error raised anywhere. Only a *positive*
+detection aborts -- an unreachable or unreadable IC warns and continues,
+since backend and ic are applied together and a startup abort on "IC isn't
+up yet" would CrashLoopBackOff the whole backend on an ordinary deploy
+race. `MOTHRA_IC_COMPAT_CHECK=0` bypasses it without a redeploy, and CD now
+rolls `ic` out and waits for it *before* applying `backend.yaml`. Before that, encoding a page silently retired the
 session behind it: re-entering step 1 for that page — the usual route being
 the project page's progress bar — got a blank new session instead of the
 corrections, and since an encoded page is also filtered out of
