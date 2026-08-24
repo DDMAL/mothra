@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   getActiveJobsSnapshot,
   subscribeActiveJobs,
@@ -11,6 +11,12 @@ export function useActiveJobWatcher(
   onJobDone: (job: ActiveJob, status: string) => void,
 ) {
   const jobs = useSyncExternalStore(subscribeActiveJobs, getActiveJobsSnapshot);
+
+  const onJobDoneRef = useRef(onJobDone);
+  useEffect(() => {
+    onJobDoneRef.current = onJobDone;
+  }, [onJobDone]);
+
   useEffect(() => {
     if (jobs.length === 0) return;
     const interval = setInterval(async () => {
@@ -24,11 +30,11 @@ export function useActiveJobWatcher(
           // slow-to-resolve fetch overlapping the next 5s tick can settle
           // the same job twice and fire onJobDone twice for it.
           if (markJobSettled(job.jobId)) {
-            onJobDone(job, data.status);
+            onJobDoneRef.current(job, data.status);
           }
         }
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [jobs, onJobDone]);
+  }, [jobs]);
 }
