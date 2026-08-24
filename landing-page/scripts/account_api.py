@@ -109,6 +109,7 @@ def delete_me(user=Depends(get_current_user)):
                 cur.execute("DELETE FROM project_images WHERE project_id=%s", (pid, ))
                 cur.execute("DELETE FROM project_models WHERE project_id=%s", (pid, ))
                 cur.execute("DELETE FROM staffline_detections WHERE project_id=%s", (pid, ))
+                cur.execute("DELETE FROM ic_xml_files WHERE project_id=%s", (pid, ))
             cur.execute("DELETE FROM projects WHERE user_id=%s", (user["id"], ))
             cur.execute("DELETE FROM users WHERE id=%s", (user["id"], ))
             con.commit()

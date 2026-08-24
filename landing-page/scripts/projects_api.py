@@ -25,7 +25,7 @@ router = APIRouter()
 def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
                          deleted_at, last_opened_at, is_pinned, used_annotation_json,
                          images, models, mei, annotations, text_alignments, cantus_source_id,
-                         stafflines):
+                         stafflines, ic_xml_files):
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -44,6 +44,11 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
         "textAlignments": text_alignments,
         "cantusSourceId": cantus_source_id,
         "stafflines": stafflines,
+        # Metadata only -- an exported GameraXML page runs to megabytes
+        # (one RLE mask per glyph), so the body is fetched per file from
+        # ic_api.py's /ic-xml/{id} endpoints rather than shipped with
+        # every project list request the way meiFiles' xmlContent is.
+        "icXmlFiles": ic_xml_files,
     }
 
 
@@ -53,6 +58,15 @@ def _map_annotation_row(aid, img_id, img_name, model_label=None):
         "imageSrc": f"/api/images/{img_id}" if img_id else None,
         "txtName": f"annotation-{aid}.txt", "jsonName": "",
         "modelLabel": model_label,
+    }
+
+
+def _map_ic_xml_row(xid, img_id, img_name, name, glyph_count, byte_size, created_at):
+    return {
+        "id": xid, "imageId": img_id, "imageName": img_name, "name": name,
+        "imageSrc": f"/api/images/{img_id}" if img_id else None,
+        "glyphCount": glyph_count, "byteSize": byte_size,
+        "createdAt": str(created_at) if created_at else None,
     }
 
 
@@ -111,9 +125,14 @@ def _project_row_to_dict(cur, row, username):
     images = [{"id": r[0], "name": r[1], "folio": r[2], "sourceId": r[3], "sourceName": r[4]} for r in cur.fetchall()]
     cur.execute("SELECT id, name, COALESCE(kind, 'yolo') FROM project_models WHERE project_id=%s", (pid,))
     models = [{"id": r[0], "name": r[1], "kind": r[2]} for r in cur.fetchall()]
-    cur.execute("SELECT id, name, xml_content, corrected, image_name, stave_source, image_id FROM mei_files WHERE project_id=%s", (pid,))
+    # created_at ASC, and carried through as createdAt: mei_files is
+    # append-only, so a page encoded more than once has several rows and the
+    # frontend has to be able to tell which is current (utils/mei.ts's
+    # latestMeiPerImage -- what the Neon editor lists).
+    cur.execute("SELECT id, name, xml_content, corrected, image_name, stave_source, image_id, created_at"
+                " FROM mei_files WHERE project_id=%s ORDER BY created_at ASC", (pid,))
     mei = [{"id": r[0], "name": r[1], "xmlContent": r[2], "corrected": bool(r[3]), "imageName": r[4],
-            "staveSource": r[5], "imageId": r[6]}
+            "staveSource": r[5], "imageId": r[6], "createdAt": str(r[7]) if r[7] else None}
            for r in cur.fetchall()]
     cur.execute("SELECT id, image_id, image_name, model_label FROM annotations WHERE project_id=%s", (pid,))
     annotations = [_map_annotation_row(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
@@ -130,11 +149,16 @@ def _project_row_to_dict(cur, row, username):
         " FROM staffline_detections WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
     stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in cur.fetchall()]
+    cur.execute(
+        "SELECT id, image_id, image_name, name, glyph_count, octet_length(xml_content), created_at"
+        " FROM ic_xml_files WHERE project_id=%s ORDER BY created_at ASC", (pid,)
+    )
+    ic_xml_files = [_map_ic_xml_row(*r) for r in cur.fetchall()]
     return _build_project_dict(
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
         images, models, mei, annotations, text_alignments, cantus_source_id,
-        stafflines,
+        stafflines, ic_xml_files,
     )
 
 
@@ -178,14 +202,15 @@ def list_projects(user=Depends(get_current_user)):
             models_by_pid.setdefault(pid, []).append({"id": mid, "name": mname, "kind": mkind})
 
         cur.execute(
-            "SELECT project_id, id, name, xml_content, corrected, image_name, stave_source, image_id"
-            " FROM mei_files WHERE project_id IN %s", (pids,)
+            "SELECT project_id, id, name, xml_content, corrected, image_name, stave_source, image_id, created_at"
+            " FROM mei_files WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         mei_by_pid: dict = {}
-        for pid, fid, fname, xml, corr, iname, stave_source, iid in cur.fetchall():
+        for pid, fid, fname, xml, corr, iname, stave_source, iid, created_at in cur.fetchall():
             mei_by_pid.setdefault(pid, []).append(
                 {"id": fid, "name": fname, "xmlContent": xml, "corrected": bool(corr), "imageName": iname,
-                 "staveSource": stave_source, "imageId": iid}
+                 "staveSource": stave_source, "imageId": iid,
+                 "createdAt": str(created_at) if created_at else None}
             )
 
         cur.execute(
@@ -221,6 +246,15 @@ def list_projects(user=Depends(get_current_user)):
                                     has_classifier_image, has_classifier_fallback, classifier_error, storage_variant)
             )
 
+        cur.execute(
+            "SELECT project_id, id, image_id, image_name, name, glyph_count,"
+            " octet_length(xml_content), created_at"
+            " FROM ic_xml_files WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
+        )
+        ic_xml_by_pid: dict = {}
+        for row_ in cur.fetchall():
+            ic_xml_by_pid.setdefault(row_[0], []).append(_map_ic_xml_row(*row_[1:]))
+
         result = [
             _build_project_dict(
                 row[0], row[1], user["username"], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
@@ -231,6 +265,7 @@ def list_projects(user=Depends(get_current_user)):
                 text_alignments=text_by_pid.get(row[0], []),
                 cantus_source_id=row[9],
                 stafflines=stafflines_by_pid.get(row[0], []),
+                ic_xml_files=ic_xml_by_pid.get(row[0], []),
             )
             for row in rows
         ]
@@ -295,10 +330,16 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
             (user["id"], body.name))
         pid = cur.fetchone()[0]
         con.commit()
+    # Every list-shaped field the project payload carries is spelled out,
+    # even though a fresh project has none of them: the frontend puts this
+    # object straight into its projects state (useProjectMutations'
+    # createProject) rather than re-fetching, so an omitted key lands as
+    # `undefined` on a Project and the tab reading it crashes on `.length`.
     return {"id": pid, "name": body.name, "user": user["username"],
             "images": [], "models": [], "meiFiles": [], "annotations": [],
             "stepsUnlocked": 0, "usedImageIds": [], "usedModelNames": [],
-            "deletedAt": None, "usedAnnotationNames": [], "cantusSourceId": None}
+            "deletedAt": None, "usedAnnotationNames": [], "cantusSourceId": None,
+            "textAlignments": [], "stafflines": [], "icXmlFiles": []}
 
 
 class UpdateProjectBody(BaseModel):
@@ -367,6 +408,7 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         # Database schema table) but still carries a project_id FK, which
         # would otherwise block this same DELETE FROM projects below.
         cur.execute("DELETE FROM staffline_detections WHERE project_id=%s", (project_id,))
+        cur.execute("DELETE FROM ic_xml_files WHERE project_id=%s", (project_id,))
         # IC persists its sessions (incl. page-image BYTEA) in a table it
         # owns; purge this project's rows too. Guarded by to_regclass since
         # the table only exists once the IC service has run against this DB.
@@ -388,6 +430,8 @@ def export_project(project_id: int, user=Depends(get_current_user)):
         images = cur.fetchall()
         cur.execute("SELECT name, xml_content FROM mei_files WHERE project_id=%s", (project_id, ))
         mei_files = cur.fetchall()
+        cur.execute("SELECT name, xml_content FROM ic_xml_files WHERE project_id=%s", (project_id, ))
+        ic_xml_files = cur.fetchall()
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -395,6 +439,8 @@ def export_project(project_id: int, user=Depends(get_current_user)):
             zf.writestr(f"images/{img_name}", bytes(data))
         for mei_name, xml_content in mei_files:
             zf.writestr(f"mei/{mei_name}", xml_content or "")
+        for xml_name, xml_content in ic_xml_files:
+            zf.writestr(f"ic-xml/{xml_name}", xml_content or "")
     buf.seek(0)
     safe_name = project_name.replace(" ", "_")
     return Response(

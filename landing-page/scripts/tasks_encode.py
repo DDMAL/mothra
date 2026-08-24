@@ -20,6 +20,7 @@ from encode_to_mei import (
 )
 import staffline_adapter
 import pitch_stage
+from ic_xml_store import store_ic_xml
 
 def _fetch_original_bytes(
     project_id: Optional[int], image_name: Optional[str], image_id: Optional[str] = None,
@@ -259,6 +260,18 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "log", "message": f"parsing GameraXML: {xml_filename}"})
         glyphs = parse_gamera_xml(xml_path)
         ev({"type": "log", "message": f" {len(glyphs)} glyphs loaded"})
+        # File the encoder's own input as a project artefact, from here
+        # rather than from the IC export bridge: this is the one point every
+        # path into encoding passes through (interactive IC, auto-classified
+        # IC, and the step-3 XML upload), and the glyph count is the parse's
+        # own rather than a guess. Written before the rest of the pipeline
+        # can fail, so a failed encode still leaves its input inspectable.
+        if store_ic_xml(project_id, image_id, image_name or image_filename,
+                        xml_bytes, glyph_count=len(glyphs)):
+            ev({"type": "log", "message": " saved classifier XML to generated files"})
+        elif project_id:
+            ev({"type": "log", "message":
+                " [warn] could not save the classifier XML to generated files"})
 
         page_w = page_h = 0
         image_data_uri = None

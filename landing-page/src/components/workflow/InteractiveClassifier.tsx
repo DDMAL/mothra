@@ -4,6 +4,8 @@ import { apiFetch } from "../../lib/apiFetch";
 import { buildEncodePair } from "../../utils/icQueue";
 import type { EncodePair } from "../../utils/icQueue";
 import { AuthImage } from "../shared/AuthImage";
+import IcSessionPicker from "../project/IcSessionPicker";
+import type { IcResumeRequest } from "../project/IcSessionsModal";
 
 interface InteractiveClassifierProps {
   // Only the pages step 1 still has work for - see pendingIcImages().
@@ -19,6 +21,16 @@ interface InteractiveClassifierProps {
   projectId: number | null;
   onBack: () => void;
   onEncodeBatch: (pairs: EncodePair[]) => void;
+  // Every image in the project, pending or not -- what the session picker
+  // resolves its rows against. `images` above is only the pending subset.
+  allImages: ProjectImage[];
+  // Reopen the sessions picked in this page's own "saved sessions" button.
+  // Re-enters this view with all of their pages on the filmstrip. Needed
+  // *here* because an already-encoded page is filtered out of `images` (see
+  // pendingIcImages), so once a page is through the pipeline this is the only
+  // route back into its corrections -- previously that meant walking back to
+  // the project page, one page per trip.
+  onResumeIcSessions: (requests: IcResumeRequest[]) => void;
   clefShape: "C" | "F";
   onClefShapeChange: (s: "C" | "F") => void;
   clefLine: number;
@@ -39,6 +51,8 @@ export default function InteractiveClassifier({
   projectId,
   onBack,
   onEncodeBatch,
+  allImages,
+  onResumeIcSessions,
   clefShape,
   onClefShapeChange,
   clefLine,
@@ -85,6 +99,7 @@ export default function InteractiveClassifier({
   const [queue, setQueue] = useState<
     { image: ProjectImage; sessionId: string }[]
   >([]);
+  const [sessionsModal, setSessionsModal] = useState(false);
   // Set when IC's in-iframe "auto-export" fires — there's no "queue page"
   // click on that path, so we run the queue logic ourselves once state settles.
   const [autoQueueRequested, setAutoQueueRequested] = useState(false);
@@ -192,12 +207,10 @@ export default function InteractiveClassifier({
   }, [icOrigin]);
 
   // Mark this page's session for encoding and move on. Deliberately does *not*
-  // call /complete: that transitions the IC session to EXPORT, which is
-  // terminal and read-only, so /ic/start can no longer resume it (see IC's
-  // store.lookup()). Doing it here meant a page queued but never encoded - the
-  // user goes back to the project, or just never presses "encode batch" - lost
-  // every correction made in it, since re-entering the page started a fresh
-  // session. Finalising happens in handleEncodeBatch instead.
+  // export: /ic/{id}/complete is what snapshots the GameraXML, and taking that
+  // snapshot at queue time would miss any correction made to the page after it
+  // was queued. handleEncodeBatch exports instead - and that export no longer
+  // ends the session either, see its comment.
   const handleQueuePage = useCallback(() => {
     if (!sessionId || !img) return;
     setError(null);
@@ -226,12 +239,24 @@ export default function InteractiveClassifier({
     }
   }, [autoQueueRequested, sessionId, img, queuedNames, handleQueuePage]);
 
-  // Finalise every queued session (CLASSIFYING → EXPORT) and hand the
-  // resulting GameraXML + image pairs to the batch encoder. This is the *only*
-  // place a session is ended: up to here each one stays editable and resumable,
-  // so abandoning the step costs nothing. Because the XML is snapshotted here
+  // Export every queued session's GameraXML and hand the resulting XML +
+  // image pairs to the batch encoder. Because the XML is snapshotted here
   // rather than at queue time, corrections made to a page *after* queueing it
   // are picked up too.
+  //
+  // No session is ended here either: the backend exports with
+  // finalize=false, so each one stays in CLASSIFYING - editable, and
+  // resumable through "saved sessions" below. Encoding used to finalise them
+  // (IC's default), which its own /sessions/lookup treats as not resumable,
+  // so a page that had been through the encoder could only ever be
+  // reclassified from scratch. The project's Neon step is where a page gets
+  // corrected *after* encoding, and having the classifier's own labels still
+  // there to fix is the point.
+  //
+  // The page context in the body lets the backend check the caller owns this
+  // project (session_id alone doesn't say whose it is). The XML itself is
+  // filed under the page by the encode job, not by this call - see
+  // ic_xml_store.py.
   const handleEncodeBatch = useCallback(async () => {
     if (queue.length === 0 || finalizing) return;
     setFinalizing(true);
@@ -239,7 +264,15 @@ export default function InteractiveClassifier({
     try {
       const pairs: EncodePair[] = [];
       for (const { image, sessionId: sid } of queue) {
-        const r = await apiFetch(`/api/ic/${sid}/complete`, { method: "POST" });
+        const r = await apiFetch(`/api/ic/${sid}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId,
+            imageId: image.id,
+            imageName: image.name,
+          }),
+        });
         if (!r.ok) {
           const detail = await r.text().catch(() => `HTTP ${r.status}`);
           throw new Error(`${image.name}: ${detail}`);
@@ -249,14 +282,14 @@ export default function InteractiveClassifier({
       }
       onEncodeBatch(pairs);
     } catch (err) {
-      // Left queued on failure: the sessions that did finalise are re-exportable
-      // (IC allows re-export from EXPORT), so pressing the button again retries
-      // the whole queue rather than dropping the pages that already worked.
+      // Left queued on failure: exporting is repeatable, so pressing the
+      // button again retries the whole queue rather than dropping the pages
+      // that already worked.
       setError(String((err as Error).message ?? err));
     } finally {
       setFinalizing(false);
     }
-  }, [queue, finalizing, onEncodeBatch]);
+  }, [queue, finalizing, onEncodeBatch, projectId]);
 
   // show 5 thumbnails at a time, centered on currentIdx
   const VISIBLE = 5;
@@ -269,6 +302,20 @@ export default function InteractiveClassifier({
 
   return (
     <div className="animate-fade-in flex-1 min-h-0 bg-[#4AADAA] flex flex-col pb-3">
+      {sessionsModal && projectId != null && (
+        <IcSessionPicker
+          projectId={projectId}
+          images={allImages}
+          onClose={() => setSessionsModal(false)}
+          onOpen={(requests) => {
+            setSessionsModal(false);
+            // Handled by the host (AppRouter), not in place: reopening
+            // re-enters this view with those pages in `images`, which this
+            // component resolves once at mount.
+            onResumeIcSessions(requests);
+          }}
+        />
+      )}
       <div className="flex items-center gap-6 px-8 py-3">
         <button
           onClick={onBack}
@@ -341,6 +388,21 @@ export default function InteractiveClassifier({
             {queuedNames.has(img?.name ?? "") ? "queued" : "queue page"}
           </button>
         )}
+        {/* A page that has already been encoded is filtered out of `images`,
+            so the filmstrip can't reach its session any more - this is the way
+            back into it (and into any page whose session was left mid-
+            correction). Not gated on a session count, unlike the project
+            page's own button: that would cost a request on every entry into
+            this view to hide a modal that already renders its own empty
+            list. */}
+        {projectId != null && (
+          <button
+            onClick={() => setSessionsModal(true)}
+            className="px-4 py-2 text-white/80 border border-white/30 rounded-xl hover:text-white hover:bg-white/10 cursor-pointer text-sm font-semibold"
+          >
+            saved sessions
+          </button>
+        )}
         <button
           onClick={handleEncodeBatch}
           disabled={queue.length === 0 || finalizing}
@@ -407,12 +469,26 @@ export default function InteractiveClassifier({
                   ? "select images on the project page and run detection first."
                   : "there's nothing left to classify here — carry on with correction (step 3), or select more pages on the project page."}
               </p>
-              <button
-                onClick={onBack}
-                className="mt-1 px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold"
-              >
-                back to project
-              </button>
+              <div className="mt-1 flex items-center gap-3">
+                <button
+                  onClick={onBack}
+                  className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold"
+                >
+                  back to project
+                </button>
+                {/* The whole point of landing here from the progress bar
+                    once every page is encoded: reopen one of those pages'
+                    classifier sessions instead of being told there is
+                    nothing to do. */}
+                {projectId != null && (
+                  <button
+                    onClick={() => setSessionsModal(true)}
+                    className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold"
+                  >
+                    reopen a saved session
+                  </button>
+                )}
+              </div>
             </div>
           ) : status === "error" ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-8">

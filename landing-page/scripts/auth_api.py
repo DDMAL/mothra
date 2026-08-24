@@ -231,6 +231,27 @@ def init_db():
             )
         """)
 
+        # The GameraXML the Interactive Classifier exported for a page --
+        # the artefact mothra's encoder consumes, surfaced in the project
+        # page's "Generated files" tab. One current row per page
+        # (delete-then-insert on re-export, like annotations), since a
+        # re-export supersedes the previous XML for that page rather than
+        # adding a comparable data point the way staffline_detections'
+        # accumulate-forever history does.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ic_xml_files (
+                id TEXT PRIMARY KEY,
+                project_id INTEGER REFERENCES projects(id),
+                image_id TEXT,
+                image_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                xml_content TEXT NOT NULL,
+                glyph_count INTEGER,
+                session_id TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
         # job queue
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -279,6 +300,7 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_text_alignments_pid ON text_alignments(project_id)",
             "CREATE INDEX IF NOT EXISTS idx_staffline_detections_lookup"
             " ON staffline_detections(project_id, image_name, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_ic_xml_files_pid ON ic_xml_files(project_id)",
             "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, id)",
             "CREATE INDEX IF NOT EXISTS idx_jobs_status        ON jobs(status)",
         ]:

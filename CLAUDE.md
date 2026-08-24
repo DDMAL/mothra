@@ -43,6 +43,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `project_images` | stores image bytes as `BYTEA` |
 | `project_models` | model name references only (no file stored) |
 | `mei_files` | xml_content as TEXT, corrected flag, `created_at` (used to pick each image's latest MEI revision for the cantus-bundle export) |
+| `ic_xml_files` | the GameraXML a page was encoded from (`xml_content` TEXT, `glyph_count`) — one current row per page, written by the encode task (`ic_xml_store.py`), delete-then-insert on re-encode; surfaced as "Generated files → Classifier XML", see **Workflow pipeline** step 2 |
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |
@@ -667,7 +668,8 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/account_api.py` | Profile update, password change, account delete |
 | `landing-page/scripts/projects_api.py` | Project CRUD, export/duplicate, activity/log-download endpoints |
 | `landing-page/scripts/images_api.py` | Project image upload/fetch/delete endpoints |
-| `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start` and related IC-step endpoints |
+| `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start`, `POST /ic/{session_id}/complete` (exports with `finalize=false`, see **Workflow pipeline** step 2), `GET /projects/{id}/ic/sessions` (what `IcSessionPicker.tsx` lists), the `ic-xml` read endpoints, and the rest of the IC-step endpoints |
+| `landing-page/scripts/ic_xml_store.py` | Writes `ic_xml_files` — the classifier XML an encode run consumed; called from `tasks_encode.py`, read back by `ic_api.py` |
 | `landing-page/scripts/inference_api.py` | `POST /projects/{id}/predict` kickoff endpoint (enqueues `tasks_predict.py`), annotation CRUD |
 | `landing-page/scripts/mei_api.py` | MEI file CRUD, Neon batch-editor edit-session bootstrap |
 | `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups (incl. `siglum`) to the text-service |
@@ -686,6 +688,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/encode_to_mei.py` | Core encoding logic: parse XML, estimate staves, build MEI, validate |
 | `landing-page/scripts/batch_api.py` | `POST /text-batch/run` job-queue kickoff, `GET /text-batch/{id}/download`, `GET /sources/{id}/export`, and `GET /sources/{id}/cantus-bundle` (corrected-MEI zip for manual hand-off to `production_mei_files`) |
 | `landing-page/src/lib/apiFetch.ts` | `apiFetch` (also drives the silent JWT-refresh-on-401 flow via `X-Refresh-Token`) / `apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper, reports `job_id` via an `onJobId` callback |
+| `landing-page/src/utils/mei.ts` | `latestMeiPerImage()` — newest MEI revision per page, what the Neon editor lists (see **Workflow pipeline** step 2) |
 | `landing-page/src/types.ts` | All shared TypeScript types |
 | `landing-page/src/components/AppRouter.tsx` | All view routing (switch on `view` string) |
 | `landing-page/src/hooks/useIcSettings.ts` | IC step mode (auto/manual) + shared training set — see **Workflow pipeline** step 2 |
@@ -737,22 +740,93 @@ route into step 2 (Continue, the completion page, the progress sidebar) honours
 it. Resuming a saved session from "manage IC sessions" always opens `"ic"`
 regardless of mode — the user picked that session explicitly.
 
-**In manual mode, an IC session is ended by "encode batch", not by "queue
-page".** `POST /api/ic/{session_id}/complete` (IC's
-`POST /sessions/{id}/complete`) moves a session `CLASSIFYING → EXPORT`, which is
-terminal and read-only — and IC's `lookup()` treats an `EXPORT` session as *not*
-resumable, so `ic/start` stages a fresh one for that page. `InteractiveClassifier.tsx`
-used to call it from "queue page", which meant a page queued but never encoded
-(back to the project, or simply never pressing "encode batch") silently lost
-every correction in it. Queueing now only records `{image, sessionId}`, and
-`handleEncodeBatch` completes each queued session then builds its
-`buildEncodePair()` pair — so the GameraXML snapshot is also taken *after* any
-edits made to a page following its queueing. The same deferral covers IC's
-in-iframe "queue page"/auto-export path (`ic:auto-export`), which hands
-completion to the host rather than doing it itself. Note the queue list itself
-is still component-local state, so leaving the view drops the checkmarks — but
-the sessions behind them survive and resume with their corrections intact, so
-re-queueing is a click.
+**In manual mode, an IC session is never ended by mothra at all.** IC's
+`POST /sessions/{id}/complete` normally moves a session `CLASSIFYING → EXPORT`,
+which is terminal and read-only — and IC's `lookup()` treats an `EXPORT`
+session as *not* resumable, so `ic/start` stages a fresh one for that page.
+`POST /api/ic/{session_id}/complete` therefore calls it with
+**`finalize=false`** (an `ic/`-side parameter, see `ic`'s `complete_session`;
+IC's own in-iframe export button passes it too whenever IC is running
+embedded), so the export is a snapshot and the session stays editable and
+resumable *after* encoding. Before that, encoding a page silently retired the
+session behind it: re-entering step 1 for that page — the usual route being
+the project page's progress bar — got a blank new session instead of the
+corrections, and since an encoded page is also filtered out of
+`pendingIcImages()`, the IC view had nothing to show but its "already
+encoded" empty state. The IC view now carries a **"saved sessions"** button
+(the empty state's reads "reopen a saved session") opening
+`IcSessionPicker.tsx` — mothra's own multi-select picker, backed by
+`GET /projects/{id}/ic/sessions` (a camel-cased proxy of IC's own
+`GET /sessions?project_id=`, sharing `_ic_project_sessions()` with the
+session-count endpoint). **Several sessions can be reopened at once**: every
+picked page joins the filmstrip alongside the still-pending ones, which is
+what it's built for — so reclassifying a folio range doesn't mean one trip
+through the project page per page. It resolves each session against the
+project's own images, so rows carry the real page thumbnail and the ones
+`AppRouter` would have to refuse (page deleted, or no recorded image id)
+can't be selected in the first place. `AppRouter.tsx` holds
+`resumeIcSessions` as a **list** and keys `<InteractiveClassifier>` on the
+joined session ids, so picking from inside the view actually remounts it
+(`initialImageName` is only read by a lazy `useState` initializer);
+`IcSessionUnavailable` is now only reachable when *nothing* resolved, i.e.
+from the project page's `IcSessionsModal`, which still iframes IC's own
+manage page (list + delete + open one).
+
+Queueing a page likewise doesn't export it: it only records
+`{image, sessionId}`, and `handleEncodeBatch` exports each queued session then
+builds its `buildEncodePair()` pair — so the GameraXML snapshot is taken
+*after* any edits made to a page following its queueing. The same deferral
+covers IC's in-iframe "queue page"/auto-export path (`ic:auto-export`), which
+hands completion to the host rather than doing it itself. Note the queue list
+itself is still component-local state, so leaving the view drops the
+checkmarks — but the sessions behind them survive and resume with their
+corrections intact, so re-queueing is a click.
+
+`ic/auto-queue` (auto mode) still finalises, deliberately: it creates its
+session server-side via IC's `POST /sessions`, which — unlike `/staging` —
+takes no project/image id, so IC could never map it back to a page for
+"manage IC sessions" to resume. Leaving those in `CLASSIFYING` would only
+accumulate unreachable sessions.
+
+**The XML each page was encoded from is kept as a project artefact.**
+`ic_xml_store.py`'s `store_ic_xml()` files it in `ic_xml_files` keyed to the
+page (`image_id` first, name only as a fallback), delete-then-insert so a
+re-encode supersedes rather than accumulating. It is called from
+**`tasks_encode.py`'s `_encode_one()`**, right after `parse_gamera_xml()`
+succeeds — deliberately *not* from the IC export bridge: that bridge can be
+reached with no encode following, IC's own in-iframe export streams straight
+to the browser without mothra seeing it, and the step-3 "upload XML output"
+path never touches IC at all. "Was encoded" is the only rule that holds for
+every path in, the glyph count is then the parse's own rather than a
+string-count guess, and writing before the rest of the pipeline can fail
+leaves a failed encode's input inspectable. `ic_complete` still takes
+optional `{projectId, imageId, imageName}` page context, now only so it can
+check the caller owns the project (`session_id` alone doesn't say whose it
+is).
+
+The files show up in the project page's "Generated files → Classifier XML"
+sub-tab (`IcXmlTab.tsx`) and in `GET /projects/{id}/export`'s zip under
+`ic-xml/`. The list rides along with the project payload but **the XML body
+does not** — a page's export is megabytes of RLE glyph masks, so
+`view`/`download` fetch it per file from
+`GET/DELETE /api/projects/{id}/ic-xml/{xml_id}`. Deleting a file there removes
+mothra's copy only; the IC session is untouched, so re-encoding brings it
+back.
+
+**`mei_files` is append-only, so the Neon editor lists one revision per
+page.** Re-encoding a page — exactly what reopening its session and pressing
+"encode batch" again does — INSERTs a second row rather than replacing the
+first (the cantus-bundle export depends on that history, picking each image's
+latest revision server-side), so the batch editor used to show the same page
+twice with the stale revision first. `AppRouter.tsx` passes it through
+`utils/mei.ts`'s `latestMeiPerImage()` instead — newest `createdAt` per page
+(`imageId`, else `imageName`), each page keeping the slot it already had, and
+the same deduped list feeds `originalMeiFiles` so the completion page's
+compare pairs one original per page. Non-destructive: earlier revisions stay
+in the MEI-files tab, where the history is the point. This is why the project
+payload now carries `mei_files.created_at` as `createdAt`, ordered
+`created_at ASC` — correcting in Neon updates a row in place, so multiple rows
+only ever mean multiple encodes.
 
 Step 6 is **not** a live push to Cantus Ultimus — the DDMAL/cantus (Cantus
 Ultimus) repo has no write API (its DRF views are all `ListAPIView`/
