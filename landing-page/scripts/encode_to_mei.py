@@ -679,16 +679,7 @@ def _extract_special_glyphs(
     A sibling to _filter_neume_glyphs's exclusion of the same glyphs from
     ordinary neume/<nc> encoding: that function says what to drop, this one
     says what to do with what was dropped.
-
-    accid entries are deliberately excluded here (though still excluded
-    from ordinary encoding by _filter_neume_glyphs, since they're also in
-    special_mapping): an accidental correctly belongs nested inside the
-    <nc> of the note it modifies, not floating as its own <layer> sibling
-    like a clef/custos/divLine change does, and that nesting isn't
-    implemented yet. accid classifications also aren't currently produced
-    by either trained classifier, so this has no observable effect today —
-    it only avoids fabricating an incorrect standalone element if/when that
-    changes."""
+    """
     pairs: list[tuple[Glyph, SpecialEntry]] = []
     for g in staff_glyphs:
         entry = special_mapping.get(g.class_name.lower().strip())
@@ -696,6 +687,52 @@ def _extract_special_glyphs(
             pairs.append((g, entry))
     return sorted(pairs, key=lambda p: p[0].ulx)
 
+def _extract_accid_glyphs(
+    staff_glyphs: list[Glyph],
+    special_mapping: dict[str, SpecialEntry],
+) -> list[tuple[Glyph, SpecialEntry]]:
+    """The subset of one stave's raw glyphs classified as accidentals,
+    sorted left-to-right by ulx. Kept separate from _extract_special_glyphs
+    (which still excludes accid -- see its docstring) because an accidental
+    doesn't become its own <layer> sibling: it becomes a <syllable> child
+    alongside the <neume> of the note it modifies (see _nearest_neume),
+    resolved by build_mei once that stave's <neume>s all exist (see
+    neume_positions)."""
+    pairs: list[tuple[Glyph, SpecialEntry]] = []
+    for g in staff_glyphs:
+        entry = special_mapping.get(g.class_name.lower().strip())
+        if entry is not None and entry.tag == "accid":
+            pairs.append((g, entry))
+    return sorted(pairs, key=lambda p: p[0].ulx)
+
+def _nearest_neume(
+    accid_ulx: float,
+    neume_positions: list[tuple[float, ET.Element, ET.Element]],
+) -> Optional[tuple[ET.Element, ET.Element]]:
+    """The (neume, syllable) an accidental at accid_ulx should attach
+    beside: the first note at or after its x position (an accidental is
+    written immediately to the left of the note it modifies), or -- only if
+    the accidental sits to the right of every note on the stave -- the last
+    one before it. neume_positions must already be sorted by x.
+
+    Returns the enclosing <neume> AND its parent <syllable> rather than a
+    <nc> -- per the MEI 5.0 Neumes module, <accid> is not a valid child of
+    <nc> (or of <neume>): its only valid neume-context parent is <syllable>,
+    confirmed by Neon's own ConvertMei.ts, which flags an <accid> as
+    invalid only when its enclosing <syllable> has no <neume> alongside it
+    -- i.e. the expected shape is <accid> and <neume> as siblings under one
+    <syllable>, not <accid> nested inside the note itself. See mothra#273's
+    follow-up: nesting inside <nc> parsed fine but Verovio never drew it,
+    because that structure doesn't exist in the schema Verovio implements
+    against."""
+    for x, neume_el, syllable_el in neume_positions:
+        if x >= accid_ulx:
+            return neume_el, syllable_el
+    if not neume_positions:
+        return None
+    _, neume_el, syllable_el = neume_positions[-1]
+    return neume_el, syllable_el
+    
 def parse_yolo_stave_hints(yolo_txt: str, img_w: int, img_h: int) -> list[StaveBbox]:
     """Parse YOLO annotation text into staff-line glyphs, then cluster them
     into per-system StaveBbox groups via _staves_from_staff_lines — the same
@@ -1131,31 +1168,63 @@ def _component_zone_ids(
     glyph: Glyph,
     components: list[NcTemplate],
     width_raw: Optional[str],
-) -> Optional[list[str]]:
+) -> Optional[list[tuple[str, float, float]]]:
     """For a multi-component neume (clivis, podatus, torculus, ...), split
-    the glyph's own zone horizontally into one side-by-side sub-zone per
-    component, proportional to the mapping CSV's width column (e.g.
-    "[1, 1]" -> two equal-width halves), registering each as a new <zone>
-    under `surface`. Returns None (caller falls back to the single shared
-    "z-{glyph.id}" zone, today's pre-existing behaviour) whenever there's
-    nothing to split: a single-component neume, no width column for this
-    classification, or a width list that doesn't parse or whose length
-    doesn't match the component count (e.g. square.csv's
-    neume.scandicus22a/22b: a "[1, 2]"/2-weight width against 3 <nc>
-    components -- a real, pre-existing inconsistency in the bundled CSV
-    data, not something to silently paper over here).
+    the glyph's own zone horizontally into one <zone> per COLUMN,
+    proportional to the mapping CSV's width column, and return one
+    (zone_id, ulx, lrx) tuple per <nc> COMPONENT -- entries repeat the same
+    zone/ulx/lrx when two or more components share a column. Returns None
+    (caller falls back to the single shared "z-{glyph.id}" zone, today's
+    pre-existing behaviour) whenever there's nothing to split: a
+    single-component neume, no width column for this classification, or a
+    width list that can't be read either of the two ways below.
+
+    The width column is read two ways, tried in order:
+      1. len(weights) == len(components): one column per component,
+         weighted by width -- e.g. torculus's "[1, 1, 1]" (three
+         independent side-by-side noteheads) or clivis's "[1, 1]" (two
+         diagonally-placed noteheads). This is the original, pre-mothra#273
+         behaviour.
+      2. len(weights) != len(components), but every weight is a positive
+         integer and they sum to len(components): each weight is how many
+         CONSECUTIVE components share that column, not one weight per
+         component. Lets one classification's <nc> list express a shape
+         that isn't "N independent noteheads side by side":
+           - podatus/oblique's "[2]" -- both components of a two-note
+             stack/ligature share ONE column (only pitch, not x, tells them
+             apart -- matches how a podatus/oblique is actually drawn).
+           - scandicus's "[1, 2]" -- the first <nc> gets its own (narrow)
+             column, the remaining two share a second (wider) column beside
+             it -- a leading note with an ascending pair stacked next to it.
+         See mothra#273 and the CSV rows this backs (square.csv/
+         hufnagel.csv's podatus*/oblique*/pescephalicus*/scandicus*/
+         torculus* rows).
+      Anything else -- a width list that fits neither shape -- is a genuine
+      mismatch: falls back to None, and the caller logs it via
+      mismatched_widths.
 
     Only the horizontal (x) extent is split -- the full glyph height is
-    kept for every sub-zone. Pitch is unaffected either way: pname/oct
+    kept for every column. Pitch is unaffected either way: pname/oct
     already come from @intm-chaining in _component_pitches, entirely
     independent of zone geometry -- these sub-zones only change where a
     component's bounding box points for facsimile display/click-to-
-    correct in Neon."""
+    correct in Neon, and (as of mothra#273) which note's <neume> a nearby
+    <accid> gets attached beside (see build_mei's neume_positions)."""
     if len(components) <= 1:
         return None
     weights = parse_width(width_raw) if width_raw else None
-    if weights is None or len(weights) != len(components):
+    if weights is None:
         return None
+    if len(weights) == len(components):
+        group_sizes = [1] * len(components)
+        col_weights = weights
+    else:
+        int_weights = [round(w) for w in weights]
+        valid = all(w > 0 and abs(w - round(w)) < 1e-9 for w in weights)
+        if not valid or sum(int_weights) != len(components):
+            return None
+        group_sizes = int_weights
+        col_weights = weights
     total = sum(weights)
     if total <= 0:
         return None
@@ -1174,7 +1243,7 @@ def _component_zone_ids(
     for prev, nxt in zip(boundaries, boundaries[1:]):
         if nxt <= prev:
             return None
-    zone_ids = []
+    columns: list[tuple[str, float, float]] = []
     for j, (x, x_next) in enumerate(zip(boundaries, boundaries[1:])):
         zone_id = f"z-{glyph.id}-{j}"
         ET.SubElement(surface, _tag("zone"), {
@@ -1184,8 +1253,11 @@ def _component_zone_ids(
             "lrx": str(round(x_next)),
             "lry": str(glyph.lry),
         })
-        zone_ids.append(zone_id)
-    return zone_ids
+        columns.append((zone_id, float(x), float(x_next)))
+    result: list[tuple[str, float, float]] = []
+    for column, size in zip(columns, group_sizes):
+        result.extend([column] * size)
+    return result
     
 def _tag(local: str) -> str:
     return f"{{{MEI_NS}}}{local}"
@@ -1212,6 +1284,7 @@ def build_mei(
     special_mapping = resolve_special_mapping(notation_type)
     missing_classes: set[str] = set()
     mismatched_widths: set[str] = set()
+    dropped_accid_ids: set[str] = set()
 
     # meiHead
 
@@ -1487,6 +1560,7 @@ def build_mei(
             if g.id not in consumed_special_ids
         ]
         layer_items.sort(key=lambda item: item[0])
+        neume_positions: list[tuple[float, ET.Element, ET.Element]] = []
 
         for _, kind, payload in layer_items:
             if kind == "syllable":
@@ -1526,7 +1600,11 @@ def build_mei(
                         mismatched_widths.add(glyph.class_name)
                     for j, (comp, (pname, oct_str)) in enumerate(zip(components, pitches, strict=True)):
                         nc_id = glyph.id if j == 0 else f"{glyph.id}-{j}"
-                        zone_id = component_zone_ids[j] if component_zone_ids is not None else f"z-{glyph.id}"
+                        if component_zone_ids is not None:
+                            zone_id, comp_ulx, comp_lrx = component_zone_ids[j]
+                        else:
+                            zone_id = f"z-{glyph.id}"
+                            comp_ulx, comp_lrx = float(glyph.ulx), float(glyph.lrx)
                         nc_attrs: dict[str, str] = {
                             XML_ID: f"nc-{nc_id}",
                             "facs": f"#{zone_id}",
@@ -1537,6 +1615,7 @@ def build_mei(
                         nc_el = ET.SubElement(neume, _tag("nc"), nc_attrs)
                         if comp.liquescent:
                             ET.SubElement(nc_el, _tag("liquescent"))
+                        neume_positions.append(((comp_ulx + comp_lrx) / 2, neume, syllable))
             else:
                 glyph, entry = payload
                 if entry.tag == "clef":
@@ -1580,7 +1659,44 @@ def build_mei(
                     attrs = {XML_ID: f"divline-{glyph.id}", "facs": f"#z-{glyph.id}"}
                     attrs.update(entry.attrs)
                     ET.SubElement(layer, _tag("divLine"), attrs)
-                
+        # An accidental doesn't get its own <layer> sibling (see
+        # _extract_special_glyphs), and it isn't a valid child of <nc> or
+        # <neume> either -- per the MEI 5.0 Neumes module, <accid>'s only
+        # valid neume-context parent is <syllable> (confirmed empirically
+        # by Neon's own ConvertMei.ts, which flags an <accid> as invalid
+        # only when its <syllable> has no <neume> alongside it). So it's
+        # inserted as a preceding sibling of the <neume> it modifies, within
+        # that <neume>'s own <syllable> -- resolved here, once every <neume>
+        # for this stave has been built, since an accidental can precede a
+        # note built by a LATER layer_item in reading order.
+        #
+        # @facs is load-bearing here, not cosmetic: unlike <nc>, <accid> has
+        # no pname/oct to derive a render position from, so without a facs
+        # zone Verovio has no geometry to draw it at and silently emits
+        # nothing (confirmed against a real working example in Neon's own
+        # test/resources/schema_test.mei: every <accid> there carries an
+        # xml:id + facs pointing at its own zone). The accid glyph's own
+        # "z-{glyph.id}" zone already exists -- every raw glyph gets one in
+        # the all_glyphs pass above -- so this only needs to reference it.
+        neume_positions.sort(key=lambda p: p[0])
+        for g, entry in _extract_accid_glyphs(staff_glyphs, special_mapping):
+            target = _nearest_neume(g.ulx, neume_positions)
+            if target is None:
+                # No <neume> anywhere on this stave to attach beside -- an
+                # accidental with nothing to modify has no valid MEI
+                # Neumes-module representation at all (see this function's
+                # comment above), so it's dropped rather than emitted into
+                # an empty <syllable> Neon's own ConvertMei.ts would flag
+                # as invalid and strip right back out. Logged rather than
+                # silent, since from the outside this looks identical to
+                # the bug it's not: mothra#273.
+                dropped_accid_ids.add(g.id)
+                continue
+            neume_el, syllable_el = target
+            idx = list(syllable_el).index(neume_el)
+            accid_attrs: dict[str, str] = {XML_ID: f"accid-{g.id}", "facs": f"#z-{g.id}"}
+            accid_attrs.update(entry.attrs)
+            syllable_el.insert(idx, ET.Element(_tag("accid"), accid_attrs))
 
     if missing_classes:
         print(
@@ -1593,6 +1709,13 @@ def build_mei(
             f" [neume-mapping:{notation_type}] {len(mismatched_widths)} classification(s) have a width column "
             f"that doesn't match their component count — encoded with a shared (unsplit) zone: "
             f"{', '.join(sorted(mismatched_widths))}",
+            file=sys.stderr,
+        )
+    if dropped_accid_ids:
+        print(
+            f" [neume-mapping:{notation_type}] {len(dropped_accid_ids)} accidental(s) dropped — no "
+            f"<neume> anywhere on their stave to attach beside (an accidental with no note to modify "
+            f"has no valid MEI Neumes-module encoding): {', '.join(sorted(dropped_accid_ids))}",
             file=sys.stderr,
         )
 

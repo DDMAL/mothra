@@ -11,8 +11,15 @@ whole point of moving to CSVs is that a new attribute or notation type
 shouldn't need a code change here.
 
 The `width` column (bbox-splitting for a <zone> per component; see the
-issue's discussion) is parsed, kept on NeumeEntry.width, and consumed by 
+issue's discussion) is parsed, kept on NeumeEntry.width, and consumed by
 encode_to_mei.py's _component_zone_ids(), with graceful fallback on mismatch.
+As of mothra#273, a width list doesn't have to give one weight per
+component: a shorter list of positive integers summing to the component
+count is read as "how many consecutive components share this column"
+(e.g. podatus/oblique's "[2]" -- both components stacked in one shared
+column -- or scandicus's "[1, 2]" -- a leading note beside a stacked pair)
+instead of "N independent noteheads side by side". See
+_component_zone_ids's own docstring for the full contract.
 
 A handful of CSV rows aren't <neume>s at all -- clef/custos/divLine/accid,
 whose 'mei' column snippet is rooted at that tag instead. resolve_neume_mapping
