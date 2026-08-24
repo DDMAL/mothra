@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { IcXmlFile, ProjectImage } from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
 import { downloadBlob } from "../../utils/download";
@@ -37,6 +37,9 @@ export default function IcXmlTab({
   const [viewContent, setViewContent] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Identifies the newest "view" click, so a slower earlier one can't write
+  // state after it. See handleView.
+  const viewSeq = useRef(0);
 
   if (icXmlFiles.length === 0) {
     return (
@@ -54,18 +57,33 @@ export default function IcXmlTab({
     return (data.xmlContent as string) ?? "";
   };
 
+  // Every write after the await is gated on this click still being the
+  // newest one. A page's XML is megabytes of RLE glyph masks, so a slow load
+  // is easy to abandon -- Modal's backdrop closes on a single click, so
+  // "open a page, dismiss, open another" is one stray click away -- and the
+  // abandoned response would otherwise land under the newer page's header:
+  // right name, right glyph count, wrong document, with nothing to signal
+  // the mismatch on a tab whose whole job is showing what the encoder read.
+  // The catch and finally need the same gate: a stale failure would close
+  // the newer file's modal and report the wrong file's error, and a stale
+  // finally would clear the newer file's busy flag while it is still
+  // loading.
   const handleView = async (file: IcXmlFile) => {
+    const seq = ++viewSeq.current;
     setError(null);
     setViewFile(file);
     setViewContent(null);
     setBusyId(file.id);
     try {
-      setViewContent(await fetchXml(file));
+      const xml = await fetchXml(file);
+      if (seq === viewSeq.current) setViewContent(xml);
     } catch (e) {
-      setError((e as Error).message);
-      setViewFile(null);
+      if (seq === viewSeq.current) {
+        setError((e as Error).message);
+        setViewFile(null);
+      }
     } finally {
-      setBusyId(null);
+      if (seq === viewSeq.current) setBusyId(null);
     }
   };
 
