@@ -43,7 +43,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `project_images` | stores image bytes as `BYTEA` |
 | `project_models` | model name references only (no file stored) |
 | `mei_files` | xml_content as TEXT, corrected flag, `created_at` (used to pick each image's latest MEI revision for the cantus-bundle export) |
-| `ic_xml_files` | the GameraXML a page was encoded from (`xml_content` TEXT, `glyph_count`) — one current row per page, written by the encode task (`ic_xml_store.py`), delete-then-insert on re-encode; surfaced as "Generated files → Classifier XML", see **Workflow pipeline** step 2 |
+| `ic_xml_files` | the GameraXML a page was encoded from (`xml_content` BYTEA — stored verbatim, since the step-3 XML-upload path accepts non-UTF-8 documents; only the JSON viewer endpoint decodes, `glyph_count`) — one current row per page, written by the encode task (`ic_xml_store.py`), delete-then-insert on re-encode; surfaced as "Generated files → Classifier XML", see **Workflow pipeline** step 2 |
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |

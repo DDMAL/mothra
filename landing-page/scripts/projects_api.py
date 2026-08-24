@@ -420,6 +420,30 @@ def permanently_delete_project(project_id: int, user=Depends(get_current_user)):
         return {"ok": True}
 
 
+_ZIP_NAME_SAFE = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._- ()"
+)
+
+
+def _zip_entry_name(name, fallback: str) -> str:
+    """Reduce a stored row name to a single safe path segment.
+
+    project_images.name is whatever multipart filename the client sent --
+    Starlette hands `UploadFile.filename` over verbatim, and images_api.py
+    stores it as-is -- so a name can carry `/`, `\\`, or `..` components.
+    Written into a ZIP entry unchanged those become a Zip Slip: `zipfile`'s
+    own extract() sanitizes, but plenty of other extractors don't, and the
+    archive is a file the user hands around. Take the basename, then keep
+    only an allow-list of filename characters, falling back for a name that
+    survives as empty or as a pure traversal component.
+    """
+    base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = "".join(ch if ch in _ZIP_NAME_SAFE else "_" for ch in base).strip()
+    if not cleaned or set(cleaned) <= {"."}:
+        return fallback
+    return cleaned
+
+
 @router.get("/projects/{project_id}/export")
 def export_project(project_id: int, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
@@ -435,12 +459,17 @@ def export_project(project_id: int, user=Depends(get_current_user)):
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for img_name, _mime, data in images:
-            zf.writestr(f"images/{img_name}", bytes(data))
-        for mei_name, xml_content in mei_files:
-            zf.writestr(f"mei/{mei_name}", xml_content or "")
-        for xml_name, xml_content in ic_xml_files:
-            zf.writestr(f"ic-xml/{xml_name}", xml_content or "")
+        for i, (img_name, _mime, data) in enumerate(images):
+            zf.writestr(f"images/{_zip_entry_name(img_name, f'image_{i}')}", bytes(data))
+        for i, (mei_name, xml_content) in enumerate(mei_files):
+            zf.writestr(f"mei/{_zip_entry_name(mei_name, f'file_{i}.mei')}", xml_content or "")
+        # BYTEA, so these go in verbatim -- the archived classifier XML is
+        # the encoder's exact input, which is the point of keeping it. (The
+        # mei/ entries above are TEXT: mothra generates that XML itself and
+        # always as UTF-8.)
+        for i, (xml_name, xml_bytes) in enumerate(ic_xml_files):
+            zf.writestr(f"ic-xml/{_zip_entry_name(xml_name, f'file_{i}.xml')}",
+                        bytes(xml_bytes) if xml_bytes else b"")
     buf.seek(0)
     safe_name = project_name.replace(" ", "_")
     return Response(

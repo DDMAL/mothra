@@ -245,7 +245,16 @@ def init_db():
                 image_id TEXT,
                 image_name TEXT NOT NULL,
                 name TEXT NOT NULL,
-                xml_content TEXT NOT NULL,
+                -- BYTEA, not TEXT: this is the encoder's verbatim input, and
+                -- the step-3 "upload XML output" path accepts any file the
+                -- user has. A GameraXML declaring `encoding="ISO-8859-1"`
+                -- parses fine (ET.parse honours the declaration) but its
+                -- accented bytes are not valid UTF-8, so decoding it to store
+                -- it as TEXT replaced them with U+FFFD -- irreversibly, and
+                -- only in the archived artefact, never in the encode the user
+                -- was watching. Storing bytes keeps the download and the zip
+                -- export byte-identical to what was encoded.
+                xml_content BYTEA NOT NULL,
                 glyph_count INTEGER,
                 session_id TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
@@ -497,6 +506,41 @@ def _migrate_db():
         cur.execute("ALTER TABLE mei_files ALTER COLUMN created_at SET DEFAULT NOW()")
         con.commit()
     except psycopg2.errors.DuplicateColumn:
+        con.rollback()
+    finally:
+        cur.close(); release_db_conn(con)
+
+    # ic_xml_files.xml_content: TEXT -> BYTEA. Rows written before this stored
+    # `xml_bytes.decode("utf-8", "replace")`, so a non-UTF-8 GameraXML (the
+    # step-3 "upload XML output" path takes any file the user has) had its
+    # bytes replaced with U+FFFD before ever reaching the table -- see the
+    # CREATE TABLE comment in init_db(). convert_to(..., 'UTF8') reproduces
+    # exactly the bytes that column was already serving, so this conversion
+    # is byte-for-byte lossless for every existing row; it does NOT recover
+    # rows already corrupted on the way in (that data is gone), it only stops
+    # new ones from being corrupted.
+    #
+    # Guarded on the column's current type rather than run unconditionally:
+    # ALTER COLUMN ... TYPE has no IF NOT EXISTS form and rewrites the whole
+    # table, and backend and worker both migrate independently at import (see
+    # below), so an unguarded version would rewrite this table on every pod
+    # start. Once converted, data_type is 'bytea' and this is a no-op.
+    con = get_db_conn(); cur = con.cursor()
+    try:
+        cur.execute("""
+            SELECT data_type FROM information_schema.columns
+            WHERE table_name='ic_xml_files' AND column_name='xml_content'
+        """)
+        _row = cur.fetchone()
+        if _row and _row[0] == 'text':
+            cur.execute(
+                "ALTER TABLE ic_xml_files ALTER COLUMN xml_content"
+                " TYPE BYTEA USING convert_to(xml_content, 'UTF8')"
+            )
+        con.commit()
+    except psycopg2.errors.UndefinedTable:
+        # Fresh database where init_db() hasn't created the table yet, or the
+        # racing pod is mid-CREATE. init_db() makes it BYTEA outright.
         con.rollback()
     finally:
         cur.close(); release_db_conn(con)

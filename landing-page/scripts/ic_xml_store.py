@@ -18,6 +18,8 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+import psycopg2
+
 from auth_api import get_db_conn, release_db_conn
 
 
@@ -46,6 +48,15 @@ def store_ic_xml(
     failure can't leave the page with its old XML dropped and no new one in
     its place.
 
+    ``xml_bytes`` is stored verbatim, in a BYTEA column. It used to be
+    ``.decode("utf-8", "replace")``-ed into a TEXT column, which silently
+    replaced every byte of a non-UTF-8 GameraXML with U+FFFD -- and the
+    encode itself still succeeded, since ``ET.parse`` honours the document's
+    own ``encoding=`` declaration, so the only casualty was the archived
+    artefact nobody looks at until they need it. Only the JSON viewer
+    endpoint decodes (``ic_api.py``'s ``get_ic_xml``); the download and the
+    project-export zip serve these bytes unchanged.
+
     Never raises: this is a side artefact of an encode job, and losing it
     must not fail the encode the user is actually waiting on. The caller
     logs the ``False`` return instead.
@@ -53,9 +64,15 @@ def store_ic_xml(
     if not project_id or not image_name:
         return False
     stem = image_name.rsplit(".", 1)[0] if "." in image_name else image_name
-    con = get_db_conn()
-    cur = con.cursor()
+    con = None
+    cur = None
     try:
+        # Acquisition is inside the try like everything else: a pool that is
+        # exhausted or cannot reach Postgres raises here, and "never raises"
+        # has to hold for that too -- otherwise the encode the user is
+        # waiting on dies over its side artefact.
+        con = get_db_conn()
+        cur = con.cursor()
         if image_id:
             cur.execute(
                 "DELETE FROM ic_xml_files WHERE project_id=%s AND image_id=%s",
@@ -73,7 +90,7 @@ def store_ic_xml(
             " VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 uuid.uuid4().hex, project_id, image_id, image_name,
-                f"{stem}.xml", xml_bytes.decode("utf-8", "replace"),
+                f"{stem}.xml", psycopg2.Binary(xml_bytes),
                 glyph_count, session_id,
             ),
         )
@@ -82,5 +99,7 @@ def store_ic_xml(
     except Exception:
         return False
     finally:
-        cur.close()
-        release_db_conn(con)
+        if cur is not None:
+            cur.close()
+        if con is not None:
+            release_db_conn(con)

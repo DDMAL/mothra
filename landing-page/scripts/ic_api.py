@@ -197,6 +197,83 @@ def _ic_unreachable(exc: Exception) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
+# Startup compatibility check
+# ---------------------------------------------------------------------------
+
+_IC_COMPLETE_PATH = "/sessions/{session_id}/complete"
+_IC_FINALIZE_PARAM = "finalize"
+
+# Escape hatch, mirroring MOTHRA_PITCH_FINDING: lets an operator start the
+# backend against an IC this check can't vouch for, without a redeploy.
+IC_COMPAT_CHECK_ENABLED = os.environ.get("MOTHRA_IC_COMPAT_CHECK", "1") != "0"
+
+
+class IcIncompatible(RuntimeError):
+    """The reachable IC positively lacks ``finalize`` on its complete endpoint."""
+
+
+def verify_ic_finalize_support(timeout: int = 5) -> str:
+    """Fail fast at startup if IC would silently finalise on export.
+
+    :func:`ic_complete` exports with ``finalize=false`` so an encoded page's
+    session stays editable and resumable. An IC predating that parameter
+    doesn't reject the unknown query param -- FastAPI ignores it -- it
+    finalises, moving the session to the terminal ``EXPORT`` state that
+    ``lookup`` refuses to resume. Every correction behind the export is then
+    stranded, with nothing anywhere reporting an error. That silence is why
+    this is checked up front rather than left to surface per-request.
+
+    Detection is IC's own OpenAPI schema, which lists the parameter
+    (verified against the pinned submodule). Returns a status string, or
+    raises :class:`IcIncompatible` to abort startup.
+
+    **Only a positive detection fails.** Unreachable IC, unparseable schema,
+    or an endpoint missing from it all return ``"unknown"`` and warn.
+    Unreachable is not incompatible: backend and ic are applied together in
+    one ``kubectl apply`` with no ordering guarantee between them, so a
+    backend that aborted whenever IC merely wasn't up yet would
+    CrashLoopBackOff on an ordinary deploy race -- turning a degraded IC step
+    into a total outage of a backend that also serves auth, projects,
+    images, MEI and jobs, none of which touch IC. Narrowing the abort to a
+    schema that positively shows the parameter absent keeps the fail-fast
+    honest about what it actually observed.
+    """
+    if not IC_COMPAT_CHECK_ENABLED:
+        return "skipped"
+
+    try:
+        status, raw = _get(f"{IC_API_URL}/openapi.json", timeout=timeout)
+        if status >= 400:
+            raise ValueError(f"openapi.json returned {status}")
+        schema = json.loads(raw)
+        operation = schema["paths"][_IC_COMPLETE_PATH]["post"]
+    except Exception as exc:
+        logger.warning(
+            "IC compatibility check inconclusive (%s at %s: %s) -- continuing. "
+            "If this IC predates the `finalize` parameter, encoding a page will "
+            "silently retire its session instead of leaving it resumable.",
+            type(exc).__name__, IC_API_URL, exc,
+        )
+        return "unknown"
+
+    names = [p.get("name") for p in operation.get("parameters", [])]
+    if _IC_FINALIZE_PARAM in names:
+        return "ok"
+
+    raise IcIncompatible(
+        f"The Interactive Classifier at {IC_API_URL} does not support "
+        f"`{_IC_FINALIZE_PARAM}` on POST {_IC_COMPLETE_PATH} "
+        f"(its OpenAPI schema lists: {names or 'no parameters'}). "
+        "Encoding a page against this IC would move its session to the "
+        "terminal EXPORT state, silently discarding the user's corrections "
+        "on any later reopen. Deploy the IC image built from this commit's "
+        "`ic/` submodule pin -- CI builds and tags backend and ic together, "
+        "so a mismatch means the two were rolled out from different commits. "
+        "Set MOTHRA_IC_COMPAT_CHECK=0 to start anyway."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -425,8 +502,14 @@ def ic_complete(
 # only the XML body, which is megabytes per page, is fetched on demand.
 
 
-def _ic_xml_row(project_id: int, xml_id: str, user_id: int) -> tuple[str, str]:
-    """Return ``(name, xml_content)`` for one stored file the user owns."""
+def _ic_xml_row(project_id: int, xml_id: str, user_id: int) -> tuple[str, bytes]:
+    """Return ``(name, xml_bytes)`` for one stored file the user owns.
+
+    ``xml_content`` is BYTEA (see ``ic_xml_store.store_ic_xml``), so this
+    hands back the encoder's verbatim input. psycopg2 yields BYTEA as a
+    ``memoryview``; normalised to ``bytes`` here so callers don't each have
+    to. Only ``get_ic_xml`` decodes -- JSON can't carry raw bytes.
+    """
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user_id)
         cur.execute(
@@ -436,22 +519,33 @@ def _ic_xml_row(project_id: int, xml_id: str, user_id: int) -> tuple[str, str]:
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="IC XML not found")
-        return row[0], row[1]
+        return row[0], bytes(row[1])
 
 
 @router.get("/projects/{project_id}/ic-xml/{xml_id}")
 def get_ic_xml(project_id: int, xml_id: str, user=Depends(get_current_user)):
-    """The stored GameraXML as JSON, for the in-app viewer."""
-    name, xml_content = _ic_xml_row(project_id, xml_id, user["id"])
-    return {"id": xml_id, "name": name, "xmlContent": xml_content}
+    """The stored GameraXML as JSON, for the in-app viewer.
+
+    The one read path that must decode: ``IcXmlTab``'s viewer renders a
+    string. Lossy for a non-UTF-8 document, but only in this preview -- the
+    download endpoint below and the project-export zip both serve the
+    original bytes.
+    """
+    name, xml_bytes = _ic_xml_row(project_id, xml_id, user["id"])
+    return {
+        "id": xml_id,
+        "name": name,
+        "xmlContent": xml_bytes.decode("utf-8", "replace"),
+    }
 
 
 @router.get("/projects/{project_id}/ic-xml/{xml_id}/download")
 def download_ic_xml(project_id: int, xml_id: str, user=Depends(get_current_user)):
-    """The stored GameraXML as a file download."""
-    name, xml_content = _ic_xml_row(project_id, xml_id, user["id"])
+    """The stored GameraXML as a file download, byte-identical to what the
+    encoder read."""
+    name, xml_bytes = _ic_xml_row(project_id, xml_id, user["id"])
     return Response(
-        content=xml_content,
+        content=xml_bytes,
         media_type="application/xml",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
