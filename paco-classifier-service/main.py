@@ -26,7 +26,9 @@ error body, since nothing has been streamed yet at that point.
 """
 import asyncio
 import base64
+import io
 import json
+import math
 import os
 import sys
 import threading
@@ -37,6 +39,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from PIL import Image, UnidentifiedImageError
 from tensorflow.keras.models import load_model
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
@@ -81,12 +84,30 @@ STAFFLINES_LABEL = 1
 # and reads the full upload into memory before decoding, so an unbounded
 # upload -- or a small, highly-compressed one that decodes to a huge pixel
 # grid -- can exhaust the container's memory limit before decoding even
-# fails. Bound both: 50 MiB comfortably covers a single high-res page scan,
-# and 6000x6000 covers real manuscript-page resolutions while still keeping
-# the classifier's several in-flight copies (input image, label map, two
-# RGBA PNG outputs) well under the container's 4 GiB limit.
+# fails. MAX_UPLOAD_BYTES bounds the raw upload: 50 MiB comfortably covers a
+# single high-res page scan.
+#
+# MAX_DECODED_PIXELS is a *downscale budget*, not a rejection threshold: real
+# manuscript scans routinely decode well above 6000x6000 (36M px) -- e.g. a
+# 6132x8176 ~= 50M-pixel page -- so rejecting outright made the classifier
+# unavailable for a large fraction of normal input, silently degrading
+# Mothra's stave detection to the raw-page fallback (see tasks_predict.py's
+# "falling back to raw-image stave detection" warning) for images that just
+# needed downscaling, not rejection. classify() now passes resize_ratio to
+# process_image_msae() to bring anything over this budget down to it before
+# classification; process_image_msae() restores the label map to the
+# original resolution internally (recognition_engine.py's restore_label_map
+# call), so callers see no change in output shape.
+#
+# MAX_INPUT_PIXELS is the real backstop: a sanity ceiling, well above any
+# real scan, that still hard-rejects (413) truly pathological input before
+# the decode/resize/padding work below is spent on it -- keeps the
+# classifier's several in-flight copies (input image, label map, two RGBA
+# PNG outputs) bounded under the container's 4 GiB limit even in the
+# downscale path.
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_DECODED_PIXELS = 6000 * 6000
+MAX_INPUT_PIXELS = 12000 * 12000
 
 # How often /classify polls the ASGI connection for a client disconnect
 # while the background classification thread is running -- see classify()'s
@@ -207,16 +228,49 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
             status_code=413,
             detail=f"uploaded image exceeds the {MAX_UPLOAD_BYTES}-byte limit",
         )
+
+    # Best-effort pre-decode guard: Image.open() is lazy -- it parses just
+    # enough of the container/metadata to report .size without decoding any
+    # pixel data -- so a small, highly-compressed file that would blow past
+    # MAX_INPUT_PIXELS once fully decoded gets rejected here instead of
+    # cv2.imdecode() below allocating the full pixel buffer first. Only
+    # covers formats Pillow can identify from header bytes alone; anything
+    # it can't (UnidentifiedImageError) falls through to cv2.imdecode() and
+    # the post-decode check further down, which stays as defense in depth.
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            probe_width, probe_height = probe.size
+        if probe_width * probe_height > MAX_INPUT_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"decoded image {probe_width}x{probe_height} exceeds the {MAX_INPUT_PIXELS}-pixel limit",
+            )
+    except UnidentifiedImageError:
+        pass
+
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=400, detail="could not decode uploaded image")
 
+    # Defense in depth: the Image.open() probe above already rejects most
+    # oversized uploads before this decode runs, but it only covers formats
+    # Pillow can identify from header bytes alone, so this check stays as
+    # the backstop for anything that slipped past it.
     height, width = img.shape[:2]
-    if height * width > MAX_DECODED_PIXELS:
+    if height * width > MAX_INPUT_PIXELS:
         raise HTTPException(
             status_code=413,
-            detail=f"decoded image {width}x{height} exceeds the {MAX_DECODED_PIXELS}-pixel limit",
+            detail=f"decoded image {width}x{height} exceeds the {MAX_INPUT_PIXELS}-pixel limit",
         )
+    # Between MAX_DECODED_PIXELS and MAX_INPUT_PIXELS: downscale into budget
+    # rather than reject -- see MAX_DECODED_PIXELS's comment above. sqrt()
+    # because pixel count scales with the square of a uniform linear ratio;
+    # compute_scale_ratio() (called inside process_image_msae()) still
+    # floor-clamps this if it would shrink either dimension below the
+    # classifier's minimum safe window size.
+    resize_ratio = None
+    if height * width > MAX_DECODED_PIXELS:
+        resize_ratio = math.sqrt(MAX_DECODED_PIXELS / float(height * width))
 
     # Run the actual classification on a background thread so this
     # coroutine is free to poll for a client disconnect concurrently (see
@@ -255,6 +309,7 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
                 [str(BACKGROUND_MODEL_PATH), str(STAFFLINES_MODEL_PATH)],
                 PATCH_HEIGHT, PATCH_WIDTH,
                 mode="logical",
+                resize_ratio=resize_ratio,
                 should_cancel=cancel_event.is_set,
                 progress_callback=_on_progress,
             )
@@ -322,8 +377,8 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
 
         label_map = outcome["label_map"]
         # process_image_msae restores full input resolution internally when
-        # resize_ratio/max_dimension are used (neither is passed here, so
-        # this should always hold) — re-checked because the Mothra side
+        # resize_ratio/max_dimension are used (see the MAX_DECODED_PIXELS
+        # downscale branch above) -- re-checked here because the Mothra side
         # needs the two models' box coordinates to share one frame.
         if label_map.shape[:2] != img.shape[:2]:
             yield (
