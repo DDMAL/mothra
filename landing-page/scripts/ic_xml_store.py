@@ -11,14 +11,14 @@ for every path into the encoder (interactive IC, auto-classified IC, and
 the step-3 "upload XML output" path).
 
 Reads live in ``ic_api.py`` (the ``/projects/{id}/ic-xml/{id}`` endpoints);
-this module is import-light on purpose, since the Celery worker pulls it in.
+this module is import-light on purpose, since the Celery worker pulls it in --
+and since ``tasks_encode.py`` imports it, which the DB-independent tests
+import in turn, the Postgres driver stays deferred into the function body.
 """
 from __future__ import annotations
 
 import uuid
 from typing import Optional
-
-import psycopg2
 
 from auth_api import get_db_conn, release_db_conn
 
@@ -67,6 +67,18 @@ def store_ic_xml(
     con = None
     cur = None
     try:
+        # Local import, not module-level, for the same reason as
+        # staffline_stage.persist_staffline_detection's (see the comment
+        # there): tasks_encode.py imports this module, and CI's
+        # "DB-independent scripts tests" step installs no Postgres driver, so
+        # a top-level `import psycopg2` fails collection for every test that
+        # imports tasks_encode (test_resolve_hints_staleness.py,
+        # test_tasks_text_batch_logs.py) -- which is what this module's own
+        # "import-light on purpose" docstring is about. Inside the try, not
+        # merely above it, so "never raises" holds on an install with no
+        # driver at all too.
+        import psycopg2
+
         # Acquisition is inside the try like everything else: a pool that is
         # exhausted or cannot reach Postgres raises here, and "never raises"
         # has to hold for that too -- otherwise the encode the user is
