@@ -17,6 +17,7 @@ import MeiTab from "./MeiTab";
 import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import StafflinesTab from "./StafflinesTab";
+import IcXmlTab from "./IcXmlTab";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
 import TruncatedName from "../shared/TruncatedName";
@@ -137,7 +138,7 @@ export default function ProjectDetail({
     initialTab?.tab ?? "images",
   );
   const [generatedSubTab, setGeneratedSubTab] = useState<
-    "annotations" | "text" | "stafflines" | "mei files"
+    "annotations" | "text" | "stafflines" | "ic xml" | "mei files"
   >(initialTab?.subTab ?? "annotations");
 
   // Reacts to initialTab CHANGING, not just seeding on mount -- a toast's
@@ -338,7 +339,7 @@ export default function ProjectDetail({
   };
 
   const switchGeneratedSubTab = (
-    tab: "annotations" | "text" | "stafflines" | "mei files",
+    tab: "annotations" | "text" | "stafflines" | "ic xml" | "mei files",
   ) => {
     setGeneratedSubTab(tab);
     meiSection.clearSelection();
@@ -357,6 +358,7 @@ export default function ProjectDetail({
     annotations: "Detected layers",
     text: "Detected text",
     stafflines: "Stafflines",
+    "ic xml": "Classifier XML",
     "mei files": "MEI files",
   };
 
@@ -366,6 +368,7 @@ export default function ProjectDetail({
     "annotations",
     "text",
     "stafflines",
+    "ic xml",
     "mei files",
   ] as const;
 
@@ -971,6 +974,21 @@ export default function ProjectDetail({
                       onUpdateProject({
                         ...project,
                         stafflines: [...project.stafflines, newSet],
+                      })
+                    }
+                  />
+                )}
+                {generatedSubTab === "ic xml" && (
+                  <IcXmlTab
+                    icXmlFiles={project.icXmlFiles ?? []}
+                    images={project.images}
+                    projectId={project.id}
+                    onDeleted={(xmlId) =>
+                      onUpdateProject({
+                        ...project,
+                        icXmlFiles: (project.icXmlFiles ?? []).filter(
+                          (f) => f.id !== xmlId,
+                        ),
                       })
                     }
                   />

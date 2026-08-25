@@ -274,13 +274,26 @@ jobs:
           kubectl -n mothra wait --for=condition=complete "job/migrate${SUFFIX}" --timeout=120s \
             || { kubectl -n mothra logs "job/migrate${SUFFIX}" --all-containers; exit 1; }
 
+      - name: Roll out IC before the backend that depends on it
+        run: |
+          set -euo pipefail
+          # The backend calls IC's /sessions/{id}/complete with `finalize=false`
+          # and verifies that parameter exists at startup (ic_api.py's
+          # verify_ic_finalize_support), so IC must be serving this commit's
+          # image BEFORE the new backend pods start. Applied together with
+          # everything else, the two roll concurrently: a new backend pod can
+          # come up first, probe a not-yet-replaced old IC pod, and abort. Both
+          # images are built from this same commit, so ordering the rollout is
+          # all that's needed -- there is no separate IC version to reconcile.
+          kubectl apply -f "$DIR/ic.yaml"
+          kubectl -n mothra rollout status "deploy/ic${SUFFIX}" --timeout=300s
+
       - name: Apply manifests (deployments, ingress; NOT redis/postgres/secrets/configmap)
         run: |
           set -euo pipefail
           kubectl apply \
             -f "$DIR/backend.yaml" \
             -f "$DIR/worker.yaml" \
-            -f "$DIR/ic.yaml" \
             -f "$DIR/text-service.yaml" \
             -f "$DIR/paco-classifier-service.yaml" \
             -f "$DIR/ingress.yaml"
@@ -289,7 +302,9 @@ jobs:
         run: |
           set -euo pipefail
           # Object names, so SUFFIX applies here (not DIR).
-          for d in backend worker ic text-service paco-classifier-service; do
+          # `ic` is omitted: already applied and waited on above, so the
+          # backend could be probed by a compatible IC at startup.
+          for d in backend worker text-service paco-classifier-service; do
             kubectl -n mothra rollout status "deploy/${d}${SUFFIX}" --timeout=300s
           done
           kubectl -n mothra get pods
