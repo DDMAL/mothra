@@ -21,3 +21,6 @@ tensorflow==2.15.1
 numpy==1.24.3
 opencv-python==4.9.0.80
 h5py==3.10.0
+# Used only for the pre-decode pixel-count guard in /classify (Image.open()
+# header peek, no full decode) -- not otherwise a project dependency.
+Pillow==10.2.0

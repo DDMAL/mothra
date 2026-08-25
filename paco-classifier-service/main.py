@@ -26,6 +26,7 @@ error body, since nothing has been streamed yet at that point.
 """
 import asyncio
 import base64
+import io
 import json
 import math
 import os
@@ -38,6 +39,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from PIL import Image, UnidentifiedImageError
 from tensorflow.keras.models import load_model
 
 PACO_DIR = Path(__file__).resolve().parent.parent / "paco-classifier"
@@ -226,10 +228,34 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
             status_code=413,
             detail=f"uploaded image exceeds the {MAX_UPLOAD_BYTES}-byte limit",
         )
+
+    # Best-effort pre-decode guard: Image.open() is lazy -- it parses just
+    # enough of the container/metadata to report .size without decoding any
+    # pixel data -- so a small, highly-compressed file that would blow past
+    # MAX_INPUT_PIXELS once fully decoded gets rejected here instead of
+    # cv2.imdecode() below allocating the full pixel buffer first. Only
+    # covers formats Pillow can identify from header bytes alone; anything
+    # it can't (UnidentifiedImageError) falls through to cv2.imdecode() and
+    # the post-decode check further down, which stays as defense in depth.
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            probe_width, probe_height = probe.size
+        if probe_width * probe_height > MAX_INPUT_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"decoded image {probe_width}x{probe_height} exceeds the {MAX_INPUT_PIXELS}-pixel limit",
+            )
+    except UnidentifiedImageError:
+        pass
+
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=400, detail="could not decode uploaded image")
 
+    # Defense in depth: the Image.open() probe above already rejects most
+    # oversized uploads before this decode runs, but it only covers formats
+    # Pillow can identify from header bytes alone, so this check stays as
+    # the backstop for anything that slipped past it.
     height, width = img.shape[:2]
     if height * width > MAX_INPUT_PIXELS:
         raise HTTPException(
