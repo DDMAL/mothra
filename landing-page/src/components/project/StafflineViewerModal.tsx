@@ -53,7 +53,15 @@ export default function StafflineViewerModal({
 }: Props) {
   const [viewState, setViewState] = useState<ViewState>({ status: "loading" });
   const [notesOpen, setNotesOpen] = useState(false);
-  const [tab, setTab] = useState<"overlay" | "rhythm" | "raw" | "classifier">("overlay");
+  const [tab, setTab] = useState<"overlay" | "rhythm" | "raw" | "classifier">(
+    "overlay",
+  );
+  // mothra#286: an in-tab option on "classifier", not its own top-level tab
+  // -- toggles that single stafflines-layer view into a side-by-side
+  // comparison against the original page (and the background layer, when
+  // stored). Resets to the focused single-image view whenever a different
+  // detection is opened, same as the other per-detection view state below.
+  const [classifierCompare, setClassifierCompare] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   // Non-null once interpolate-preview has returned -- presence alone means
@@ -205,6 +213,7 @@ export default function StafflineViewerModal({
     // showing last detection's preview over this one's image.
     setInterpolatePreview(null);
     setInterpolateError(null);
+    setClassifierCompare(false);
 
     if (!detection.imageSrc) {
       setViewState({
@@ -433,15 +442,82 @@ export default function StafflineViewerModal({
             </div>
           ) : !interpolatePreview && tab === "classifier" ? (
             <div className="p-4 flex flex-col items-center">
-              <AuthImage
-                src={`/api/projects/${projectId}/stafflines/${detection.id}/classifier-image`}
-                alt={`${detection.imageName} — paco-classifier stafflines layer`}
-                className="block max-w-full rounded-xl"
-              />
-              <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
-                paco-classifier's stafflines-only layer — the image the stave
-                model actually detected boxes against, not the raw page.
-              </p>
+              {/* mothra#286: an in-tab option, not a separate top-level tab
+                  -- toggles this single stafflines-layer view into a
+                  side-by-side comparison against the original page (and the
+                  background layer, when stored). */}
+              <button
+                onClick={() => setClassifierCompare((c) => !c)}
+                className="mb-3 px-3 py-1 rounded-full text-xs font-mono border border-[#1D3335]/30 text-[#1D3335]/70 hover:text-[#1D3335] cursor-pointer self-end"
+              >
+                {classifierCompare ? "single image" : "compare with original"}
+              </button>
+              {classifierCompare ? (
+                <div className="w-full">
+                  <div
+                    className={`grid gap-3 ${
+                      detection.hasBackgroundImage
+                        ? "grid-cols-1 sm:grid-cols-3"
+                        : "grid-cols-1 sm:grid-cols-2"
+                    }`}
+                  >
+                    <div className="flex flex-col items-center gap-1 min-w-0">
+                      <span className="text-[#1D3335]/60 text-[11px] font-mono">
+                        original page
+                      </span>
+                      <img
+                        src={viewState.imageUrl}
+                        alt={detection.imageName}
+                        className="block max-w-full rounded-xl bg-[#1D3335]/10"
+                      />
+                    </div>
+                    <div className="flex flex-col items-center gap-1 min-w-0">
+                      <span className="text-[#1D3335]/60 text-[11px] font-mono">
+                        stafflines layer
+                      </span>
+                      <AuthImage
+                        src={`/api/projects/${projectId}/stafflines/${detection.id}/classifier-image`}
+                        alt={`${detection.imageName} — paco-classifier stafflines layer`}
+                        className="block max-w-full rounded-xl bg-[#1D3335]/10"
+                      />
+                    </div>
+                    {detection.hasBackgroundImage && (
+                      <div className="flex flex-col items-center gap-1 min-w-0">
+                        <span className="text-[#1D3335]/60 text-[11px] font-mono">
+                          background layer
+                        </span>
+                        <AuthImage
+                          src={`/api/projects/${projectId}/stafflines/${detection.id}/background-image`}
+                          alt={`${detection.imageName} — paco-classifier background layer`}
+                          className="block max-w-full rounded-xl bg-[#1D3335]/10"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-3 text-[#1D3335]/50 text-[11px] font-mono text-center">
+                    paco-classifier's raw output{" "}
+                    {detection.hasBackgroundImage
+                      ? "— the stafflines-only and background-only layers it split this page into —"
+                      : "— the stafflines-only layer it split this page into —"}{" "}
+                    shown next to the original page for comparison.
+                    {!detection.hasBackgroundImage &&
+                      " (this detection predates the background layer being stored.)"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <AuthImage
+                    src={`/api/projects/${projectId}/stafflines/${detection.id}/classifier-image`}
+                    alt={`${detection.imageName} — paco-classifier stafflines layer`}
+                    className="block max-w-full rounded-xl"
+                  />
+                  <p className="mt-2 text-[#1D3335]/50 text-[11px] font-mono">
+                    paco-classifier's stafflines-only layer — the image the
+                    stave model actually detected boxes against, not the raw
+                    page.
+                  </p>
+                </>
+              )}
             </div>
           ) : !interpolatePreview && tab === "raw" ? (
             <div className="p-4">

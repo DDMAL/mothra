@@ -375,6 +375,14 @@ _ADDED_COLUMNS = [
     ("annotations",     "model_hash",            "TEXT"),
     ("staffline_detections", "classifier_image",      "BYTEA"),
     ("staffline_detections", "classifier_image_mime", "TEXT DEFAULT 'image/png'"),
+    # mothra#286: paco-classifier's OTHER output layer (background-only),
+    # stored the same way as classifier_image above (verbatim bytes, its own
+    # mime sibling) so both of its raw output layers can be viewed
+    # side-by-side with the original page -- see staffline_stage.py's
+    # persist_staffline_detection and inference_api.py's
+    # GET .../background-image.
+    ("staffline_detections", "background_image",      "BYTEA"),
+    ("staffline_detections", "background_image_mime", "TEXT DEFAULT 'image/png'"),
 
     ("text_alignments", "log_text",              "TEXT"),
     # Which project_images column syl_boxes' absolute-pixel ul/lr coords were
