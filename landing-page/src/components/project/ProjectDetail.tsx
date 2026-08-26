@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { Project, ModelKind, CantusSource, ProjectInitialTab } from "../../types";
+import type {
+  Project,
+  ModelKind,
+  CantusSource,
+  ProjectInitialTab,
+  ProjectImage,
+} from "../../types";
 import { apiFetch } from "../../lib/apiFetch";
-import { getImageProgress, minNextStep } from "../../utils/imageStep";
+import {
+  getImageProgress,
+  minNextStep,
+  findMeiFileForImage,
+} from "../../utils/imageStep";
 import { useAssetSection } from "../../hooks/useAssetSection";
 import type { useInferenceSettings } from "../../hooks/useInferenceSettings";
 import type { useTextFindingSettings } from "../../hooks/useTextFindingSettings";
@@ -18,9 +28,9 @@ import TextAlignmentsTab from "./TextAlignmentsTab";
 import AnnotationsTab from "./AnnotationsTab";
 import StafflinesTab from "./StafflinesTab";
 import IcXmlTab from "./IcXmlTab";
+import SelectedPanel from "./SelectedPanel";
 import { downloadBlob } from "../../utils/download";
 import CantusSourcePanel from "./CantusSourcePanel";
-import TruncatedName from "../shared/TruncatedName";
 import {
   subscribeActiveJobs,
   getActiveJobsSnapshot,
@@ -51,18 +61,19 @@ interface ProjectDetailProps {
   onBack: () => void;
   onContinue: () => void;
   onUpdateProject: (updated: Project) => void;
-  usedNames: { images: string[]; models: string[]; annotations: string[] };
-  onUsedNamesChange: (names: {
-    images: string[];
-    models: string[];
-    annotations: string[];
-  }) => void;
+  usedNames: { images: string[]; models: string[] };
+  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
   stepsUnlocked: number;
   onStepClick: (step: number) => void;
   /** Open a saved IC session picked in the "manage IC sessions" modal on the
    * IC step page (step 1), rather than inside the modal's iframe. */
   onResumeIcSession: (req: IcResumeRequest) => void;
   onSendToCantus: () => void;
+  /** mothra#294: clicking an already-progressed selected image (in the
+   * Images tab grid or the "selected:" panel) jumps straight back into its
+   * current stage instead of just toggling multi-select. */
+  onFocusIcImage: (imageId: string) => void;
+  onFocusNeonFile: (fileId: string) => void;
   onViewActiveJob: (jobId: string, kind: string, startedAt?: string | null) => void;
   /** Deep-links the tab/sub-tab this mount should open on -- set by App.tsx's
    * job-done toast handler for a succeeded job (issue #196). Null for every
@@ -115,6 +126,8 @@ export default function ProjectDetail({
   onStepClick,
   onResumeIcSession,
   onSendToCantus,
+  onFocusIcImage,
+  onFocusNeonFile,
   onViewActiveJob,
   initialTab,
   onInitialTabConsumed,
@@ -321,6 +334,30 @@ export default function ProjectDetail({
   // waiting until the IC step would waste a whole detection run.
   const autoIcNeedsTraining =
     nextStep <= 1 && icSettings.mode === "auto" && !icSettings.hasTrainingSet;
+
+  // mothra#294: the single decision point for "clicking this selected image
+  // should jump me back into IC/Neon" -- reused by both the Images tab grid
+  // (AssetGrid's onNavigate) and the "selected:" panel's rows. Returns
+  // whether it navigated; a Begin-stage image (progress === null) has
+  // nothing to jump into, so callers fall back to their normal click
+  // behavior (multi-select) in that case.
+  const navigateToImage = (img: Pick<ProjectImage, "id" | "name">): boolean => {
+    const progress = getImageProgress(
+      img,
+      project.annotations ?? [],
+      project.meiFiles ?? [],
+      stepsUnlocked,
+    );
+    if (!progress) return false;
+    if (progress.nextStep === 1) {
+      onFocusIcImage(img.id);
+      return true;
+    }
+    const meiFile = findMeiFileForImage(img, project.meiFiles ?? []);
+    if (!meiFile) return false; // defensive; progress said neon/done implies a match
+    onFocusNeonFile(meiFile.id);
+    return true;
+  };
 
   const imgSection = useAssetSection(project.images);
   const mdlSection = useAssetSection(project.models);
@@ -739,26 +776,8 @@ export default function ProjectDetail({
               generatedSubTab === "annotations" &&
               annSection.selectedIds.size > 0 && (
                 <>
-                  {selectionButtons(
-                    "annotation",
-                    annSection.selectedIds.size,
-                    () => {
-                      const names = project.annotations
-                        .filter((a) => annSection.selectedIds.has(a.id))
-                        .map((a) => a.imageName);
-                      onUsedNamesChange({
-                        ...usedNames,
-                        annotations: [
-                          ...usedNames.annotations,
-                          ...names.filter(
-                            (n) => !usedNames.annotations.includes(n),
-                          ),
-                        ],
-                      });
-                      annSection.clearSelection();
-                      setValidationError(null);
-                    },
-                    async () => {
+                  <button
+                    onClick={async () => {
                       const ids = [...annSection.selectedIds];
                       const deleted = new Set(ids);
                       annSection.clearSelection();
@@ -771,8 +790,12 @@ export default function ProjectDetail({
                           (a) => !deleted.has(a.id),
                         ),
                       });
-                    },
-                  )}
+                    }}
+                    className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer bg-white/20 shrink-0 whitespace-nowrap"
+                  >
+                    delete {annSection.selectedIds.size} annotation
+                    {annSection.selectedIds.size > 1 ? "s" : ""}
+                  </button>
                   <button
                     onClick={() =>
                       project.annotations
@@ -893,6 +916,7 @@ export default function ProjectDetail({
                 usedNames={usedNames}
                 onUpdateProject={onUpdateProject}
                 onUsedNamesChange={onUsedNamesChange}
+                onNavigateImage={navigateToImage}
                 onUploadImage={onUploadImage}
                 onDeleteImage={onDeleteImage}
                 setValidationError={setValidationError}
@@ -953,8 +977,6 @@ export default function ProjectDetail({
                     images={project.images}
                     projectId={project.id}
                     section={annSection}
-                    usedNames={usedNames}
-                    onUsedNamesChange={onUsedNamesChange}
                   />
                 )}
                 {generatedSubTab === "text" && (
@@ -1065,23 +1087,6 @@ export default function ProjectDetail({
                           return;
                         }
                         setValidationError(null);
-                      } else if (nextStep === 1 && stepsUnlocked <= 1) {
-                        if (usedNames.annotations.length === 0) {
-                          setValidationError(
-                            "must select at least one annotation!",
-                          );
-                          return;
-                        }
-                        if (
-                          usedNames.annotations.length !==
-                          usedNames.images.length
-                        ) {
-                          setValidationError(
-                            "number of annotations must match number of images!",
-                          );
-                          return;
-                        }
-                        setValidationError(null);
                       }
                       if (autoIcNeedsTraining) return; // defensive; button is disabled below
                       onContinue();
@@ -1163,108 +1168,13 @@ export default function ProjectDetail({
                 </>
               );
             })()}
-          <div className="bg-[#C8E6E3]/40 rounded-2xl p-4 flex flex-col gap-2 text-white text-sm">
-            <span className="text-white/80">selected:</span>
-            {usedNames.models.map((name) => (
-              <div key={name} className="flex items-center justify-between">
-                <TruncatedName name={name} className="flex-1 min-w-0 mr-2" />
-                {stepsUnlocked === 0 && (
-                  <button
-                    onClick={() =>
-                      onUsedNamesChange({
-                        ...usedNames,
-                        models: usedNames.models.filter((n) => n !== name),
-                      })
-                    }
-                    className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-            {stepsUnlocked >= 1 && (
-              <>
-                <hr className="border-white/40 my-1" />
-                {usedNames.annotations.map((name) => (
-                  <div key={name} className="flex items-center justify-between">
-                    <TruncatedName
-                      name={name}
-                      className="flex-1 min-w-0 mr-2"
-                    />
-                    {stepsUnlocked < 2 && (
-                      <button
-                        onClick={() =>
-                          onUsedNamesChange({
-                            ...usedNames,
-                            annotations: usedNames.annotations.filter(
-                              (n) => n !== name,
-                            ),
-                          })
-                        }
-                        className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-            <hr className="border-white/40 my-1" />
-            {usedNames.images.map((imageId) => {
-              // mothra#241 follow-up (CodeRabbit): usedNames.images now
-              // holds ids, so this always finds the exact image -- no more
-              // ambiguity between two duplicate-named uploads. The
-              // `{ id: imageId, name: imageId }` fallback only matters if
-              // the image was deleted out from under a still-"used" id.
-              const img = project.images.find((i) => i.id === imageId);
-              const displayName = img?.name ?? imageId;
-              const hasProgress =
-                getImageProgress(
-                  img ?? { id: imageId, name: displayName },
-                  project.annotations ?? [],
-                  project.meiFiles ?? [],
-                  stepsUnlocked,
-                ) !== null;
-              return (
-                <div
-                  key={imageId}
-                  className="flex items-center justify-between"
-                >
-                  <TruncatedName
-                    name={displayName}
-                    className="flex-1 min-w-0 mr-2"
-                  />
-                  {/* mothra#247: always removable, regardless of hasProgress
-                      -- this only excludes the page from future predict/IC/
-                      batch runs (usedImageIds), it never deletes its
-                      existing annotations/MEI files, so there's nothing
-                      unsafe about removing a page that already has progress.
-                      Re-"use"-ing it later picks up right where it left off,
-                      same as any other used image. */}
-                  <button
-                    onClick={() =>
-                      onUsedNamesChange({
-                        ...usedNames,
-                        images: usedNames.images.filter(
-                          (id) => id !== imageId,
-                        ),
-                      })
-                    }
-                    title={
-                      hasProgress
-                        ? "Remove from selection (its existing annotations/MEI are kept, just excluded from future runs)"
-                        : "Remove from selection"
-                    }
-                    className="text-white/60 hover:text-white flex-shrink-0 leading-none cursor-pointer"
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+          <SelectedPanel
+            project={project}
+            usedNames={usedNames}
+            stepsUnlocked={stepsUnlocked}
+            onUsedNamesChange={onUsedNamesChange}
+            onNavigateImage={navigateToImage}
+          />
           {validationError && (
             <p className="text-white text-xs text-center">{validationError}</p>
           )}

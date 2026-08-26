@@ -6,19 +6,11 @@ import TruncatedName from "../shared/TruncatedName";
 import type { useAssetSection } from "../../hooks/useAssetSection";
 import { sortBySourceThenFolio, sourceGroupLabel } from "../../utils/folio";
 
-// mothra#241 follow-up (CodeRabbit): despite the name, `images` holds
-// project_images.id values, not names, since duplicate-named uploads need
-// to be selected/removed independently -- see Project.usedImageIds's
-// comment in types.ts. `models`/`annotations` are unaffected (still names).
-type UsedNames = { images: string[]; models: string[]; annotations: string[] };
-
 interface AnnotationsTabProps {
   annotations: AnnotationSet[];
   images: ProjectImage[];
   projectId: number;
   section: ReturnType<typeof useAssetSection<AnnotationSet>>;
-  usedNames: { images: string[]; models: string[]; annotations: string[] };
-  onUsedNamesChange: (names: UsedNames) => void;
 }
 
 export default function AnnotationsTab({
@@ -26,8 +18,6 @@ export default function AnnotationsTab({
   images,
   projectId,
   section,
-  usedNames,
-  onUsedNamesChange,
 }: AnnotationsTabProps) {
   const [viewSet, setViewSet] = useState<AnnotationSet | null>(null);
   if (annotations.length === 0) {
@@ -57,7 +47,6 @@ export default function AnnotationsTab({
         onClick={() => section.clearSelection()}
       >
         {sortedAnnotations.map((set, idx) => {
-          const isUsed = usedNames.annotations.includes(set.imageName);
           const isSelected = section.selectedIds.has(set.id);
           const group = sourceGroupLabel(images, set.imageName);
           const prevGroup =
@@ -73,10 +62,10 @@ export default function AnnotationsTab({
                 </div>
               )}
               <div
-                className={`flex flex-col gap-2 ${!isUsed ? "cursor-pointer" : ""}`}
+                className="flex flex-col gap-2 cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!isUsed) section.handleClick(e, set.id, idx);
+                  section.handleClick(e, set.id, idx);
                 }}
               >
                 <div className="relative aspect-square">
@@ -87,8 +76,7 @@ export default function AnnotationsTab({
                   </div>
                   <div
                     className={`absolute inset-0 bg-[#C8E6E3]/50 rounded-xl overflow-hidden flex items-end justify-start p-2
-                    ${isSelected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}
-                    ${isUsed ? "opacity-50" : ""}`}
+                    ${isSelected ? "ring-4 ring-white ring-offset-2 ring-offset-[#4AADAA]" : ""}`}
                   >
                     {set.imageSrc && (
                       <AuthImage
@@ -100,27 +88,6 @@ export default function AnnotationsTab({
                     <span className="relative text-[10px] text-white/80 font-mono z-10">
                       .png
                     </span>
-                    {isUsed ? (
-                      <span className="absolute top-1.5 left-1.5 z-20 px-1.5 py-0.5 bg-black/40 text-white/60 text-[9px] font-mono rounded">
-                        ✓
-                      </span>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onUsedNamesChange({
-                            ...usedNames,
-                            annotations: [
-                              ...usedNames.annotations,
-                              set.imageName,
-                            ],
-                          });
-                        }}
-                        className="absolute top-1.5 left-1.5 z-20 px-1.5 py-0.5 bg-black/40 text-white text-[9px] font-mono rounded hover:bg-black/70 cursor-pointer"
-                      >
-                        use
-                      </button>
-                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
