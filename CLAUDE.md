@@ -53,6 +53,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `job_uploads` | raw XML/image bytes staged for a Celery task to pick up, keyed by a short-lived `upload_id` |
 | `job_sessions` | encode-job output (`mei_bytes`, `stem`, `manifest`) — replaces the old in-memory `_sessions` dict + `MANIFEST_DIR` tempfiles |
 | `refresh_tokens` | `user_id`, `token_hash` (SHA-256 of the raw token), `expires_at`, `revoked_at` — backs the real JWT refresh flow, see **Backend** above |
+| `neon_manifests` | `session_id`, `manifest JSONB`, `project_id` (provenance only, not an ownership boundary) — Neon-editor manifests (mothra#230), replaces `NEON_MANIFESTS_DIR/{session_id}.jsonld` files; served back by a dynamic `GET /neon/samples/manifests/{id}.jsonld` route at the same URL shape the old `StaticFiles` mount used |
 
 Schema is migrated forward via `_migrate_db()` in `auth_api.py`. New columns go in the
 `_ADDED_COLUMNS` list — `(table, column, definition)` tuples replayed as
@@ -169,7 +170,7 @@ Optional env var overrides (all have working `config.yaml` defaults):
 ### Configuration (`config.py` / `config.yaml`)
 
 `landing-page/scripts/config.yaml` centralizes non-secret paths (`MODELS_DIR`,
-`NEON_MANIFESTS_DIR`, `MOCK_DATA_DIR`, `MEDIEVAL_MODELS_DIR`) and service URLs
+`MOCK_DATA_DIR`, `MEDIEVAL_MODELS_DIR`) and service URLs
 (`IC_API_URL`, `IC_PUBLIC_URL`, `TEXT_API_URL`, Celery's `broker_url`) that used
 to be scattered as inline `Path(__file__).parent / "..."` literals or
 `os.environ.get(..., "http://localhost:PORT")` defaults across several files.
@@ -917,13 +918,15 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   can't actually kill an already-running task; see **Job queue** above
 - **Job retry** — `POST /api/jobs/{id}/retry` replays a failed job's stored `params` as a new,
   lineage-tracked job; see **Job queue** above
-- **Periodic job_uploads/job_sessions cleanup** — the worker's embedded Celery beat scheduler
-  runs `tasks_cleanup.py`'s `cleanup.run_periodic` task hourly (`celery_app.py`'s
+- **Periodic job_uploads/job_sessions/neon_manifests cleanup** — the worker's embedded Celery
+  beat scheduler runs `tasks_cleanup.py`'s `cleanup.run_periodic` task hourly (`celery_app.py`'s
   `beat_schedule`); previously `job_store.py`'s `cleanup_stale_uploads()` (typo now fixed --
-  was `cleanup_stale_uplaods`) and `cleanup_stale_sessions()` only ran once at backend startup.
-  Neon-editor manifest cleanup (`auth_api.cleanup_stale_neon_manifests`) stays a backend-only,
-  non-Celery sweep since it cleans the backend container's own local disk, which a task running
-  on the worker pod can't reach; see **Job queue** above
+  was `cleanup_stale_uplaods`) and `cleanup_stale_sessions()` only ran once at backend startup,
+  and Neon-editor manifest cleanup was a backend-only, non-Celery disk sweep
+  (`auth_api.cleanup_stale_neon_manifests`) since it cleaned the backend container's own local
+  disk, which a task running on the worker pod couldn't reach. mothra#230 moved manifests into
+  Postgres (`neon_manifests`), so `job_store.cleanup_stale_neon_manifests` now joins the same
+  Celery-beat sweep as everything else; see **Job queue** above
 - **Real health endpoints** — `GET /healthz` (readiness, checks Postgres + Celery broker) and
   `GET /healthz/live` (liveness, no dependency check) on the backend; `GET /healthz` on
   text-service. k8s probes now use `httpGet` instead of bare `tcpSocket`; see **Deployment** above
