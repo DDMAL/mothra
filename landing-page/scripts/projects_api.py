@@ -94,7 +94,8 @@ def _map_text_alignment_row(tid, img_id, img_name, spacing, syl_count, storage_v
 
 
 def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image=False,
-                        has_classifier_fallback=False, classifier_error=None, storage_variant="working_copy"):
+                        has_classifier_fallback=False, classifier_error=None, storage_variant="working_copy",
+                        has_background_image=False):
     return {
         "id": did, "imageName": img_name,
         "imageSrc": _image_src(img_id, storage_variant),
@@ -108,6 +109,10 @@ def _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave,
         # docstring.
         "hasClassifierFallback": bool(has_classifier_fallback),
         "classifierError": classifier_error,
+        # mothra#286: paco-classifier's OTHER output layer (background-only),
+        # alongside the stafflines-only one hasClassifierImage exposes --
+        # see inference_api.py's GET .../background-image.
+        "hasBackgroundImage": bool(has_background_image),
     }
 
 def _project_row_to_dict(cur, row, username):
@@ -145,10 +150,11 @@ def _project_row_to_dict(cur, row, username):
         "SELECT id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
         " classifier_image IS NOT NULL,"
         " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error',"
-        " settings_json->>'storage_variant'"
+        " settings_json->>'storage_variant',"
+        " background_image IS NOT NULL"
         " FROM staffline_detections WHERE project_id=%s ORDER BY created_at ASC", (pid,)
     )
-    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]) for r in cur.fetchall()]
+    stafflines = [_map_staffline_row(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]) for r in cur.fetchall()]
     cur.execute(
         "SELECT id, image_id, image_name, name, glyph_count, octet_length(xml_content), created_at"
         " FROM ic_xml_files WHERE project_id=%s ORDER BY created_at ASC", (pid,)
@@ -235,15 +241,17 @@ def list_projects(user=Depends(get_current_user)):
             "SELECT project_id, id, image_id, image_name, stave_count, mode_lines_per_stave, status,"
             " classifier_image IS NOT NULL,"
             " settings_json->>'source_label' = 'raw_page_fallback', settings_json->>'classifier_error',"
-            " settings_json->>'storage_variant'"
+            " settings_json->>'storage_variant',"
+            " background_image IS NOT NULL"
             " FROM staffline_detections WHERE project_id IN %s ORDER BY created_at ASC", (pids,)
         )
         stafflines_by_pid: dict = {}
         for (pid, did, img_id, img_name, stave_count, mode_lines_per_stave, status, has_classifier_image,
-             has_classifier_fallback, classifier_error, storage_variant) in cur.fetchall():
+             has_classifier_fallback, classifier_error, storage_variant, has_background_image) in cur.fetchall():
             stafflines_by_pid.setdefault(pid, []).append(
                 _map_staffline_row(did, img_id, img_name, stave_count, mode_lines_per_stave, status,
-                                    has_classifier_image, has_classifier_fallback, classifier_error, storage_variant)
+                                    has_classifier_image, has_classifier_fallback, classifier_error, storage_variant,
+                                    has_background_image)
             )
 
         cur.execute(

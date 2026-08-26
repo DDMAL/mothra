@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
+import AlphaBanner from "./components/layout/AlphaBanner";
 import AppRouter from "./components/AppRouter";
 import ToastContainer from "./components/shared/ToastContainer";
 import type { View, Project, ProjectInitialTab } from "./types";
@@ -331,6 +332,9 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       <ToastContainer />
+      {/* mothra#290: shown on every view, not just "landing" -- the whole
+          app is alpha, not just its marketing page. */}
+      <AlphaBanner />
       <Navbar
         currentUser={currentUser}
         onLogout={handleLogout}

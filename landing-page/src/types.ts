@@ -82,6 +82,12 @@ export interface StafflineSet {
    * "unreachable: ..."); null/undefined on rows written before this was
    * added, or when hasClassifierFallback is false. */
   classifierError?: string | null;
+  /** mothra#286: paco-classifier's OTHER output layer -- the
+   * background-only PNG, the sibling to the stafflines-only layer
+   * hasClassifierImage already exposes. Never true without
+   * hasClassifierImage also being true (both come from the same
+   * classify_stafflines call) -- see GET .../background-image. */
+  hasBackgroundImage?: boolean;
 }
 
 // Field names here are snake_case, matching landing-page/scripts/staffline_stage.py's

@@ -124,7 +124,8 @@ async def get_staffline_detection(
         cur.execute(
             "SELECT s.jsomr_json, s.image_name, s.scale_unit, s.stave_count,"
             " s.mode_lines_per_stave, s.status, s.classifier_image IS NOT NULL,"
-            " s.settings_json->>'source_label' = 'raw_page_fallback', s.settings_json->>'classifier_error'"
+            " s.settings_json->>'source_label' = 'raw_page_fallback', s.settings_json->>'classifier_error',"
+            " s.background_image IS NOT NULL"
             " FROM staffline_detections s"
             " JOIN projects p ON p.id = s.project_id"
             " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
@@ -143,6 +144,9 @@ async def get_staffline_detection(
         # represent -- CodeRabbit finding on #252. Matches
         # projects_api.py's _map_staffline_row, which already does this.
         "hasClassifierFallback": bool(row[7]), "classifierError": row[8],
+        # mothra#286: paco-classifier's OTHER output layer -- see
+        # get_staffline_background_image below.
+        "hasBackgroundImage": row[9],
     }
 
 @router.get("/projects/{project_id}/stafflines/{detection_id}/classifier-image")
@@ -171,6 +175,31 @@ def get_staffline_classifier_image(
         row = cur.fetchone()
     if not row or row[0] is None:
         raise HTTPException(status_code=404, detail="no classifier image stored for this detection")
+    return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
+
+@router.get("/projects/{project_id}/stafflines/{detection_id}/background-image")
+def get_staffline_background_image(
+    project_id: int,
+    detection_id: str,
+    user=Depends(get_current_user),
+):
+    """mothra#286: serves the paco-classifier's OTHER output layer -- the
+    background-only PNG, the sibling to classifier-image above from the
+    same classify_stafflines call. Unlike the stafflines-only layer, this
+    one plays no role in stave detection; it's stored purely so the
+    frontend can show paco's raw output (both layers) side-by-side with the
+    original page. Same scoping/404 semantics as get_staffline_classifier_image."""
+    with db_cursor() as (con, cur):
+        cur.execute(
+            "SELECT s.background_image, s.background_image_mime"
+            " FROM staffline_detections s"
+            " JOIN projects p ON p.id = s.project_id"
+            " WHERE s.id = %s AND s.project_id = %s AND p.user_id = %s",
+            (detection_id, project_id, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        raise HTTPException(status_code=404, detail="no background image stored for this detection")
     return Response(content=bytes(row[0]), media_type=row[1] or "image/png")
 
 def _load_image_and_yolo_for_detection(cur, project_id: int, detection_id: str, user_id: int):

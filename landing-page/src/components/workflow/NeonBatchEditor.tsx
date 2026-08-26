@@ -124,6 +124,34 @@ function applyNotationTypeFont(
   tryClick();
 }
 
+function disableStrayInsertMode(
+  iframe: HTMLIFrameElement,
+  timerRef: { current: number | null },
+) {
+  // one poll at a time per iframe, same reasoning as applyNotationTypeFont above
+  if (timerRef.current !== null) {
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }
+  let attempts = 0;
+  const tryDisable = () => {
+    const doc = iframe.contentDocument;
+    if (doc?.getElementById("returnToEditMode")) {
+      doc
+        .getElementById("editContents")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      timerRef.current = null;
+      return;
+    }
+    if (attempts++ < 40) {
+      timerRef.current = window.setTimeout(tryDisable, 250);
+    } else {
+      timerRef.current = null;
+    }
+  };
+  tryDisable();
+}
+
 const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
   function NeonBatchEditor(
     { project, meiFiles, onFinish, onBack, onFileCorrected },
@@ -152,6 +180,7 @@ const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
     // instance so a new call (new file, new session) always cancels whatever
     // poll the previous one left running -- see that function's comment.
     const notationTimerRef = useRef<number | null>(null);
+    const insertModeTimerRef = useRef<number | null>(null);
     useEffect(() => {
       return () => {
         // Deliberately reads notationTimerRef.current at cleanup/unmount
@@ -162,6 +191,10 @@ const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
         if (notationTimerRef.current !== null) {
           // eslint-disable-next-line react-hooks/exhaustive-deps
           window.clearTimeout(notationTimerRef.current);
+        }
+        if (insertModeTimerRef.current !== null) {
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          window.clearTimeout(insertModeTimerRef.current);
         }
       };
     }, []);
@@ -445,13 +478,15 @@ const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
             src={`/neon/editor.html?manifest=${currentSession.session_id}`}
             className="flex-1 border-none w-full"
             title={`Neon editor - ${currentFile?.name ?? ""}`}
-            onLoad={(e) =>
+            onLoad={(e) => {
+              e.currentTarget.contentWindow?.focus(); // focus new iframe immediately so shortcuts work
               applyNotationTypeFont(
                 e.currentTarget,
                 currentFile?.xmlContent,
                 notationTimerRef,
-              )
-            }
+              );
+              disableStrayInsertMode(e.currentTarget, insertModeTimerRef);
+            }}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-[#ef4444]">
