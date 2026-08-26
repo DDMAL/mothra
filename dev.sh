@@ -205,17 +205,20 @@ start() {
 
 echo "${C_OK}Mothra dev${C_RST}  web:${C_WEB}$WEB_PORT${C_RST}  backend:${C_API}$API_PORT${C_RST}  ic:${C_IC}$IC_PORT${C_RST}  text:${C_TEXT}$TEXT_PORT${C_RST}  paco:${C_PACO}$PACO_PORT${C_RST}   ${C_DIM}(Ctrl-C to stop all)${C_RST}"
 
-# Share the landing-page's Neon DATABASE_URL with the IC process so IC
-# sessions are persisted with the mothra project (see ic/api db_store.py).
-# Empty → IC uses its in-memory store and sessions vanish on restart.
-IC_DB_URL=""
+# Share the landing-page's Neon DATABASE_URL with the IC process (so IC
+# sessions are persisted with the mothra project, see ic/api db_store.py) and
+# with text-service (mothra#230, BATCH_DIR half -- batch-download zips now
+# live in Postgres, text-service/db.py). Empty → IC falls back to its
+# in-memory store and sessions vanish on restart; text-service fails loudly
+# on its first batch-download instead (db.py's _get_pool() has no fallback).
+SHARED_DB_URL=""
 ENV_FILE="$ROOT/landing-page/scripts/.env"
 if [ -f "$ENV_FILE" ]; then
-  IC_DB_URL="$(sed -n 's/^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" | head -1)"
-  IC_DB_URL="${IC_DB_URL%\"}"; IC_DB_URL="${IC_DB_URL#\"}"
-  IC_DB_URL="${IC_DB_URL%\'}"; IC_DB_URL="${IC_DB_URL#\'}"
+  SHARED_DB_URL="$(sed -n 's/^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" | head -1)"
+  SHARED_DB_URL="${SHARED_DB_URL%\"}"; SHARED_DB_URL="${SHARED_DB_URL#\"}"
+  SHARED_DB_URL="${SHARED_DB_URL%\'}"; SHARED_DB_URL="${SHARED_DB_URL#\'}"
 fi
-[ -n "$IC_DB_URL" ] || echo "${C_DIM}note: no DATABASE_URL found — IC sessions won't persist across restarts${C_RST}"
+[ -n "$SHARED_DB_URL" ] || echo "${C_DIM}note: no DATABASE_URL found — IC sessions won't persist across restarts, and text-service batch downloads will fail${C_RST}"
 
 # config.yaml's paco_api_url default (http://localhost:8003) only matches
 # PACO_PORT's own default -- if a developer overrides PACO_PORT, the backend/
@@ -223,17 +226,18 @@ fi
 # the stale default. Preserve an explicit PACO_API_URL override, if set.
 PACO_API_URL="${PACO_API_URL:-http://localhost:$PACO_PORT}"
 
-start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$IC_DB_URL" "$IC_BIN"
-start text "$C_TEXT" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
+start ic  "$C_IC"  env HOST=127.0.0.1 PORT="$IC_PORT" DATABASE_URL="$SHARED_DB_URL" "$IC_BIN"
 start paco "$C_PACO" "$PACO_BIN" main:app --app-dir "$ROOT/paco-classifier-service" --port "$PACO_PORT"
 
 # init_db()/_migrate_db() no longer run as an import-time side effect of
 # auth_api.py (mothra#220 row 31) -- run migrate.py once, synchronously,
-# before starting backend/worker (which would otherwise fail loudly on
-# missing tables rather than silently creating the schema themselves).
+# before starting backend/worker/text-service (which would otherwise fail
+# loudly on a missing text_batch_zips/other table rather than silently
+# creating the schema themselves).
 echo "${C_DIM}→ running DB migration...${C_RST}"
 "$API_PYTHON" "$ROOT/landing-page/scripts/migrate.py" || die "migration failed -- see output above"
 
+start text "$C_TEXT" env DATABASE_URL="$SHARED_DB_URL" "$TEXT_BIN" main:app --app-dir "$ROOT/text-service" --port "$TEXT_PORT"
 start backend "$C_API" env PACO_API_URL="$PACO_API_URL" "$API_UVICORN" main:app --app-dir "$ROOT/landing-page/scripts" --reload --port "$API_PORT"
 start worker "$C_WORKER" env PYTHONPATH="$ROOT/landing-page/scripts" CELERY_BROKER_URL="$CELERY_BROKER_URL" PACO_API_URL="$PACO_API_URL" "$WORKER_BIN" -A celery_app.celery_app worker -B --loglevel=info --pool=threads --concurrency=2
 start web "$C_WEB" npm --prefix "$ROOT/landing-page" run dev -- --port "$WEB_PORT" --strictPort

@@ -1,6 +1,7 @@
 """Celery task backing celery_app.py's beat_schedule -- periodic sweep of the
-two Postgres-backed staging/output tables (job_uploads, job_sessions), which
-used to only get cleaned up once, at backend startup (main.py). See
+Postgres-backed staging/output tables (job_uploads, job_sessions,
+text_batch_zips), which used to only get cleaned up once, at backend startup
+(main.py) or (for text_batch_zips) text-service's own process start. See
 job_store.run_periodic_cleanup's docstring for why the backend-local Neon
 manifest sweep (auth_api.cleanup_stale_neon_manifests) is deliberately NOT
 included here -- it lives on the backend container's own disk, which this
