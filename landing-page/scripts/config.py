@@ -32,6 +32,7 @@ MODELS_DIR = _path("models_dir")
 NEON_MANIFESTS_DIR = _path("neon_manifests_dir")
 MEDIEVAL_MODELS_DIR = _path("medieval_models_dir")
 MEI_ENCODING_DIR = _path("mei_encoding_dir")
+DEMO_FIXTURES_DIR = _path("demo_fixtures_dir")
 PITCH_FINDING_DIR = _path_env("pitch_finding_dir", "PITCH_FINDING_DIR")
 
 IC_API_URL = _url("IC_API_URL", "ic_api_url")

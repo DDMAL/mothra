@@ -358,6 +358,7 @@ _ADDED_COLUMNS = [
     ("projects",        "created_at",            "TIMESTAMPTZ DEFAULT NOW()"),
     ("projects",        "used_annotation_names", "TEXT DEFAULT '[]'"),
     ("projects",        "cantus_source_id",      "TEXT"),
+    ("projects",        "is_tutorial_template",  "BOOLEAN DEFAULT FALSE"),
 
     ("project_images",  "created_at",            "TIMESTAMPTZ DEFAULT NOW()"),
     ("project_images",  "folio",                 "TEXT"),

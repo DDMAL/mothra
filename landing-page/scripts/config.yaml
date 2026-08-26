@@ -8,6 +8,7 @@ paths:
   neon_manifests_dir: ../public/neon/samples/manifests
   medieval_models_dir: assets/models/medieval
   mei_encoding_dir: assets/mei_encoding
+  demo_fixtures_dir: assets/demo_fixtures
   # The pitch-finding/ submodule's flat module directory (algorithm #1;
   # see pitch_stage.py). Relative to this scripts/ dir, so it resolves to
   # <repo>/pitch-finding/scripts in a bare-metal checkout. Docker lands it
