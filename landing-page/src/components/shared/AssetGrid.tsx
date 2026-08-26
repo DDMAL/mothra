@@ -37,6 +37,7 @@ interface AssetGridProps<T extends AssetItem> {
   // be deselected directly from the grid instead of only via the project
   // page's "selected:" side list.
   onRemove?: (item: T) => void;
+  onNavigate?: (item: T) => boolean;
   topLeftBadge?: (item: T) => ReactNode;
 }
 
@@ -52,6 +53,7 @@ export default function AssetGrid<T extends AssetItem>({
   groupBy,
   onUse,
   onRemove,
+  onNavigate,
   topLeftBadge,
 }: AssetGridProps<T>) {
   return (
@@ -94,6 +96,7 @@ export default function AssetGrid<T extends AssetItem>({
                     // "delete N" action should not suddenly gain the
                     // ability to bulk-delete already-used models/mei files
                     // that were previously unselectable.
+                    if (!e.shiftKey && used && onNavigate?.(item)) return;
                     if (!used || onRemove) section.handleClick(e, item.id, idx);
                   }}
                 >

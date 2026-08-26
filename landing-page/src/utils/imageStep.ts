@@ -1,4 +1,5 @@
 import type { AnnotationSet, MeiFile, ProjectImage } from "../types";
+import { latestMeiPerImage } from "./mei";
 
 export interface ImageProgress {
   nextStep: number; // 1=ic, 3=neon, 4=send
@@ -83,4 +84,13 @@ export function minNextStep(
     const p = getImageProgress(img, annotations, meiFiles, stepsUnlocked);
     return Math.min(min, p?.nextStep ?? 0);
   }, Infinity);
+}
+
+export function findMeiFileForImage(
+  image:Pick<ProjectImage, "id" | "name">,
+  meiFiles: MeiFile[],
+): MeiFile | undefined {
+  return latestMeiPerImage(meiFiles).find((f) => 
+    matchesImage(image, f.imageId, f.imageName),
+  );
 }

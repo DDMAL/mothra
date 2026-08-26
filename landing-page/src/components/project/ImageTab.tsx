@@ -38,13 +38,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 interface ImageTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectImage>>;
-  usedNames: { images: string[]; models: string[]; annotations: string[] };
+  usedNames: { images: string[]; models: string[] };
   onUpdateProject: (p: Project) => void;
-  onUsedNamesChange: (names: {
-    images: string[];
-    models: string[];
-    annotations: string[];
-  }) => void;
+  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
+  // mothra#294: for a used, already-progressed image, clicking its thumbnail
+  // navigates into IC/Neon instead of toggling multi-select. Returns whether
+  // it did -- see AssetGrid.tsx's onNavigate.
+  onNavigateImage: (image: ProjectImage) => boolean;
   onUploadImage: (
     file: File,
     folio?: string,
@@ -80,6 +80,7 @@ export default function ImageTab({
   usedNames,
   onUpdateProject,
   onUsedNamesChange,
+  onNavigateImage,
   onUploadImage,
   onDeleteImage,
   setValidationError,
@@ -819,6 +820,7 @@ export default function ImageTab({
             section={section}
             usedNames={usedNames.images}
             usedKey="id"
+            onNavigate={onNavigateImage}
             groupBy={(img) => img.sourceName || "no source"}
             totalPages={totalImagePages}
             renderThumbnail={(img) =>

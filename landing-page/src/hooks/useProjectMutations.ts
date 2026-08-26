@@ -179,24 +179,6 @@ export function useProjectMutations(setProjects: SetProjects) {
     }
   };
 
-  const updateUsedAnnotationNames = async (id: number, names: string[]) => {
-    try {
-      const r = await apiFetch(`/api/projects/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usedAnnotationNames: names }),
-      });
-      if (!r.ok) return;
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === id ? { ...p, usedAnnotationNames: names } : p,
-        ),
-      );
-    } catch {
-      // internal bookkeeping — silent
-    }
-  };
-
   const updateCantusSourceId = async (id: number, sourceId: string) => {
     try {
       const r = await apiFetch(`/api/projects/${id}`, {
@@ -249,7 +231,6 @@ export function useProjectMutations(setProjects: SetProjects) {
     updateProjectSteps,
     updateUsedImageIds,
     updateUsedModelNames,
-    updateUsedAnnotationNames,
     updateCantusSourceId,
     togglePin,
   };

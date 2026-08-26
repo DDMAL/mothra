@@ -20,6 +20,7 @@ interface NeonBatchEditorProps {
   onFinish: () => void;
   onBack: () => void;
   onFileCorrected?: (id: string) => void;
+  initialFileId?: string | null;
 }
 
 // Exposed to App.tsx so the browser back/forward popstate handler (which
@@ -154,13 +155,17 @@ function disableStrayInsertMode(
 
 const NeonBatchEditor = forwardRef<NeonEditorHandle, NeonBatchEditorProps>(
   function NeonBatchEditor(
-    { project, meiFiles, onFinish, onBack, onFileCorrected },
+    { project, meiFiles, onFinish, onBack, onFileCorrected, initialFileId },
     ref,
   ) {
     const [sessions, setSessions] = useState<Map<string, BatchSession>>(
       new Map(),
     );
     const [currentIndex, setCurrentIndex] = useState(() => {
+      if (initialFileId) {
+        const i = meiFiles.findIndex((f) => f.id === initialFileId);
+        if (i !== -1) return i;
+      }
       const firstUncorrected = meiFiles.findIndex((f) => !f.corrected);
       return firstUncorrected === -1 ? 0 : firstUncorrected;
     });

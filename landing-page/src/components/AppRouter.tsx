@@ -166,7 +166,6 @@ export default function AppRouter({
     updateProjectSteps,
     updateUsedImageIds,
     updateUsedModelNames,
-    updateUsedAnnotationNames,
     updateCantusSourceId,
     togglePin,
   } = mutations;
@@ -207,6 +206,13 @@ export default function AppRouter({
   const [resumeIcSessions, setResumeIcSessions] = useState<IcResumeRequest[]>(
     [],
   );
+  // mothra#294: set when the user clicks an already-progressed selected
+  // image on the project page, so the "ic"/"neon-editor" cases land on that
+  // exact page instead of the first pending/uncorrected one. Cleared by the
+  // ordinary goToIc()/goToNeon() entry points so a stale click target can
+  // never leak into a later plain Continue/step click.
+  const [icFocusImageId, setIcFocusImageId] = useState<string | null>(null);
+  const [neonFocusFileId, setNeonFocusFileId] = useState<string | null>(null);
 
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
@@ -284,7 +290,35 @@ export default function AppRouter({
   // the user picked that session explicitly.
   const goToIc = () => {
     setResumeIcSessions([]);
+    setIcFocusImageId(null);
     setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
+  };
+
+  // mothra#294: entry point for clicking a specific "ic"-stage image (in the
+  // Images tab grid or the "selected:" panel) -- lands the classifier on
+  // that exact page instead of the first pending one. Auto mode has no
+  // per-image picking UI, so icFocusImageId is simply unread there; this
+  // still routes into auto mode's queue-everything-pending behavior, same as
+  // goToIc() already does for the ordinary Continue path.
+  const focusIc = (imageId: string) => {
+    setResumeIcSessions([]);
+    setIcFocusImageId(imageId);
+    setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
+  };
+
+  // mothra#294: ordinary entry into the Neon editor -- always lands on the
+  // first uncorrected page (NeonBatchEditor's own default), never a stale
+  // focus target left over from a previous click.
+  const goToNeon = () => {
+    setNeonFocusFileId(null);
+    setView("neon-editor");
+  };
+
+  // Entry point for clicking a specific "neon"/"done"-stage image -- opens
+  // the editor directly on that exact page.
+  const focusNeon = (fileId: string) => {
+    setNeonFocusFileId(fileId);
+    setView("neon-editor");
   };
 
   // Hand a finished IC queue (either mode) to the batch encoder.
@@ -363,7 +397,7 @@ export default function AppRouter({
               selectedProject.stepsUnlocked,
             );
             if (step >= 4) handleSendToCantus();
-            else if (step >= 3) setView("neon-editor");
+            else if (step >= 3) goToNeon();
             else if (step >= 1 || SKIP_PREDICT) goToIc();
             else {
               setBatchRunIds(computeBatchRun(selectedProject));
@@ -387,7 +421,7 @@ export default function AppRouter({
               setView("processing");
             } else if (step === 1) goToIc();
             else if (step === 2) setView("ic-completion");
-            else if (step === 3) setView("neon-editor");
+            else if (step === 3) goToNeon();
           }}
           onResumeIcSession={(req) => {
             // IC's own manage page hands back one session at a time; the IC
@@ -412,18 +446,22 @@ export default function AppRouter({
           }
           // mothra#241 follow-up (CodeRabbit): `images` now holds
           // project_images.id values, not names -- see
-          // Project.usedImageIds's comment in types.ts. `models`/
-          // `annotations` are unaffected (no duplicate-name concern there).
+          // Project.usedImageIds's comment in types.ts. `models` is
+          // unaffected (no duplicate-name concern there). mothra#294:
+          // annotations are no longer a separately-"used" concept -- an
+          // image's pipeline stage is derived (see utils/imageStep.ts), not
+          // selected. `usedAnnotationNames`/`used_annotation_names` still
+          // exist server-side, just never written from here anymore.
           usedNames={{
             images: selectedProject.usedImageIds,
             models: selectedProject.usedModelNames ?? [],
-            annotations: selectedProject.usedAnnotationNames ?? [],
           }}
           onUsedNamesChange={(names) => {
             updateUsedImageIds(selectedProject.id, names.images);
             updateUsedModelNames(selectedProject.id, names.models);
-            updateUsedAnnotationNames(selectedProject.id, names.annotations);
           }}
+          onFocusIcImage={focusIc}
+          onFocusNeonFile={focusNeon}
           stepsUnlocked={selectedProject.stepsUnlocked}
           onUploadImage={async (
             file,
@@ -903,14 +941,21 @@ export default function AppRouter({
       ];
       return (
         <InteractiveClassifier
-          // Remount on a resume: `initialImageId` is only read by a lazy
-          // useState initializer, so picking sessions from *inside* this
-          // view (its own "saved sessions" button) would otherwise change
-          // the prop with nothing reading it -- same `view`, same element,
-          // no remount, and the click would look like a no-op.
-          key={resumeIcSessions.map((r) => r.sessionId).join(",") || "fresh"}
+          // Remount on a resume (or a mothra#294 focus click): `initialImageId`
+          // is only read by a lazy useState initializer, so picking sessions
+          // from *inside* this view (its own "saved sessions" button) would
+          // otherwise change the prop with nothing reading it -- same `view`,
+          // same element, no remount, and the click would look like a no-op.
+          // Not strictly load-bearing for focusIc() itself (that always
+          // navigates in from the project view, so `view` switching already
+          // remounts this element fresh) -- included anyway for consistency.
+          key={
+            resumeIcSessions.map((r) => r.sessionId).join(",") ||
+            icFocusImageId ||
+            "fresh"
+          }
           images={images}
-          initialImageId={resumeImages[0]?.id ?? null}
+          initialImageId={resumeImages[0]?.id ?? icFocusImageId ?? null}
           usedImageCount={selectedProject.usedImageIds.length}
           onBack={() => setView("project")}
           projectId={selectedProjectId}
@@ -1090,7 +1135,7 @@ export default function AppRouter({
               : "encoding successfully completed! you can now view mei files on the project page, and send them to cantus ultimus.")
           }
           continueLabel="correction"
-          onContinue={() => setView("neon-editor")}
+          onContinue={() => goToNeon()}
           onBackToProject={() => setView("project")}
           logsFileName="encoding-logs.txt"
           logContent={encodingLogs.join("\n")}
@@ -1118,6 +1163,7 @@ export default function AppRouter({
           ref={neonEditorRef}
           project={selectedProject}
           meiFiles={neonMeiFiles}
+          initialFileId={neonFocusFileId}
           onFileCorrected={(id) =>
             setProjects((prev) =>
               prev.map((p) =>
@@ -1143,12 +1189,16 @@ export default function AppRouter({
                 Math.max(selectedProject.stepsUnlocked, 4),
               );
             }
+            setNeonFocusFileId(null);
             setView("neon-completion");
           }}
           // issue #272: once you're editing in Neon, none of the
           // processing/IC/encoding stages that led here are worth
           // revisiting -- back always returns straight to the project page.
-          onBack={() => setView("project")}
+          onBack={() => {
+            setNeonFocusFileId(null);
+            setView("project");
+          }}
         />
       ) : null;
     }

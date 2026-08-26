@@ -44,13 +44,9 @@ const KIND_BADGE: Record<ModelKind, string> = {
 interface ModelTabProps {
   project: Project;
   section: ReturnType<typeof useAssetSection<ProjectModel>>;
-  usedNames: { images: string[]; models: string[]; annotations: string[] };
+  usedNames: { images: string[]; models: string[] };
   onUpdateProject: (p: Project) => void;
-  onUsedNamesChange: (names: {
-    images: string[];
-    models: string[];
-    annotations: string[];
-  }) => void;
+  onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
   onUploadModel: (
     file: File,
     kind: ModelKind,
