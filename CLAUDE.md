@@ -53,7 +53,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `job_uploads` | raw XML/image bytes staged for a Celery task to pick up, keyed by a short-lived `upload_id` |
 | `job_sessions` | encode-job output (`mei_bytes`, `stem`, `manifest`) — replaces the old in-memory `_sessions` dict + `MANIFEST_DIR` tempfiles |
 | `refresh_tokens` | `user_id`, `token_hash` (SHA-256 of the raw token), `expires_at`, `revoked_at` — backs the real JWT refresh flow, see **Backend** above |
-| `text_batch_zips` | `batch_id`, `zip_bytes BYTEA` — text-service's finished batch-download zips (mothra#230). Schema created here (same one-shot migration as every other table), but only `text-service/db.py` ever reads/writes rows — landing-page itself never queries this table |
+| `text_batch_zips` | `batch_id`, `zip_bytes BYTEA` — text-service's finished batch-download zips (mothra#230). Schema created here (same one-shot migration as every other table); `text-service/db.py` inserts and reads rows, `job_store.cleanup_stale_batch_zips` (run from the landing-page worker) deletes stale ones — see **Job queue** below |
 
 Schema is migrated forward via `_migrate_db()` in `auth_api.py`. New columns go in the
 `_ADDED_COLUMNS` list — `(table, column, definition)` tuples replayed as
@@ -140,7 +140,7 @@ cd ic/api && HOST=127.0.0.1 PORT=8000 .venv/bin/ic-api
 # DATABASE_URL is required (mothra#230) -- batch-download zips live in
 # Postgres (text_batch_zips), not local disk. That table (like every other)
 # is created by landing-page/scripts/migrate.py -- run it at least once
-# before your first batch download (see "One-shot DB migration" below).
+# before your first batch run or download (see "One-shot DB migration" below).
 cd text-service && DATABASE_URL=postgresql://localhost/mothra_dev .venv/bin/uvicorn main:app --port 8002
 
 # Terminal 3 — staffline classifier service (:8003)
@@ -924,8 +924,9 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
   beat scheduler runs `tasks_cleanup.py`'s `cleanup.run_periodic` task hourly (`celery_app.py`'s
   `beat_schedule`); previously `job_store.py`'s `cleanup_stale_uploads()` (typo now fixed --
   was `cleanup_stale_uplaods`) and `cleanup_stale_sessions()` only ran once at backend startup,
-  and `text_batch_zips` (text-service's batch-download zips, mothra#230) only existed as an
-  unswept local-disk TTL inside text-service itself. Neon-editor manifest cleanup
+  and `text_batch_zips` (text-service's batch-download zips, mothra#230) only had a
+  startup-only local-disk sweep (86400s TTL) inside text-service itself, not a periodic one.
+  Neon-editor manifest cleanup
   (`auth_api.cleanup_stale_neon_manifests`) stays a backend-only, non-Celery sweep since it
   cleans the backend container's own local disk, which a task running on the worker pod can't
   reach; see **Job queue** above

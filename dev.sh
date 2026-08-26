@@ -211,9 +211,13 @@ echo "${C_OK}Mothra dev${C_RST}  web:${C_WEB}$WEB_PORT${C_RST}  backend:${C_API}
 # live in Postgres, text-service/db.py). Empty → IC falls back to its
 # in-memory store and sessions vanish on restart; text-service fails loudly
 # on its first batch-download instead (db.py's _get_pool() has no fallback).
-SHARED_DB_URL=""
+# A DATABASE_URL already exported into this shell wins outright -- only fall
+# back to parsing .env when nothing's set, so a developer who exports it
+# themselves (e.g. to point at a non-default local Postgres) isn't silently
+# overridden by whatever landing-page/scripts/.env happens to say.
+SHARED_DB_URL="${DATABASE_URL:-}"
 ENV_FILE="$ROOT/landing-page/scripts/.env"
-if [ -f "$ENV_FILE" ]; then
+if [ -z "$SHARED_DB_URL" ] && [ -f "$ENV_FILE" ]; then
   SHARED_DB_URL="$(sed -n 's/^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" | head -1)"
   SHARED_DB_URL="${SHARED_DB_URL%\"}"; SHARED_DB_URL="${SHARED_DB_URL#\"}"
   SHARED_DB_URL="${SHARED_DB_URL%\'}"; SHARED_DB_URL="${SHARED_DB_URL#\'}"
