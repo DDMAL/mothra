@@ -14,6 +14,10 @@ through the embedded IC iframe:
 2. ``POST /api/ic/{session_id}/complete`` — call IC's
    ``POST /sessions/{id}/complete`` and hand the resulting GameraXML back
    to the frontend, which feeds it into the existing encode flow.
+   Exported with ``finalize=false`` so the session stays editable and
+   resumable afterwards (see :func:`ic_complete`). The GameraXML itself is
+   filed under the page by the encode job, not here -- see
+   ``ic_xml_store.py``.
 
 IC is reached over plain HTTP with the stdlib ``urllib`` (no extra
 dependency); calls are server-to-server, so IC's CORS allowlist is
@@ -24,6 +28,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import urllib.error
 import urllib.parse
@@ -32,10 +37,13 @@ import uuid
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 from config import IC_API_URL, IC_PUBLIC_URL
 
 from auth_api import get_current_user, db_cursor, require_project_owner
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -189,6 +197,83 @@ def _ic_unreachable(exc: Exception) -> HTTPException:
 
 
 # ---------------------------------------------------------------------------
+# Startup compatibility check
+# ---------------------------------------------------------------------------
+
+_IC_COMPLETE_PATH = "/sessions/{session_id}/complete"
+_IC_FINALIZE_PARAM = "finalize"
+
+# Escape hatch, mirroring MOTHRA_PITCH_FINDING: lets an operator start the
+# backend against an IC this check can't vouch for, without a redeploy.
+IC_COMPAT_CHECK_ENABLED = os.environ.get("MOTHRA_IC_COMPAT_CHECK", "1") != "0"
+
+
+class IcIncompatible(RuntimeError):
+    """The reachable IC positively lacks ``finalize`` on its complete endpoint."""
+
+
+def verify_ic_finalize_support(timeout: int = 5) -> str:
+    """Fail fast at startup if IC would silently finalise on export.
+
+    :func:`ic_complete` exports with ``finalize=false`` so an encoded page's
+    session stays editable and resumable. An IC predating that parameter
+    doesn't reject the unknown query param -- FastAPI ignores it -- it
+    finalises, moving the session to the terminal ``EXPORT`` state that
+    ``lookup`` refuses to resume. Every correction behind the export is then
+    stranded, with nothing anywhere reporting an error. That silence is why
+    this is checked up front rather than left to surface per-request.
+
+    Detection is IC's own OpenAPI schema, which lists the parameter
+    (verified against the pinned submodule). Returns a status string, or
+    raises :class:`IcIncompatible` to abort startup.
+
+    **Only a positive detection fails.** Unreachable IC, unparseable schema,
+    or an endpoint missing from it all return ``"unknown"`` and warn.
+    Unreachable is not incompatible: backend and ic are applied together in
+    one ``kubectl apply`` with no ordering guarantee between them, so a
+    backend that aborted whenever IC merely wasn't up yet would
+    CrashLoopBackOff on an ordinary deploy race -- turning a degraded IC step
+    into a total outage of a backend that also serves auth, projects,
+    images, MEI and jobs, none of which touch IC. Narrowing the abort to a
+    schema that positively shows the parameter absent keeps the fail-fast
+    honest about what it actually observed.
+    """
+    if not IC_COMPAT_CHECK_ENABLED:
+        return "skipped"
+
+    try:
+        status, raw = _get(f"{IC_API_URL}/openapi.json", timeout=timeout)
+        if status >= 400:
+            raise ValueError(f"openapi.json returned {status}")
+        schema = json.loads(raw)
+        operation = schema["paths"][_IC_COMPLETE_PATH]["post"]
+    except Exception as exc:
+        logger.warning(
+            "IC compatibility check inconclusive (%s at %s: %s) -- continuing. "
+            "If this IC predates the `finalize` parameter, encoding a page will "
+            "silently retire its session instead of leaving it resumable.",
+            type(exc).__name__, IC_API_URL, exc,
+        )
+        return "unknown"
+
+    names = [p.get("name") for p in operation.get("parameters", [])]
+    if _IC_FINALIZE_PARAM in names:
+        return "ok"
+
+    raise IcIncompatible(
+        f"The Interactive Classifier at {IC_API_URL} does not support "
+        f"`{_IC_FINALIZE_PARAM}` on POST {_IC_COMPLETE_PATH} "
+        f"(its OpenAPI schema lists: {names or 'no parameters'}). "
+        "Encoding a page against this IC would move its session to the "
+        "terminal EXPORT state, silently discarding the user's corrections "
+        "on any later reopen. Deploy the IC image built from this commit's "
+        "`ic/` submodule pin -- CI builds and tags backend and ic together, "
+        "so a mismatch means the two were rolled out from different commits. "
+        "Set MOTHRA_IC_COMPAT_CHECK=0 to start anyway."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -333,24 +418,63 @@ def ic_start(project_id: int, body: IcStartRequest, user=Depends(get_current_use
     }
 
 
+class IcCompleteRequest(BaseModel):
+    """Optional page context for an export.
+
+    Only used to check the caller owns the project the page belongs to (see
+    :func:`ic_complete`'s note on why session_id alone isn't enough).
+    Omitted entirely by any caller that just wants the XML back -- the
+    export itself doesn't need it, since IC resolves everything from
+    ``session_id``. ``imageId``/``imageName`` are along for the ride so a
+    future caller has the page identity to hand without another round trip.
+    """
+    projectId: Optional[int] = None
+    imageId: Optional[str] = None
+    imageName: Optional[str] = None
+
+
 @router.post("/ic/{session_id}/complete")
-def ic_complete(session_id: str, user=Depends(get_current_user)):
-    """Finalise an IC session and return its GameraXML (base64).
+def ic_complete(
+    session_id: str,
+    body: Optional[IcCompleteRequest] = None,
+    user=Depends(get_current_user),
+):
+    """Export an IC session's GameraXML (base64), leaving it editable.
 
     The frontend turns this into a ``File`` and feeds it to the existing
     ``/api/encode-upload`` flow.
 
-    Note: unlike ic_start/ic_manage_url/ic_auto_queue (all resolve through
-    require_project_owner first), this only checks that *some* user is
+    Exported with ``finalize=false``: IC's default transitions the session
+    to ``EXPORT``, which is terminal and read-only, and which its own
+    ``/sessions/lookup`` treats as *not* resumable -- so encoding a page
+    used to silently retire the session behind it, and re-entering the IC
+    step got a blank new one instead of the corrections. Here the XML is a
+    mid-pipeline artefact, not the end of the session's life: the user
+    encodes, sees the result in Neon, and can come back through "manage IC
+    sessions" to keep correcting the same page. (Requires an ``ic/``
+    carrying the ``finalize`` parameter; an older IC ignores the unknown
+    query param and finalises, which is the pre-existing behaviour rather
+    than an error.)
+
+    ``body`` is optional page context; when it names a project, the caller
+    must own it. The exported XML is deliberately *not* filed under the page
+    here -- ``tasks_encode.py`` does that as it parses the encoder's input
+    (see ic_xml_store.py), so "Classifier XML" means "what was encoded" and
+    covers every path into the encoder rather than only this bridge.
+
+    Note: without ``body.projectId`` this only checks that *some* user is
     logged in, not that they own the project session_id belongs to -- IC's
     own session store is the real authority here, but within mothra's own
     trust model any authenticated user who learns another user's session_id
-    could finalise it. Inconsistent with the rest of this file; revisit if
+    could export it. Inconsistent with the rest of this file; revisit if
     session_id ever becomes guessable/discoverable in practice.
     """
+    if body is not None and body.projectId is not None:
+        with db_cursor() as (con, cur):
+            require_project_owner(cur, body.projectId, user["id"])
     try:
         status, raw, _headers = _post_empty(
-            f"{IC_API_URL}/sessions/{session_id}/complete?page=true"
+            f"{IC_API_URL}/sessions/{session_id}/complete?page=true&finalize=false"
         )
     except urllib.error.HTTPError as exc:
         # IC maps an unknown/torn-down session to 404.
@@ -366,6 +490,82 @@ def ic_complete(session_id: str, user=Depends(get_current_user)):
         "xml_base64": base64.b64encode(raw).decode(),
         "filename": f"ic-session-{session_id}.xml",
     }
+
+
+# ---------------------------------------------------------------------------
+# Stored classifier XML ("Generated files" tab)
+# ---------------------------------------------------------------------------
+#
+# Written by the encode job (ic_xml_store.py); read here. The list itself
+# rides along with the project payload (projects_api.py's
+# _project_row_to_dict / list_projects), like annotations and stafflines --
+# only the XML body, which is megabytes per page, is fetched on demand.
+
+
+def _ic_xml_row(project_id: int, xml_id: str, user_id: int) -> tuple[str, bytes]:
+    """Return ``(name, xml_bytes)`` for one stored file the user owns.
+
+    ``xml_content`` is BYTEA (see ``ic_xml_store.store_ic_xml``), so this
+    hands back the encoder's verbatim input. psycopg2 yields BYTEA as a
+    ``memoryview``; normalised to ``bytes`` here so callers don't each have
+    to. Only ``get_ic_xml`` decodes -- JSON can't carry raw bytes.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user_id)
+        cur.execute(
+            "SELECT name, xml_content FROM ic_xml_files WHERE id=%s AND project_id=%s",
+            (xml_id, project_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="IC XML not found")
+        return row[0], bytes(row[1])
+
+
+@router.get("/projects/{project_id}/ic-xml/{xml_id}")
+def get_ic_xml(project_id: int, xml_id: str, user=Depends(get_current_user)):
+    """The stored GameraXML as JSON, for the in-app viewer.
+
+    The one read path that must decode: ``IcXmlTab``'s viewer renders a
+    string. Lossy for a non-UTF-8 document, but only in this preview -- the
+    download endpoint below and the project-export zip both serve the
+    original bytes.
+    """
+    name, xml_bytes = _ic_xml_row(project_id, xml_id, user["id"])
+    return {
+        "id": xml_id,
+        "name": name,
+        "xmlContent": xml_bytes.decode("utf-8", "replace"),
+    }
+
+
+@router.get("/projects/{project_id}/ic-xml/{xml_id}/download")
+def download_ic_xml(project_id: int, xml_id: str, user=Depends(get_current_user)):
+    """The stored GameraXML as a file download, byte-identical to what the
+    encoder read."""
+    name, xml_bytes = _ic_xml_row(project_id, xml_id, user["id"])
+    return Response(
+        content=xml_bytes,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.delete("/projects/{project_id}/ic-xml/{xml_id}")
+def delete_ic_xml(project_id: int, xml_id: str, user=Depends(get_current_user)):
+    """Drop one stored export.
+
+    Only removes mothra's copy -- the IC session it came from is untouched
+    and still resumable, so re-exporting the page brings the file back.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+        cur.execute(
+            "DELETE FROM ic_xml_files WHERE id=%s AND project_id=%s",
+            (xml_id, project_id),
+        )
+        con.commit()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +594,28 @@ def ic_manage_url(project_id: int, user=Depends(get_current_user)) -> dict:
     }
 
 
+def _ic_project_sessions(project_id: int, timeout: int = 5) -> list[dict]:
+    """IC's saved sessions for one project, as IC returns them.
+
+    Short timeout on purpose: both callers run on a page open, and a down IC
+    must not park a request thread on the default 30s. Errors are the
+    caller's to interpret rather than something to swallow into an empty list
+    -- "no sessions" and "IC is down" must stay distinguishable, or an
+    unreachable IC would silently look like a project with nothing saved.
+    """
+    try:
+        _, raw = _get(f"{IC_API_URL}/sessions?project_id={project_id}", timeout=timeout)
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    try:
+        sessions = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="IC returned a malformed session list")
+    if not isinstance(sessions, list):
+        raise HTTPException(status_code=502, detail="IC returned a malformed session list")
+    return sessions
+
+
 @router.get("/projects/{project_id}/ic/session-count")
 def ic_session_count(project_id: int, user=Depends(get_current_user)) -> dict:
     """How many saved IC sessions this project has.
@@ -405,29 +627,38 @@ def ic_session_count(project_id: int, user=Depends(get_current_user)) -> dict:
     path goes straight to IC, and a batch text-finding job that fails after
     its YOLO stage leaves annotations behind without advancing the step), and
     those are exactly the cases where a stale session most needs clearing.
-
-    Errors are the caller's to interpret rather than something to swallow into
-    a 0 here — a count of zero and "IC is down" must stay distinguishable, or
-    an unreachable IC would silently hide the button again.
     """
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
-    try:
-        # Short timeout on purpose: this runs on every project-page open, and
-        # a down IC must not park a request thread on the default 30s.
-        _, raw = _get(f"{IC_API_URL}/sessions?project_id={project_id}", timeout=5)
-    except urllib.error.URLError as exc:
-        raise _ic_unreachable(exc)
-    try:
-        sessions = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="IC returned a malformed session list")
-    if not isinstance(sessions, list):
-        raise HTTPException(
-            status_code=502,
-            detail="IC returned a malformed session list",
-        )
-    return {"count": len(sessions)}
+    return {"count": len(_ic_project_sessions(project_id))}
+
+
+@router.get("/projects/{project_id}/ic/sessions")
+def ic_sessions(project_id: int, user=Depends(get_current_user)) -> list[dict]:
+    """This project's saved IC sessions, for mothra's own session picker.
+
+    IC's `?manage=1` page (iframed by `IcSessionsModal`) covers listing and
+    deleting, but it opens one session at a time. The IC step page instead
+    lets the user pick *several* pages to reopen in one go -- the filmstrip
+    is built to hold more than one -- which needs the list in mothra's own
+    UI, where it can be resolved against the project's images and shown with
+    their thumbnails. Camel-cased here (IC's own payload is snake_case) to
+    match every other mothra API shape.
+    """
+    with db_cursor() as (con, cur):
+        require_project_owner(cur, project_id, user["id"])
+    return [
+        {
+            "sessionId": s.get("id"),
+            "state": s.get("state"),
+            "sourceName": s.get("source_name") or "",
+            "imageId": s.get("image_id"),
+            "glyphCount": s.get("n_glyphs"),
+            "updatedAt": s.get("updated_at"),
+        }
+        for s in _ic_project_sessions(project_id)
+        if isinstance(s, dict) and s.get("id")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +740,12 @@ async def ic_auto_queue(
     if not session_id:
         raise HTTPException(status_code=502, detail="IC /sessions returned no session id")
 
-    # 2. Finalise → GameraXML.
+    # 2. Finalise → GameraXML. Unlike ic_complete above this *does*
+    # finalise: the session was created here, server-side, purely to run
+    # one classify round, and POST /sessions (unlike /staging) takes no
+    # project/image id, so IC could never map it back to a page for
+    # "manage IC sessions" to resume anyway. Leaving it in CLASSIFYING
+    # would only accumulate unreachable sessions.
     try:
         c_status, c_raw, _headers = _post_empty(
             f"{IC_API_URL}/sessions/{session_id}/complete?page=true"

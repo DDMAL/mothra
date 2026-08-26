@@ -6,12 +6,14 @@ import type {
   AnnotationSet,
   MeiFile,
   ModelKind,
+  ProjectImage,
   ProjectInitialTab,
 } from "../types";
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { downloadBlob } from "../utils/download";
+import { latestMeiPerImage } from "../utils/mei";
 import { yoloTxtToJson } from "../utils/yolo";
 import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
@@ -197,11 +199,14 @@ export default function AppRouter({
   const [clefShape, setClefShape] = useState<"C" | "F">("C");
   const [clefLine, setClefLine] = useState(3);
 
-  // A saved IC session picked in the project page's "manage IC sessions"
-  // modal, to be opened on the IC step page. Cleared by goToIc() below, so
-  // every other route into that view starts on the first page to classify.
-  const [resumeIcSession, setResumeIcSession] =
-    useState<IcResumeRequest | null>(null);
+  // Saved IC sessions to reopen on the IC step page -- one when it came from
+  // the project page's "manage IC sessions" modal, any number when it came
+  // from the IC step page's own picker (IcSessionPicker). Cleared by goToIc()
+  // below, so every other route into that view starts on the first page to
+  // classify.
+  const [resumeIcSessions, setResumeIcSessions] = useState<IcResumeRequest[]>(
+    [],
+  );
 
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
@@ -278,7 +283,7 @@ export default function AppRouter({
   // page to classify. A saved-session resume always goes to the classifier -
   // the user picked that session explicitly.
   const goToIc = () => {
-    setResumeIcSession(null);
+    setResumeIcSessions([]);
     setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
   };
 
@@ -385,7 +390,9 @@ export default function AppRouter({
             else if (step === 3) setView("neon-editor");
           }}
           onResumeIcSession={(req) => {
-            setResumeIcSession(req);
+            // IC's own manage page hands back one session at a time; the IC
+            // step page's picker (IcSessionPicker) is what supplies several.
+            setResumeIcSessions([req]);
             setView("ic");
           }}
           onSendToCantus={handleSendToCantus}
@@ -849,48 +856,61 @@ export default function AppRouter({
         selectedProject.meiFiles ?? [],
         selectedProject.stepsUnlocked,
       );
-      // The page a resume request (from "manage IC sessions") points at. IC
-      // records mothra's image id when the session is staged, so that's the
-      // authoritative match; the file-name stem it also stores is a fallback
-      // only for sessions saved without an id. Deliberately not a fallback for
-      // an id that fails to resolve - that means the page was deleted, and a
-      // stem match could land on a different image that reuses the filename
-      // (the session wouldn't even be the one /ic/start finds for it).
-      const resumeImage = resumeIcSession
-        ? ((resumeIcSession.imageId == null
+      // The pages the resume requests point at. IC records mothra's image id
+      // when the session is staged, so that's the authoritative match; the
+      // file-name stem it also stores is a fallback only for sessions saved
+      // without an id. Deliberately not a fallback for an id that fails to
+      // resolve - that means the page was deleted, and a stem match could
+      // land on a different image that reuses the filename (the session
+      // wouldn't even be the one /ic/start finds for it).
+      const resumeImages = resumeIcSessions
+        .map((req) =>
+          req.imageId == null
             ? selectedProject.images.find(
-                (img) =>
-                  img.name.replace(/\.[^.]+$/, "") ===
-                  resumeIcSession.sourceName,
+                (img) => img.name.replace(/\.[^.]+$/, "") === req.sourceName,
               )
-            : selectedProject.images.find(
-                (img) => img.id === resumeIcSession.imageId,
-              )) ?? null)
-        : null;
+            : selectedProject.images.find((img) => img.id === req.imageId),
+        )
+        .filter((img): img is ProjectImage => img != null);
       // An unresolvable resume must not fall through to the classifier: it
       // would mount on the first pending page, and queueing there would pair
-      // this session's GameraXML with that other page's image.
-      if (resumeIcSession && !resumeImage)
+      // that session's GameraXML with the wrong page's image. Only reported
+      // when *nothing* resolved -- IcSessionPicker already refuses to select
+      // an unresolvable session, so this is the "manage IC sessions" path
+      // (which doesn't) and it only ever asks for one.
+      if (resumeIcSessions.length > 0 && resumeImages.length === 0)
         return (
           <IcSessionUnavailable
-            sourceName={resumeIcSession.sourceName}
-            sessionId={resumeIcSession.sessionId}
+            sourceName={resumeIcSessions[0].sourceName}
+            sessionId={resumeIcSessions[0].sessionId}
             onBack={() => setView("project")}
             onOpenClassifier={goToIc}
           />
         );
       // A saved session's page is normally still pending, but it doesn't have
-      // to be (its page may have been encoded by some other route). Add it
-      // back rather than silently ignoring the click - and so the queued XML
-      // is paired with the right image, which needs the page to be selectable.
-      const images =
-        resumeImage && !pending.some((img) => img.id === resumeImage.id)
-          ? [...pending, resumeImage]
-          : pending;
+      // to be (its page may have been encoded by some other route). Add those
+      // back rather than silently ignoring the click - and so each queued XML
+      // is paired with the right image, which needs the page to be
+      // selectable. Order: the pending pages first, then the reopened ones in
+      // the order they were picked.
+      const images = [
+        ...pending,
+        ...resumeImages.filter(
+          (img, i) =>
+            !pending.some((p) => p.id === img.id) &&
+            resumeImages.findIndex((other) => other.id === img.id) === i,
+        ),
+      ];
       return (
         <InteractiveClassifier
+          // Remount on a resume: `initialImageId` is only read by a lazy
+          // useState initializer, so picking sessions from *inside* this
+          // view (its own "saved sessions" button) would otherwise change
+          // the prop with nothing reading it -- same `view`, same element,
+          // no remount, and the click would look like a no-op.
+          key={resumeIcSessions.map((r) => r.sessionId).join(",") || "fresh"}
           images={images}
-          initialImageName={resumeImage?.name ?? null}
+          initialImageId={resumeImages[0]?.id ?? null}
           usedImageCount={selectedProject.usedImageIds.length}
           onBack={() => setView("project")}
           projectId={selectedProjectId}
@@ -901,6 +921,8 @@ export default function AppRouter({
           trainingPresets={icSettings.trainingPresets}
           trainingFiles={icSettings.trainingFiles}
           onEncodeBatch={startEncodeBatch}
+          allImages={selectedProject.images}
+          onResumeIcSessions={setResumeIcSessions}
         />
       );
     }
@@ -922,7 +944,7 @@ export default function AppRouter({
           onDone={startEncodeBatch}
           onBack={() => setView("project")}
           onOpenManualClassifier={() => {
-            setResumeIcSession(null);
+            setResumeIcSessions([]);
             setView("ic");
           }}
         />
@@ -1083,12 +1105,19 @@ export default function AppRouter({
         />
       );
     }
-    case "neon-editor":
-      return selectedProject && selectedProject.meiFiles.length > 0 ? (
+    case "neon-editor": {
+      if (!selectedProject) return null;
+      // One file per page, newest revision only. Re-encoding a page (which
+      // reopening its saved IC session and pressing "encode batch" again
+      // does) appends a second mei_files row rather than replacing the
+      // first, and the editor would otherwise list the same page twice --
+      // stale revision first. See utils/mei.ts.
+      const neonMeiFiles = latestMeiPerImage(selectedProject.meiFiles);
+      return neonMeiFiles.length > 0 ? (
         <NeonBatchEditor
           ref={neonEditorRef}
           project={selectedProject}
-          meiFiles={selectedProject.meiFiles}
+          meiFiles={neonMeiFiles}
           onFileCorrected={(id) =>
             setProjects((prev) =>
               prev.map((p) =>
@@ -1104,7 +1133,10 @@ export default function AppRouter({
             )
           }
           onFinish={() => {
-            setOriginalMeiFiles([...(selectedProject?.meiFiles ?? [])]);
+            // The same deduped list the editor just worked through, so the
+            // completion page's before/after compare pairs one original per
+            // page instead of a superseded revision.
+            setOriginalMeiFiles([...neonMeiFiles]);
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(
                 selectedProjectId,
@@ -1119,6 +1151,7 @@ export default function AppRouter({
           onBack={() => setView("project")}
         />
       ) : null;
+    }
     case "neon-completion":
       return selectedProject ? (
         <NeonCompletionPage

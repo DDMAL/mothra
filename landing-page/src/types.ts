@@ -31,6 +31,12 @@ export interface Project {
   textAlignments: TextAlignment[];
   cantusSourceId?: string;
   stafflines: StafflineSet[];
+  /** GameraXML exported from the Interactive Classifier, one per page --
+   * metadata only. The document itself is fetched on demand from
+   * ic_api.py's /ic-xml/{id} endpoints, since a page's export runs to
+   * megabytes (one RLE glyph mask each) and would otherwise ride along
+   * with every project list request. */
+  icXmlFiles: IcXmlFile[];
 }
 
 /** Which tab/sub-tab ProjectDetail should open on mount -- set by App.tsx's
@@ -40,7 +46,7 @@ export interface Project {
  * later navigation back to the project page doesn't re-apply a stale value. */
 export interface ProjectInitialTab {
   tab: "images" | "models" | "generated";
-  subTab?: "annotations" | "text" | "stafflines" | "mei files";
+  subTab?: "annotations" | "text" | "stafflines" | "ic xml" | "mei files";
 }
 
 export interface CantusSource {
@@ -98,6 +104,42 @@ export interface JsomrLineRecord {
   within_stave_index: number | null;
 }
 
+/** One saved Interactive Classifier session, as
+ * `GET /api/projects/{id}/ic/sessions` returns it (ic_api.py's `ic_sessions`
+ * re-shapes IC's own snake_case payload). Sessions live in IC's store, not
+ * mothra's DB, so this is the only way to know a project has any. */
+export interface IcSessionSummary {
+  sessionId: string;
+  /** IC's own lifecycle state -- "classifying" (resumable) or "export"
+   * (terminal/read-only; only pre-existing sessions should still be here,
+   * see ic_api.py's ic_complete on finalize=false). */
+  state?: string | null;
+  /** IC's stored page name, a file-name stem -- "" if it recorded none. */
+  sourceName: string;
+  /** mothra's project_images.id, recorded when the page was staged. Null on
+   * sessions saved before IC tracked it, which can then only be matched by
+   * `sourceName`. */
+  imageId?: string | null;
+  glyphCount?: number | null;
+  updatedAt?: string | null;
+}
+
+/** One page's exported Interactive Classifier GameraXML (metadata only --
+ * see Project.icXmlFiles). Written server-side at export time, so it exists
+ * for auto-classified pages too, not just ones opened in the classifier. */
+export interface IcXmlFile {
+  id: string;
+  /** File name the download uses -- the page's stem plus ".xml". */
+  name: string;
+  imageId?: string | null;
+  imageName: string;
+  imageSrc?: string | null;
+  /** `<glyph>` elements in the document; null if it couldn't be counted. */
+  glyphCount?: number | null;
+  byteSize?: number | null;
+  createdAt?: string | null;
+}
+
 export interface ProjectModel {
   id: string;
   name: string;
@@ -135,6 +177,11 @@ export interface MeiFile {
   imageId?: string;
   imageName?: string;
   staveSource?: StaveSource | null;
+  /** When this revision was encoded. `mei_files` is append-only, so a page
+   * encoded twice has two rows; this is how utils/mei.ts's latestMeiPerImage
+   * tells them apart. Undefined on a row built client-side straight after an
+   * encode (useEncodingFlow), where list order already says it's newest. */
+  createdAt?: string | null;
 }
 
 export type View =
