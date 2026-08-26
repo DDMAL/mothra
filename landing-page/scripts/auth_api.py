@@ -9,6 +9,7 @@ import psycopg2, psycopg2.errors, os, secrets, hashlib, base64
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from contextlib import contextmanager
+from tutorial_store import ensure_tutorial_project
 import bcrypt
 import json
 
@@ -359,6 +360,7 @@ _ADDED_COLUMNS = [
     ("projects",        "used_annotation_names", "TEXT DEFAULT '[]'"),
     ("projects",        "cantus_source_id",      "TEXT"),
     ("projects",        "is_tutorial_template",  "BOOLEAN DEFAULT FALSE"),
+    ("projects",        "is_tutorial",           "BOOLEAN DEFAULT FALSE"), # real user's cloned copy
 
     ("project_images",  "created_at",            "TIMESTAMPTZ DEFAULT NOW()"),
     ("project_images",  "folio",                 "TEXT"),
@@ -700,6 +702,7 @@ def register(request: Request, body: RegisterBody):
         except psycopg2.errors.UniqueViolation:
             con.rollback()
             raise HTTPException(status_code=409, detail="username or email already taken")
+        ensure_tutorial_project(con, cur, user_id)
     return {
         "token": create_token(user_id),
         "refresh_token": create_refresh_token(user_id),
@@ -715,8 +718,9 @@ def login(request: Request, body: LoginBody):
             (body.username, body.username)
         )
         row = cur.fetchone()
-    if not row or not verify_password(body.password, row[4]):
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        if not row or not verify_password(body.password, row[4]):
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        ensure_tutorial_project(con, cur, row[0])
     return {
         "token": create_token(row[0]),
         "refresh_token": create_refresh_token(row[0]),
