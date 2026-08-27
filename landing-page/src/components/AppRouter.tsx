@@ -984,12 +984,21 @@ export default function AppRouter({
           )}
           usedImageCount={selectedProject.usedImageIds.length}
           projectId={selectedProjectId}
+          allImages={selectedProject.images}
           trainingPresets={icSettings.trainingPresets}
           trainingFiles={icSettings.trainingFiles}
           onDone={startEncodeBatch}
           onBack={() => setView("project")}
           onOpenManualClassifier={() => {
             setResumeIcSessions([]);
+            setView("ic");
+          }}
+          // A resume is an explicit choice of specific pages, so it opens the
+          // real classifier regardless of IC mode -- exactly what the project
+          // page's "manage IC sessions" path does (see onResumeIcSession).
+          onResumeIcSessions={(requests) => {
+            setResumeIcSessions(requests);
+            setIcFocusImageId(null);
             setView("ic");
           }}
         />

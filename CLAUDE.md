@@ -729,7 +729,15 @@ once, alongside image/model selection, rather than mid-classification.
   (`autoIcNeedsTraining`, checked at steps 0 and 1) until one is picked, rather
   than letting a whole detection run be spent first. Because auto is the
   default, that greyed-out Continue is what a brand-new project sees until
-  training data is picked or the switch is flipped to manual.
+  training data is picked or the switch is flipped to manual. It still carries
+  the same **"saved sessions"** reopen entry the manual classifier has
+  (`IcSessionPicker`, wired to `AppRouter`'s `resumeIcSessions` → view `"ic"`):
+  reopening is a deliberate choice of specific pages, so it must not depend on
+  the IC mode — previously the picker lived only inside
+  `InteractiveClassifier.tsx`, which auto mode never shows, leaving IC's own
+  iframed manage page (one session at a time) as the only way in. Picking
+  sessions mid-pass abandons the automatic run the same way "back to project"
+  does.
 - **manual** (the pre-existing behaviour) → view `"ic"`: the classifier opens
   per page, and the training set above is pre-selected in each page's
   create-session screen via the `ic:prefill-training` postMessage. No selection
