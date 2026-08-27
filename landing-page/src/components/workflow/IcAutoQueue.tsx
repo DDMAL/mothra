@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ProjectImage } from "../../types";
 import { autoQueueImage } from "../../utils/icQueue";
 import type { EncodePair } from "../../utils/icQueue";
+import IcSessionPicker from "../project/IcSessionPicker";
+import type { IcResumeRequest } from "../project/IcSessionsModal";
 
 interface IcAutoQueueProps {
   /** Only the pages step 1 still has work for — see pendingIcImages(). */
@@ -10,10 +12,18 @@ interface IcAutoQueueProps {
    *  state tell "nothing selected yet" apart from "all already encoded". */
   usedImageCount: number;
   projectId: number | null;
+  /** *Every* image in the project — what IcSessionPicker resolves the listed
+   *  sessions against, since a session worth reopening usually belongs to a
+   *  page `images` (pending only) has already filtered out. */
+  allImages: ProjectImage[];
   trainingPresets: string[];
   trainingFiles: File[];
   onDone: (pairs: EncodePair[]) => void;
   onBack: () => void;
+  /** Reopen the sessions picked here. Handled by the host (AppRouter), which
+   *  routes them into the manual classifier: reopening is an explicit choice
+   *  about specific pages, so it lands in the classifier in either IC mode. */
+  onResumeIcSessions: (requests: IcResumeRequest[]) => void;
   /** Escape hatch to the interactive classifier — offered when the automatic
    *  pass can't run (no training set) or fails partway. */
   onOpenManualClassifier: () => void;
@@ -32,13 +42,16 @@ export default function IcAutoQueue({
   images,
   usedImageCount,
   projectId,
+  allImages,
   trainingPresets,
   trainingFiles,
   onDone,
   onBack,
   onOpenManualClassifier,
+  onResumeIcSessions,
 }: IcAutoQueueProps) {
   const [done, setDone] = useState(0);
+  const [sessionsModal, setSessionsModal] = useState(false);
   const [current, setCurrent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bumped by "try again" to re-run the effect below.
@@ -95,6 +108,21 @@ export default function IcAutoQueue({
 
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48">
+      {sessionsModal && projectId != null && (
+        <IcSessionPicker
+          projectId={projectId}
+          images={allImages}
+          onClose={() => setSessionsModal(false)}
+          onOpen={(requests) => {
+            setSessionsModal(false);
+            // Same abandonment as "back to project": we're navigating away,
+            // so an in-flight automatic pass must not report itself done
+            // (and its partial queue is dropped) once we're gone.
+            abortedRef.current = true;
+            onResumeIcSessions(requests);
+          }}
+        />
+      )}
       <div className="flex flex-col items-center gap-6 w-full max-w-xl">
         <h1 className="text-4xl font-bold italic text-white text-center">
           interactive classifier
@@ -181,6 +209,22 @@ export default function IcAutoQueue({
               className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold"
             >
               classify manually
+            </button>
+          )}
+          {/* Reopening a saved session isn't a manual-mode feature: the
+              pages worth reopening are usually already encoded (so no
+              automatic pass will ever visit them again), and this is the only
+              entry point the IC step has in auto mode. Same modal and same
+              destination as the manual classifier's own "saved sessions"
+              button. */}
+          {projectId != null && (
+            <button
+              onClick={() => setSessionsModal(true)}
+              className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold"
+            >
+              {images.length === 0
+                ? "reopen a saved session"
+                : "saved sessions"}
             </button>
           )}
           <button
