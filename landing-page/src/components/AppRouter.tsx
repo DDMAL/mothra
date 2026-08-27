@@ -19,6 +19,9 @@ import type { useProjectMutations } from "../hooks/useProjectMutations";
 import { useInferenceSettings } from "../hooks/useInferenceSettings";
 import { useTextFindingSettings } from "../hooks/useTextFindingSettings";
 import { useIcSettings } from "../hooks/useIcSettings";
+import { useTutorialFlow } from "../hooks/useTutorialFlow";
+import TutorialOverlay from "../tutorial/TutorialOverlay";
+import { TUTORIAL_IMAGE_NAMES } from "../tutorial/tutorialSteps";
 import Hero from "./landing/Hero";
 import Documentation from "./documentation/Documentation";
 import AuthPage from "./auth/AuthPage";
@@ -179,6 +182,9 @@ export default function AppRouter({
   // IC step settings (auto/manual + shared training set), picked on the
   // project page — see IcSettingsSection.
   const icSettings = useIcSettings(selectedProjectId);
+  // Guided-tour state for the auto-provisioned tutorial project (see
+  // tutorial_store.py) -- see hooks/useTutorialFlow.ts.
+  const tutorialFlow = useTutorialFlow(selectedProject, view, icSettings);
 
   // batch text-alignment run (run_chain.py) state
   const [batchRunIds, setBatchRunIds] = useState<{
@@ -321,6 +327,28 @@ export default function AppRouter({
     setView("neon-editor");
   };
 
+  // Tutorial hand-off: reaching these steps in the guided tour deep-links
+  // into IC/Neon for that phase's dedicated fixture page (see
+  // tutorial/tutorialSteps.ts's TUTORIAL_IMAGE_NAMES) via the same
+  // focusIc/focusNeon entry points a real user clicking a specific image
+  // already uses -- no separate routing path for the tutorial.
+  useEffect(() => {
+    if (!selectedProject) return;
+    if (tutorialFlow.step?.id === "ic-handoff") {
+      const img = selectedProject.images.find(
+        (i) => i.name === TUTORIAL_IMAGE_NAMES.ic,
+      );
+      if (img) focusIc(img.id);
+    }
+    if (tutorialFlow.step?.id === "neon-handoff") {
+      const mei = selectedProject.meiFiles.find(
+        (f) => f.imageName === TUTORIAL_IMAGE_NAMES.neon,
+      );
+      if (mei) focusNeon(mei.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorialFlow.step?.id]);
+
   // Hand a finished IC queue (either mode) to the batch encoder.
   const startEncodeBatch = (
     pairs: { xmlFile: File; imageFile: File; imageId: string }[],
@@ -336,7 +364,12 @@ export default function AppRouter({
     setView("encoding-processing");
   };
 
-  switch (view) {
+  // Wrapped in an IIFE (rather than the switch returning directly from the
+  // component) so TutorialOverlay can be mounted as a sibling of whatever
+  // view is showing, below, instead of needing a render branch added to
+  // every single case.
+  const routedContent = (() => {
+    switch (view) {
     case "landing":
       return (
         <main>
@@ -551,6 +584,8 @@ export default function AppRouter({
           inferenceSettings={inferenceSettings}
           textFindingSettings={textFindingSettings}
           icSettings={icSettings}
+          showTutorialStart={tutorialFlow.canStart}
+          onStartTutorial={tutorialFlow.start}
         />
       ) : null;
     case "processing":
@@ -1230,5 +1265,19 @@ export default function AppRouter({
           onSuccess={handleLoginSuccess}
         />
       );
-  }
+    }
+  })();
+
+  return (
+    <>
+      {routedContent}
+      {tutorialFlow.active && tutorialFlow.step && (
+        <TutorialOverlay
+          step={tutorialFlow.step}
+          onNext={tutorialFlow.advance}
+          onSkip={tutorialFlow.dismiss}
+        />
+      )}
+    </>
+  );
 }

@@ -50,7 +50,7 @@ export default function IcSettingsSection({
   const totalTrainingSets = trainingPresets.length + trainingFiles.length;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tutorial-target="ic-settings" className="flex flex-col gap-3">
       <h3 className="text-base text-white font-semibold">
         Glyph Classifier settings
       </h3>

@@ -113,6 +113,10 @@ interface ProjectDetailProps {
   inferenceSettings: ReturnType<typeof useInferenceSettings>;
   textFindingSettings: ReturnType<typeof useTextFindingSettings>;
   icSettings: ReturnType<typeof useIcSettings>;
+  /** Tutorial-project-only "restart tour" control (useTutorialFlow.ts's
+   * canStart/start) -- false/undefined for every ordinary project. */
+  showTutorialStart?: boolean;
+  onStartTutorial?: () => void;
 }
 
 export default function ProjectDetail({
@@ -146,6 +150,8 @@ export default function ProjectDetail({
   inferenceSettings,
   textFindingSettings,
   icSettings,
+  showTutorialStart = false,
+  onStartTutorial,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<"images" | "models" | "generated">(
     initialTab?.tab ?? "images",
@@ -553,7 +559,10 @@ export default function ProjectDetail({
       <div className="flex gap-8 max-w-6xl mx-auto">
         {/* progress sidebar */}
         <div className="flex flex-col gap-3 shrink-0 mt-[4.5rem]">
-          <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start">
+          <div
+            data-tutorial-target="progress-sidebar"
+            className="w-48 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start"
+          >
             <span className="text-white/60 text-sm font-medium mb-1">
               progress:
             </span>
@@ -623,7 +632,10 @@ export default function ProjectDetail({
 
         <div className="flex-1">
           {/* header */}
-          <div className="flex items-center gap-4 mb-3">
+          <div
+            data-tutorial-target="project-header"
+            className="flex items-center gap-4 mb-3"
+          >
             <button
               onClick={onBack}
               className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0 mt-1"
@@ -633,6 +645,14 @@ export default function ProjectDetail({
             <h1 className="text-4xl font-bold italic text-white min-w-0 shrink break-words">
               {project.name}
             </h1>
+            {showTutorialStart && (
+              <button
+                onClick={onStartTutorial}
+                className="shrink-0 px-4 py-1.5 bg-[#1E6B70] text-white text-xs font-semibold rounded-full hover:opacity-90 cursor-pointer whitespace-nowrap"
+              >
+                restart tutorial
+              </button>
+            )}
             <div className="relative shrink-0">
               <button
                 onClick={() => setProjectMenu((v) => !v)}
@@ -888,7 +908,7 @@ export default function ProjectDetail({
               locked={sourceLocked}
               icSettings={icSettings}
             />
-            <div className="flex items-end">
+            <div data-tutorial-target="tab-bar" className="flex items-end">
               {tabs.map((tab, i) => (
                 <button
                   key={tab}
@@ -1066,6 +1086,7 @@ export default function ProjectDetail({
               return (
                 <>
                   <button
+                    data-tutorial-target="continue-button"
                     onClick={() => {
                       if (activeJobForProject) return; // defensive; button is disabled below anyway
                       if (nextStep === 0) {

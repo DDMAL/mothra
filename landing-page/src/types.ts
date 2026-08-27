@@ -28,6 +28,7 @@ export interface Project {
   deletedAt?: string;
   lastOpenedAt?: string;
   isPinned?: boolean;
+  isTutorial?: boolean;
   textAlignments: TextAlignment[];
   cantusSourceId?: string;
   stafflines: StafflineSet[];

@@ -25,7 +25,7 @@ router = APIRouter()
 def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
                          deleted_at, last_opened_at, is_pinned, used_annotation_json,
                          images, models, mei, annotations, text_alignments, cantus_source_id,
-                         stafflines, ic_xml_files):
+                         stafflines, ic_xml_files, is_tutorial=False):
     return {
         "id": pid, "name": name, "user": username,
         "stepsUnlocked": steps,
@@ -49,6 +49,7 @@ def _build_project_dict(pid, name, username, steps, used_json, used_model_json,
         # ic_api.py's /ic-xml/{id} endpoints rather than shipped with
         # every project list request the way meiFiles' xmlContent is.
         "icXmlFiles": ic_xml_files,
+        "isTutorial": bool(is_tutorial),
     }
 
 
@@ -122,7 +123,7 @@ def _project_row_to_dict(cur, row, username):
     upload order is stable across requests rather than following whatever
     order Postgres happens to return rows in.
     """
-    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id = row
+    pid, name, steps, used_json, used_model_json, deleted_at, last_opened_at, is_pinned, used_annotation_json, cantus_source_id, is_tutorial = row
     cur.execute(
         "SELECT id, name, folio, source_id, source_name FROM project_images"
         " WHERE project_id=%s ORDER BY created_at ASC, id ASC", (pid,)
@@ -164,7 +165,7 @@ def _project_row_to_dict(cur, row, username):
         pid, name, username, steps, used_json, used_model_json, deleted_at,
         last_opened_at, is_pinned, used_annotation_json,
         images, models, mei, annotations, text_alignments, cantus_source_id,
-        stafflines, ic_xml_files,
+        stafflines, ic_xml_files, is_tutorial=is_tutorial,
     )
 
 
@@ -181,7 +182,7 @@ def list_projects(user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at, "
-            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id, is_tutorial"
             " FROM projects WHERE user_id=%s",
             (user["id"],)
         )
@@ -274,6 +275,7 @@ def list_projects(user=Depends(get_current_user)):
                 cantus_source_id=row[9],
                 stafflines=stafflines_by_pid.get(row[0], []),
                 ic_xml_files=ic_xml_by_pid.get(row[0], []),
+                is_tutorial=row[10],
             )
             for row in rows
         ]
@@ -285,7 +287,7 @@ def get_project(project_id: int, user=Depends(get_current_user)):
     with db_cursor() as (con, cur):
         cur.execute(
             "SELECT id, name, steps_unlocked, used_image_names, used_model_names, deleted_at,"
-            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id"
+            " last_opened_at, is_pinned, used_annotation_names, cantus_source_id, is_tutorial"
             " FROM projects WHERE id=%s AND user_id=%s",
             (project_id, user["id"])
         )
@@ -347,7 +349,7 @@ def create_project(body: CreateProjectBody, user=Depends(get_current_user)):
             "images": [], "models": [], "meiFiles": [], "annotations": [],
             "stepsUnlocked": 0, "usedImageIds": [], "usedModelNames": [],
             "deletedAt": None, "usedAnnotationNames": [], "cantusSourceId": None,
-            "textAlignments": [], "stafflines": [], "icXmlFiles": []}
+            "textAlignments": [], "stafflines": [], "icXmlFiles": [], "isTutorial": False}
 
 
 class UpdateProjectBody(BaseModel):
