@@ -1,0 +1,4 @@
+page_name,image,gt_txt
+Antiphonal_1v_hfngl,../../addtl-gt/images/train/Antiphonal_1v_hfngl.jpg,../../addtl-gt/labels/train/Antiphonal_1v_hfngl.txt
+CH-E611_15r,../../addtl-gt/images/train/CH-E611_15r.jpg,../../addtl-gt/labels/train/CH-E611_15r.txt
+l'Arsenal_Ms-5198_11,../../addtl-gt/images/train/l'Arsenal_Ms-5198_11.jpg,../../addtl-gt/labels/train/l'Arsenal_Ms-5198_11.txt
