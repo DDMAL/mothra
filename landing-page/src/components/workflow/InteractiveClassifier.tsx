@@ -7,6 +7,12 @@ import { AuthImage } from "../shared/AuthImage";
 import IcSessionPicker from "../project/IcSessionPicker";
 import type { IcResumeRequest } from "../project/IcSessionsModal";
 
+// How long to wait for the iframe to confirm it has committed this page's
+// deleted glyphs (see flushDeletions). Generous: it covers one DELETE per
+// deleted glyph, and the cost of giving up early is a warning on a page whose
+// deletions were, in fact, fine.
+const FLUSH_TIMEOUT_MS = 8000;
+
 interface InteractiveClassifierProps {
   // Only the pages step 1 still has work for - see pendingIcImages().
   images: ProjectImage[];
@@ -107,6 +113,17 @@ export default function InteractiveClassifier({
   // Set when IC's in-iframe "auto-export" fires — there's no "queue page"
   // click on that path, so we run the queue logic ourselves once state settles.
   const [autoQueueRequested, setAutoQueueRequested] = useState(false);
+
+  // The live IC frame, for the deletion flush below. Re-keyed per page (see
+  // the iframe's key={icUrl}), so this always points at the page on screen.
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const flushSeq = useRef(0);
+  // Set once a flush request goes unanswered: an IC build predating the
+  // ic:flush-deletions handshake never replies, and waiting out the full
+  // timeout on every page turn would make the filmstrip feel broken. After
+  // the first miss we still send the message (harmless, and a newer IC in a
+  // later session will answer it) but stop blocking on the reply.
+  const flushUnsupported = useRef(false);
 
   // Keyed by project_images.id, not name: two pages in one project may share
   // a file name (mothra#241), and a name-keyed set marks both queued off one
@@ -215,14 +232,89 @@ export default function InteractiveClassifier({
     return () => window.removeEventListener("message", onMessage);
   }, [icOrigin]);
 
+  // Ask the IC frame to commit the glyphs the user deleted on this page.
+  //
+  // IC's delete is a client-side soft delete: the ids sit in the iframe's own
+  // memory, hidden from its grid but still present in the *backend's* working
+  // set, until something commits them. The only thing that ever did was IC's
+  // own Export button - which mothra never presses, since it exports
+  // server-to-server (/ic/{id}/complete) from handleEncodeBatch below. So
+  // without this, every glyph deleted in the classifier came back in the
+  // GameraXML and turned into a neume in Neon.
+  //
+  // It has to happen while *this* page's frame is still alive: switching
+  // pages re-runs the staging effect and re-keys the iframe, which drops the
+  // ids on the floor. Hence a flush before every page change, before
+  // queueing, and once more before the batch export (a page can be corrected
+  // further after it was queued - that is the whole point of deferring the
+  // export).
+  //
+  // Never rejects: a classifier that can't confirm the flush leaves the user
+  // with a warning and a working queue, not a dead button.
+  const flushDeletions = useCallback((): Promise<void> => {
+    const frame = iframeRef.current?.contentWindow;
+    if (!frame || !sessionId) return Promise.resolve();
+    const requestId = `flush-${++flushSeq.current}`;
+    const message = { type: "ic:flush-deletions", sessionId, requestId };
+    if (flushUnsupported.current) {
+      frame.postMessage(message, icOrigin ?? "*");
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (warning?: string) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onReply);
+        if (warning) setError(warning);
+        resolve();
+      };
+      function onReply(e: MessageEvent) {
+        if (icOrigin && e.origin !== icOrigin) return;
+        const data = e.data;
+        if (data?.requestId !== requestId) return;
+        if (data.type === "ic:deletions-flushed") finish();
+        else if (data.type === "ic:deletions-flush-failed")
+          finish(
+            `the classifier could not apply this page's deletions (${data.error}) — deleted glyphs may come back after encoding`,
+          );
+      }
+      const timer = window.setTimeout(() => {
+        flushUnsupported.current = true;
+        finish(
+          "the classifier did not confirm this page's deletions — deleted glyphs may come back after encoding",
+        );
+      }, FLUSH_TIMEOUT_MS);
+      window.addEventListener("message", onReply);
+      frame.postMessage(message, icOrigin ?? "*");
+    });
+  }, [sessionId, icOrigin]);
+
+  // Every route to another page goes through here so the page being left gets
+  // its deletions committed first (see flushDeletions).
+  const gotoPage = useCallback(
+    async (idx: number) => {
+      if (idx === currentIdx || idx < 0 || idx >= images.length) return;
+      await flushDeletions();
+      setCurrentIdx(idx);
+    },
+    [currentIdx, images.length, flushDeletions],
+  );
+
   // Mark this page's session for encoding and move on. Deliberately does *not*
   // export: /ic/{id}/complete is what snapshots the GameraXML, and taking that
   // snapshot at queue time would miss any correction made to the page after it
   // was queued. handleEncodeBatch exports instead - and that export no longer
   // ends the session either, see its comment.
-  const handleQueuePage = useCallback(() => {
+  const handleQueuePage = useCallback(async () => {
     if (!sessionId || !img) return;
     setError(null);
+    // Before anything else: the deletions made on this page only exist in the
+    // iframe until this commits them (see flushDeletions). Queueing is what
+    // hands the page to the encoder, so this is the last moment they are
+    // certain to still be there.
+    await flushDeletions();
     setQueue((prev) =>
       prev.some((q) => q.image.id === img.id)
         ? // Same page re-queued (it stays editable, so this can happen): keep
@@ -235,8 +327,10 @@ export default function InteractiveClassifier({
     const nextIdx = images.findIndex(
       (im, idx) => idx > currentIdx && !queuedIds.has(im.id),
     );
+    // setCurrentIdx directly, not gotoPage: the flush above already covered
+    // the page being left, and a second one would only race the teardown.
     if (nextIdx !== -1) setCurrentIdx(nextIdx);
-  }, [sessionId, img, images, currentIdx, queuedIds]);
+  }, [sessionId, img, images, currentIdx, queuedIds, flushDeletions]);
 
   // Run the queue path for an auto-exported page once the session id and
   // current page have settled. Gated on the flag (reset immediately) so it
@@ -244,7 +338,7 @@ export default function InteractiveClassifier({
   useEffect(() => {
     if (autoQueueRequested && sessionId && img && !queuedIds.has(img.id)) {
       setAutoQueueRequested(false);
-      handleQueuePage();
+      void handleQueuePage();
     }
   }, [autoQueueRequested, sessionId, img, queuedIds, handleQueuePage]);
 
@@ -271,6 +365,10 @@ export default function InteractiveClassifier({
     setFinalizing(true);
     setError(null);
     try {
+      // The open page may have been corrected further since it was queued -
+      // deferring the export is exactly what makes that possible - so commit
+      // its deletions before exporting anything (see flushDeletions).
+      await flushDeletions();
       const pairs: EncodePair[] = [];
       for (const { image, sessionId: sid } of queue) {
         const r = await apiFetch(`/api/ic/${sid}/complete`, {
@@ -298,7 +396,7 @@ export default function InteractiveClassifier({
     } finally {
       setFinalizing(false);
     }
-  }, [queue, finalizing, onEncodeBatch, projectId]);
+  }, [queue, finalizing, onEncodeBatch, projectId, flushDeletions]);
 
   // show 5 thumbnails at a time, centered on currentIdx
   const VISIBLE = 5;
@@ -316,8 +414,12 @@ export default function InteractiveClassifier({
           projectId={projectId}
           images={allImages}
           onClose={() => setSessionsModal(false)}
-          onOpen={(requests) => {
+          onOpen={async (requests) => {
             setSessionsModal(false);
+            // Reopening re-enters this view, which rebuilds the iframe - so
+            // the page on screen loses its uncommitted deletions unless they
+            // go now (see flushDeletions).
+            await flushDeletions();
             // Handled by the host (AppRouter), not in place: reopening
             // re-enters this view with those pages in `images`, which this
             // component resolves once at mount.
@@ -327,7 +429,7 @@ export default function InteractiveClassifier({
       )}
       <div className="flex items-center gap-6 px-8 py-3">
         <button
-          onClick={onBack}
+          onClick={() => void flushDeletions().then(onBack)}
           title="back to project"
           className="text-white text-2xl hover:opacity-70 transition-opacity cursor-pointer shrink-0"
         >
@@ -390,7 +492,7 @@ export default function InteractiveClassifier({
             the interactive path — queuing a page after a live session. */}
         {sessionId && (
           <button
-            onClick={handleQueuePage}
+            onClick={() => void handleQueuePage()}
             disabled={finalizing || queuedIds.has(img?.id ?? "")}
             className="px-6 py-2 bg-white text-[#1D3335] rounded-xl hover:opacity-90 cursor-pointer font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -514,6 +616,7 @@ export default function InteractiveClassifier({
           ) : icUrl ? (
             <iframe
               key={icUrl}
+              ref={iframeRef}
               src={icUrl}
               title={`Interactive Classifier — ${img?.name ?? ""}`}
               className="flex-1 w-full border-0"
@@ -530,7 +633,7 @@ export default function InteractiveClassifier({
           <div className="flex items-center justify-center px-6 pb-2 pt-2 gap-4">
             <div className="flex items-center justify-center gap-3">
               <button
-                onClick={() => setCurrentIdx((i) => i - 1)}
+                onClick={() => void gotoPage(currentIdx - 1)}
                 disabled={currentIdx === 0}
                 className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
               >
@@ -543,7 +646,7 @@ export default function InteractiveClassifier({
                 return (
                   <button
                     key={thumb.id}
-                    onClick={() => setCurrentIdx(globalIdx)}
+                    onClick={() => void gotoPage(globalIdx)}
                     className={`relative w-12 aspect-square rounded-lg overflow-hidden flex-shrink-0 cursor-pointer transition-all
                       ${active ? "ring-2 ring-white ring-offset-2 ring-offset-[#1D3335]" : "opacity-50 hover:opacity-80"}`}
                   >
@@ -561,7 +664,7 @@ export default function InteractiveClassifier({
                 );
               })}
               <button
-                onClick={() => setCurrentIdx((i) => i + 1)}
+                onClick={() => void gotoPage(currentIdx + 1)}
                 disabled={currentIdx === images.length - 1}
                 className="text-white text-xl hover:opacity-70 disabled:opacity-20 cursor-pointer"
               >

@@ -791,6 +791,26 @@ itself is still component-local state, so leaving the view drops the
 checkmarks — but the sessions behind them survive and resume with their
 corrections intact, so re-queueing is a click.
 
+**Deleting a glyph in IC only sticks if mothra asks the iframe to commit it.**
+IC's delete is a client-side soft delete: the id lives in the iframe's own
+Zustand store, hidden from IC's grid but still in the *backend's* working set,
+and the only thing that ever committed it was IC's own Export button — which
+mothra never presses, since `handleEncodeBatch` exports server-to-server via
+`POST /api/ic/{id}/complete`. So every glyph the user deleted came back in the
+GameraXML and turned into a neume in Neon. `InteractiveClassifier.tsx`'s
+`flushDeletions()` fixes this by posting `ic:flush-deletions` into the frame and
+awaiting IC's `ic:deletions-flushed` reply (`ic/frontend`'s
+`useFlushDeletions.ts`, which runs the same `commitSoftDeletes()` the Export
+button does). **It must run while that page's frame is still alive** — the
+staging effect re-keys the iframe on every page change, which drops the ids on
+the floor — so it fires before a filmstrip page change, before queueing, before
+the batch export (a queued page can still be corrected, that being the point of
+deferring the export), and on the two exits that unmount the view ("back to
+project", opening a saved session). A classifier that never answers (an IC build
+predating the handshake) doesn't block the queue: the first request times out
+after 8s, warns visibly, and marks the handshake unsupported for the rest of the
+view so later page turns don't stall too.
+
 `ic/auto-queue` (auto mode) still finalises, deliberately: it creates its
 session server-side via IC's `POST /sessions`, which — unlike `/staging` —
 takes no project/image id, so IC could never map it back to a page for
