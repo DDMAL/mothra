@@ -11,6 +11,12 @@ const dismissedKey = (projectId: number) => `mothra-tutorial-dismissed-${project
 // with content mothra doesn't control.
 const OVERLAY_VIEWS: View[] = ["project", "completion"];
 
+// IC's built-in training presets are GameraXML filenames, not stable ids
+// (e.g. "Square notation training data 05.08.26.xml", see ic/api's
+// presets_dir()) -- the date suffix can change on a retrain, so match on
+// "square" appearing in the name rather than an exact filename.
+const SQUARE_PRESET = /square/i;
+
 export function useTutorialFlow(
     project: Project | null,
     view: View,
@@ -53,19 +59,29 @@ export function useTutorialFlow(
     }
 
     // Gates "ic-settings-prompt" -- waits until the user has actually
-    // switched mode to "manual" and notation to "square" (not just visited
-    // the settings panel) before advancing to "process-prompt".
+    // switched mode to "manual" and checked the "square" training preset
+    // (not just visited the settings panel) before advancing to
+    // "process-prompt". trainingPresets starts empty (no default to be
+    // trivially satisfied by, unlike notationType), so this genuinely
+    // requires the user to have clicked the checkbox themselves.
     useEffect(() => {
         if (
             step?.id === "ic-settings-prompt" &&
             icSettings.mode === "manual" &&
-            icSettings.notationType === "square"
+            icSettings.trainingPresets.some((name) => SQUARE_PRESET.test(name))
         ) {
             advance();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [step?.id, icSettings.mode, icSettings.notationType]);
+    }, [step?.id, icSettings.mode, icSettings.trainingPresets]);
 
+    // step?.id is a real dependency here, not just view: stepIndex reaches
+    // "process-prompt" while still ON view "project" (advancing past
+    // "ic-settings-prompt" doesn't change view at all), so an effect keyed
+    // on [view] alone would never re-run at that moment and awaitingProcess
+    // would never flip true -- then when view later changed to
+    // "completion", the guard below would exit immediately and advance()
+    // would never fire, leaving the step stuck on "process-prompt" forever.
     useEffect(() => {
         if (step?.id === "process-prompt" && view === "project") {
             setAwaitingProcess(true);
@@ -86,7 +102,7 @@ export function useTutorialFlow(
       setStepIndex((i) => Math.min(i + 2, TUTORIAL_STEPS.length - 1));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [view]);
+    }, [view, step?.id]);
 
     // Only the tutorial project ever shows a start/restart control, and only
     // once nothing is currently on screen for it -- avoids a redundant

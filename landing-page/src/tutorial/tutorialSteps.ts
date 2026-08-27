@@ -54,7 +54,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     type: "action",
     target: "ic-settings",
     title: "Set up the classifier",
-    body: 'Switch mode to "manual" so you classify pages yourself in the Interactive Classifier, and set notation to "square" to match these sample pages. We\'ll wait here until both are set.',
+    body: 'Switch mode to "manual" so you classify pages yourself in the Interactive Classifier. Then, under training data → presets, check the "square" preset to match these sample pages. We\'ll wait here until both are done.',
   },
   {
     id: "process-prompt",

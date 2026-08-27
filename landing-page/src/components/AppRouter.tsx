@@ -705,9 +705,20 @@ export default function AppRouter({
                 }
                 // Filtered through selectedProject.images (not used
                 // directly) so a stale usedImageIds entry referencing a
-                // since-deleted image can't leak into the request.
+                // since-deleted image can't leak into the request. When the
+                // tutorial's own "process a page" step is what's driving
+                // this run, further restrict to just the one page it's
+                // narrating (Aarau) -- the other two are reserved for the
+                // IC/Neon steps and deliberately never processed here, so
+                // they stay untouched examples rather than all three
+                // silently going through detection together.
                 const usedImageIds = selectedProject.images
                   .filter((i) => selectedProject.usedImageIds.includes(i.id))
+                  .filter((i) =>
+                    tutorialFlow.step?.id === "process-prompt"
+                      ? i.name === TUTORIAL_IMAGE_NAMES.process
+                      : true,
+                  )
                   .map((i) => i.id);
                 return apiFetchJobStream(
                   `/api/projects/${selectedProject.id}/predict`,
