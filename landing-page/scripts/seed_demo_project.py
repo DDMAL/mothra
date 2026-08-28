@@ -1,6 +1,6 @@
 """One-shot seed script -- creates (or resets) the "tutorial template" demo
 project: a fixture project, owned by its own throwaway fixture user, that
-ships 3 manuscript pages plus one paired MEI file so a later frontend feature
+ships 2 manuscript pages plus one paired MEI file so a later frontend feature
 can present a ready-made example without a real user having produced one.
 
 Run manually, after `python migrate.py` has added `projects.is_tutorial_template`:
@@ -10,16 +10,22 @@ Run manually, after `python migrate.py` has added `projects.is_tutorial_template
                                   # run once per database
     python seed_demo_project.py
 
-Deliberately does NOT touch `ic_xml_files` or the two `ic-session-*.xml`
-fixtures under assets/demo_fixtures/files/ -- those are reserved for a later
-frontend IC-training-set feature; mothra has no DB table for "IC training
-set" today (see CLAUDE.md's Workflow pipeline step 2).
+Deliberately does NOT touch `ic_xml_files` or the `ic-session-*.xml` fixture
+under assets/demo_fixtures/files/ -- reserved for a later frontend
+IC-training-set feature; mothra has no DB table for "IC training set" today
+(see CLAUDE.md's Workflow pipeline step 2).
 
 Safe to re-run: deletes and recreates the template project from scratch each
-time, so it always ends up as exactly these 3 images + 1 MEI file, nothing
+time, so it always ends up as exactly these 2 images + 1 MEI file, nothing
 accumulated from a previous run. The template user (mothra-tutorial-template)
 is created once and reused; it has a throwaway random password and is never
 meant to log in.
+
+Note: re-running this only updates the TEMPLATE. A user who already has
+their own cloned tutorial project (tutorial_store.py's ensure_tutorial_project
+only ever clones once per account) keeps whatever the template looked like
+at clone time -- delete their `projects` row where is_tutorial=TRUE to force
+a fresh clone on next login.
 """
 # .env has to be loaded before importing auth_api -- auth_api reads
 # DATABASE_URL/MOTHRA_SECRET at import time (see migrate.py's own comment).
@@ -43,7 +49,12 @@ IMAGES_DIR = DEMO_FIXTURES_DIR / "images"
 FILES_DIR = DEMO_FIXTURES_DIR / "files"
 
 DEMO_PAGES = [
-    ("Aarau_MsMurF2_6v.jpg", None),
+    # Antiphonal does double duty in the guided tutorial -- both the
+    # "process a page" example and the IC-classifying example (see
+    # tutorial/tutorialSteps.ts's TUTORIAL_IMAGE_NAMES). A third fixture
+    # image (Aarau_MsMurF2_6v.jpg) originally covered "process a page"
+    # separately, kept out of the IC step entirely -- dropped in favor of
+    # this simpler two-image project.
     ("Antiphonal_1v_hfngl.jpg", None),
     ("CDN-Hsmu_M2149.L4_097r_demo.png", "CDN-Hsmu_M2149.L4_097r_demo.mei"),
 ]

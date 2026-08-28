@@ -12,10 +12,14 @@ const dismissedKey = (projectId: number) => `mothra-tutorial-dismissed-${project
 const OVERLAY_VIEWS: View[] = ["project", "completion"];
 
 // IC's built-in training presets are GameraXML filenames, not stable ids
-// (e.g. "Square notation training data 05.08.26.xml", see ic/api's
-// presets_dir()) -- the date suffix can change on a retrain, so match on
-// "square" appearing in the name rather than an exact filename.
-const SQUARE_PRESET = /square/i;
+// (e.g. "Hufnagel training data 06.08.26.xml", see ic/api's presets_dir())
+// -- the date suffix can change on a retrain, so match on "hufnagel"
+// appearing in the name rather than an exact filename. Hufnagel, not
+// square: Antiphonal_1v_hfngl.jpg (the IC-practice page) is written in
+// Hufnagelschrift -- confirmed by demo_fixtures/text/IC tutorial.docx,
+// which names the folio's notation directly (an earlier version of this
+// gate required "square" instead, which was simply wrong for this page).
+const HUFNAGEL_PRESET = /hufnagel/i;
 
 export function useTutorialFlow(
     project: Project | null,
@@ -59,16 +63,19 @@ export function useTutorialFlow(
     }
 
     // Gates "ic-settings-prompt" -- waits until the user has actually
-    // switched mode to "manual" and checked the "square" training preset
+    // switched mode to "manual" and checked the "hufnagel" training preset
     // (not just visited the settings panel) before advancing to
     // "process-prompt". trainingPresets starts empty (no default to be
     // trivially satisfied by, unlike notationType), so this genuinely
-    // requires the user to have clicked the checkbox themselves.
+    // requires the user to have clicked the checkbox themselves. This is
+    // the project-level training-set choice made on mothra's own settings
+    // panel, before predict ever runs -- separate from IC's own in-session
+    // preset checkbox, which "ic-select-preset" (below) covers.
     useEffect(() => {
         if (
             step?.id === "ic-settings-prompt" &&
             icSettings.mode === "manual" &&
-            icSettings.trainingPresets.some((name) => SQUARE_PRESET.test(name))
+            icSettings.trainingPresets.some((name) => HUFNAGEL_PRESET.test(name))
         ) {
             advance();
         }
@@ -109,5 +116,19 @@ export function useTutorialFlow(
     // button while the overlay itself is already active.
     const canStart = !!project?.isTutorial && !active;
 
-    return { step, active, advance, dismiss, start, canStart };
+    // Routes ic:tour-event messages (relayed by InteractiveClassifier.tsx,
+    // which owns the actual postMessage bridge) into stepIndex advances.
+    // Only ever acts while the CURRENT step is an "ic-tour" step -- an event
+    // arriving after the user has already navigated elsewhere (or before
+    // ic-handoff has even fired) is simply ignored, not queued.
+    function handleIcTourEvent(event: string) {
+        if (step?.phase !== "ic-tour") return;
+        if (event === "skip") {
+            dismiss();
+            return;
+        }
+        if (event === "next" || event === step.icAdvanceOn) advance();
+    }
+
+    return { step, active, advance, dismiss, start, canStart, handleIcTourEvent };
 }

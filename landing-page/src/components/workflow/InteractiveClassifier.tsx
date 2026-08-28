@@ -6,6 +6,7 @@ import type { EncodePair } from "../../utils/icQueue";
 import { AuthImage } from "../shared/AuthImage";
 import IcSessionPicker from "../project/IcSessionPicker";
 import type { IcResumeRequest } from "../project/IcSessionsModal";
+import type { TutorialStep } from "../../tutorial/tutorialSteps";
 
 interface InteractiveClassifierProps {
   // Only the pages step 1 still has work for - see pendingIcImages().
@@ -46,6 +47,13 @@ interface InteractiveClassifierProps {
   // classifier opens with nothing pre-selected (its own default).
   trainingPresets: string[];
   trainingFiles: File[];
+  // Guided-tutorial step, when the tutorial's current step is phase
+  // "ic-tour" -- pushed into the iframe via postMessage so IC can render
+  // its own coachmark against it (see ic/frontend's IcTourOverlay.tsx).
+  // null on every ordinary (non-tutorial) project, and for tutorial steps
+  // outside this component's own iframe.
+  tutorialStep?: TutorialStep | null;
+  onTutorialEvent?: (event: string) => void;
 }
 
 export default function InteractiveClassifier({
@@ -63,6 +71,8 @@ export default function InteractiveClassifier({
   onClefLineChange,
   trainingPresets,
   trainingFiles,
+  tutorialStep = null,
+  onTutorialEvent,
 }: InteractiveClassifierProps) {
   // Resolved once, at mount: this view is remounted on every entry (AppRouter
   // switches on `view`), and after that the filmstrip owns the selection - a
@@ -122,6 +132,27 @@ export default function InteractiveClassifier({
   // Guards against a slow /ic/start response landing after the user has
   // already switched pages — only the latest request may set state.
   const startSeq = useRef(0);
+  // Needed to postMessage proactively (a tutorial-step push isn't a reply to
+  // an incoming message, unlike ic:prefill-training below, which replies via
+  // e.source instead).
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Mirrors trainingRef's own pattern just below: readable from the message
+  // handler without re-subscribing the listener every render (onTutorialEvent
+  // is a fresh closure each render of useTutorialFlow) -- and, unlike
+  // capturing it directly in the listener's closure, never goes stale, since
+  // handleIcTourEvent reads useTutorialFlow's OWN current step by closing
+  // over the render it was created in.
+  const onTutorialEventRef = useRef(onTutorialEvent);
+  useEffect(() => {
+    onTutorialEventRef.current = onTutorialEvent;
+  }, [onTutorialEvent]);
+
+  // Same reasoning as onTutorialEventRef -- read from the ic:ready reply
+  // below without re-subscribing the listener on every tutorialStep change.
+  const tutorialStepRef = useRef(tutorialStep);
+  useEffect(() => {
+    tutorialStepRef.current = tutorialStep;
+  }, [tutorialStep]);
 
   // Training selection from the project page, readable from the message
   // handler below without re-subscribing the listener when it changes.
@@ -191,6 +222,29 @@ export default function InteractiveClassifier({
             e.origin || "*",
           );
         }
+        // Reply-based, not just the proactive push effect below: that effect
+        // fires as soon as icUrl/tutorialStep change, which can race the
+        // iframe's own script bootstrap and get missed entirely on the very
+        // first ic-tour step. Replying to ic:ready (like ic:prefill-training
+        // above) can't race -- IC only sends it once its own listener is
+        // already registered.
+        const ts = tutorialStepRef.current;
+        if (ts && ts.phase === "ic-tour") {
+          (e.source as Window | null)?.postMessage(
+            {
+              type: "mothra:tutorial-step",
+              step: {
+                id: ts.id,
+                target: ts.icTarget ?? null,
+                title: ts.title,
+                body: ts.body,
+                type: ts.type,
+                blocksInteraction: ts.blocksInteraction,
+              },
+            },
+            e.origin || "*",
+          );
+        }
         return;
       }
       if (
@@ -198,6 +252,16 @@ export default function InteractiveClassifier({
         typeof data.sessionId === "string"
       ) {
         setSessionId(data.sessionId);
+        // "ic-start-session"'s tour step advances on this same message,
+        // reusing it rather than requiring the IC-side send it a second,
+        // dedicated event.
+        onTutorialEventRef.current?.("session-created");
+      }
+      // Any other in-tour action (preset checked, glyph reclassified,
+      // training panel opened, manual "next"/"skip") -- see
+      // ic/frontend's lib/tourBridge.ts's postTourEvent().
+      if (data?.type === "ic:tour-event" && typeof data.event === "string") {
+        onTutorialEventRef.current?.(data.event);
       }
       // "Trust the classifier" path: IC ran classify + skipped the interactive
       // step. Adopt the session and flag it for auto-queuing (handled by the
@@ -214,6 +278,29 @@ export default function InteractiveClassifier({
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [icOrigin]);
+
+  // Pushes the tutorial's current ic-tour step (or null, clearing it) into
+  // the iframe whenever it changes. Keyed on icUrl too: the iframe remounts
+  // on every page change (key={icUrl} below), which drops whatever the
+  // previous mount had received.
+  useEffect(() => {
+    if (!icUrl) return;
+    const step =
+      tutorialStep && tutorialStep.phase === "ic-tour"
+        ? {
+            id: tutorialStep.id,
+            target: tutorialStep.icTarget ?? null,
+            title: tutorialStep.title,
+            body: tutorialStep.body,
+            type: tutorialStep.type,
+            blocksInteraction: tutorialStep.blocksInteraction,
+          }
+        : null;
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "mothra:tutorial-step", step },
+      icOrigin || "*",
+    );
+  }, [tutorialStep, icUrl, icOrigin]);
 
   // Mark this page's session for encoding and move on. Deliberately does *not*
   // export: /ic/{id}/complete is what snapshots the GameraXML, and taking that
@@ -513,6 +600,7 @@ export default function InteractiveClassifier({
             </div>
           ) : icUrl ? (
             <iframe
+              ref={iframeRef}
               key={icUrl}
               src={icUrl}
               title={`Interactive Classifier — ${img?.name ?? ""}`}

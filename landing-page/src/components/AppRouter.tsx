@@ -338,13 +338,23 @@ export default function AppRouter({
       const img = selectedProject.images.find(
         (i) => i.name === TUTORIAL_IMAGE_NAMES.ic,
       );
-      if (img) focusIc(img.id);
+      // advance() right after: this step's only job is the one-time
+      // trigger, so stepIndex shouldn't linger here once it's fired --
+      // the real, seen coachmarking for the classifier is the "ic-tour"
+      // steps that follow, rendered inside the IC iframe itself.
+      if (img) {
+        focusIc(img.id);
+        tutorialFlow.advance();
+      }
     }
     if (tutorialFlow.step?.id === "neon-handoff") {
       const mei = selectedProject.meiFiles.find(
         (f) => f.imageName === TUTORIAL_IMAGE_NAMES.neon,
       );
-      if (mei) focusNeon(mei.id);
+      if (mei) {
+        focusNeon(mei.id);
+        tutorialFlow.advance();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tutorialFlow.step?.id]);
@@ -708,10 +718,9 @@ export default function AppRouter({
                 // since-deleted image can't leak into the request. When the
                 // tutorial's own "process a page" step is what's driving
                 // this run, further restrict to just the one page it's
-                // narrating (Aarau) -- the other two are reserved for the
-                // IC/Neon steps and deliberately never processed here, so
-                // they stay untouched examples rather than all three
-                // silently going through detection together.
+                // narrating (Antiphonal -- also the IC-tour's own page, see
+                // TUTORIAL_IMAGE_NAMES) so the Neon page stays an untouched
+                // example rather than going through detection too.
                 const usedImageIds = selectedProject.images
                   .filter((i) => selectedProject.usedImageIds.includes(i.id))
                   .filter((i) =>
@@ -1014,6 +1023,10 @@ export default function AppRouter({
           onEncodeBatch={startEncodeBatch}
           allImages={selectedProject.images}
           onResumeIcSessions={setResumeIcSessions}
+          tutorialStep={
+            tutorialFlow.step?.phase === "ic-tour" ? tutorialFlow.step : null
+          }
+          onTutorialEvent={tutorialFlow.handleIcTourEvent}
         />
       );
     }

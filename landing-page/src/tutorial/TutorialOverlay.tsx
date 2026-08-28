@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TutorialStep } from "./tutorialSteps";
 
@@ -15,15 +15,57 @@ interface TutorialOverlayProps {
 
 export default function TutorialOverlay({ step, onNext, onSkip }: TutorialOverlayProps) {
     const [rect, setRect] = useState<DOMRect | null>(null);
+    const [calloutStyle, setCalloutStyle] = useState<React.CSSProperties>({
+        bottom: 32,
+        left: "50%",
+        transform: "translateX(-50%)",
+    });
+    // Measured, not assumed -- see ic/frontend's IcTourOverlay.tsx (this
+    // component's sibling): a guessed height can still let the callout spill
+    // past the viewport edge; measuring its own actual size and hard-clamping
+    // against it cannot.
+    const calloutRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        const GAP = 16;
+        const EDGE = 8;
         const measure = () => {
-            if (!step.target) {
-                setRect(null);
-                return;
+            const el = step.target
+                ? document.querySelector(`[data-tutorial-target="${step.target}"]`)
+                : null;
+            const targetRect = el ? el.getBoundingClientRect() : null;
+            setRect(targetRect);
+
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            // Fallback estimate only matters before the very first paint (ref
+            // not attached yet) -- every measurement after that uses the real
+            // size.
+            const calloutW = calloutRef.current?.offsetWidth || 320;
+            const calloutH = calloutRef.current?.offsetHeight || 160;
+
+            let top: number;
+            let left: number;
+            if (targetRect) {
+                const spaceBelow = vh - targetRect.bottom;
+                const spaceAbove = targetRect.top - NAVBAR_HEIGHT_PX;
+                const placeBelow =
+                    spaceBelow >= calloutH + GAP || spaceBelow >= spaceAbove;
+                top = placeBelow
+                    ? targetRect.bottom + GAP
+                    : targetRect.top - GAP - calloutH;
+                left = targetRect.left;
+            } else {
+                top = vh - calloutH - 32;
+                left = (vw - calloutW) / 2;
             }
-            const el = document.querySelector(`[data-tutorial-target="${step.target}"]`);
-            setRect(el ? el.getBoundingClientRect() : null);
+            // Hard clamp: guarantees the callout's full box stays inside the
+            // viewport (and below the nav bar) no matter what the
+            // target-relative math above produced -- the above/below choice
+            // only reduces how often the clamp has to kick in.
+            top = Math.max(NAVBAR_HEIGHT_PX + EDGE, Math.min(top, vh - calloutH - EDGE));
+            left = Math.max(EDGE, Math.min(left, vw - calloutW - EDGE));
+            setCalloutStyle({ top, left });
         };
         measure();
         window.addEventListener("resize", measure);
@@ -35,16 +77,19 @@ export default function TutorialOverlay({ step, onNext, onSkip }: TutorialOverla
     }, [step.target]);
 
     const isAction = step.type === "action";
+    // Action steps never scrim (there's always a real control to click
+    // underneath); some "info" steps ALSO need the page interactive despite
+    // having a manual "next" -- their own copy instructs clicking/switching
+    // tabs on the page itself, not just reading. blocksInteraction:false
+    // opts a step out of the scrim without changing its type/footer.
+    const showScrim = !isAction && step.blocksInteraction !== false;
 
     return createPortal(
         <>
-        {/* Informational steps dim the page (nothing to click through to);
-            action steps render no scrim at all, so the real "begin" button
-            stays fully interactive underneath -- see the plan's "Known
-            simplifications" re: no true spotlight-cutout/click-blocking.
-            Starts below the nav bar (top: NAVBAR_HEIGHT_PX, not inset-0) so
-            it never dims/covers it. */}
-        {!isAction && (
+        {/* Starts below the nav bar (top: NAVBAR_HEIGHT_PX, not inset-0) so
+            it never dims/covers it -- see the plan's "Known simplifications"
+            re: no true spotlight-cutout/click-blocking. */}
+        {showScrim && (
             <div
             className="fixed inset-x-0 bottom-0 z-[60] bg-black/60"
             style={{ top: NAVBAR_HEIGHT_PX }}
@@ -66,18 +111,9 @@ export default function TutorialOverlay({ step, onNext, onSkip }: TutorialOverla
             />
         )}
         <div
+            ref={calloutRef}
             className="fixed z-[62] bg-[#C8E6E3] rounded-2xl p-5 max-w-sm shadow-2xl flex flex-col gap-3"
-            style={
-            rect
-                ? {
-                    top: Math.max(
-                        Math.min(rect.bottom + 16, window.innerHeight - 200),
-                        NAVBAR_HEIGHT_PX + 8,
-                    ),
-                    left: Math.max(16, Math.min(rect.left, window.innerWidth - 400)),
-                }
-                : { bottom: 32, left: "50%", transform: "translateX(-50%)" }
-            }
+            style={calloutStyle}
         >
             <h3 className="text-lg font-bold text-[#1D3335]">{step.title}</h3>
             <p className="text-sm text-[#1D3335]/80">{step.body}</p>
