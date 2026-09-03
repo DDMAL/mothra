@@ -149,6 +149,36 @@ def test_step_from_y_none_for_too_few_or_degenerate_lines():
     assert mei._step_from_y(100.0, [100.0, 100.0]) is None  # zero spacing -- can't quantize
 
 
+# --- _clef_line_from_bbox ----------------------------------------------------
+
+def test_clef_line_from_bbox_reads_the_line_the_clef_is_actually_on():
+    """A 4-line stave, clef centered on the second line from the bottom
+    (line 2) -- must resolve to 2, not the fixed clef_line=3 default that
+    made a real F-clef.f2 render one line too high in Neon whenever
+    pitch_stage.py had no measurement for it."""
+    line_ys = [100.0, 120.0, 140.0, 160.0]
+    assert mei._clef_line_from_bbox(140.0, line_ys) == 2
+
+def test_clef_line_from_bbox_matches_step_from_y_in_reverse():
+    """_clef_line_from_bbox is _step_from_y's bottom-anchored convention run
+    in reverse: a clef measured at the line _step_from_y would treat as
+    clef_line=N must itself resolve back to N."""
+    line_ys = [487.6, 513.9, 543.5, 572.6]
+    for line in (1, 2, 3, 4):
+        clef_y = line_ys[-1] - mei._line_spacing(line_ys) * (line - 1)
+        assert mei._clef_line_from_bbox(clef_y, line_ys) == line
+
+def test_clef_line_from_bbox_clamps_out_of_range_estimates():
+    line_ys = [100.0, 120.0, 140.0, 160.0]
+    assert mei._clef_line_from_bbox(40.0, line_ys, staff_lines=4) == 4   # far above -> clamped high
+    assert mei._clef_line_from_bbox(220.0, line_ys, staff_lines=4) == 1  # far below -> clamped low
+
+def test_clef_line_from_bbox_none_for_too_few_or_degenerate_lines():
+    assert mei._clef_line_from_bbox(100.0, []) is None
+    assert mei._clef_line_from_bbox(100.0, [100.0]) is None
+    assert mei._clef_line_from_bbox(100.0, [100.0, 100.0]) is None
+
+
 # --- _group_staves_by_row --------------------------------------------------
 
 def test_group_staves_by_row_transitive_chain_and_isolated_control():
