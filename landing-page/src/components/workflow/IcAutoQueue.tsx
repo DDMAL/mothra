@@ -58,6 +58,11 @@ export default function IcAutoQueue({
   const [attempt, setAttempt] = useState(0);
   const hasTrainingSet = trainingPresets.length + trainingFiles.length > 0;
   const canRun = projectId != null && images.length > 0 && hasTrainingSet;
+  // True for exactly the window the classify loop is actually running (or
+  // about to start) — not while showing the "no pages"/"no training set"/
+  // error states, where these buttons are the only way forward and must
+  // stay live.
+  const runInProgress = canRun && !error;
 
   // Guards the run against StrictMode's double-invoked effect (dev): the
   // second invocation is skipped rather than firing a duplicate pass. Note
@@ -216,20 +221,45 @@ export default function IcAutoQueue({
               automatic pass will ever visit them again), and this is the only
               entry point the IC step has in auto mode. Same modal and same
               destination as the manual classifier's own "saved sessions"
-              button. */}
+              button. Disabled while the automatic pass is actually running:
+              opening it doesn't stop the pass, so leaving it live invites
+              picking a session while pages are still being silently
+              classified/discarded in the background. */}
           {projectId != null && (
             <button
               onClick={() => setSessionsModal(true)}
-              className="px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl hover:opacity-90 cursor-pointer font-semibold"
+              disabled={runInProgress}
+              title={
+                runInProgress
+                  ? "wait for the automatic pass to finish"
+                  : undefined
+              }
+              className={`px-6 py-2 bg-[#1D3335] text-white border border-white/30 rounded-xl font-semibold ${
+                runInProgress
+                  ? "opacity-40 cursor-not-allowed"
+                  : "hover:opacity-90 cursor-pointer"
+              }`}
             >
               {images.length === 0
                 ? "reopen a saved session"
                 : "saved sessions"}
             </button>
           )}
+          {/* Disabled for the same reason: clicking this mid-run doesn't
+              actually stop the in-flight page (the abort flag is only
+              checked between images), so leaving it enabled just discards
+              that page's result while the backend keeps working on it. */}
           <button
             onClick={handleBack}
-            className="px-6 py-2 border-2 border-white text-white rounded-xl hover:bg-white/10 cursor-pointer font-semibold"
+            disabled={runInProgress}
+            title={
+              runInProgress ? "wait for the automatic pass to finish" : undefined
+            }
+            className={`px-6 py-2 border-2 border-white text-white rounded-xl font-semibold ${
+              runInProgress
+                ? "opacity-40 cursor-not-allowed"
+                : "hover:bg-white/10 cursor-pointer"
+            }`}
           >
             back to project
           </button>
