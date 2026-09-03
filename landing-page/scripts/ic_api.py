@@ -700,11 +700,22 @@ async def ic_auto_queue(
 
     The server-side half of the "queue all available" batch path. Instead of
     opening the IC iframe for each page, mothra generates the page's bboxes,
-    creates an IC session seeded with the caller's training set (which runs a
-    classify round at ingest), and completes it — all server-to-server —
+    stages them tagged with this project/image id (same as :func:`ic_start`'s
+    fresh-staging branch), creates an IC session from that staging entry
+    seeded with the caller's training set (which runs a classify round at
+    ingest), and exports it with ``finalize=false`` — all server-to-server —
     returning the GameraXML the frontend turns into a ``File`` for the encode
     queue. Mirrors IC's in-iframe "queue page" (auto-export), just driven from
     the parent so every page can be queued in one pass.
+
+    Going through ``/staging`` + ``/sessions/from-staging`` (rather than
+    ``POST /sessions`` directly) is what makes the resulting session
+    resumable: only a staged session carries the ``project_id``/``image_id``
+    IC's ``/sessions/lookup`` needs to map it back to a page, and only a
+    non-finalised export leaves it in an editable state for
+    ``/sessions/lookup`` to find. An auto-queued page's session used to be
+    created via ``POST /sessions`` (no project/image id) and finalised
+    outright — permanently correct-proof, unlike a manually classified page.
 
     ``training_presets`` is a JSON-encoded ``list[str]`` of built-in preset
     filenames (see :func:`ic_training_presets`); ``training_files`` are
@@ -717,38 +728,59 @@ async def ic_auto_queue(
     )
     annotations, ann_format = generate_bboxes(image_bytes, project_id, image_id, imageName)
 
-    fields = {"annotations_format": ann_format}
-    if training_presets:
-        fields["training_presets"] = training_presets
-    files = [
+    # 1. Stage the page + bboxes tagged with project/image id.
+    stage_fields = {
+        "annotations_format": ann_format,
+        "project_id": str(project_id),
+        "image_id": str(image_id),
+    }
+    stage_files = [
         ("page_image", imageName, mime_type, image_bytes),
         ("annotations", "annotations.json", "application/json", annotations),
     ]
+    try:
+        s_status, s_raw = _post_multipart(f"{IC_API_URL}/staging", fields=stage_fields, files=stage_files)
+    except urllib.error.URLError as exc:
+        raise _ic_unreachable(exc)
+    if s_status >= 400:
+        raise HTTPException(status_code=502, detail=f"IC /staging failed ({s_status}): {s_raw[:500]!r}")
+    staging_id = json.loads(s_raw).get("staging_id")
+    if not staging_id:
+        raise HTTPException(status_code=502, detail="IC /staging returned no staging id")
+
+    # mothra#220 DL-1, same as ic_start: persist whether this session was
+    # seeded from the placeholder grid so a later resume still shows the "no
+    # prediction ran" banner.
+    _set_project_image_synthetic(project_id, image_id, ann_format == "json")
+
+    # 2. Create + classify the session from that staging entry (training set
+    # → classify round at ingest).
+    create_fields = {"staging_id": staging_id}
+    if training_presets:
+        create_fields["training_presets"] = training_presets
+    create_files = []
     for tf in training_files or []:
-        files.append(
+        create_files.append(
             ("training_files", tf.filename or "training.xml", "application/xml", await tf.read())
         )
-
-    # 1. Create + classify the session in one call (training set → classify).
     try:
-        status, raw = _post_multipart(f"{IC_API_URL}/sessions", fields=fields, files=files)
+        status, raw = _post_multipart(
+            f"{IC_API_URL}/sessions/from-staging", fields=create_fields, files=create_files
+        )
     except urllib.error.URLError as exc:
         raise _ic_unreachable(exc)
     if status >= 400:
-        raise HTTPException(status_code=502, detail=f"IC /sessions failed ({status}): {raw[:500]!r}")
+        raise HTTPException(status_code=502, detail=f"IC /sessions/from-staging failed ({status}): {raw[:500]!r}")
     session_id = json.loads(raw).get("id")
     if not session_id:
-        raise HTTPException(status_code=502, detail="IC /sessions returned no session id")
+        raise HTTPException(status_code=502, detail="IC /sessions/from-staging returned no session id")
 
-    # 2. Finalise → GameraXML. Unlike ic_complete above this *does*
-    # finalise: the session was created here, server-side, purely to run
-    # one classify round, and POST /sessions (unlike /staging) takes no
-    # project/image id, so IC could never map it back to a page for
-    # "manage IC sessions" to resume anyway. Leaving it in CLASSIFYING
-    # would only accumulate unreachable sessions.
+    # 3. Export → GameraXML with finalize=false, same as ic_complete, so the
+    # session stays resumable through "reopen a saved session" instead of
+    # being retired the moment the automatic pass classifies it.
     try:
         c_status, c_raw, _headers = _post_empty(
-            f"{IC_API_URL}/sessions/{session_id}/complete?page=true"
+            f"{IC_API_URL}/sessions/{session_id}/complete?page=true&finalize=false"
         )
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=exc.code, detail=f"IC complete failed: {exc.read()[:500]!r}")
