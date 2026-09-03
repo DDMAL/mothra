@@ -223,16 +223,10 @@ def _clef_lines(xml_bytes):
     return [c.get("line") for c in root.iter(f"{MEI_NS}clef")]
 
 
-def test_clef_line_map_overrides_the_geometric_clef_line():
+def test_clef_line_map_overrides_the_assumed_clef_line():
     """The measured line has to reach the emitted <clef>: Verovio positions an
     <nc> from pname/oct against the DECLARED line, so a clef read at line 1 and
-    declared at line 2 renders the whole stave one line off.
-
-    With no clef_line_map entry at all, build_mei no longer falls all the way
-    through to the fixed clef_line=3 default -- it first reads this clef
-    glyph's own bbox (cy=140) against the stave's detected line_ys, which
-    lands it on line 2 (_clef_line_from_bbox), a real per-clef measurement
-    rather than an assumed constant."""
+    declared at line 3 renders the whole stave two lines off."""
     staves = [_stave("auto-0", 100, 160, line_ys=[100, 120, 140, 160])]
     glyphs_by_stave = {0: [
         _glyph("clef1", 10, uly=130, class_name="clef.c"),
@@ -241,23 +235,9 @@ def test_clef_line_map_overrides_the_geometric_clef_line():
     kwargs = dict(image_path=Path("page.jpg"), image_w=500, image_h=400,
                   manuscript_name="test")
 
-    assert _clef_lines(mei.build_mei(glyphs_by_stave, staves, **kwargs)) == ["2"]
+    assert _clef_lines(mei.build_mei(glyphs_by_stave, staves, **kwargs)) == ["3"]
     assert _clef_lines(mei.build_mei(glyphs_by_stave, staves,
                                      clef_line_map={"clef1": 1}, **kwargs)) == ["1"]
-
-
-def test_clef_line_falls_back_to_the_fixed_default_only_with_no_line_geometry():
-    """The fixed clef_line default is now the THIRD tier, reached only when
-    neither pitch_stage.py's measurement nor a page-geometric read of the
-    clef's own bbox is possible (here: a stave with no detected lines at
-    all, so _clef_line_from_bbox also has nothing to work from)."""
-    staves = [_stave("auto-0", 100, 160, line_ys=[])]
-    glyphs_by_stave = {0: [_glyph("clef1", 10, uly=130, class_name="clef.c")]}
-    kwargs = dict(image_path=Path("page.jpg"), image_w=500, image_h=400,
-                  manuscript_name="test")
-
-    assert _clef_lines(mei.build_mei(glyphs_by_stave, staves, **kwargs)) == ["3"]
-    assert _clef_lines(mei.build_mei(glyphs_by_stave, staves, clef_line=1, **kwargs)) == ["1"]
 
 
 def test_clef_line_map_also_moves_the_placeholder_reference():
@@ -271,15 +251,12 @@ def test_clef_line_map_also_moves_the_placeholder_reference():
     kwargs = dict(image_path=Path("page.jpg"), image_w=500, image_h=400,
                   manuscript_name="test")
 
-    # No clef_line_map entry: the geometric fallback reads clef1's own bbox
-    # as line 2, the same line g1 (same y) sits on, so g1 lands on the clef's
-    # own reference pitch.
     default = _pitched_ncs(mei.build_mei(glyphs_by_stave, staves, **kwargs))["g1"]
     moved = _pitched_ncs(mei.build_mei(glyphs_by_stave, staves,
                                        clef_line_map={"clef1": 1}, **kwargs))["g1"]
-    # Declaring the clef one line lower puts the same glyph two diatonic
-    # steps above it instead of on it.
-    assert default == [("c", "4")]
+    # Declaring the clef two lines lower puts the same glyph four
+    # diatonic steps above it instead of two below.
+    assert default == [("a", "3")]
     assert moved == [("e", "4")]
 
 

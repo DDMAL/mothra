@@ -11,10 +11,6 @@ _resolve_pitches:
     anchor on the glyph, the neume decomposed into its own notes from that one
     anchor, and the page's OWN detected clef glyph (whose measured staff line
     arrives as `clef_line_map` and is what this file then declares on <clef>);
-  * for a clef pitch_stage.py couldn't measure, from THIS file's own
-    page-geometric read of that clef glyph's bbox against its stave's detected
-    lines (_clef_line_from_bbox) -- a real, per-clef measurement, just a
-    coarser one than pitch_stage.py's ink-centroid anchor;
   * otherwise from this file's older geometric placeholder -- the glyph bbox's
     vertical center converted to a diatonic step below an ASSUMED clef
     (clef_shape/clef_line, default C-clef/line 3), then @intm chaining. That is
@@ -1028,26 +1024,6 @@ def _step_from_y(y: float, line_ys: list[float], clef_line: int = 3) -> Optional
     clef_y = line_ys[-1] - line_spacing * (clef_line - 1)
     return round((y - clef_y) / (line_spacing / 2))
 
-def _clef_line_from_bbox(y: float, line_ys: list[float], staff_lines: int = STAFF_LINES) -> Optional[int]:
-    """MEI @line for a clef glyph centered at y, read off this stave's own
-    detected line_ys -- _step_from_y's bottom-anchored, spacing-based
-    convention run in reverse (line 1 = the bottom detected line).
-
-    Used only as the second-tier fallback when pitch_stage.py couldn't
-    measure this particular clef itself (no entry in clef_line_map -- e.g. its
-    stave had no line coverage at the clef's x, see pitch_stage.py's
-    `_REPORTED_FLAGS`/reasons). A page-geometric read of the clef's own bbox
-    is still a real measurement of THIS clef, unlike the fixed `clef_line`
-    default below it, which assumes every clef on every stave sits on the
-    same line regardless of where its ink actually is -- the bug that made a
-    correctly-placed clef.f2 render one line too high in Neon after silently
-    falling all the way through to that default."""
-    line_spacing = _line_spacing(line_ys)
-    if line_spacing is None:
-        return None
-    line = round((line_ys[-1] - y) / line_spacing) + 1
-    return min(max(line, 1), staff_lines)
-
 def _stave_zone_bounds(stave: StaveBbox) -> tuple[int, int]:
     """(uly, lry) to use for this stave's <sb>-referenced facsimile zone.
 
@@ -1309,12 +1285,6 @@ def build_mei(
     missing_classes: set[str] = set()
     mismatched_widths: set[str] = set()
     dropped_accid_ids: set[str] = set()
-    # Clef glyphs pitch_stage.py couldn't measure (no entry in clef_line_map --
-    # see _clef_line_from_bbox above for why). Split so the log makes clear
-    # which clefs still got a real (if lower-confidence) page measurement vs.
-    # which fell all the way through to the fixed `clef_line` default.
-    geometric_clef_fallback_ids: set[str] = set()
-    default_clef_fallback_ids: set[str] = set()
 
     # meiHead
 
@@ -1522,44 +1492,25 @@ def build_mei(
 
         stave_clef_shape = clef_shape
         opening_clef_glyph_id: Optional[str] = None
-        opening_clef_glyph: Optional[Glyph] = None
         consumed_special_ids: set[str] = set()
         for g, entry in special_glyphs_by_stave.get(stave_idx, []):
             if entry.tag == "clef":
                 stave_clef_shape = entry.attrs.get("shape", clef_shape)
                 opening_clef_glyph_id = g.id
-                opening_clef_glyph = g
                 consumed_special_ids.add(g.id)
                 break
         clef_note, clef_oct = _CLEF_PITCH_REF.get(stave_clef_shape, ("c", 4))
-        # Which staff line this stave's clef is DECLARED on, resolved in three
-        # tiers: pitch_stage.py's own ink-centroid measurement (see its
-        # _clef_line_from_step) when it has one; else a page-geometric read of
-        # THIS clef glyph's bbox against the stave's own detected line_ys
-        # (_clef_line_from_bbox); else the clef_line argument's fixed default,
-        # only when neither measurement was possible. The fixed default used
-        # to be the sole fallback -- it applies the same line to every clef on
-        # every stave regardless of where its ink actually is, which is what
-        # made an otherwise-correctly-placed clef.f2 render one line too high
-        # in Neon whenever pitch_stage.py couldn't measure it. This matters
-        # beyond the emitted attribute: Verovio positions an <nc> from
-        # pname/oct against the declared clef line, and
-        # _step_from_y's own placeholder pitch is measured relative to it too,
-        # so both have to read the same value or the stave's notes render off
-        # by whole lines.
+        # Which staff line this stave's clef is DECLARED on. pitch_stage.py
+        # measures it from the clef glyph's own ink centroid when it can (see
+        # its _clef_line_from_step); the clef_line argument is the assumed
+        # default for every stave it couldn't. This matters beyond the emitted
+        # attribute: Verovio positions an <nc> from pname/oct against the
+        # declared clef line, and _step_from_y's own placeholder pitch is
+        # measured relative to it too, so both have to read the same value or
+        # the stave's notes render off by whole lines.
         effective_clef_line = clef_line
-        if opening_clef_glyph_id:
-            measured = (clef_line_map or {}).get(opening_clef_glyph_id)
-            if measured is not None:
-                effective_clef_line = measured
-            else:
-                geo = (_clef_line_from_bbox(opening_clef_glyph.cy, line_ys)
-                       if opening_clef_glyph is not None else None)
-                if geo is not None:
-                    effective_clef_line = geo
-                    geometric_clef_fallback_ids.add(opening_clef_glyph_id)
-                else:
-                    default_clef_fallback_ids.add(opening_clef_glyph_id)
+        if opening_clef_glyph_id and clef_line_map:
+            effective_clef_line = clef_line_map.get(opening_clef_glyph_id, clef_line)
 
         # Clef must follow each <sb>; @facs anchors it to the stave's left edge
         clef_id = str(uuid.uuid4()).replace("-", "")[:12]
@@ -1681,20 +1632,11 @@ def build_mei(
                     # position, but pitch_stage.py measures every clef glyph
                     # the same way, so when it has a value for this one, both
                     # the emitted @line and the placeholder's own reference
-                    # move with it. Absent that, it falls back to a
-                    # page-geometric read of THIS clef glyph's own bbox
-                    # (_clef_line_from_bbox) rather than silently inheriting
-                    # whatever line the previous clef on this stave used.
+                    # move with it. Absent that, it falls back to the stave
+                    # default exactly as before.
                     measured_line = (clef_line_map or {}).get(glyph.id)
                     if measured_line is not None:
                         effective_clef_line = measured_line
-                    else:
-                        geo = _clef_line_from_bbox(glyph.cy, line_ys)
-                        if geo is not None:
-                            effective_clef_line = geo
-                            geometric_clef_fallback_ids.add(glyph.id)
-                        else:
-                            default_clef_fallback_ids.add(glyph.id)
                     attrs.setdefault("line", str(effective_clef_line))
                     ET.SubElement(layer, _tag("clef"), attrs)
                     clef_note, clef_oct = _CLEF_PITCH_REF.get(
@@ -1774,20 +1716,6 @@ def build_mei(
             f" [neume-mapping:{notation_type}] {len(dropped_accid_ids)} accidental(s) dropped — no "
             f"<neume> anywhere on their stave to attach beside (an accidental with no note to modify "
             f"has no valid MEI Neumes-module encoding): {', '.join(sorted(dropped_accid_ids))}",
-            file=sys.stderr,
-        )
-    if geometric_clef_fallback_ids:
-        print(
-            f" [pitch-finding] {len(geometric_clef_fallback_ids)} clef(s) not measured by pitch_stage.py "
-            f"-- @line estimated from the clef glyph's own bbox against this stave's detected lines "
-            f"instead: {', '.join(sorted(geometric_clef_fallback_ids))}",
-            file=sys.stderr,
-        )
-    if default_clef_fallback_ids:
-        print(
-            f" [pitch-finding] [warn] {len(default_clef_fallback_ids)} clef(s) not measured by "
-            f"pitch_stage.py and no usable stave line geometry either -- @line defaulted to "
-            f"{clef_line} (verify against the source image): {', '.join(sorted(default_clef_fallback_ids))}",
             file=sys.stderr,
         )
 
