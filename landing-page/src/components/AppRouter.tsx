@@ -12,6 +12,7 @@ import type {
 import type { CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
+import { refreshProject } from "../utils/projects";
 import { downloadBlob } from "../utils/download";
 import { latestMeiPerImage } from "../utils/mei";
 import { yoloTxtToJson } from "../utils/yolo";
@@ -1035,6 +1036,13 @@ export default function AppRouter({
                   selectedProjectId,
                   Math.max(selectedProject.stepsUnlocked, 3),
                 );
+                // ic_xml_files (and any other server-written-only fields)
+                // never reach local state otherwise: this ProcessingPage
+                // settles its own job via markJobSettled before
+                // useActiveJobWatcher's poll ever sees it "succeeded", so
+                // that watcher's refetch (App.tsx) never fires for it. See
+                // refreshProject's doc comment.
+                refreshProject(selectedProjectId, setProjects);
               }
               setPendingBatchPairs([]);
               setView("encoding-completion");
@@ -1087,6 +1095,9 @@ export default function AppRouter({
                 selectedProjectId,
                 Math.max(selectedProject.stepsUnlocked, 3),
               );
+              // See the batch case's onComplete above for why this refetch
+              // is needed even though this ProcessingPage already ran.
+              refreshProject(selectedProjectId, setProjects);
             }
             setView("encoding-completion");
           }}
