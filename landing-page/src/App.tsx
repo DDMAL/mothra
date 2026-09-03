@@ -7,7 +7,7 @@ import ToastContainer from "./components/shared/ToastContainer";
 import type { View, Project, ProjectInitialTab } from "./types";
 import type { CurrentUser } from "./hooks/useAuth";
 import { getToken, setToken, clearToken } from "./hooks/useAuth";
-import { normalizeProjects } from "./utils/projects";
+import { normalizeProjects, refreshProject } from "./utils/projects";
 import { useProjectMutations } from "./hooks/useProjectMutations";
 import { useEncodingFlow } from "./hooks/useEncodingFlow";
 import { useScrollFade } from "./hooks/useScrollFade";
@@ -237,14 +237,9 @@ export default function App() {
       // `projects` closure -- firing both at once let an in-flight GET that
       // started before the PUT resolve AFTER it and overwrite the
       // just-bumped local stepsUnlocked back down to its pre-bump value.
-      apiFetch(`/api/projects/${projectId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((fresh: Project | null) => {
-          if (!fresh) return;
-          const [normalized] = normalizeProjects([fresh]);
-          setProjects((prev) =>
-            prev.map((p) => (p.id === normalized.id ? normalized : p)),
-          );
+      refreshProject(projectId, setProjects)
+        .then((normalized) => {
+          if (!normalized) return;
           const minSteps = STEPS_UNLOCKED_BY_JOB_KIND[job.kind];
           if (minSteps != null) {
             updateProjectSteps(
