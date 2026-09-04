@@ -29,7 +29,6 @@ def _url(env_var: str, cfg_key: str) -> str:
     return os.environ.get(env_var, _cfg["services"][cfg_key]).rstrip("/")
 
 MODELS_DIR = _path("models_dir")
-NEON_MANIFESTS_DIR = _path("neon_manifests_dir")
 MEDIEVAL_MODELS_DIR = _path("medieval_models_dir")
 MEI_ENCODING_DIR = _path("mei_encoding_dir")
 PITCH_FINDING_DIR = _path_env("pitch_finding_dir", "PITCH_FINDING_DIR")

@@ -5,16 +5,15 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Literal, Optional
 import base64
-import json
 import uuid as _uuid
 import sys
 import xml.etree.ElementTree as ET
 
 from auth_api import (
     get_current_user, db_cursor, require_project_owner, _log_activity,
-    NEON_MANIFESTS_DIR, _make_edit_token, _verify_edit_token, get_latest_text_alignment,
-    cleanup_stale_neon_manifests,
+    _make_edit_token, _verify_edit_token, get_latest_text_alignment,
 )
+from job_store import neon_manifest_put
 import encode_to_mei
 
 router = APIRouter()
@@ -183,12 +182,9 @@ async def put_mei_content(project_id: int, mei_id: str, token: str, request: Req
 
 @router.post("/projects/{project_id}/mei/{mei_id}/edit-session")
 def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_user)):
-    # proactive cleanup of neon manifests to prevent excess accumulation --
-    # shared with the backend-startup sweep (main.py), see
-    # auth_api.cleanup_stale_neon_manifests's docstring for why this can't
-    # just move to the worker's periodic Celery cleanup instead.
-    cleanup_stale_neon_manifests()
-
+    # Manifests now live in Postgres (neon_manifests, mothra#230), swept by
+    # the worker's periodic Celery-beat cleanup (job_store.run_periodic_cleanup)
+    # like everything else -- no more proactive per-request sweep needed here.
     with db_cursor() as (con, cur):
         require_project_owner(cur, project_id, user["id"])
         cur.execute("SELECT name, image_name, xml_content, corrected, image_id FROM mei_files"
@@ -313,6 +309,5 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
         }]
     }
 
-    NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-    (NEON_MANIFESTS_DIR / f"{session_id}.jsonld").write_text(json.dumps(manifest))
+    neon_manifest_put(session_id, manifest, project_id=project_id)
     return {"session_id": session_id, "manifest_id": manifest_id}
