@@ -211,8 +211,10 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
   existing `/health` + `/ready`. `backend`'s readinessProbe (`/healthz`) checks
   Postgres + Celery broker reachability; its livenessProbe (`/healthz/live`)
   deliberately does not, so a transient DB/broker outage pulls the pod out of
-  rotation instead of killing and restarting it. `text-service` has no
-  DB/broker of its own, so both its probes point at the same `/healthz`.
+  rotation instead of killing and restarting it. `text-service` has no broker
+  of its own, and its `/healthz` deliberately doesn't ping the DB it gained
+  in mothra#230 (see main.py's `healthz()` docstring), so both its probes
+  still point at the same `/healthz`.
 - ~~`init_db()`/`_migrate_db()` run at import → keep backend/worker at 1 replica~~
   **done (mothra#220 row 31)** — a one-shot `migrate-job.yaml` now runs the
   schema migration once per deploy, applied and waited-on by
@@ -222,8 +224,11 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
   constraint — except `worker`, which has a *different* reason to stay at 1:
   its embedded Celery beat scheduler (row 28) would double-fire periodic
   tasks if run by more than one replica.
-- text-service `/batch-download/{id}` uses local disk keyed by batch_id → needs
-  shared storage or a single replica if batch downloads are used.
+- ~~text-service `/batch-download/{id}` uses local disk keyed by batch_id →
+  needs shared storage or a single replica~~ **done (mothra#230)** —
+  batch-download zips now live in Postgres (`text_batch_zips`,
+  `text-service/db.py`), reachable from any replica; retention swept by the
+  worker's existing periodic Celery-beat cleanup rather than a local-disk TTL.
 - Sharing the `mothra` namespace means no `ResourceQuota` headroom check happens
   automatically — staging adds ≈2 CPU / 8.6Gi of *requests* (paco-classifier-service
   alone is 500m / 3Gi of that). Confirm with

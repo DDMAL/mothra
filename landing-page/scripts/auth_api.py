@@ -297,6 +297,23 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        cur.execute("""
+            -- text-service's batch-download zips (mothra#230, BATCH_DIR half).
+            -- Schema owned here (created by the same one-shot migrate.py that
+            -- creates every other table) since text-service has no migration
+            -- infrastructure of its own and this is the same physical Postgres
+            -- database -- but only text-service's own db.py reads/writes it;
+            -- landing-page never queries this table directly. Cleaned up by
+            -- job_store.cleanup_stale_batch_zips via the existing Celery-beat
+            -- periodic cleanup (mothra#220 row 28), same as job_uploads/
+            -- job_sessions above -- text-service needs no cleanup code of its
+            -- own for the same "same DB, one sweeper" reason.
+            CREATE TABLE IF NOT EXISTS text_batch_zips (
+                batch_id TEXT PRIMARY KEY,
+                zip_bytes BYTEA NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
 
         # performance: db indexes
         for _idx in [

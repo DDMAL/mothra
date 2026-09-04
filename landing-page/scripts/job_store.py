@@ -354,14 +354,39 @@ def cleanup_stale_sessions(max_age_days: int = 14) -> int:
         release_db_conn(con)
 
 
+def cleanup_stale_batch_zips(max_age_days: int = 1) -> int:
+    """text_batch_zips holds text-service's finished batch-download zips
+    (mothra#230, BATCH_DIR half) -- 24h matches the old local-disk sweep's
+    86400s TTL text-service ran at its own startup before this table existed.
+    Runs from here (landing-page/worker), not text-service, since it's the
+    same physical Postgres database and this is where every other periodic
+    cleanup already lives -- text-service's db.py only ever does INSERT/SELECT
+    on this table, never DELETE."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM text_batch_zips WHERE created_at < NOW() - make_interval(days => %s)",
+            (max_age_days,),
+        )
+        deleted = cur.rowcount
+        con.commit()
+        cur.close()
+        return deleted
+    finally:
+        release_db_conn(con)
+
+
 def run_periodic_cleanup() -> dict:
-    """Runs the two Postgres-backed cleanups (job_uploads, job_sessions) --
-    both operate on the shared DB, so unlike auth_api.cleanup_stale_neon_manifests
-    (backend-local disk) this is safe to invoke from anywhere, including the
-    worker via Celery beat (see celery_app.py/tasks_cleanup.py). Previously
-    these only ran once at backend startup (main.py), so a long-lived pod
-    that never restarted never got swept again -- mothra#220 row 28."""
+    """Runs the Postgres-backed cleanups (job_uploads, job_sessions,
+    text_batch_zips) -- all operate on the shared DB, so unlike
+    auth_api.cleanup_stale_neon_manifests (backend-local disk) these are safe
+    to invoke from anywhere, including the worker via Celery beat (see
+    celery_app.py/tasks_cleanup.py). Previously these only ran once at
+    backend startup (main.py), so a long-lived pod that never restarted never
+    got swept again -- mothra#220 row 28."""
     return {
         "job_uploads_deleted": cleanup_stale_uploads(),
         "job_sessions_deleted": cleanup_stale_sessions(),
+        "text_batch_zips_deleted": cleanup_stale_batch_zips(),
     }
