@@ -307,6 +307,25 @@ export default function AppRouter({
     setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
   };
 
+  // mothra#321: re-entering step 1 from the project page's numbered
+  // step-progress button ("1 interactive classifier") is not the same
+  // action as advancing into it for the first time via Continue.
+  // icSettings.mode is page-session state that resets to "auto" on every
+  // return to the project page (useIcSettings.ts, mothra#222) -- so by the
+  // time this click happens, "auto" says nothing about whether the user
+  // actually has manual-mode progress or saved sessions sitting behind it.
+  // Unlike goToIc()/focusIc(), this never routes to "ic-auto": IcAutoQueue
+  // classifies+encodes every pending page the instant it mounts, which
+  // would silently blow away in-progress manual work the user only meant
+  // to go look at. Always land on the real classifier view instead, which
+  // surfaces the saved-sessions picker itself and degrades gracefully to
+  // the ordinary pending-page classifier when there's nothing saved yet.
+  const reopenIc = () => {
+    setResumeIcSessions([]);
+    setIcFocusImageId(null);
+    setView("ic");
+  };
+
   // mothra#294: ordinary entry into the Neon editor -- always lands on the
   // first uncorrected page (NeonBatchEditor's own default), never a stale
   // focus target left over from a previous click.
@@ -420,7 +439,7 @@ export default function AppRouter({
               setBatchRunIds(computeBatchRun(selectedProject));
               setBatchResult(null);
               setView("processing");
-            } else if (step === 1) goToIc();
+            } else if (step === 1) reopenIc();
             else if (step === 2) setView("ic-completion");
             else if (step === 3) goToNeon();
           }}

@@ -680,6 +680,11 @@ export default function ImageTab({
       );
       return;
     }
+    // mothra#319: ProjectDetail's "+ new image" button already checks both
+    // of these same conditions before this modal ever opens -- kept here
+    // too as the fallback for drag-and-drop straight onto the dropzone
+    // while the modal is already open (e.g. the folio/range gets cleared
+    // mid-session).
     if (imageSubTab === "batch" && batchFolioSequence.length === 0) {
       setUploadError("select a start/end folio range above before uploading");
       return;
