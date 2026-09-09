@@ -676,7 +676,19 @@ export default function ProjectDetail({
           <div className="flex items-center gap-3 flex-wrap mb-8">
             {activeTab === "images" ? (
               <button
-                onClick={() => imgSection.setUploadModal(true)}
+                onClick={() => {
+                  if (
+                    imageSubTab === "grid" && 
+                    !textFindingSettings.ocrOnlyMode &&
+                    loadedCantusSource?.sourceId &&
+                    !textFindingSettings.folio
+                  ) {
+                    setValidationError("select a folio above before uploading");
+                    return;
+                  }
+                  setValidationError(null);
+                  imgSection.setUploadModal(true);
+                }}
                 className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer shrink-0"
               >
                 + new image
