@@ -16,6 +16,7 @@ from auth_api import (
     cleanup_stale_neon_manifests,
 )
 import encode_to_mei
+from neon_manifest import neon_manifest_title as _neon_manifest_title
 
 router = APIRouter()
 
@@ -303,7 +304,7 @@ def create_edit_session(project_id: int, mei_id: str, user=Depends(get_current_u
             },
         ],
         "@id": f"urn:uuid:{manifest_id}",
-        "title": mei_name,
+        "title": _neon_manifest_title(mei_name),
         "image": image_ref,
         "mei_annotations": [{
             "id": f"urn:uuid:{annotation_id}",

@@ -169,6 +169,11 @@ export default function ProjectDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // mothra#319: whether the last "+ new image" click was blocked on a
+  // missing folio/range -- rendered inside CantusSourcePanel itself (right
+  // by the FolioSelect it's telling the user to use) rather than as text
+  // down here, so the warning shows up where the fix actually is.
+  const [folioUploadBlocked, setFolioUploadBlocked] = useState(false);
 
   // Client-side mirror of the backend's cross-kind "one active job per
   // project" guard (job_store.py's get_active_job_for_project) — disables
@@ -677,16 +682,27 @@ export default function ProjectDetail({
             {activeTab === "images" ? (
               <button
                 onClick={() => {
-                  if (
-                    imageSubTab === "grid" && 
-                    !textFindingSettings.ocrOnlyMode &&
-                    loadedCantusSource?.sourceId &&
-                    !textFindingSettings.folio
-                  ) {
-                    setValidationError("select a folio above before uploading");
-                    return;
-                  }
-                  setValidationError(null);
+                  // mothra#319: surface the same "nothing to tag this
+                  // upload with yet" checks ImageTab's handleFiles already
+                  // runs (ImageTab.tsx:683-695) at the moment the user
+                  // clicks "+ new image", instead of after they've already
+                  // picked a file and opened the native file dialog for
+                  // nothing. The message itself now renders inside
+                  // CantusSourcePanel, right next to the folio/range picker
+                  // it's telling the user to use -- setFolioUploadBlocked
+                  // just flips that panel's existing (previously always-
+                  // subdued) hint text into its louder blocked-upload
+                  // styling; see CantusSourcePanel.tsx's grid/batch hint
+                  // ternaries.
+                  const missingFolio =
+                    imageSubTab === "batch"
+                      ? batchFolioSequence.length === 0
+                      : imageSubTab === "grid" &&
+                        !textFindingSettings.ocrOnlyMode &&
+                        !!loadedCantusSource?.sourceId &&
+                        !textFindingSettings.folio;
+                  setFolioUploadBlocked(missingFolio);
+                  if (missingFolio) return;
                   imgSection.setUploadModal(true);
                 }}
                 className="px-5 border-2 border-white text-white text-sm rounded-full hover:opacity-90 cursor-pointer shrink-0"
@@ -899,6 +915,7 @@ export default function ProjectDetail({
               batchFolioSequence={batchFolioSequence}
               locked={sourceLocked}
               icSettings={icSettings}
+              uploadBlocked={folioUploadBlocked}
             />
             <div className="flex items-end">
               {tabs.map((tab, i) => (

@@ -26,6 +26,11 @@ interface CantusSourcePanelProps {
   batchFolioSequence: string[];
   locked: boolean;
   icSettings: ReturnType<typeof useIcSettings>;
+  // mothra#319: true right after "+ new image" was clicked and blocked on
+  // a missing folio/range -- swaps the hint below from its normal subdued
+  // wording to a louder "you have to fix this before you can upload"
+  // warning, in place, instead of a separate message shown elsewhere.
+  uploadBlocked?: boolean;
 }
 
 export default function CantusSourcePanel({
@@ -41,6 +46,7 @@ export default function CantusSourcePanel({
   batchFolioSequence,
   locked,
   icSettings,
+  uploadBlocked,
 }: CantusSourcePanelProps) {
   const { ocrOnlyMode, sourceId, folio, patch } = textFindingSettings;
   const [sourceIdInput, setSourceIdInput] = useState(sourceId);
@@ -258,6 +264,10 @@ export default function CantusSourcePanel({
                         the next image you upload in the images tab will be
                         tagged as folio "{folio}"
                       </p>
+                    ) : uploadBlocked ? (
+                      <p className="text-red-200 text-xs font-semibold flex items-center gap-1">
+                        ⚠ select a folio above before uploading
+                      </p>
                     ) : (
                       <p className="text-white/50 text-xs">
                         select a folio above to tag your next upload —
@@ -293,6 +303,11 @@ export default function CantusSourcePanel({
                     {batchFolioSequence.length > 0 ? (
                       <p className="text-xs text-white/70">
                         {batchFolioSequence.length} folio(s) in this range
+                      </p>
+                    ) : uploadBlocked ? (
+                      <p className="text-red-200 text-xs font-semibold flex items-center gap-1">
+                        ⚠ select a start/end folio range above before
+                        uploading
                       </p>
                     ) : (
                       <p className="text-xs text-white/50">
