@@ -227,6 +227,23 @@ export default function InteractiveClassifier({
         setSessionId(data.sessionId);
         setAutoQueueRequested(true);
       }
+      // A wheel event over one of IC's own dialog overlays (its greyed-out
+      // modal backdrop) — the iframe boundary swallows that scroll by
+      // default rather than letting it reach this page underneath, so IC
+      // forwards the delta for us to apply here instead. See
+      // ic/frontend/src/lib/overlayScroll.ts.
+      const frame = iframeRef.current?.contentWindow;
+      if (
+        data?.type === "ic:overlay-scroll" &&
+        frame &&
+        e.source === frame &&
+        Number.isFinite(data.deltaY)
+      ) {
+        window.scrollBy({
+          top: data.deltaY,
+          left: Number.isFinite(data.deltaX) ? data.deltaX : 0,
+        });
+      }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
