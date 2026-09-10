@@ -6,9 +6,9 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
-from auth_api import limiter, cleanup_stale_neon_manifests, get_db_conn, release_db_conn
+from auth_api import limiter, get_db_conn, release_db_conn
 from celery_app import celery_app
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -26,7 +26,7 @@ from text_api import router as text_router
 from cantus_api import router as cantus_router
 from batch_api import router as batch_router
 from jobs_api import router as jobs_router
-from job_store import cleanup_stale_sessions, cleanup_stale_uploads
+from job_store import cleanup_stale_sessions, cleanup_stale_uploads, neon_manifest_get
 
 app = FastAPI()
 # No "*" default: an unset ALLOWED_ORIGINS used to silently allow every
@@ -113,18 +113,14 @@ def healthz():
 
     return {"status": "ok"}
 
-# job_uploads/job_sessions also get a periodic Celery-beat sweep now
-# (celery_app.py's beat_schedule, tasks_cleanup.py) -- this immediate
-# call just means a fresh deploy doesn't wait a full beat interval for
-# its first cleanup.
+# job_uploads/job_sessions/neon_manifests also get a periodic Celery-beat
+# sweep now (celery_app.py's beat_schedule, tasks_cleanup.py) -- this
+# immediate call just means a fresh deploy doesn't wait a full beat interval
+# for its first cleanup. neon_manifests joined this set in mothra#230 (it
+# used to be a backend-local disk sweep that could only run here, see that
+# PR); no separate call needed for it now.
 cleanup_stale_uploads()
 cleanup_stale_sessions()
-# Neon-editor manifest files live on this backend container's own local
-# disk (not the shared stored_models NFS mount), so unlike the two calls
-# above, this can only run from the backend process itself -- see
-# auth_api.cleanup_stale_neon_manifests's docstring. mei_api.py's
-# create_edit_session also calls it proactively on each new edit session.
-cleanup_stale_neon_manifests()
 
 # Before serving anything: confirm the IC this backend is configured against
 # still supports exporting WITHOUT finalising the session (ic_api.py's
@@ -138,6 +134,24 @@ cleanup_stale_neon_manifests()
 _ic_compat = verify_ic_finalize_support()
 if _ic_compat != "ok":
     logging.getLogger(__name__).info("IC finalize-support check: %s", _ic_compat)
+
+@app.get("/neon/samples/manifests/{session_id}.jsonld", include_in_schema=False)
+def get_neon_manifest(session_id: str):
+    """Serves a Neon-editor manifest from Postgres (mothra#230,
+    NEON_MANIFESTS_DIR half) at the exact same URL shape the old
+    NEON_MANIFESTS_DIR/{session_id}.jsonld StaticFiles-served file lived at --
+    the embedded Neon editor bundle (neon/deployment/scripts/editor.ts) does
+    a plain relative `fetch('./samples/manifests/${name}.jsonld')` from
+    /neon/editor.html with no way to attach an auth header, so this route
+    must stay public, same authorization tradeoff as the existing
+    unauthenticated GET /jobs/{id}/stream. MUST be registered before the
+    app.mount("/neon", StaticFiles(...)) below -- Starlette matches routes in
+    registration order, so an exact-path route registered after a mount at
+    the same prefix would never be reached."""
+    manifest = neon_manifest_get(session_id)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="manifest not found")
+    return JSONResponse(content=manifest)
 
 _neon_dir = Path(__file__).parent.parent / "public" / "neon"
 if _neon_dir.exists():
