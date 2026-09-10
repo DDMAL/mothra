@@ -232,13 +232,16 @@ export default function InteractiveClassifier({
       // default rather than letting it reach this page underneath, so IC
       // forwards the delta for us to apply here instead. See
       // ic/frontend/src/lib/overlayScroll.ts.
+      const frame = iframeRef.current?.contentWindow;
       if (
         data?.type === "ic:overlay-scroll" &&
-        typeof data.deltaY === "number"
+        frame &&
+        e.source === frame &&
+        Number.isFinite(data.deltaY)
       ) {
         window.scrollBy({
           top: data.deltaY,
-          left: typeof data.deltaX === "number" ? data.deltaX : 0,
+          left: Number.isFinite(data.deltaX) ? data.deltaX : 0,
         });
       }
     }
