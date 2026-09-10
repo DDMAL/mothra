@@ -28,9 +28,17 @@ spec:
           ports:
             - name: http
               containerPort: 8002
-          # No env required (port fixed in the image CMD). Kraken/HTR + the
-          # baked-in Tridis OCR model make this a memory-heavy container.
-          # See k8s/text-service.yaml's identical comment (mothra#220 row 29).
+          # DATABASE_URL (mothra#230, BATCH_DIR half) -- see
+          # k8s/text-service.yaml's identical comment. mothra-secrets-staging,
+          # not mothra-secrets, so this stays pointed at staging's own DB
+          # (see CLAUDE.md's Deployment section on the shared-namespace
+          # suffix convention).
+          envFrom:
+            - secretRef:
+                name: mothra-secrets-staging
+          # Kraken/HTR + the baked-in Tridis OCR model make this a
+          # memory-heavy container. See k8s/text-service.yaml's identical
+          # comment (mothra#220 row 29).
           readinessProbe:
             httpGet:
               path: /healthz

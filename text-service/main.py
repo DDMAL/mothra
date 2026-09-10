@@ -4,6 +4,7 @@ Runs as its own process (own venv, port 8002 by default) — see dev.sh.
 Mirrors the SSE event contract used by inference_api.py's /predict and
 encode_api.py's /encode-upload: stage -> stage_done -> log -> result -> done.
 """
+import io
 import json
 import os
 import re
@@ -18,21 +19,19 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
 
 MOTHRA_TEXT_DIR = Path(__file__).resolve().parent.parent / "mothra-text"
 sys.path.insert(0, str(MOTHRA_TEXT_DIR))
-BATCH_DIR = Path(tempfile.gettempdir()) / "mothra-text/batches"
-BATCH_DIR.mkdir(parents=True, exist_ok=True)
 
-# startup cleanup of old batch zips to prevent excess accumulation
-import time as _time
-_now = _time.time()
-for _f in BATCH_DIR.glob("*.zip"):
-    if _now - _f.stat().st_mtime > 86400:
-        _f.unlink(missing_ok=True)
+# Batch-download zips live in Postgres (text_batch_zips, mothra#230) instead
+# of node-local disk now -- db.py's batch_zip_put/batch_zip_get. Retention
+# (the old 86400s local-disk sweep) is handled by job_store
+# .cleanup_stale_batch_zips on the worker's existing periodic Celery-beat
+# cleanup (mothra#220 row 28), not by this process.
+from db import batch_zip_put, batch_zip_get
 
 from run_pipeline import run, _build_pipeline_payload, _write_mei_json, _find_tridis_model
 from steps.gt_manifest import fetch_cantus_csv, make_output_stem
@@ -67,15 +66,20 @@ RECOGNITION_MODEL = _find_tridis_model()
 
 @app.get("/healthz", include_in_schema=False)
 def healthz():
-    """text-service has no DB/broker of its own -- unlike the backend's
-    /healthz (mothra#220 row 29), there's no external dependency to check
-    reachability of. Still a real improvement over the bare tcpSocket probe
-    it replaces (k8s/text-service.yaml): confirms this process is actually
-    serving HTTP, not just that the OS has a listener on the port. Always
-    returns 200 -- a missing recognition_model means text-finding silently
-    runs in stub mode (segmentation/YOLO still work, no OCR text), which is
-    a real but degraded capability, not a reason to fail the probe and pull
-    this pod out of rotation; recognition_model is reported for visibility."""
+    """text-service has no broker of its own -- unlike the backend's /healthz
+    (mothra#220 row 29), there's no queue to check reachability of. It does
+    now have a DB connection (db.py, mothra#230's BATCH_DIR half), but this
+    probe deliberately doesn't ping it: DB unreachability would only break
+    batch-download zip storage, not the core segmentation/OCR path, so
+    failing liveness/readiness over it would pull a still-mostly-functional
+    pod out of rotation. Still a real improvement over the bare tcpSocket
+    probe it replaces (k8s/text-service.yaml): confirms this process is
+    actually serving HTTP, not just that the OS has a listener on the port.
+    Always returns 200 -- a missing recognition_model means text-finding
+    silently runs in stub mode (segmentation/YOLO still work, no OCR text),
+    which is a real but degraded capability, not a reason to fail the probe
+    and pull this pod out of rotation; recognition_model is reported for
+    visibility."""
     return {"status": "ok", "recognition_model": RECOGNITION_MODEL is not None}
 
 import urllib.error
@@ -596,10 +600,11 @@ async def run_text_batch(
             if not output_files:
                 yield event({"type": "error", "message": "batch completed but produced no output files"})
                 return
-            zip_path = BATCH_DIR / f"{batch_id}.zip"
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 for f in output_files:
                     zf.write(f, arcname=f.name)
+            batch_zip_put(batch_id, zip_buf.getvalue())
             yield event({"type": "log", "message": f"{len(output_files)} folio(s) aligned"})
             yield event({"type": "stage_done", "name": "processing"})
             yield event({"type": "result", "batchId": batch_id, "fileCount": len(output_files)})
@@ -619,7 +624,11 @@ async def run_text_batch(
 
 @app.get("/batch-download/{batch_id}")
 def download_batch(batch_id: str):
-    zip_path = BATCH_DIR / f"{batch_id}.zip"
-    if not zip_path.is_file():
+    zip_bytes = batch_zip_get(batch_id)
+    if zip_bytes is None:
         raise HTTPException(status_code=404, detail="batch result not found or expired")
-    return FileResponse(zip_path, media_type="application/zip", filename=f"batch-{batch_id}.zip")
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="batch-{batch_id}.zip"'},
+    )

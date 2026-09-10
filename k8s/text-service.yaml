@@ -24,12 +24,22 @@ spec:
           ports:
             - name: http
               containerPort: 8002
-          # No env required (port fixed in the image CMD). Kraken/HTR + the
-          # baked-in Tridis OCR model make this a memory-heavy container.
+          # DATABASE_URL (mothra#230, BATCH_DIR half): text-service now stores
+          # batch-download zips in Postgres (text_batch_zips, db.py) instead of
+          # node-local disk. The table itself is created by k8s/migrate-job.yaml
+          # (which the deploy workflow always applies and waits on before this
+          # Deployment), not by this process -- see text-service/db.py's module
+          # docstring. Kraken/HTR + the baked-in Tridis OCR model make this a
+          # memory-heavy container.
+          envFrom:
+            - secretRef:
+                name: mothra-secrets
           # httpGet /healthz (mothra#220 row 29) replaces bare tcpSocket probes --
-          # text-service has no DB/broker of its own to distinguish readiness
-          # from liveness on (see main.py's healthz() docstring), so both probes
-          # point at the same endpoint, unlike backend.yaml's split.
+          # text-service has no broker of its own, and /healthz deliberately
+          # doesn't ping the DB it now has (see main.py's healthz() docstring
+          # for why), so there's still no dependency to distinguish readiness
+          # from liveness on; both probes point at the same endpoint, unlike
+          # backend.yaml's split.
           readinessProbe:
             httpGet:
               path: /healthz
