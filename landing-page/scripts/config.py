@@ -26,7 +26,18 @@ def _path_env(key: str, env_var: str) -> Path:
     return _path(key)
 
 def _url(env_var: str, cfg_key: str) -> str:
-    return os.environ.get(env_var, _cfg["services"][cfg_key]).rstrip("/")
+    """The service URL, with an env var overriding config.yaml's default.
+
+    An EMPTY env var counts as unset, matching _path_env above. This is not
+    hypothetical tidiness: docker-compose.yml passes optional settings as
+    `VAR: ${VAR:-}`, which hands the container an empty string rather than
+    omitting the variable. A bare os.environ.get would treat that as a real
+    override and return "", producing requests against no host at all --
+    the yaml default would be silently unreachable precisely when nobody had
+    configured anything.
+    """
+    override = os.environ.get(env_var, "").strip()
+    return (override or _cfg["services"][cfg_key]).rstrip("/")
 
 MODELS_DIR = _path("models_dir")
 NEON_MANIFESTS_DIR = _path("neon_manifests_dir")
@@ -38,6 +49,19 @@ IC_API_URL = _url("IC_API_URL", "ic_api_url")
 IC_PUBLIC_URL = _url("IC_PUBLIC_URL", "ic_public_url")
 TEXT_API_URL = _url("TEXT_API_URL", "text_api_url")
 PACO_API_URL = _url("PACO_API_URL", "paco_api_url")
+CU_API_URL = _url("CU_API_URL", "cu_api_url")
+
+# Cantus Ultimus deposit credential (cu_api.py) -- a DRF token belonging to
+# CU's `mothra` service account, sent as `Authorization: Token <key>`. This is
+# a SECRET, so unlike CU_API_URL above it lives only in .env / the process
+# environment, never config.yaml.
+#
+# Deliberately NOT required at import, unlike MOTHRA_SECRET: a deployment that
+# never submits to CU is a perfectly valid one, and making this fatal would
+# CrashLoopBackOff every such backend. cu_api.py raises its own
+# "not_configured" error at call time instead, so the failure reaches the one
+# user who tried to submit rather than taking the whole app down.
+CU_DEPOSIT_TOKEN = os.environ.get("CU_DEPOSIT_TOKEN", "").strip()
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", _cfg["celery"]["broker_url"])
 

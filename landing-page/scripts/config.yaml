@@ -19,6 +19,16 @@ services:
   ic_public_url: http://localhost:8000
   text_api_url: http://localhost:8002
   paco_api_url: http://localhost:8003
+  # Cantus Ultimus, for the MEI deposit inbox (cu_api.py). A bare-metal
+  # checkout has no local CU, so this default points at the public
+  # production host; k8s/docker set CU_API_URL to the in-cluster Service
+  # instead. NOTE: CU's staging shares production's `cantus-ultimus`
+  # namespace, separated only by a `-staging` name suffix -- so a staging
+  # deployment that leaves CU_API_URL unset resolves to PRODUCTION CU and
+  # files its test submissions into the real review queue. Same class of
+  # mistake as paco_api_url above. The deposit TOKEN is a secret and is
+  # deliberately not here -- see CU_DEPOSIT_TOKEN in .env.
+  cu_api_url: https://cantus.simssa.ca
 
 celery:
   broker_url: redis://localhost:6379/0
