@@ -20,16 +20,21 @@ data:
   IC_API_URL: "http://ic-staging:8000"                 # server-to-server (cluster DNS)
   TEXT_API_URL: "http://text-service-staging:8002"     # server-to-server (cluster DNS)
   PACO_API_URL: "http://paco-classifier-service-staging:8003"  # server-to-server (cluster DNS)
-  # MUST NOT be production's Cantus Ultimus. CU's own staging shares the
-  # `cantus-ultimus` namespace with CU production exactly the way this
-  # environment shares `mothra` with Mothra production, separated only by the
-  # `-staging` name suffix -- so `nginx.cantus-ultimus...` is PRODUCTION CU.
-  # Getting this wrong files staging's test submissions into the real review
-  # queue that real CU admins work through, and nothing fails: the deposit
-  # succeeds, it is simply filed in the wrong place. Omitting the key entirely
-  # is no safer -- config.py would fall back to config.yaml's
-  # https://cantus.simssa.ca, which is also production.
-  CU_API_URL: "http://nginx-staging.cantus-ultimus.svc.cluster.local:8000"
+  # Cantus Ultimus's MEI deposit inbox. This reaches Django (`app-staging`)
+  # DIRECTLY rather than going through CU's nginx, and that is deliberate:
+  # nginx ends its config with a `listen 8000 default_server; return 444;`
+  # host-spoofing guard, and its server_name list holds only CU's public
+  # hostnames plus the bare `nginx`. A cross-namespace caller has to use the
+  # FQDN, which matches none of them -- so via nginx every request is closed
+  # with no response at all (urllib reports RemoteDisconnected, not an HTTP
+  # status). Django accepts this FQDN because CU's own EXTRA_ALLOWED_HOSTS
+  # lists it. Nothing is lost by skipping nginx here: it serves TLS, static
+  # files and IIIF proxying, none of which a server-to-server JSON call uses.
+  #
+  # MUST NOT be production's CU -- see the -staging suffix. Both CU
+  # environments share the `cantus-ultimus` namespace exactly as both Mothra
+  # environments share `mothra`.
+  CU_API_URL: "http://app-staging.cantus-ultimus.svc.cluster.local:8001"
   # TLS is terminated by the campus front proxy (134.87.11.29), which forces
   # http→https, so browsers are always on https — use https here to avoid
   # mixed-content (IC iframe) and CORS-origin mismatches.

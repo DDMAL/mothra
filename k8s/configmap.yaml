@@ -10,12 +10,12 @@ data:
   IC_API_URL: "http://ic:8000"                 # server-to-server (cluster DNS)
   TEXT_API_URL: "http://text-service:8002"     # server-to-server (cluster DNS)
   PACO_API_URL: "http://paco-classifier-service:8003"  # server-to-server (cluster DNS)
-  # Cantus Ultimus, for the MEI deposit inbox (cu_api.py). CU lives in its OWN
-  # namespace, so this needs the cross-namespace FQDN -- a bare `nginx` would
-  # resolve inside `mothra`, where there is no such Service. Paired with
-  # CU_DEPOSIT_TOKEN in mothra-secrets; without that token the submission page
-  # reports itself unconfigured and nothing is sent.
-  CU_API_URL: "http://nginx.cantus-ultimus.svc.cluster.local:8000"
+  # Cantus Ultimus's MEI deposit inbox, reaching Django (`app`) directly
+  # rather than through CU's nginx -- nginx's `default_server` returns 444 for
+  # any Host outside its server_name list, and a cross-namespace caller can
+  # only use the FQDN, which is not on it. CU's EXTRA_ALLOWED_HOSTS lists this
+  # name. See k8s/staging/configmap.yaml for the longer note.
+  CU_API_URL: "http://app.cantus-ultimus.svc.cluster.local:8001"
   # TLS is terminated by the campus front proxy (134.87.11.29), which forces
   # http→https, so browsers are always on https — use https here to avoid
   # mixed-content (IC iframe) and CORS-origin mismatches.
