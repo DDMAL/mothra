@@ -177,6 +177,16 @@ to be scattered as inline `Path(__file__).parent / "..."` literals or
 what makes it possible to re-point services at container hostnames in Docker
 (see **Deployment** below) without editing source. `DATABASE_URL`/`MOTHRA_SECRET`
 are deliberately **not** in `config.yaml` — they're secrets and stay in `.env`/environment only.
+The same split applies to Cantus Ultimus: `CU_API_URL` is a `config.yaml` service URL,
+while `CU_DEPOSIT_TOKEN` is a secret and lives only in `.env`/the environment. Unlike
+`MOTHRA_SECRET` the token is **not** required at import — a deployment that never submits
+to CU is valid, so `cu_api.py` reports "not configured" at call time instead of
+CrashLoopBackOff-ing the backend.
+
+Note `_url()` treats an **empty** env var as unset, not as an override. This matters
+because `docker-compose.yml` passes optional settings as `VAR: ${VAR:-}`, which hands the
+container an empty string rather than omitting the variable — a bare `os.environ.get`
+would take that as a real override and produce requests against no host at all.
 
 ### Job queue (Celery + Postgres)
 
@@ -507,6 +517,23 @@ inside the shared namespace the bare name `paco-classifier-service` resolves to
 would fall back to `config.yaml`'s `http://localhost:8003`, nothing would answer,
 and `paco_api.py`'s graceful raw-page fallback would silently leave staging running
 a different staffline pipeline than production.
+
+**`CU_API_URL` is the same trap, one namespace over, and it fails more quietly.**
+Cantus Ultimus lives in its own `cantus-ultimus` namespace and splits *its*
+staging from *its* production by exactly the same `-staging` name suffix
+(`nginx` vs `nginx-staging`) — so `mothra-config` points at
+`http://nginx.cantus-ultimus.svc.cluster.local:8000` and
+`mothra-config-staging` **must** point at
+`http://nginx-staging.cantus-ultimus.svc.cluster.local:8000`. Getting it wrong
+files staging's throwaway test submissions into the review queue real CU admins
+work through, and nothing errors — the deposit genuinely succeeds, it is simply
+filed in the wrong place. Omitting the key is *worse* than for PACO, not
+better: `config.yaml`'s fallback is `https://cantus.simssa.ca`, which is
+production. Note also the URL is cross-namespace, so it needs the full
+`svc.cluster.local` form — a bare `nginx` resolves inside `mothra`, where no
+such Service exists. Each environment also needs the deposit token issued by
+**its own** CU (`CU_DEPOSIT_TOKEN` in its own Secret); a shared token would let
+staging write into production CU regardless of the URL.
 `stored_models` (locally-uploaded custom YOLO checkpoints, written by
 `models_api.py`) is **not baked into the image** — it's a static NFS
 PersistentVolume (RWX, `stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
@@ -673,6 +700,8 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/inference_api.py` | `POST /projects/{id}/predict` kickoff endpoint (enqueues `tasks_predict.py`), annotation CRUD |
 | `landing-page/scripts/mei_api.py` | MEI file CRUD, Neon batch-editor edit-session bootstrap |
 | `landing-page/scripts/cantus_api.py` | Proxies Cantus source lookups (incl. `siglum`) to the text-service |
+| `landing-page/scripts/cu_api.py` | Bridge to Cantus Ultimus's MEI deposit inbox — submit/list plus the manuscript and folio lookups the submission page's pickers use. Stdlib only (no fastapi), raises `CuError` so it stays unit-testable under CI's minimal deps — see **Workflow pipeline** step 6 |
+| `landing-page/scripts/cu_submission_api.py` | `POST /projects/{id}/mei/{mei_id}/cu-submit`, `GET /cu/manuscripts`, `GET /cu/manuscripts/{id}/folios`, `GET /cu/submissions` — the thin router over `cu_api.py`, mapping its error categories onto status codes |
 | `landing-page/scripts/model_validation.py` | Validates uploaded YOLO checkpoints, derives text/music/staves class maps |
 | `landing-page/scripts/config.py` / `config.yaml` | Centralized non-secret paths + service URLs, env-var overridable |
 | `landing-page/scripts/celery_app.py` | Celery app instance/config incl. `beat_schedule` (hourly periodic cleanup); entrypoint for `celery -A celery_app.celery_app worker -B` |
@@ -689,6 +718,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/batch_api.py` | `POST /text-batch/run` job-queue kickoff, `GET /text-batch/{id}/download`, `GET /sources/{id}/export`, and `GET /sources/{id}/cantus-bundle` (corrected-MEI zip for manual hand-off to `production_mei_files`) |
 | `landing-page/src/lib/apiFetch.ts` | `apiFetch` (also drives the silent JWT-refresh-on-401 flow via `X-Refresh-Token`) / `apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper, reports `job_id` via an `onJobId` callback |
 | `landing-page/src/utils/mei.ts` | `latestMeiPerImage()` — newest MEI revision per page, what the Neon editor lists (see **Workflow pipeline** step 2) |
+| `landing-page/src/components/workflow/CuSubmissionPage.tsx` | Step 6's submission surface: CU manuscript picker, per-page folio + status table, and the client-side sequential submit loop |
 | `landing-page/src/types.ts` | All shared TypeScript types |
 | `landing-page/src/components/AppRouter.tsx` | All view routing (switch on `view` string) |
 | `landing-page/src/hooks/useIcSettings.ts` | IC step mode (auto/manual) + shared training set — see **Workflow pipeline** step 2 |
@@ -707,7 +737,7 @@ rollout restart`) remains the safer habit.
 3. IC completion / upload XML output  →  view: "ic-completion"
 4. Encoding (GameraXML → MEI via encode_to_mei.py)  →  view: "encoding-processing"
 5. Neon.js batch editor for human correction  →  view: "neon-editor"
-6. Send to Cantus Ultimus  →  downloads a corrected-MEI zip bundle (no dedicated view)
+6. Send to Cantus Ultimus  →  view: "cu-submission" (submit for review, or download the zip bundle)
 ```
 
 `stepsUnlocked` on the project record gates which steps are accessible. It increments as each step completes and is persisted via `PUT /api/projects/{id}`.
@@ -865,17 +895,57 @@ payload now carries `mei_files.created_at` as `createdAt`, ordered
 `created_at ASC` — correcting in Neon updates a row in place, so multiple rows
 only ever mean multiple encodes.
 
-Step 6 is **not** a live push to Cantus Ultimus — the DDMAL/cantus (Cantus
-Ultimus) repo has no write API (its DRF views are all `ListAPIView`/
-`RetrieveAPIView`, GET-only). The real workflow there is manual: a maintainer
-commits correctly-named MEI files into the separate `DDMAL/production_mei_files`
-repo and runs `index_manuscript_mei` by hand. So "send to Cantus Ultimus"
-(`AppRouter.tsx`'s `handleSendToCantus`) downloads a zip from
-`GET /api/projects/{id}/sources/{sourceId}/cantus-bundle` — corrected MEI
-files renamed `{siglum}_{folio}.mei` plus a `README.txt` with the exact
-manual hand-off steps — rather than routing through any `ProcessingPage`/job
-queue (it's a fast synchronous zip build, no Celery task needed). The old
-`"sending"` view/animation and its no-op fake progress bar are gone.
+**Step 6 submits to Cantus Ultimus directly.** This used to be impossible —
+DDMAL/cantus was GET-only, so the step downloaded a zip for a maintainer to
+commit into `DDMAL/production_mei_files` and index by hand. CU has since gained
+a deposit inbox (`POST`/`GET /api/mei-submissions/`, its
+`views/mei_submission.py`), so "send to Cantus Ultimus" now opens the
+`"cu-submission"` view (`CuSubmissionPage.tsx`), which files each page's MEI as
+a **PENDING** record for a CU admin to publish, request a correction on, or
+refuse. Nothing Mothra sends can become public on its own; the credential
+cannot publish, only deposit.
+
+The zip export (`GET /api/projects/{id}/sources/{sourceId}/cantus-bundle`,
+corrected MEI renamed `{siglum}_{folio}.mei` plus a hand-off `README.txt`)
+**stays**, reachable from inside that view — it is still the only route for
+anything CU will not accept. It remains a fast synchronous zip build with no
+Celery task, as before.
+
+What crosses the boundary, and what CU does with it:
+
+| | |
+|---|---|
+| Auth | `Authorization: Token <key>` — a DRF token for CU's `mothra` service account (`manage.py create_deposit_user`), holding only `add_meisubmission`/`view_meisubmission`. Throttled by CU at **300/hour**, shared by every Mothra user |
+| POST body | `manuscript_id`, `folio_number`, `mei`, `submitter` (the Mothra username, from the JWT — never client-supplied), `comment` |
+| Idempotency | CU answers **`200` with the existing record** when byte-identical content is already pending, `201` when it filed a new one. A re-run therefore cannot duplicate a review, which is what lets "submit all" be a plain client-side loop |
+| Rejections (`400`) | unknown manuscript; a folio not on that manuscript (its chants need importing on CU first); **a folio with no `image_uri`**; MEI that CU's `MEIParser` cannot parse or that has zero neumes |
+| Statuses | `PENDING → PUBLISHING → PUBLISHED \| CORRECTION_REQUESTED \| REFUSED`, plus `SUPERSEDED`. A correction is a **new** submission, not an edit, so history is free |
+
+Implementation notes that are easy to get wrong:
+
+- **`cu_api.py` imports no fastapi, deliberately.** It raises its own
+  `CuError(message, category=...)` (paco_api.py's model) and
+  `cu_submission_api.py` maps categories onto status codes at the edge. CI
+  installs only pytest/Pillow/PyYAML/staff-finding, so a module importing
+  fastapi cannot be unit-tested at all — the same split, for the same reason,
+  as `neon_manifest.py` vs. its router.
+- **Mothra stores nothing about submissions.** There is no submissions table;
+  status is re-read from CU on demand and matched back to pages on
+  `(manuscript_id, folio_number)`. CU **canonicalizes folio numbers** (`1r` is
+  stored as `001r`), so that match goes through `utils/folio.ts`'s
+  `matchCanonicalFolio`, not string equality.
+- **Uncorrected MEI is submittable**, unlike the zip export's `corrected=1`
+  filter — CU's admin review is the gate. The `corrected` flag instead rides
+  along in the submission `comment`, together with project and page name: CU's
+  review queue shows only manuscript/folio/submitter/timestamp, so that comment
+  is the reviewer's only provenance.
+- Only the **latest** revision per page is sent (`mei_files` is append-only) —
+  the frontend picks it with `latestMeiPerImage()`, the same dedupe the Neon
+  editor uses.
+- **CU's manuscript picker cannot show every valid target.** `GET /manuscripts/`
+  filters `public=True`, while the deposit serializer deliberately does not (a
+  manuscript being OMR'd is normally still unpublished). Hence the
+  type-the-id-directly escape hatch on the submission page.
 
 ---
 
@@ -963,9 +1033,12 @@ separate, repo-admin-level step, done in GitHub's own UI, not this file.
 - **Real JWT refresh** — a separate, rotating, revocable refresh token (`refresh_tokens` table)
   replaces the old `/api/auth/refresh`, which depended on the very access token it was meant to
   refresh and so never worked once that token actually expired; see **Backend** above
-- **Cantus bundle export** — the old mocked "sending" animation is gone; "send to Cantus Ultimus"
-  now downloads a real zip of corrected MEI files (`GET /sources/{id}/cantus-bundle`) for manual
-  hand-off, since Cantus Ultimus has no write API; see **Workflow pipeline** above
+- **Cantus Ultimus MEI submission** — step 6 POSTs each page's MEI straight into CU's
+  deposit inbox (`cu_api.py`/`cu_submission_api.py` → CU's `POST /api/mei-submissions/`) as a
+  pending record for admin review, replacing the manual "download a zip and hand it to a
+  maintainer" flow. CU **does** have a write API now, contrary to what this file said before;
+  the zip export survives as the fallback for anything CU won't accept. Needs `CU_API_URL` +
+  `CU_DEPOSIT_TOKEN`; see **Workflow pipeline** above
 - **Batch encoding** — `POST /api/encode-batch` (`batch_api.py`/`tasks_encode.py`) handles multiple XML+image pairs in one job
 - **Batch text-finding logs/activity parity** — `tasks_text_batch.py` now captures and persists
   per-folio `log_text` on each `text_alignments` row (scoped between `folio_result` boundaries, with

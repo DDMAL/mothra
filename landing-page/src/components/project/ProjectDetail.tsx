@@ -68,7 +68,9 @@ interface ProjectDetailProps {
   /** Open a saved IC session picked in the "manage IC sessions" modal on the
    * IC step page (step 1), rather than inside the modal's iframe. */
   onResumeIcSession: (req: IcResumeRequest) => void;
-  onSendToCantus: () => void;
+  /** Opens the Cantus Ultimus submission page, carrying whichever MEI files
+   * were selected here so they arrive pre-ticked. */
+  onSendToCantus: (selectedMeiIds: string[]) => void;
   /** mothra#294: clicking an already-progressed selected image (in the
    * Images tab grid or the "selected:" panel) jumps straight back into its
    * current stage instead of just toggling multi-select. */
@@ -80,8 +82,6 @@ interface ProjectDetailProps {
    * ordinary navigation into this page. */
   initialTab?: ProjectInitialTab | null;
   onInitialTabConsumed?: () => void;
-  sendingBundle?: boolean;
-  sendBundleError?: string | null;
   onRenameProject: (newName: string) => void;
   onUploadImage: (
     file: File,
@@ -131,8 +131,6 @@ export default function ProjectDetail({
   onViewActiveJob,
   initialTab,
   onInitialTabConsumed,
-  sendingBundle = false,
-  sendBundleError = null,
   onRenameProject,
   onUploadImage,
   onUploadModel,
@@ -1062,26 +1060,19 @@ export default function ProjectDetail({
           {meiSection.selectedIds.size > 0 ? (
             <button
               onClick={() => {
+                // Read the selection before clearing it -- the submission page
+                // pre-ticks these, so clearing first would send an empty list.
+                const picked = [...meiSection.selectedIds];
                 imgSection.clearSelection();
                 mdlSection.clearSelection();
                 meiSection.clearSelection();
-                onSendToCantus();
+                onSendToCantus(picked);
               }}
-              disabled={sendingBundle}
               className="w-full px-5 py-2 bg-white text-[#4AADAA] font-semibold rounded-xl border-2 border-white hover:opacity-90 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-default"
             >
-              {sendingBundle ? (
-                "preparing bundle..."
-              ) : (
-                <>send to cantus ultimus &rarr;</>
-              )}
+              send to cantus ultimus &rarr;
             </button>
           ) : null}
-          {sendBundleError && (
-            <p className="text-red-200 text-xs text-center">
-              {sendBundleError}
-            </p>
-          )}
           {meiSection.selectedIds.size === 0 &&
             (() => {
               const continueLabel =

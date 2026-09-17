@@ -42,6 +42,8 @@ export function formatActivity(e: ActivityEntry): string {
       return `MEI ${e.detail} produced`;
     case "mei_corrected":
       return `MEI ${e.detail} corrected`;
+    case "cu_submitted":
+      return `submitted to Cantus Ultimus: ${e.detail}`;
     case "step_unlocked":
       return `step ${e.detail} unlocked`;
     default:

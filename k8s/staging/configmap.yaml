@@ -20,6 +20,16 @@ data:
   IC_API_URL: "http://ic-staging:8000"                 # server-to-server (cluster DNS)
   TEXT_API_URL: "http://text-service-staging:8002"     # server-to-server (cluster DNS)
   PACO_API_URL: "http://paco-classifier-service-staging:8003"  # server-to-server (cluster DNS)
+  # MUST NOT be production's Cantus Ultimus. CU's own staging shares the
+  # `cantus-ultimus` namespace with CU production exactly the way this
+  # environment shares `mothra` with Mothra production, separated only by the
+  # `-staging` name suffix -- so `nginx.cantus-ultimus...` is PRODUCTION CU.
+  # Getting this wrong files staging's test submissions into the real review
+  # queue that real CU admins work through, and nothing fails: the deposit
+  # succeeds, it is simply filed in the wrong place. Omitting the key entirely
+  # is no safer -- config.py would fall back to config.yaml's
+  # https://cantus.simssa.ca, which is also production.
+  CU_API_URL: "http://nginx-staging.cantus-ultimus.svc.cluster.local:8000"
   # TLS is terminated by the campus front proxy (134.87.11.29), which forces
   # http→https, so browsers are always on https — use https here to avoid
   # mixed-content (IC iframe) and CORS-origin mismatches.

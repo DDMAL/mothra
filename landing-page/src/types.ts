@@ -53,6 +53,65 @@ export interface CantusSource {
   sourceId: string;
   name: string;
   folios: string[];
+  /** e.g. "CDN-Hsmu M2149.L4". The API has always returned this (text-service's
+   * /cantus-source builds it from institution code + shelfmark); it just was
+   * not in this type. It is what cantus-bundle names its files after. */
+  siglum?: string | null;
+}
+
+/** A manuscript on Cantus Ultimus, from GET /api/cu/manuscripts.
+ * NB: CU only lists PUBLIC manuscripts there, while its deposit endpoint
+ * deliberately accepts non-public ones too (a manuscript being OMR'd is
+ * normally still unpublished) — so this list can be missing a manuscript that
+ * is perfectly valid to submit against. Hence the manual-id entry on the
+ * submission page. */
+export interface CuManuscript {
+  id: number;
+  name?: string | null;
+  siglum?: string | null;
+  date?: string | null;
+  provenance?: string | null;
+}
+
+/** One folio of a CU manuscript, from GET /api/cu/manuscripts/{id}/folios.
+ * `image_uri` is the load-bearing field: CU refuses a deposit for a folio that
+ * has none, so the UI disables those rather than letting a submit-all discover
+ * them one failure at a time. Snake-cased because these come straight from
+ * CU's Solr documents, unlike the rest of mothra's API. */
+export interface CuFolio {
+  number: string;
+  image_uri?: string | null;
+}
+
+export type CuSubmissionStatus =
+  | "PENDING"
+  | "PUBLISHING"
+  | "PUBLISHED"
+  | "CORRECTION_REQUESTED"
+  | "REFUSED"
+  | "SUPERSEDED";
+
+/** CU's record of one submitted folio, from GET /api/cu/submissions. Mothra
+ * stores none of this — it is read back from CU on demand and matched to pages
+ * by (manuscript_id, folio_number). Snake-cased for the same reason as
+ * CuFolio. */
+export interface CuSubmission {
+  id: number;
+  manuscript_id: number;
+  folio_number: string;
+  status: CuSubmissionStatus;
+  status_display: string;
+  /** The admin's explanation, required by CU when refusing or asking for a
+   * correction. This is the whole reason a submitter checks back. */
+  review_note: string;
+  comment: string;
+  submitter: string;
+  submitted_at: string;
+  reviewed_at: string | null;
+  /** Set by mothra's own POST response, not by CU's list: true when CU
+   * returned an already-pending identical submission instead of filing a new
+   * one. */
+  alreadyPending?: boolean;
 }
 
 export interface TextAlignment {
@@ -200,5 +259,6 @@ export type View =
   | "encoding-processing"
   | "encoding-completion"
   | "send-completion"
+  | "cu-submission"
   | "neon-editor"
   | "neon-completion";
