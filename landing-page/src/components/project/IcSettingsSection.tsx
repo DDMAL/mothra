@@ -85,7 +85,10 @@ export default function IcSettingsSection({
           onChange={(e) =>
             setNotationType(e.target.value as "square" | "hufnagel")
           }
-          className="bg-transparent border border-white/30 rounded-lg px-2 py-1 text-xs text-white cursor-pointer w-fit"
+          // Opaque, not transparent: Preflight leaves a <select> with no
+          // background, so the native option popup renders this white text on
+          // the browser's own white backdrop and disappears.
+          className="bg-[#1D3335] border border-white/30 rounded-lg px-2 py-1 text-xs text-white cursor-pointer w-fit"
         >
           <option value="square">square</option>
           <option value="hufnagel">hufnagel</option>

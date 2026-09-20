@@ -466,7 +466,10 @@ export default function InteractiveClassifier({
           <select
             value={clefShape}
             onChange={(e) => onClefShapeChange(e.target.value as "C" | "F")}
-            className="bg-transparent border border-white/30 rounded px-1 text-sm cursor-pointer text-white"
+            // Opaque, not transparent -- see IcSettingsSection's notation
+            // picker: Preflight leaves a <select> with no background, so the
+            // option popup draws this white text on white and vanishes.
+            className="bg-[#1D3335] border border-white/30 rounded px-1 text-sm cursor-pointer text-white"
           >
             <option value="C">C</option>
             <option value="F">F</option>

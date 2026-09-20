@@ -427,7 +427,14 @@ export default function CuSubmissionPage({
                     onChange={(v) =>
                       setFolioByMei((m) => ({ ...m, [page.id]: v }))
                     }
-                    className="text-xs"
+                    // Background and text colour both have to be explicit.
+                    // Tailwind's Preflight gives every <select> `color: inherit`
+                    // and `background-color: transparent`, so inheriting this
+                    // row's `text-white` left the native option popup drawing
+                    // white text on the browser's white backdrop. Same idiom as
+                    // the manuscript picker above; FolioSelect forwards this to
+                    // its custom-folio <input> too, which had the same problem.
+                    className="text-xs px-2 py-1 rounded-lg bg-white/80 text-[#1D3335] outline-none"
                   />
                   <span className="font-mono">
                     {outcome.kind === "sending" && (
