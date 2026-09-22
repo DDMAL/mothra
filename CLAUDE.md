@@ -521,19 +521,48 @@ a different staffline pipeline than production.
 **`CU_API_URL` is the same trap, one namespace over, and it fails more quietly.**
 Cantus Ultimus lives in its own `cantus-ultimus` namespace and splits *its*
 staging from *its* production by exactly the same `-staging` name suffix
-(`nginx` vs `nginx-staging`) — so `mothra-config` points at
-`http://nginx.cantus-ultimus.svc.cluster.local:8000` and
-`mothra-config-staging` **must** point at
-`http://nginx-staging.cantus-ultimus.svc.cluster.local:8000`. Getting it wrong
-files staging's throwaway test submissions into the review queue real CU admins
-work through, and nothing errors — the deposit genuinely succeeds, it is simply
-filed in the wrong place. Omitting the key is *worse* than for PACO, not
-better: `config.yaml`'s fallback is `https://cantus.simssa.ca`, which is
-production. Note also the URL is cross-namespace, so it needs the full
-`svc.cluster.local` form — a bare `nginx` resolves inside `mothra`, where no
-such Service exists. Each environment also needs the deposit token issued by
-**its own** CU (`CU_DEPOSIT_TOKEN` in its own Secret); a shared token would let
-staging write into production CU regardless of the URL.
+Mothra uses inside `mothra` — so `mothra-config` points at
+`http://app.cantus-ultimus.svc.cluster.local:8001` and `mothra-config-staging`
+**must** point at `http://app-staging.cantus-ultimus.svc.cluster.local:8001`.
+Getting it wrong files staging's throwaway test submissions into the review
+queue real CU admins work through, and nothing errors — the deposit genuinely
+succeeds, it is simply filed in the wrong place. Each environment also needs the
+deposit token issued by **its own** CU (`CU_DEPOSIT_TOKEN` in its own Secret); a
+shared token would let staging write into production CU regardless of the URL.
+
+**That URL names CU's Django Service (`app`), deliberately NOT its nginx.** Do
+not "fix" it to `nginx`/`nginx-staging:8000`, which looks like the obvious
+choice and is the one that fails. CU's `nginx.conf` ends with
+
+```nginx
+server { listen 8000 default_server; return 444; }   # host-spoofing guard
+server { listen 8000; server_name cantus.simssa.ca cantus.staging.simssa.ca
+                                  dev-cantus.simssa.ca localhost nginx; ... }
+```
+
+and a cross-namespace caller can only address a Service by its full
+`svc.cluster.local` name, which matches none of those (bare `nginx` is on the
+list, but a bare name resolves inside `mothra`, where no such Service exists).
+Every request therefore hits `return 444` — the connection is closed with **no
+response at all**, so urllib raises `RemoteDisconnected` rather than reporting
+an HTTP status, and it reads like a network fault rather than a rejection.
+Nothing is lost by skipping nginx: it terminates TLS and serves static files and
+IIIF, none of which a server-to-server JSON call touches.
+
+**This depends on a setting in the *other* repo.** Django only accepts that FQDN
+because CU's own `EXTRA_ALLOWED_HOSTS` lists it
+(`k8s/cantus-ultimus{,-staging}/app/configmap.yaml` in DDMAL/cantus); drop the
+entry and every deposit becomes a `400` from Django's `ALLOWED_HOSTS` check.
+**As of 2026-09-22 only staging has it live** — DDMAL/cantus carries the FQDN for
+both environments in-repo, but the running production `app-config` is still
+`app,cantus.simssa.ca`, so production deposits will `400` until that ConfigMap is
+applied and `app` restarted.
+
+Omitting `CU_API_URL` entirely falls back to `config.yaml`'s
+`https://cantus.simssa.ca`, i.e. production. In-cluster that currently answers
+`403` (the campus proxy refuses pod traffic), so it fails loudly there rather
+than quietly depositing into production — but from a bare-metal checkout, which
+reaches the public host normally, it would not.
 `stored_models` (locally-uploaded custom YOLO checkpoints, written by
 `models_api.py`) is **not baked into the image** — it's a static NFS
 PersistentVolume (RWX, `stored-models-pv.yaml`/`-pvc.yaml`) mounted on both
