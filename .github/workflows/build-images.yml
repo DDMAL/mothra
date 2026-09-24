@@ -271,8 +271,29 @@ jobs:
           kubectl apply -f "$DIR/migrate-job.yaml"
           # Must complete before backend/worker start querying tables that
           # may not exist yet -- see auth_api.py's/migrate.py's comments.
-          kubectl -n mothra wait --for=condition=complete "job/migrate${SUFFIX}" --timeout=120s \
-            || { kubectl -n mothra logs "job/migrate${SUFFIX}" --all-containers; exit 1; }
+          #
+          # 600s, not the 120s this used to be: this wait is dominated by the
+          # IMAGE PULL, not by the migration (which is sub-second -- it is a
+          # handful of idempotent ALTER ... ADD COLUMN IF NOT EXISTS). The
+          # mothra-backend image is ~3.4 GB, and a cold pull onto a node that
+          # doesn't already have the layers takes minutes: 5m15s measured on
+          # k3s-gpu-node-1 on 2026-09-24, and the staging deploy that same day
+          # failed here with the pod still in ContainerCreating. Nothing is
+          # half-applied when it trips -- this step runs before any Deployment
+          # is touched -- but it does abort a deploy whose images all built
+          # fine, for no reason other than a slow registry pull.
+          #
+          # On failure, describe the pod as well as dumping logs: when the
+          # container never STARTED, `kubectl logs` returns only
+          # "Error from server (BadRequest): ... is waiting to start:
+          # ContainerCreating", which says nothing about why. The pod's events
+          # are where the pull progress (or an ImagePullBackOff, or an
+          # unschedulable resource request) actually shows up.
+          kubectl -n mothra wait --for=condition=complete "job/migrate${SUFFIX}" --timeout=600s \
+            || { kubectl -n mothra describe "job/migrate${SUFFIX}"; \
+                 kubectl -n mothra describe pod -l "job-name=migrate${SUFFIX}"; \
+                 kubectl -n mothra logs "job/migrate${SUFFIX}" --all-containers || true; \
+                 exit 1; }
 
       - name: Roll out IC before the backend that depends on it
         run: |

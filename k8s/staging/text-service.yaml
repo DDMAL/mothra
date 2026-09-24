@@ -31,6 +31,38 @@ spec:
           # No env required (port fixed in the image CMD). Kraken/HTR + the
           # baked-in Tridis OCR model make this a memory-heavy container.
           # See k8s/text-service.yaml's identical comment (mothra#220 row 29).
+          # startupProbe: main.py imports torch + Kraken and resolves the
+          # baked-in Tridis recognition model before uvicorn ever binds this
+          # port, so nothing answers /healthz at all until that cold import
+          # finishes. Without this, livenessProbe's own schedule below (30s
+          # initial delay + 3 failures 15s apart) kills the container for
+          # "not up yet" at ~75s -- comfortably shorter than that import
+          # takes under this pod's 2-CPU limit on a cold page cache -- and
+          # then does it again to the replacement, forever. Observed for
+          # real on 2026-09-24: staging took SIX restarts to come up, and
+          # production restarted once the same afternoon (exit 137,
+          # "Container text-service failed liveness probe, will be
+          # restarted"). This is the same failure paco-classifier-service
+          # already guards against for the same reason -- see the much
+          # longer note in paco-classifier-service.yaml; text-service was
+          # simply never given the same treatment.
+          #
+          # A startupProbe suspends BOTH liveness and readiness until it
+          # succeeds once, so a slow-but-eventually-fine boot is no longer
+          # mistaken for a hang. failureThreshold * periodSeconds = 5
+          # minutes of grace, generous for a cold torch+Kraken import but
+          # still bounded -- a genuinely hung container still gets killed.
+          #
+          # This matters beyond boot flakiness: tasks_predict.py calls
+          # text-finding once PER IMAGE, so a predict job that starts while
+          # this pod is in that restart loop has every page's text stage
+          # fail against a service that isn't listening.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8002
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /healthz
