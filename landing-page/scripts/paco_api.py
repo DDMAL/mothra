@@ -84,6 +84,7 @@ def classify_stafflines(
     timeout: int = DEFAULT_TIMEOUT,
     conn_holder: Optional[dict] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    timing_out: Optional[dict] = None,
 ) -> tuple[bytes, bytes]:
     """POSTs one page image to paco-classifier-service's /classify.
 
@@ -109,6 +110,15 @@ def classify_stafflines(
     deterministic progress from the TF inference loop itself, not a
     time-based guess. Optional and defaults to None so every existing
     caller keeps working unchanged.
+
+    `timing_out`, if given, is a plain dict this function updates with the
+    service's own server-side timing breakdown (how much of the call was
+    the per-request Keras model load versus the sliding-window inference,
+    and how many patches that window covered -- see
+    paco-classifier-service's _timing_summary). Filled as an out-param
+    rather than added to the return tuple so the two existing callers and
+    their tests are untouched. Stays empty against a service too old to
+    send it, which is the only reason this is read defensively at all.
     """
     boundary = _uuid.uuid4().hex
     body = bytearray()
@@ -235,6 +245,17 @@ def classify_stafflines(
             "paco-classifier-service's response stream ended without a result",
             category=CATEGORY_MALFORMED_RESPONSE,
         )
+    if timing_out is not None:
+        # Deliberately outside the try/except below: a malformed `timing`
+        # must not be able to turn a perfectly good pair of PNGs into a
+        # CATEGORY_MALFORMED_RESPONSE failure. This is a log line's worth of
+        # detail, nothing depends on it.
+        try:
+            reported = result_payload.get("timing")
+            if isinstance(reported, dict):
+                timing_out.update(reported)
+        except Exception:  # noqa: BLE001 - observability only
+            pass
     try:
         return (
             base64.b64decode(result_payload["stafflines_png_base64"], validate=True),

@@ -1,4 +1,5 @@
 import io
+import time
 from PIL import Image
 import base64
 import json
@@ -21,6 +22,7 @@ from encode_to_mei import (
 import staffline_adapter
 import pitch_stage
 from ic_xml_store import store_ic_xml
+from perf_log import stage_timer
 
 def _fetch_original_bytes(
     project_id: Optional[int], image_name: Optional[str], image_id: Optional[str] = None,
@@ -258,7 +260,9 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         xml_path = tmp_dir / "uploaded.xml"
         xml_path.write_bytes(xml_bytes)
         ev({"type": "log", "message": f"parsing GameraXML: {xml_filename}"})
-        glyphs = parse_gamera_xml(xml_path)
+        with stage_timer(ev, "parse-gamera-xml", file=xml_filename) as parse_t:
+            glyphs = parse_gamera_xml(xml_path)
+            parse_t.note(glyphs=len(glyphs))
         ev({"type": "log", "message": f" {len(glyphs)} glyphs loaded"})
         # File the encoder's own input as a project artefact, from here
         # rather than from the IC export bridge: this is the one point every
@@ -266,8 +270,10 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         # IC, and the step-3 XML upload), and the glyph count is the parse's
         # own rather than a guess. Written before the rest of the pipeline
         # can fail, so a failed encode still leaves its input inspectable.
-        if store_ic_xml(project_id, image_id, image_name or image_filename,
-                        xml_bytes, glyph_count=len(glyphs)):
+        with stage_timer(ev, "store-classifier-xml", bytes=len(xml_bytes)):
+            stored_ic_xml = store_ic_xml(project_id, image_id, image_name or image_filename,
+                                         xml_bytes, glyph_count=len(glyphs))
+        if stored_ic_xml:
             ev({"type": "log", "message": " saved classifier XML to generated files"})
         elif project_id:
             ev({"type": "log", "message":
@@ -291,9 +297,11 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         ev({"type": "stage_done", "name": "checking"})
 
         ev({"type": "stage", "name": "validating"})
-        text_alignment, yolo_stave_hints, stave_source, jsomr_records = _resolve_hints(
-            project_id, image_name, page_w, page_h, ev=ev, image_id=image_id,
-        )
+        with stage_timer(ev, "resolve-hints", image=image_name) as hints_t:
+            text_alignment, yolo_stave_hints, stave_source, jsomr_records = _resolve_hints(
+                project_id, image_name, page_w, page_h, ev=ev, image_id=image_id,
+            )
+            hints_t.note(source=stave_source)
         if text_alignment:
             ev({"type": "log", "message": f" {len(text_alignment.get('syl_boxes', []))} syllable(s) from text-finding"})
         if yolo_stave_hints:
@@ -333,24 +341,26 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
         # advisory per-glyph tables; build_mei falls back to its own geometric
         # placeholder for anything left unresolved, so this never gates the
         # encode. See pitch_stage.run_pitch_finding's docstring.
-        pitch = pitch_stage.run_pitch_finding(
-            glyphs, staves, jsomr_records, image_bytes,
-            notation_type=notation_type or "square", tmp_dir=tmp_dir,
-        )
+        with stage_timer(ev, "pitch-finding", glyphs=len(glyphs), staves=len(staves)):
+            pitch = pitch_stage.run_pitch_finding(
+                glyphs, staves, jsomr_records, image_bytes,
+                notation_type=notation_type or "square", tmp_dir=tmp_dir,
+            )
         for line in pitch.log_lines:
             ev({"type": "log", "message": line})
         stem = Path(image_filename).stem if image_filename else Path(xml_filename).stem
         image_ref = Path(image_filename) if image_filename else Path("")
-        mei_bytes_out = build_mei(
-            glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
-            clef_shape=clef_shape or "C",
-            clef_line=clef_line or 3,
-            notation_type=notation_type or "square",
-            text_alignment=text_alignment,
-            n_detected_staves=n_input_staves,
-            pitch_map=pitch.pitches_by_glyph,
-            clef_line_map=pitch.clef_lines_by_glyph,
-        )
+        with stage_timer(ev, "build-mei", staves=len(staves)):
+            mei_bytes_out = build_mei(
+                glyphs_by_stave, staves, image_ref, page_w, page_h, stem,
+                clef_shape=clef_shape or "C",
+                clef_line=clef_line or 3,
+                notation_type=notation_type or "square",
+                text_alignment=text_alignment,
+                n_detected_staves=n_input_staves,
+                pitch_map=pitch.pitches_by_glyph,
+                clef_line_map=pitch.clef_lines_by_glyph,
+            )
         for msg in trace_stave_zone_parity(staves, mei_bytes_out):
             ev({"type": "log", "message": msg})
         original_bytes = _fetch_original_bytes(project_id, image_name, image_id=image_id)
@@ -368,8 +378,9 @@ def _encode_one(publish, xml_bytes, xml_filename, image_bytes, image_filename,
             ev({"type": "log", "message": f"[warn] {w}"})
         ev({"type": "log", "message": "MEI built successfully" if not validation_warnings else "MEI built with warnings"})
         mei_b64 = base64.b64encode(mei_bytes_out).decode()
-        manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
-        session_put(session_id, mei_bytes_out, stem, manifest, project_id=project_id)
+        with stage_timer(ev, "manifest+session-write", mei_bytes=len(mei_bytes_out)):
+            manifest = build_neon_manifest(mei_bytes_out, image_data_uri or str(image_ref), stem) if image_data_uri else None
+            session_put(session_id, mei_bytes_out, stem, manifest, project_id=project_id)
 
         result = {"session_id": session_id, "mei_base64": mei_b64, "manifest": manifest, "stave_source": stave_source}
         if include_name_fields:
@@ -410,12 +421,15 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
         publish_event(job_id, obj)
 
     succeeded, failed = [], []
+    batch_t0 = time.perf_counter()
     for i, item in enumerate(items):
         check_cancelled(job_id)
         publish({"type": "item_start", "item": i, "total": len(items),
                  "name": item["image_filename"] or item["xml_filename"]})
-        xml_bytes = fetch_upload(item["xml_upload_id"])
-        image_bytes = fetch_upload(item["image_upload_id"])
+        item_t0 = time.perf_counter()
+        with stage_timer(publish, "fetch-staged-uploads", item=i):
+            xml_bytes = fetch_upload(item["xml_upload_id"])
+            image_bytes = fetch_upload(item["image_upload_id"])
         try:
             session_id, _ = _encode_one(
                 publish, xml_bytes, item["xml_filename"], image_bytes, item["image_filename"],
@@ -425,6 +439,9 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
             )
             succeeded.append({"item": i, "session_id": session_id,
                                "name": item["image_filename"] or item["xml_filename"]})
+            publish({"type": "log", "message":
+                     f"[timing] encode item total: {time.perf_counter() - item_t0:.2f}s"
+                     f" (name={item['image_filename'] or item['xml_filename']})"})
             publish({"type": "item_done", "item": i, "session_id": session_id})
             drop_upload(item["xml_upload_id"])
             drop_upload(item["image_upload_id"])
@@ -434,6 +451,9 @@ def run_encode_batch_task(job_id, items, project_id, clef_shape, clef_line,
             failed.append({"item": i, "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
             publish({"type": "item_error", "item": i,
                      "name": item["image_filename"] or item["xml_filename"], "message": str(e)})
+    publish({"type": "log", "message":
+             f"[timing] encode batch total: {time.perf_counter() - batch_t0:.2f}s"
+             f" ({len(items)} item(s))"})
     if failed and not succeeded:
         # Every item failed, so none of them had its staged upload dropped —
         # the whole batch can safely be replayed as-is. Surface this as a real
