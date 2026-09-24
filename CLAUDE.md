@@ -1102,10 +1102,14 @@ and `.../paco-classifier-service.yaml` set `OMP_NUM_THREADS` (plus `MKL_NUM_THRE
 `TF_NUM_INTRAOP_THREADS`) to match each pod's own `limits.cpu`. **Keep them in step** —
 raising a CPU limit without raising these leaves the extra cores unused.
 
-Known remaining: kraken's **segmentation** model is still loaded per request
-(`blla.segment(model=None)` loads Kraken's bundled default inside the call). Caching it
-means reaching into kraken internals that were not verifiable at the time, so it was left
-alone deliberately rather than guessed at.
+Kraken's **segmentation** model is cached the same way. `blla.segment(model=None)` loads
+the bundled default *inside* the call, so every page paid a load before any segmentation
+ran; `_default_segmentation_model()` reproduces kraken's own resolution
+(`vgsl.TorchVGSLModel.load_model(resources.files("kraken")/"blla.mlmodel")`) once per
+process. It returns `None` on any failure, which falls through to
+`blla.segment(model=None)` — i.e. the old per-page behaviour — because this reaches into
+another project's resource layout and must degrade rather than break when a kraken
+upgrade moves things.
 
 ## Things that don't exist yet (planned)
 
