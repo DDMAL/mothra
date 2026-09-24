@@ -325,7 +325,15 @@ jobs:
           # Object names, so SUFFIX applies here (not DIR).
           # `ic` is omitted: already applied and waited on above, so the
           # backend could be probed by a compatible IC at startup.
+          # 900s, not 300s: this wait has to be LONGER than the slowest
+          # pod's startupProbe budget, or CI gives up on a rollout that is
+          # still legitimately in progress and fails a deploy that would
+          # have succeeded. text-service allows 10 minutes of startup grace
+          # (k8s/text-service.yaml) because its cold `import torch` + kraken
+          # genuinely needs it on a loaded node -- so a 5-minute rollout
+          # wait could never see it finish. Raise this whenever any of
+          # these pods' startupProbe budgets go up.
           for d in backend worker text-service paco-classifier-service; do
-            kubectl -n mothra rollout status "deploy/${d}${SUFFIX}" --timeout=300s
+            kubectl -n mothra rollout status "deploy/${d}${SUFFIX}" --timeout=900s
           done
           kubectl -n mothra get pods
