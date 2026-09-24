@@ -52,6 +52,18 @@ services:
       - "8002:8002"
     environment:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      # Batch-download zips (mothra#230, BATCH_DIR half) -- text_batch_zips,
+      # written/read by text-service/db.py. Same default as backend/worker/ic
+      # so every service shares one database. Unlike ic above, text-service
+      # does NOT create its table lazily -- it's created once by the shared
+      # migrate service (depends_on below), so text-service's db.py stays
+      # DDL-free.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mothra:${POSTGRES_PASSWORD}@postgres:5432/mothra}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       # /healthz (mothra#220 row 29) -- see main.py's healthz() docstring.
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/healthz', timeout=3)"]
