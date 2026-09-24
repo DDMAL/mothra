@@ -1072,6 +1072,16 @@ CPU work in `text-service` and `paco-classifier-service`. Anyone investigating
 "why is this slow" should start from the `[timing]` lines in the job log (see
 **Where the time goes** above), not from the model or the GPU.
 
+**Measured outcome of the two optimisations below: both were smaller than expected, and
+the measurement says why.** paco is **compute-bound, not overhead-bound** — ~167ms per
+256x256 autoencoder forward on 2 cores, so batching away Keras's per-call overhead bought
+only ~1.1x (output byte-identical, verified by hash). And text-finding is **~80% Kraken
+BLLA segmentation** (23s/page) with HTR only 2-7% (0.5-2s) — so caching the recognition
+model and skipping HTR for pre-filtered lines both target a small slice. What is left in
+both services is raw CPU forward-pass time. **The real lever is GPU access for
+`text-service` and `paco-classifier-service`, not more code tuning** — today only `worker`
+gets the MIG slice.
+
 **`paco-classifier` batches its sliding window.** `process_image_msae()` used to call
 `model.predict()` once per patch **per model** with a batch of exactly 1 — 84 Keras
 calls for a 1064×1342 page. It now batches one sliding-window row per call and uses

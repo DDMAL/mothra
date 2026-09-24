@@ -182,9 +182,12 @@ def _timing_summary(timing: dict, shape) -> dict:
             cols = max(1, -(-int(shape[1]) // stride))
             out["cols"] = cols
             out["patches"] = out["rows"] * cols
-            # Two models per patch, one predict() each -- the number that
-            # explains the wall-clock better than "patches" alone does.
-            out["predict_calls"] = out["patches"] * 2
+            # Model invocations, which is NOT patches*2 any more: the engine
+            # batches a whole sliding-window row per call, so it is one call
+            # per row per model. Reported as a measured-ish count rather than
+            # the old patches*2 estimate, which kept printing 84 after the
+            # code had dropped to 14 and made the batching look inert.
+            out["model_calls"] = out["rows"] * 2
     except Exception:  # noqa: BLE001 - observability only, never fail the response
         pass
     return out
