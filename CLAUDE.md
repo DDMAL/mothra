@@ -737,6 +737,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage, `run_periodic_cleanup()` |
 | `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
 | `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` / `tasks_cleanup.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work / periodic `job_uploads`+`job_sessions` cleanup, run out-of-request |
+| `landing-page/scripts/perf_log.py` | `stage_timer`/`timed` — per-stage `[timing]` lines in the job log and the resolved inference device; see **Where the time goes** below |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
 | `landing-page/scripts/pitch_stage.py` | Real pitch finding for the encode step — wraps the `pitch-finding/` submodule's algorithm #1, hands `build_mei()` a per-glyph pitch map + measured clef lines; called from `tasks_encode.py` — see **Pitch finding** below |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
@@ -1026,6 +1027,41 @@ check in the repo's branch protection settings for `main` — that is a
 separate, repo-admin-level step, done in GitHub's own UI, not this file.
 
 ---
+
+## Where the time goes (per-stage timing)
+
+Predict and encode jobs emit `[timing]` lines into the same job log
+`ProcessingPage.tsx` already renders, via `landing-page/scripts/perf_log.py`'s
+`stage_timer(publish, label, **detail)` / `timed(label, **detail)`. Add one
+around any new stage; both are guaranteed never to raise and never to swallow
+the wrapped block's exception, because every stage they wrap is allowed to
+fail softly and report its own failure.
+
+What's measured today, per page: image decode, the text/music YOLO pass, the
+concurrent classifier+stave pass (paco and the stave YOLO split apart, since
+they run on different machines *and* different devices), staffline detection
+(with the stave-box count it iterated — that loop is linear in it), and
+text-finding; then a per-image and a per-job total. The encode task times the
+GameraXML parse, hint resolution, pitch finding, `build_mei`, and the
+manifest/session write. The auto-IC pass has no job-queue stream of its own, so
+`ic_api.py` returns its three IC round-trips' timings in the `auto-queue`
+response body and `utils/icQueue.ts` logs them to the browser console.
+
+**`resolve_yolo_models()` also logs the resolved device** (`describe_device()`,
+e.g. `cuda (NVIDIA H100L-1-12C MIG 1g.12gb)`). Before this there was no way at
+all to tell a GPU run from a CPU fallback except by how slow it was — and only
+YOLO uses the GPU. Everything else in the pipeline is CPU by construction:
+`paco-classifier-service` pins plain `tensorflow` (not `[and-cuda]`) and gets no
+GPU node, `text-service/Dockerfile` installs the CPU-only torch wheel
+deliberately, and `staff-finding`/`pitch-finding`/IC are numpy/scipy throughout.
+
+`paco-classifier-service` additionally reports its own server-side split in the
+terminal `result` SSE frame (`_timing_summary`) — how much of a `/classify` call
+was the **per-request** reload of both Keras `.h5` autoencoders versus the
+sliding-window inference, plus the patch and `predict()` call counts.
+`paco_api.classify_stafflines()` collects it through the optional `timing_out`
+out-param (additive on both sides: an older service simply sends no `timing`
+key, and a malformed one is ignored rather than failing the call).
 
 ## Things that don't exist yet (planned)
 

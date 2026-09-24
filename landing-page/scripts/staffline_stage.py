@@ -62,6 +62,23 @@ def has_class(yolo_txt: str, class_id: int) -> bool:
     return False
 
 
+def count_class(yolo_txt: str, class_id: int) -> int:
+    """How many boxes of the given class a merged YOLO-txt string holds.
+
+    The counterpart to has_class(), for the timing line tasks_predict.py
+    logs around this module's per-image work: run_page()'s cost is linear
+    in the number of stave-class boxes (one crop + Sauvola binarization +
+    connected-component pass + Huber centerline fit each), so a page that
+    is slow here is slow because the detector produced a lot of boxes --
+    a number that appears nowhere else in the job log.
+    """
+    target = str(class_id)
+    return sum(
+        1 for line in yolo_txt.splitlines()
+        if line.strip() and line.strip().split(None, 1)[0] == target
+    )
+
+
 def _package_version() -> Optional[str]:
     try:
         from importlib.metadata import version
