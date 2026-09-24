@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from config import MODELS_DIR, NEON_MANIFESTS_DIR
+from config import MODELS_DIR
 import psycopg2, psycopg2.errors, os, secrets, hashlib, base64
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
@@ -76,29 +76,6 @@ STORAGE_QUOTA_BYTES = int(os.getenv("STORAGE_QUOTA_MB", "500")) * 1024 * 1024
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-NEON_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-
-def cleanup_stale_neon_manifests(max_age_seconds: int = 86400) -> int:
-    """Deletes exported Neon-editor manifest files (NEON_MANIFESTS_DIR/*.jsonld)
-    older than max_age_seconds. This lives on the backend container's own
-    ephemeral local disk (not the stored_models NFS share), unlike
-    job_store.cleanup_stale_uploads/cleanup_stale_sessions -- a Celery task run
-    by the worker executes on a different pod/filesystem and would have no
-    effect on these files, so this has to be invoked from the backend process
-    itself (see main.py). Consolidates what used to be two separately
-    maintained inline copies of this same loop (auth_api.py's _migrate_db and
-    mei_api.py's create_edit_session -- mothra#220 row 28)."""
-    import time as _time
-    now = _time.time()
-    deleted = 0
-    for f in NEON_MANIFESTS_DIR.glob("*.jsonld"):
-        try:
-            if now - f.stat().st_mtime > max_age_seconds:
-                f.unlink(missing_ok=True)
-                deleted += 1
-        except FileNotFoundError:
-            pass
-    return deleted
 
 @contextmanager
 def db_cursor():
@@ -293,6 +270,22 @@ def init_db():
                 mei_bytes BYTEA NOT NULL,
                 stem TEXT NOT NULL,
                 manifest JSONB,
+                project_id INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            -- Neon-editor manifests (mothra#230, NEON_MANIFESTS_DIR half) --
+            -- replaces NEON_MANIFESTS_DIR/{session_id}.jsonld files served by
+            -- main.py's old StaticFiles mount. project_id is provenance only,
+            -- not an ownership boundary: the dynamic route that serves these
+            -- back (main.py) can't require auth (editor.ts's plain fetch()
+            -- can't attach one -- see that route's docstring), so unguessable
+            -- session_id is the same authorization convention already used
+            -- for e.g. GET /jobs/{id}/stream.
+            CREATE TABLE IF NOT EXISTS neon_manifests (
+                session_id TEXT PRIMARY KEY,
+                manifest JSONB NOT NULL,
                 project_id INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
