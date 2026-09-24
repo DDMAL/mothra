@@ -24,6 +24,7 @@ from inference_api import router as inference_router
 from ic_api import router as ic_router, verify_ic_finalize_support
 from text_api import router as text_router
 from cantus_api import router as cantus_router
+from cu_submission_api import router as cu_submission_router
 from batch_api import router as batch_router
 from jobs_api import router as jobs_router
 from job_store import cleanup_stale_sessions, cleanup_stale_uploads
@@ -65,6 +66,7 @@ app.include_router(inference_router, prefix="/api")
 app.include_router(ic_router, prefix="/api")
 app.include_router(text_router, prefix="/api")
 app.include_router(cantus_router, prefix="/api")
+app.include_router(cu_submission_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 

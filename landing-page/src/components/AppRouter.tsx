@@ -34,6 +34,7 @@ import IcAutoQueue from "./workflow/IcAutoQueue";
 import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
 import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
+import CuSubmissionPage from "./workflow/CuSubmissionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
 import type { NeonEditorHandle } from "./workflow/NeonBatchEditor";
 
@@ -217,6 +218,9 @@ export default function AppRouter({
 
   const [sendingBundle, setSendingBundle] = useState(false);
   const [sendBundleError, setSendBundleError] = useState<string | null>(null);
+  // MEI ids ticked on the project page, handed to the submission view so the
+  // user's selection survives the navigation.
+  const [cuSelection, setCuSelection] = useState<string[]>([]);
   // Bumped whenever the active project changes (or a new send-to-Cantus
   // request starts), so an in-flight request whose project has since been
   // navigated away from can recognize itself as stale and skip mutating
@@ -229,7 +233,7 @@ export default function AppRouter({
     setSendingBundle(false);
   }, [selectedProjectId]);
 
-  const handleSendToCantus = async () => {
+  const handleDownloadBundle = async () => {
     if (!selectedProject?.cantusSourceId) {
       setSendBundleError("link a Cantus source to this project first");
       return;
@@ -263,6 +267,15 @@ export default function AppRouter({
     }
   };
 
+  // Step 6's primary action. The zip download (handleDownloadBundle above) is
+  // still reachable from inside the submission page -- it remains the only
+  // route for anything CU will not accept.
+  const goToCuSubmission = (selectedMeiIds: string[] = []) => {
+    setCuSelection(selectedMeiIds);
+    setSendBundleError(null);
+    setView("cu-submission");
+  };
+
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
       "project",
@@ -274,6 +287,7 @@ export default function AppRouter({
       "encoding-completion",
       "neon-editor",
       "neon-completion",
+      "cu-submission",
     ];
     if (PROJECT_VIEWS.includes(view) && !selectedProject) setView("projects");
   }, [view, selectedProject]);
@@ -416,7 +430,7 @@ export default function AppRouter({
               selectedProject.meiFiles ?? [],
               selectedProject.stepsUnlocked,
             );
-            if (step >= 4) handleSendToCantus();
+            if (step >= 4) goToCuSubmission();
             else if (step >= 3) goToNeon();
             else if (step >= 1 || SKIP_PREDICT) goToIc();
             else {
@@ -449,15 +463,13 @@ export default function AppRouter({
             setResumeIcSessions([req]);
             setView("ic");
           }}
-          onSendToCantus={handleSendToCantus}
+          onSendToCantus={goToCuSubmission}
           onViewActiveJob={(jobId, kind, startedAt) => {
             setResumeJob({ jobId, kind, startedAt });
             setView("processing");
           }}
           initialTab={pendingProjectTab}
           onInitialTabConsumed={() => setPendingProjectTab(null)}
-          sendingBundle={sendingBundle}
-          sendBundleError={sendBundleError}
           onRenameProject={(newName) =>
             renameProject(selectedProject.id, newName)
           }
@@ -1246,9 +1258,18 @@ export default function AppRouter({
         <NeonCompletionPage
           project={selectedProject}
           originalMeiFiles={originalMeiFiles}
-          onSendToCantus={handleSendToCantus}
-          sendingBundle={sendingBundle}
-          sendBundleError={sendBundleError}
+          onSendToCantus={goToCuSubmission}
+          onBackToProject={() => setView("project")}
+        />
+      ) : null;
+    case "cu-submission":
+      return selectedProject ? (
+        <CuSubmissionPage
+          project={selectedProject}
+          initialSelection={cuSelection}
+          onDownloadBundle={handleDownloadBundle}
+          downloadingBundle={sendingBundle}
+          bundleError={sendBundleError}
           onBackToProject={() => setView("project")}
         />
       ) : null;

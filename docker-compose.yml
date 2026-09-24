@@ -122,6 +122,16 @@ services:
       TEXT_API_URL: http://text-service:8002
       PACO_API_URL: http://paco-classifier-service:8003
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      # Cantus Ultimus MEI deposit (cu_api.py). Backend only, deliberately --
+      # submission is a plain synchronous endpoint, not a Celery task, so the
+      # worker never talks to CU. Both are optional: with no token the
+      # submission page reports itself unconfigured rather than failing, and
+      # the cantus-bundle zip download is unaffected. There is no CU service in
+      # this Compose file, so CU_API_URL falls through to config.yaml's public
+      # production host unless it is set -- point it at a local CU before
+      # testing submissions, or they will reach the real review queue.
+      CU_API_URL: ${CU_API_URL:-}
+      CU_DEPOSIT_TOKEN: ${CU_DEPOSIT_TOKEN:-}
       # config.py's PITCH_FINDING_ENABLED off switch. A container sees no host
       # env it isn't handed, so without this line MOTHRA_PITCH_FINDING=0 is
       # silently ignored under Compose and encoding keeps using real pitch
