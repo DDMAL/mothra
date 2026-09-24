@@ -7,19 +7,22 @@
 [submodule "mothra-text"]
 	path = mothra-text
 	url = https://github.com/DDMAL/mothra-text.git
-# mothra#220 DL-3: pinned to a personal branch (not main/a tag) because it
-# ships the production model.h5 weights this submodule bundles -- see
-# CLAUDE.md's "Updating the bundled medieval models"-adjacent staffline
+# mothra#220 DL-3: this submodule ships the production model.h5 weights --
+# see CLAUDE.md's "Updating the bundled medieval models"-adjacent staffline
 # section and documentation_allons-y/ALPHA_TRANSITION_PLAN.md's decision log.
-# Decided 2026-08-17: FREEZE this pin -- no `git submodule update --remote`
-# bumps -- until gianna/calvo-training-script merges upstream to main/a
-# tagged release, then re-pin there. A full CODEOWNERS mapping (including
-# this submodule) is tracked separately under Phase 6 repo-professionalization
-# work, not created here.
+# It was pinned to the personal branch gianna/calvo-training-script and
+# FROZEN on 2026-08-17, with the stated unfreeze condition "until
+# gianna/calvo-training-script merges upstream to main/a tagged release,
+# then re-pin there".
+#
+# 2026-09-24: that condition is met -- the branch merged to main upstream
+# (DDMAL/Paco_classifier PR #43), so this now tracks main and the freeze is
+# lifted. A full CODEOWNERS mapping (including this submodule) is tracked
+# separately under Phase 6 repo-professionalization work, not created here.
 [submodule "paco-classifier"]
 	path = paco-classifier
 	url = https://github.com/DDMAL/Paco_classifier.git
-	branch = gianna/calvo-training-script
+	branch = main
 # Pitch finding for the MEI encoding step (landing-page/scripts/pitch_stage.py
 # imports its scripts/ as flat modules -- it has no pyproject.toml, so unlike
 # staff-finding/ it is NOT pip-installed). Unpinned to a branch, i.e. tracking

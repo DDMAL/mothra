@@ -281,7 +281,7 @@ is also sent to `paco-classifier-service` (`landing-page/scripts/paco_api.py`'s
 `classify_stafflines()`, a plain-`urllib` HTTP bridge — see **Running
 locally** above for why this is its own service rather than an in-process
 import), which wraps the `paco-classifier/` submodule
-(`DDMAL/Paco_classifier`, branch `gianna/calvo-training-script`) — a
+(`DDMAL/Paco_classifier`, branch `main`) — a
 TensorFlow auto-encoder that splits the page into a background-only layer
 and a stafflines-only layer (both transparent PNGs). The weights,
 `paco-classifier/models_v4/{model_0.h5,model_1.h5}` (`model_0`=background,
@@ -1062,6 +1062,50 @@ sliding-window inference, plus the patch and `predict()` call counts.
 `paco_api.classify_stafflines()` collects it through the optional `timing_out`
 out-param (additive on both sides: an older service simply sends no `timing`
 key, and a malformed one is ignored rather than failing the call).
+
+## Performance: what was slow, and what was done about it
+
+Measured 2026-09-24 on three MS234 pages (staging, warm). Per page: paco classify
+**13–15s**, text-finding **17–34s**, staffline detection ~2s, and both YOLO passes
+together **~0.25s**. The GPU was never the bottleneck — over 99% of a predict job is
+CPU work in `text-service` and `paco-classifier-service`. Anyone investigating
+"why is this slow" should start from the `[timing]` lines in the job log (see
+**Where the time goes** above), not from the model or the GPU.
+
+**`paco-classifier` batches its sliding window.** `process_image_msae()` used to call
+`model.predict()` once per patch **per model** with a batch of exactly 1 — 84 Keras
+calls for a 1064×1342 page. It now batches one sliding-window row per call and uses
+`model(x, training=False)` (same inference arithmetic, without the per-call dataset/
+callback plumbing). Per-row batching bounds memory with no tuning knob. The `(row, col)`
+arithmetic is preserved **exactly**, quirks included — `row` was reassigned inside the
+inner loop so the bottom-edge clamp stuck for that row, and the column loop ranges over
+the *unpadded* width while rows use the padded height. The submodule's
+`tests/test_recognition_engine_batching.py` pins this against a transcription of the
+original loop and demands byte-identical output; it stubs TensorFlow, so it runs without
+a TF install. `load_model()` is also memoized per (path, mtime, size).
+
+**`mothra-text` caches its recognition model and filters before OCR.**
+`models.load_any()` ran once per page (and once per folio in `/batch-run`); it is now
+process-wide, keyed by `(model, device)`. The lock around it guards **inference too** —
+kraken's `TorchSeqRecognizer` keeps per-inference state on the object, so a shared
+instance without one can corrupt transcriptions across threads. Separately, the
+music-overlap and off-main-text-area filters moved from after Stage 3 to before it: both
+decide purely on `node.bbox`, so every line they dropped had been needlessly OCR'd. Their
+relative order is load-bearing (`_main_text_area` is computed from whichever nodes survive
+the music filter). The `"text"` field in the dropped-line payloads is now always `""`;
+nothing reads it.
+
+**Thread pools are pinned to the cgroup quota.** `nproc` reports the host's 8 CPUs inside
+every container while the quota is 2–3, and torch/TF size their intra-op pools from the
+former — which buys cfs throttling, not parallelism. `k8s/{,staging/}text-service.yaml`
+and `.../paco-classifier-service.yaml` set `OMP_NUM_THREADS` (plus `MKL_NUM_THREADS` /
+`TF_NUM_INTRAOP_THREADS`) to match each pod's own `limits.cpu`. **Keep them in step** —
+raising a CPU limit without raising these leaves the extra cores unused.
+
+Known remaining: kraken's **segmentation** model is still loaded per request
+(`blla.segment(model=None)` loads Kraken's bundled default inside the call). Caching it
+means reaching into kraken internals that were not verifiable at the time, so it was left
+alone deliberately rather than guessed at.
 
 ## Things that don't exist yet (planned)
 

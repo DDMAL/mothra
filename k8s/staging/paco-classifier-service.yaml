@@ -54,6 +54,19 @@ spec:
           # failing every /classify call -- see main.py's health()/ready()
           # docstrings.
           #
+          # Thread pinning -- same reasoning as text-service.yaml's: `nproc`
+          # reports the host's 8 CPUs inside this container while the cgroup
+          # quota is the limit below, and TensorFlow sizes its intra-op pool
+          # from the former. TF_NUM_*OP_THREADS are read by TF at import,
+          # before any tf.config.threading call the app could make.
+          # Keep in step with resources.limits.cpu below.
+          env:
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: TF_NUM_INTRAOP_THREADS
+              value: "2"
+            - name: TF_NUM_INTEROP_THREADS
+              value: "1"
           # startupProbe: main.py loads TensorFlow and both Keras models
           # synchronously at MODULE IMPORT time, before uvicorn ever binds
           # this port -- so nothing answers /health or /ready at all until

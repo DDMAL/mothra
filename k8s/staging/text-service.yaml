@@ -31,6 +31,18 @@ spec:
           # No env required (port fixed in the image CMD). Kraken/HTR + the
           # baked-in Tridis OCR model make this a memory-heavy container.
           # See k8s/text-service.yaml's identical comment (mothra#220 row 29).
+          # Thread pinning. Nothing set these before, so torch sized its
+          # intra-op pool from the HOST cpu count -- `nproc` reports 8 inside
+          # this container while the cgroup quota below is 2 -- which buys
+          # cfs throttling and context-switch churn, not parallelism. torch
+          # reads OMP_NUM_THREADS at import for its intra-op pool, so this
+          # has to be env rather than a set_num_threads() call somewhere in
+          # the app. Keep in step with resources.limits.cpu below.
+          env:
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: MKL_NUM_THREADS
+              value: "2"
           # startupProbe: main.py imports torch + Kraken and resolves the
           # baked-in Tridis recognition model before uvicorn ever binds this
           # port, so nothing answers /healthz at all until that cold import
@@ -62,7 +74,13 @@ spec:
               path: /healthz
               port: 8002
             periodSeconds: 5
-            failureThreshold: 60
+            # 120 x 5s = 10 minutes. 60 (5 min) was tried first and was not
+            # enough: on 2026-09-24 a staging pod on k3s-test exhausted it
+            # (61 probe failures, then "failed startup probe", exit 137) and
+            # only came up on the retry, with the image and page cache warm.
+            # The cold `import torch` + kraken under a 2-CPU quota is simply
+            # slower than that on a loaded node.
+            failureThreshold: 120
           readinessProbe:
             httpGet:
               path: /healthz
