@@ -479,6 +479,28 @@ active branches auto-deploy into it would only thrash both.
    taking production's classifier to `ImagePullBackOff` — and the fail-loudly guard
    wouldn't have caught it, since it only iterates the `sed` list.
 
+**`text-service` and `paco-classifier-service` roll out with `strategy: Recreate`, and
+three timeouts must stay ordered.** Both are `replicas: 1` and memory-heavy (2Gi / 3Gi),
+and every schedulable node in this cluster runs at 81-88% memory requests. Under the
+default RollingUpdate, `maxSurge` 25% rounds **up** to 1 while `maxUnavailable` 25%
+rounds **down** to 0 — so a rollout is required to hold the old *and* the new pod's
+reservation at once, the new pod has nowhere to land, and it sits in `FailedScheduling
+... Insufficient memory` until some unrelated workload frees memory (~8 minutes, on
+2026-09-25). `Recreate` drops the old pod first, so the replacement schedules into the
+space it just freed. Both services degrade softly during the gap, which is what makes
+this safe: `paco_api.py` falls back to raw-page stave detection, and `tasks_predict.py`
+logs a text-finding error and finishes the job without that page's alignment.
+
+The deadlines around it must satisfy **startupProbe budget < CI rollout wait <
+`progressDeadlineSeconds`**, currently 600s/300s < 900s < 1200s. The default
+`progressDeadlineSeconds` is 600s — *exactly* `text-service`'s startup budget before the
+image pull is even counted — so the Deployment declared the rollout Failed while the pod
+was still starting normally, and `kubectl rollout status` reported that failure no matter
+how long CI was willing to wait. **Raising the CI timeout cannot fix a progress-deadline
+trip**; the deadline belongs to the Deployment. Keeping CI's wait in the middle makes it
+the single place a deploy is judged, while a genuinely wedged pod is still caught sooner
+by its startupProbe killing the container into CrashLoopBackOff.
+
 A dispatched run executes the **selected branch's** copy of the workflow and of
 `k8s/staging/`, not `main`'s. That's what makes it possible to test manifest edits
 on the branch that makes them, but it also means a branch cut before the staging
