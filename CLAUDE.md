@@ -281,7 +281,7 @@ is also sent to `paco-classifier-service` (`landing-page/scripts/paco_api.py`'s
 `classify_stafflines()`, a plain-`urllib` HTTP bridge — see **Running
 locally** above for why this is its own service rather than an in-process
 import), which wraps the `paco-classifier/` submodule
-(`DDMAL/Paco_classifier`, branch `gianna/calvo-training-script`) — a
+(`DDMAL/Paco_classifier`, branch `main`) — a
 TensorFlow auto-encoder that splits the page into a background-only layer
 and a stafflines-only layer (both transparent PNGs). The weights,
 `paco-classifier/models_v4/{model_0.h5,model_1.h5}` (`model_0`=background,
@@ -478,6 +478,28 @@ active branches auto-deploy into it would only thrash both.
    *production*'s paco Deployment with the unrewritten `sha-0000000` placeholder,
    taking production's classifier to `ImagePullBackOff` — and the fail-loudly guard
    wouldn't have caught it, since it only iterates the `sed` list.
+
+**`text-service` and `paco-classifier-service` roll out with `strategy: Recreate`, and
+three timeouts must stay ordered.** Both are `replicas: 1` and memory-heavy (2Gi / 3Gi),
+and every schedulable node in this cluster runs at 81-88% memory requests. Under the
+default RollingUpdate, `maxSurge` 25% rounds **up** to 1 while `maxUnavailable` 25%
+rounds **down** to 0 — so a rollout is required to hold the old *and* the new pod's
+reservation at once, the new pod has nowhere to land, and it sits in `FailedScheduling
+... Insufficient memory` until some unrelated workload frees memory (~8 minutes, on
+2026-09-25). `Recreate` drops the old pod first, so the replacement schedules into the
+space it just freed. Both services degrade softly during the gap, which is what makes
+this safe: `paco_api.py` falls back to raw-page stave detection, and `tasks_predict.py`
+logs a text-finding error and finishes the job without that page's alignment.
+
+The deadlines around it must satisfy **startupProbe budget < CI rollout wait <
+`progressDeadlineSeconds`**, currently 600s/300s < 900s < 1200s. The default
+`progressDeadlineSeconds` is 600s — *exactly* `text-service`'s startup budget before the
+image pull is even counted — so the Deployment declared the rollout Failed while the pod
+was still starting normally, and `kubectl rollout status` reported that failure no matter
+how long CI was willing to wait. **Raising the CI timeout cannot fix a progress-deadline
+trip**; the deadline belongs to the Deployment. Keeping CI's wait in the middle makes it
+the single place a deploy is judged, while a genuinely wedged pod is still caught sooner
+by its startupProbe killing the container into CrashLoopBackOff.
 
 A dispatched run executes the **selected branch's** copy of the workflow and of
 `k8s/staging/`, not `main`'s. That's what makes it possible to test manifest edits
@@ -737,6 +759,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/job_store.py` | Postgres-backed job state: create/status/events (incl. `params`/`retry_of`/`attempt`), `check_cancelled()`/`JobCancelled` cooperative-cancellation helper, staged uploads, encode session/manifest storage, `run_periodic_cleanup()` |
 | `landing-page/scripts/jobs_api.py` | `GET /api/jobs/{id}/stream` (polls `job_events`, re-emits SSE frames), `POST /api/jobs/{id}/cancel`, `POST /api/jobs/{id}/retry` |
 | `landing-page/scripts/tasks_predict.py` / `tasks_encode.py` / `tasks_text_batch.py` / `tasks_cleanup.py` | Celery tasks: YOLO inference / MEI-building / batch text-finding work / periodic `job_uploads`+`job_sessions` cleanup, run out-of-request |
+| `landing-page/scripts/perf_log.py` | `stage_timer`/`timed` — per-stage `[timing]` lines in the job log and the resolved inference device; see **Where the time goes** below |
 | `landing-page/scripts/staffline_stage.py` | Staffline detection stage (component filter → centerline fit → stave grouping), wraps the `staff-finding/` package; called from `tasks_predict.py`, writes `staffline_detections` — see **Staffline detection** above |
 | `landing-page/scripts/pitch_stage.py` | Real pitch finding for the encode step — wraps the `pitch-finding/` submodule's algorithm #1, hands `build_mei()` a per-glyph pitch map + measured clef lines; called from `tasks_encode.py` — see **Pitch finding** below |
 | `landing-page/scripts/staffline_adapter.py` | Converts `staffline_detections`' JSOMR records into `encode_to_mei.py`'s `StaveBbox` shape; used by `tasks_encode.py` |
@@ -1026,6 +1049,99 @@ check in the repo's branch protection settings for `main` — that is a
 separate, repo-admin-level step, done in GitHub's own UI, not this file.
 
 ---
+
+## Where the time goes (per-stage timing)
+
+Predict and encode jobs emit `[timing]` lines into the same job log
+`ProcessingPage.tsx` already renders, via `landing-page/scripts/perf_log.py`'s
+`stage_timer(publish, label, **detail)` / `timed(label, **detail)`. Add one
+around any new stage; both are guaranteed never to raise and never to swallow
+the wrapped block's exception, because every stage they wrap is allowed to
+fail softly and report its own failure.
+
+What's measured today, per page: image decode, the text/music YOLO pass, the
+concurrent classifier+stave pass (paco and the stave YOLO split apart, since
+they run on different machines *and* different devices), staffline detection
+(with the stave-box count it iterated — that loop is linear in it), and
+text-finding; then a per-image and a per-job total. The encode task times the
+GameraXML parse, hint resolution, pitch finding, `build_mei`, and the
+manifest/session write. The auto-IC pass has no job-queue stream of its own, so
+`ic_api.py` returns its three IC round-trips' timings in the `auto-queue`
+response body and `utils/icQueue.ts` logs them to the browser console.
+
+**`resolve_yolo_models()` also logs the resolved device** (`describe_device()`,
+e.g. `cuda (NVIDIA H100L-1-12C MIG 1g.12gb)`). Before this there was no way at
+all to tell a GPU run from a CPU fallback except by how slow it was — and only
+YOLO uses the GPU. Everything else in the pipeline is CPU by construction:
+`paco-classifier-service` pins plain `tensorflow` (not `[and-cuda]`) and gets no
+GPU node, `text-service/Dockerfile` installs the CPU-only torch wheel
+deliberately, and `staff-finding`/`pitch-finding`/IC are numpy/scipy throughout.
+
+`paco-classifier-service` additionally reports its own server-side split in the
+terminal `result` SSE frame (`_timing_summary`) — how much of a `/classify` call
+was the **per-request** reload of both Keras `.h5` autoencoders versus the
+sliding-window inference, plus the patch and `predict()` call counts.
+`paco_api.classify_stafflines()` collects it through the optional `timing_out`
+out-param (additive on both sides: an older service simply sends no `timing`
+key, and a malformed one is ignored rather than failing the call).
+
+## Performance: what was slow, and what was done about it
+
+Measured 2026-09-24 on three MS234 pages (staging, warm). Per page: paco classify
+**13–15s**, text-finding **17–34s**, staffline detection ~2s, and both YOLO passes
+together **~0.25s**. The GPU was never the bottleneck — over 99% of a predict job is
+CPU work in `text-service` and `paco-classifier-service`. Anyone investigating
+"why is this slow" should start from the `[timing]` lines in the job log (see
+**Where the time goes** above), not from the model or the GPU.
+
+**Measured outcome of the two optimisations below: both were smaller than expected, and
+the measurement says why.** paco is **compute-bound, not overhead-bound** — ~167ms per
+256x256 autoencoder forward on 2 cores, so batching away Keras's per-call overhead bought
+only ~1.1x (output byte-identical, verified by hash). And text-finding is **~80% Kraken
+BLLA segmentation** (23s/page) with HTR only 2-7% (0.5-2s) — so caching the recognition
+model and skipping HTR for pre-filtered lines both target a small slice. What is left in
+both services is raw CPU forward-pass time. **The real lever is GPU access for
+`text-service` and `paco-classifier-service`, not more code tuning** — today only `worker`
+gets the MIG slice.
+
+**`paco-classifier` batches its sliding window.** `process_image_msae()` used to call
+`model.predict()` once per patch **per model** with a batch of exactly 1 — 84 Keras
+calls for a 1064×1342 page. It now batches one sliding-window row per call and uses
+`model(x, training=False)` (same inference arithmetic, without the per-call dataset/
+callback plumbing). Per-row batching bounds memory with no tuning knob. The `(row, col)`
+arithmetic is preserved **exactly**, quirks included — `row` was reassigned inside the
+inner loop so the bottom-edge clamp stuck for that row, and the column loop ranges over
+the *unpadded* width while rows use the padded height. The submodule's
+`tests/test_recognition_engine_batching.py` pins this against a transcription of the
+original loop and demands byte-identical output; it stubs TensorFlow, so it runs without
+a TF install. `load_model()` is also memoized per (path, mtime, size).
+
+**`mothra-text` caches its recognition model and filters before OCR.**
+`models.load_any()` ran once per page (and once per folio in `/batch-run`); it is now
+process-wide, keyed by `(model, device)`. The lock around it guards **inference too** —
+kraken's `TorchSeqRecognizer` keeps per-inference state on the object, so a shared
+instance without one can corrupt transcriptions across threads. Separately, the
+music-overlap and off-main-text-area filters moved from after Stage 3 to before it: both
+decide purely on `node.bbox`, so every line they dropped had been needlessly OCR'd. Their
+relative order is load-bearing (`_main_text_area` is computed from whichever nodes survive
+the music filter). The `"text"` field in the dropped-line payloads is now always `""`;
+nothing reads it.
+
+**Thread pools are pinned to the cgroup quota.** `nproc` reports the host's 8 CPUs inside
+every container while the quota is 2–3, and torch/TF size their intra-op pools from the
+former — which buys cfs throttling, not parallelism. `k8s/{,staging/}text-service.yaml`
+and `.../paco-classifier-service.yaml` set `OMP_NUM_THREADS` (plus `MKL_NUM_THREADS` /
+`TF_NUM_INTRAOP_THREADS`) to match each pod's own `limits.cpu`. **Keep them in step** —
+raising a CPU limit without raising these leaves the extra cores unused.
+
+Kraken's **segmentation** model is cached the same way. `blla.segment(model=None)` loads
+the bundled default *inside* the call, so every page paid a load before any segmentation
+ran; `_default_segmentation_model()` reproduces kraken's own resolution
+(`vgsl.TorchVGSLModel.load_model(resources.files("kraken")/"blla.mlmodel")`) once per
+process. It returns `None` on any failure, which falls through to
+`blla.segment(model=None)` — i.e. the old per-page behaviour — because this reaches into
+another project's resource layout and must degrade rather than break when a kraken
+upgrade moves things.
 
 ## Things that don't exist yet (planned)
 

@@ -32,6 +32,7 @@ import math
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
@@ -148,6 +149,49 @@ def _validate_classifier_models() -> str | None:
 
 
 _classifier_ready_error = _validate_classifier_models()
+
+def _timing_summary(timing: dict, shape) -> dict:
+    """Turn classify()'s raw perf_counter marks into the `timing` object the
+    result frame carries.
+
+    `model_load_s` is the prologue before the sliding window's first row --
+    dominated by recognition_engine.py's two `load_model()` calls, which run
+    per request (see the comment where `timing` is initialised). `inference_s`
+    is the sliding-window pass itself. `rows` is how many row-steps the window
+    took; with the 256px patch and 25px padding the stride is 205px, so the
+    patch count is roughly rows * ceil(width / 205), and each patch runs
+    `predict()` once per model at batch size 1.
+
+    Best-effort: this only ever feeds a log line, so a missing mark or a bad
+    shape yields a partial dict rather than an exception on the response path.
+    """
+    out: dict = {}
+    try:
+        started = timing.get("started_at")
+        first = timing.get("first_progress_at")
+        finished = timing.get("finished_at")
+        if started is not None and finished is not None:
+            out["total_s"] = round(finished - started, 3)
+        if started is not None and first is not None:
+            out["model_load_s"] = round(first - started, 3)
+            if finished is not None:
+                out["inference_s"] = round(finished - first, 3)
+        out["rows"] = timing.get("rows", 0)
+        stride = PATCH_WIDTH - 2 * 25 - 1
+        if stride > 0 and shape is not None and len(shape) >= 2:
+            cols = max(1, -(-int(shape[1]) // stride))
+            out["cols"] = cols
+            out["patches"] = out["rows"] * cols
+            # Model invocations, which is NOT patches*2 any more: the engine
+            # batches a whole sliding-window row per call, so it is one call
+            # per row per model. Reported as a measured-ish count rather than
+            # the old patches*2 estimate, which kept printing 84 after the
+            # code had dropped to 14 and made the batching look inert.
+            out["model_calls"] = out["rows"] * 2
+    except Exception:  # noqa: BLE001 - observability only, never fail the response
+        pass
+    return out
+
 
 def _layer_to_rgba_png(image: np.ndarray, label_map: np.ndarray, id_label: int) -> bytes:
     """One label's pixels, alpha-masked — ported verbatim from
@@ -296,13 +340,29 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
     # ever grows beyond that.
     progress_lock = threading.Lock()
     progress: dict = {"row": 0, "total": 0}
+    # Timing bookkeeping. `first_progress_at` is how the two halves of
+    # process_image_msae() get told apart without patching the submodule:
+    # recognition_engine.py loads BOTH .h5 autoencoders (its lines 88-90)
+    # before the sliding-window loop (its line 103) emits its first
+    # progress callback, so the gap between "thread started" and "first
+    # callback" is the model load plus the resize/padding prologue, and
+    # everything after it is inference. That split is the whole point --
+    # those models are reloaded from disk on EVERY /classify call, and
+    # until now nothing anywhere measured what that costs per page versus
+    # the inference it precedes.
+    timing: dict = {"started_at": None, "first_progress_at": None,
+                    "finished_at": None, "rows": 0}
 
     def _on_progress(row: int, total: int) -> None:
         with progress_lock:
             progress["row"] = row
             progress["total"] = total
+            if timing["first_progress_at"] is None:
+                timing["first_progress_at"] = time.perf_counter()
+            timing["rows"] += 1
 
     def _run():
+        timing["started_at"] = time.perf_counter()
         try:
             outcome["label_map"] = recognition_engine.process_image_msae(
                 img,
@@ -317,6 +377,11 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
             outcome["cancelled"] = True
         except Exception as exc:  # noqa: BLE001 - reported back to the request handler, not raised in this thread
             outcome["error"] = exc
+        finally:
+            # In a `finally` so a cancelled or failed page still reports how
+            # long it ran before it stopped -- the case where the number is
+            # most worth having.
+            timing["finished_at"] = time.perf_counter()
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -389,10 +454,15 @@ async def classify(request: Request, image: Annotated[UploadFile, File()]):
 
         background_png = _layer_to_rgba_png(img, label_map, BACKGROUND_LABEL)
         stafflines_png = _layer_to_rgba_png(img, label_map, STAFFLINES_LABEL)
+        # Additive field: paco_api.py reads it when present and ignores it
+        # when absent, so an older service and an older caller both keep
+        # working against a newer counterpart (tests/test_paco_api.py's
+        # fixture frames carry no "timing" key at all).
         yield "data: " + json.dumps({
             "type": "result",
             "background_png_base64": base64.b64encode(background_png).decode(),
             "stafflines_png_base64": base64.b64encode(stafflines_png).decode(),
+            "timing": _timing_summary(timing, img.shape[:2]),
         }) + "\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
