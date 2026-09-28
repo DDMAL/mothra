@@ -14,6 +14,32 @@ export interface EncodePair {
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "");
 
 /**
+ * Per-page timing for the automatic IC pass, to the browser console.
+ *
+ * The auto pass is a strictly sequential loop of blocking round-trips
+ * (IcAutoQueue's own loop, then this module's), and none of it goes through
+ * the job-queue SSE stream that ProcessingPage renders — so unlike predict
+ * and encode, there was no log anywhere showing where a slow pass spent its
+ * time. The console is the right surface for it: it is per-page diagnostic
+ * detail, not something the pipeline UI should grow a panel for.
+ *
+ * `detail` carries the backend's own breakdown when it sent one
+ * (ic_api.py's `timing`: the /staging upload, the classify round, the
+ * GameraXML export, and the size of the response the classify round
+ * returns).
+ */
+function logTiming(
+  imageName: string,
+  label: string,
+  detail: Record<string, unknown>,
+) {
+  const parts = Object.entries(detail)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}=${typeof v === "number" ? v.toFixed(2) : v}`);
+  console.info(`[timing] ic ${label} — ${imageName}: ${parts.join(", ")}`);
+}
+
+/**
  * Turn IC's GameraXML (base64) + a project image into an encode pair. Shared
  * by the interactive path (which builds its pairs when "encode batch" is
  * pressed, not when a page is queued — see InteractiveClassifier's
@@ -27,9 +53,14 @@ export async function buildEncodePair(
   const xmlFile = new File([xmlBytes], `${stemOf(image.name)}.xml`, {
     type: "application/xml",
   });
+  const fetchStart = performance.now();
   const imgResp = await apiFetch(`/api/images/${image.id}`);
   if (!imgResp.ok) throw new Error(`image fetch failed (${imgResp.status})`);
   const blob = await imgResp.blob();
+  logTiming(image.name, "image-refetch", {
+    seconds: (performance.now() - fetchStart) / 1000,
+    bytes: blob.size,
+  });
   const imageFile = new File([blob], image.name, {
     type: blob.type || "image/png",
   });
@@ -47,6 +78,7 @@ export async function autoQueueImage(
   trainingPresets: string[],
   trainingFiles: File[],
 ): Promise<EncodePair> {
+  const queueStart = performance.now();
   const form = new FormData();
   form.append("imageName", image.name);
   // CodeRabbit (ic_api.py#L254): image_name alone can't disambiguate a
@@ -62,5 +94,9 @@ export async function autoQueueImage(
   });
   if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
   const data = await r.json();
+  logTiming(image.name, "auto-queue", {
+    seconds: (performance.now() - queueStart) / 1000,
+    ...(data.timing ?? {}),
+  });
   return buildEncodePair(image, data.xml_base64);
 }

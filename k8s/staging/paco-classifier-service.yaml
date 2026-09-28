@@ -8,6 +8,44 @@ metadata:
     mothra.env: staging
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate. At replicas=1 the RollingUpdate
+  # defaults are maxSurge 25% (rounds UP to 1) and maxUnavailable 25% (rounds
+  # DOWN to 0), so a rollout is required to run the OLD and the NEW pod at the
+  # same time -- 3Gi of reservations at once for this Deployment. Every
+  # schedulable node in this cluster sits at 81-88% memory requests, so the new
+  # pod has nowhere to go: it stays Pending with
+  # "FailedScheduling ... Insufficient memory" until some unrelated workload
+  # frees memory, which on 2026-09-25 took ~8 minutes.
+  #
+  # The Deployment's own progressDeadlineSeconds (600s, the default) then marks
+  # the rollout Failed and CI's `kubectl rollout status` exits non-zero -- on a
+  # deploy that is not broken and that completed a minute later. Raising the CI
+  # timeout cannot fix this: the deadline belongs to the Deployment, not to the
+  # wait, so `rollout status` reports failure the moment it trips regardless of
+  # how long CI is willing to wait.
+  #
+  # Recreate terminates the old pod BEFORE scheduling the new one, so only one
+  # 3Gi reservation exists at a time and the replacement schedules into the
+  # space the old pod just freed. The cost is a gap with no classifier:
+  # paco_api.py already falls back to running the stave model on the raw
+  # page when this service is unreachable (see CLAUDE.md, Staffline
+  # detection), so a predict job that lands in the gap degrades to the
+  # pre-classifier behaviour rather than failing.
+  strategy:
+    type: Recreate
+  # progressDeadlineSeconds must sit ABOVE this pod's own startup budget, or
+  # the Deployment declares the rollout Failed while the pod is still starting
+  # legitimately. The default is 600s against a 300s startupProbe budget
+  # (60 x 5s) below -- which leaves under 5 minutes for the image pull, and a
+  # cold pull of this image was measured at 4m28s on k3s-test. 1200s keeps the
+  # decision with CI's `rollout status --timeout=900s` (build-images.yml),
+  # which is the single place a deploy is judged. A pod that is genuinely
+  # wedged is still caught, and faster: the startupProbe kills the container
+  # at 300s and it CrashLoopBackOffs.
+  #
+  # Ordering to preserve when any of these move:
+  #   startupProbe budget  <  CI rollout wait  <  progressDeadlineSeconds
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: paco-classifier-service-staging
@@ -54,6 +92,19 @@ spec:
           # failing every /classify call -- see main.py's health()/ready()
           # docstrings.
           #
+          # Thread pinning -- same reasoning as text-service.yaml's: `nproc`
+          # reports the host's 8 CPUs inside this container while the cgroup
+          # quota is the limit below, and TensorFlow sizes its intra-op pool
+          # from the former. TF_NUM_*OP_THREADS are read by TF at import,
+          # before any tf.config.threading call the app could make.
+          # Keep in step with resources.limits.cpu below.
+          env:
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: TF_NUM_INTRAOP_THREADS
+              value: "2"
+            - name: TF_NUM_INTEROP_THREADS
+              value: "1"
           # startupProbe: main.py loads TensorFlow and both Keras models
           # synchronously at MODULE IMPORT time, before uvicorn ever binds
           # this port -- so nothing answers /health or /ready at all until

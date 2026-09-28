@@ -42,6 +42,7 @@ from pydantic import BaseModel
 from config import IC_API_URL, IC_PUBLIC_URL
 
 from auth_api import get_current_user, db_cursor, require_project_owner
+from perf_log import timed
 
 logger = logging.getLogger(__name__)
 
@@ -738,8 +739,18 @@ async def ic_auto_queue(
         ("page_image", imageName, mime_type, image_bytes),
         ("annotations", "annotations.json", "application/json", annotations),
     ]
+    # Auto mode classifies every page through this handler, one blocking
+    # round-trip at a time, and until now reported nothing about where that
+    # time went -- a slow pass was indistinguishable from a hung one. Each
+    # of the three IC calls below is timed separately because they cost
+    # wildly different amounts: /staging is an upload, /sessions/from-staging
+    # is where IC actually runs the kNN classify round (and re-parses the
+    # whole training set), and /complete is the GameraXML export.
+    ic_timing: dict = {}
     try:
-        s_status, s_raw = _post_multipart(f"{IC_API_URL}/staging", fields=stage_fields, files=stage_files)
+        with timed("ic/staging", image=imageName) as t_stage:
+            s_status, s_raw = _post_multipart(f"{IC_API_URL}/staging", fields=stage_fields, files=stage_files)
+        ic_timing["staging_s"] = round(t_stage.seconds or 0.0, 3)
     except urllib.error.URLError as exc:
         raise _ic_unreachable(exc)
     if s_status >= 400:
@@ -764,9 +775,16 @@ async def ic_auto_queue(
             ("training_files", tf.filename or "training.xml", "application/xml", await tf.read())
         )
     try:
-        status, raw = _post_multipart(
-            f"{IC_API_URL}/sessions/from-staging", fields=create_fields, files=create_files
-        )
+        with timed("ic/sessions/from-staging", image=imageName) as t_create:
+            status, raw = _post_multipart(
+                f"{IC_API_URL}/sessions/from-staging", fields=create_fields, files=create_files
+            )
+        ic_timing["classify_s"] = round(t_create.seconds or 0.0, 3)
+        # IC answers this with a full SessionDTO -- every page glyph AND
+        # every training glyph, each base64-PNG-encoded -- of which the
+        # next line reads exactly one field. Recording the size makes the
+        # cost of that visible instead of merely known.
+        ic_timing["classify_response_bytes"] = len(raw)
     except urllib.error.URLError as exc:
         raise _ic_unreachable(exc)
     if status >= 400:
@@ -779,9 +797,11 @@ async def ic_auto_queue(
     # session stays resumable through "reopen a saved session" instead of
     # being retired the moment the automatic pass classifies it.
     try:
-        c_status, c_raw, _headers = _post_empty(
-            f"{IC_API_URL}/sessions/{session_id}/complete?page=true&finalize=false"
-        )
+        with timed("ic/complete", image=imageName) as t_complete:
+            c_status, c_raw, _headers = _post_empty(
+                f"{IC_API_URL}/sessions/{session_id}/complete?page=true&finalize=false"
+            )
+        ic_timing["export_s"] = round(t_complete.seconds or 0.0, 3)
     except urllib.error.HTTPError as exc:
         raise HTTPException(status_code=exc.code, detail=f"IC complete failed: {exc.read()[:500]!r}")
     except urllib.error.URLError as exc:
@@ -794,4 +814,7 @@ async def ic_auto_queue(
         "session_id": session_id,
         "xml_base64": base64.b64encode(c_raw).decode(),
         "filename": f"{stem}.xml",
+        # Additive: IcAutoQueue's caller logs this per page. Nothing in the
+        # response contract depends on it.
+        "timing": ic_timing,
     }

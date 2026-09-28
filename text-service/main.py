@@ -150,14 +150,27 @@ class _QueueLogHandler(logging.Handler):
 
     Filtered by thread identity so concurrent /run requests (each with its
     own worker thread) don't cross-talk on the shared root logger.
+
+    Every relayed line is prefixed with seconds elapsed since this handler
+    was created, i.e. since the request started doing work. run_pipeline.py
+    already logs each stage boundary ("Stage 1: Kraken line segmentation",
+    "Stage 3: Kraken HTR recognition", ...), so stamping the relay turns logs
+    we were already shipping into a per-stage timeline -- which is the only
+    way to see, from outside, whether a slow page went slow in segmentation,
+    in HTR, or in NW allocation. Doing it here rather than in the pipeline
+    keeps the mothra-text submodule untouched.
+
+    A monotonic clock, so the numbers survive a wall-clock adjustment
+    mid-request.
     """
 
     def __init__(self, q: "queue.Queue[dict]"):
         super().__init__()
         self.q = q
         self.thread_ident: Optional[int] = None
+        self.started_at = _time.monotonic()
         self.setFormatter(logging.Formatter("%(message)s"))
-    
+
     def emit(self, record: logging.LogRecord) -> None:
         if self.thread_ident is None or record.thread != self.thread_ident:
             return
@@ -165,7 +178,13 @@ class _QueueLogHandler(logging.Handler):
             message = self.format(record)
         except Exception:
             message = record.getMessage()
-        self.q.put({"type": "log", "message": f"[{record.levelname}] {message}"})
+        try:
+            stamp = f"+{_time.monotonic() - self.started_at:6.2f}s "
+        except Exception:
+            # A log line is worth more than its timestamp -- never let the
+            # stamping itself drop the record.
+            stamp = ""
+        self.q.put({"type": "log", "message": f"{stamp}[{record.levelname}] {message}"})
 
 
 @app.get("/cantus-source/{source_id}")

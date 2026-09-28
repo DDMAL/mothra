@@ -45,6 +45,36 @@ def resolve_device(requested: Optional[str]) -> str:
         return "cuda"
     return "cpu"
 
+
+def describe_device(device: str) -> str:
+    """Human-readable form of an already-resolved device, for the job log.
+
+    Until this existed there was NO way to tell, from the UI or from a
+    downloaded job log, whether inference had run on the GPU or silently
+    fallen back to CPU -- resolve_device() picks the device from
+    torch.cuda.is_available() and reports nothing, so a worker that had
+    lost its CUDA device (a MIG instance the NVIDIA runtime failed to
+    inject, a CPU-only node, a torch build without CUDA) looked identical
+    to a healthy one apart from being many times slower. That is exactly
+    the question a "why is this slow?" investigation starts with.
+
+    Best-effort by design: the device name is a nicety, so every failure
+    path here degrades to the bare device string rather than raising into
+    a caller whose only job was to load a model.
+    """
+    if not str(device).startswith("cuda"):
+        return str(device)
+    try:
+        import torch
+        idx = 0
+        _, _, suffix = str(device).partition(":")
+        if suffix.isdigit():
+            idx = int(suffix)
+        return f"{device} ({torch.cuda.get_device_name(idx)})"
+    except Exception:
+        return str(device)
+
+
 def to_bgr(arr):
     """Ultralytics treats a raw array input as already BGR (matching what its own
     file-path loader produces via cv2). Every image array in this codebase is
@@ -207,7 +237,11 @@ def resolve_yolo_models(
             model_label="medieval manuscripts (text_music_detector_fulldata.pt + stave_detector_fulldata.pt)",
             model_hash=None,
         )
-        return model_set, ["medieval manuscripts preset: loaded text/music + stave detectors"]
+        return model_set, [
+            "medieval manuscripts preset: loaded text/music + stave detectors",
+            f"inference device: text/music={describe_device(tm_device)},"
+            f" staves={describe_device(st_device)}",
+        ]
     
     model_row = get_model_file_path(cur, project_id, model_id, "yolo")
     if not model_row:
@@ -226,7 +260,10 @@ def resolve_yolo_models(
         stored_model_id=model_id,
         model_label=f"custom: {model_name}", model_hash=file_hash,
     )
-    return model_set, [f"Model loaded: {model_name}"]
+    return model_set, [
+        f"Model loaded: {model_name}",
+        f"inference device: {describe_device(device)}",
+    ]
 
 def write_annotation(cur, con, project_id: int, image_id: str, image_name: str,
                      yolo_txt: str, stored_model_id: str, model_label: str,

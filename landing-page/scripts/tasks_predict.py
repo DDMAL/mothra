@@ -1,6 +1,7 @@
 import io
 import logging
 import threading
+import time
 from pathlib import Path
 
 from celery_app import celery_app
@@ -9,11 +10,12 @@ from auth_api import get_db_conn, release_db_conn, _log_activity
 from yolo_inference import resolve_yolo_models, write_annotation
 from models_api import get_model_file_path
 from text_api import stream_text_finding
-from staffline_stage import run_staffline_detection, has_class, STAFFLINE_CLASS_ID
+from staffline_stage import run_staffline_detection, has_class, count_class, STAFFLINE_CLASS_ID
 from paco_api import (
     classify_stafflines, abort_classify_request, PacoClassifierError,
     CATEGORY_MALFORMED_RESPONSE,
 )
+from perf_log import stage_timer, timed
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +148,32 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
             progress_state["total"] = total
 
     def _stave_pipeline() -> None:
+        # Timed with `timed()`, not `stage_timer()`: this runs on the
+        # background thread, which must never call publish() (see this
+        # function's "no shared DB state" invariant above). The elapsed
+        # seconds are stashed in stave_result for the MAIN thread to
+        # publish after the join, exactly like every other value this
+        # thread produces. Splitting the classifier call from the stave
+        # YOLO pass matters because they run on different machines and
+        # different devices -- paco is CPU-only on its own pod, the YOLO
+        # pass is CUDA in this process -- so one combined number would hide
+        # which of the two is actually the long pole.
         try:
-            stafflines_png, background_png = classify_stafflines(
-                image_bytes, mime_type, conn_holder=conn_holder,
-                progress_callback=_on_paco_progress,
-            )
+            paco_timing: dict = {}
+            with timed("paco-classify", image=image_name) as paco_t:
+                stafflines_png, background_png = classify_stafflines(
+                    image_bytes, mime_type, conn_holder=conn_holder,
+                    progress_callback=_on_paco_progress,
+                    timing_out=paco_timing,
+                )
+            stave_result["paco_seconds"] = paco_t.seconds
+            # The service's own breakdown of that same call -- empty against
+            # a paco-classifier-service too old to report it.
+            stave_result["paco_timing"] = paco_timing
             arr = _decode_paco_layer(stafflines_png, img_arr.shape)
-            stave_result["yolo_txt"] = yolo_models.infer_staves(arr)
+            with timed("yolo-staves", image=image_name) as st_t:
+                stave_result["yolo_txt"] = yolo_models.infer_staves(arr)
+            stave_result["stave_yolo_seconds"] = st_t.seconds
             stave_result["source_arr"] = arr  # RGB by this point -- see _decode_paco_layer's SF-4 comment
             stave_result["classifier_png"] = stafflines_png  # raw bytes, pre-conversion -- see mothra#207
             stave_result["background_png"] = background_png  # raw bytes, unused for detection -- see mothra#286
@@ -163,7 +184,8 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
 
     thread = threading.Thread(target=_stave_pipeline, daemon=True)
     thread.start()
-    tm_txt = yolo_models.infer_text_music(img_arr)
+    with stage_timer(publish, "yolo-text-music", image=image_name):
+        tm_txt = yolo_models.infer_text_music(img_arr)
 
     if job_id is None:
         thread.join()
@@ -214,6 +236,23 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
         # completed normally.
         check_cancelled(job_id)
 
+    # The background thread's own measurements, published from here
+    # because only the main thread may publish. Absent when the classifier
+    # call raised before either timer closed, which the fallback branch
+    # below reports separately anyway.
+    if stave_result.get("paco_seconds") is not None:
+        publish({"type": "log", "message":
+                 f"[timing] classifier+staves (concurrent with text/music):"
+                 f" paco-classify={stave_result['paco_seconds']:.2f}s,"
+                 f" yolo-staves={stave_result.get('stave_yolo_seconds') or 0:.2f}s"
+                 f" (image={image_name})"})
+        server_timing = stave_result.get("paco_timing") or {}
+        if server_timing:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(server_timing.items()))
+            publish({"type": "log", "message":
+                     f"[timing] paco-classify server-side breakdown: {detail}"
+                     f" (image={image_name})"})
+
     if "error" in stave_result:
         reason = stave_result["error_reason"]
         publish({
@@ -221,7 +260,8 @@ def _run_medieval_inference(yolo_models, img_arr, image_bytes, mime_type, image_
             "message": f"warning: {image_name}: staffline classifier unavailable ({stave_result['error']}) — falling back to raw-image stave detection",
             "reason": reason,
         })
-        st_txt = yolo_models.infer_staves(img_arr)
+        with stage_timer(publish, "yolo-staves-raw-page-fallback", image=image_name):
+            st_txt = yolo_models.infer_staves(img_arr)
         source_arr = img_arr  # RGB (img_arr is always PIL-decoded) -- see SF-4 comment above
         source_label = "raw_page_fallback"
         classifier_image_bytes = None
@@ -415,11 +455,24 @@ def run_predict_task(job_id, project_id, body):
         fallback_images: list[tuple[str, "str | None"]] = []
         text_debug_mode = body.get("text_debug_mode", False)
         text_debug_data: dict = {}
+        # Wall-clock for the whole loop, reported once at the end so a run
+        # can be checked against the sum of its parts -- the per-stage
+        # numbers below only add up to this if nothing significant is
+        # running unmeasured between them.
+        job_t0 = time.perf_counter()
         for idx, (image_id, image_name, image_data, mime_type, image_folio, has_annotation, has_text_alignment, used_original) in enumerate(images):
             check_cancelled(job_id)
             publish({"type": "item_start", "item": idx, "total": len(images), "name": image_name})
-            pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
-            img_arr = np.array(pil_img)
+            # Not a `with stage_timer(...)` around the loop body: the body
+            # has two exits (the has_text_alignment `continue` and falling
+            # off the end), and re-indenting ~100 lines to wrap them would
+            # be a far larger diff than this pair of markers for the same
+            # measurement.
+            image_t0 = time.perf_counter()
+            with stage_timer(publish, "image-decode", image=image_name) as decode_t:
+                pil_img = Image.open(io.BytesIO(bytes(image_data))).convert("RGB")
+                img_arr = np.array(pil_img)
+                decode_t.note(size=f"{pil_img.width}x{pil_img.height}")
             image_storage_variant = "original" if used_original else "working_copy"
             if has_annotation:
                 publish({"type": "log", "message": f"{image_name}: already annotated — skipping YOLO"})
@@ -454,7 +507,8 @@ def run_predict_task(job_id, project_id, body):
                         job_id=job_id,
                     )
                 else:
-                    yolo_txt = yolo_models.infer(img_arr)
+                    with stage_timer(publish, "yolo-infer", image=image_name):
+                        yolo_txt = yolo_models.infer(img_arr)
                     staffline_source_arr = img_arr  # RGB -- see SF-4 comment in _run_medieval_inference
                     staffline_source_label = "raw_page"  # non-medieval preset has no classifier to choose between
                     classifier_image_bytes = None
@@ -518,55 +572,70 @@ def run_predict_task(job_id, project_id, body):
                     yolo_models.infer_staves_raw_boxes
                     if yolo_models.medieval_models is not None else None
                 )
-                for sf_ev in run_staffline_detection(
-                    job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
-                    redetect_fn=redetect_fn, source_label=staffline_source_label,
-                    storage_variant=image_storage_variant,
-                    classifier_image_bytes=classifier_image_bytes,
-                    classifier_error=staffline_classifier_error,
-                    background_image_bytes=background_image_bytes,
+                with stage_timer(
+                    publish, "staffline-detection", image=image_name,
+                    stave_boxes=count_class(yolo_txt, STAFFLINE_CLASS_ID),
+                    source=staffline_source_label,
                 ):
-                    if sf_ev.get("type") == "error":
-                        publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
-                    else:
-                        publish(sf_ev)
+                    for sf_ev in run_staffline_detection(
+                        job_id, cur, con, project_id, image_id, image_name, ann_id, staffline_source_arr, yolo_txt,
+                        redetect_fn=redetect_fn, source_label=staffline_source_label,
+                        storage_variant=image_storage_variant,
+                        classifier_image_bytes=classifier_image_bytes,
+                        classifier_error=staffline_classifier_error,
+                        background_image_bytes=background_image_bytes,
+                    ):
+                        if sf_ev.get("type") == "error":
+                            publish({"type": "log", "message": f"staffline-detection: {sf_ev.get('message', 'failed')}"})
+                        else:
+                            publish(sf_ev)
 
             if has_text_alignment:
                 publish({"type": "log", "message": f"{image_name}: text already found — skipping text-finding"})
+                publish({"type": "log", "message":
+                         f"[timing] image total: {time.perf_counter() - image_t0:.2f}s"
+                         f" (image={image_name})"})
                 publish({"type": "item_done", "item": idx})
                 publish({"type": "stage_done", "name": "processing"})
                 continue
 
             publish({"type": "log", "message": f"{image_name}: starting text-finding..."})
-            for text_ev in stream_text_finding(
-                project_id, image_id, image_name,
-                bytes(image_data), mime_type,
-                column_count=body.get("text_column_count"),
-                segmentation_model=seg_model_path,
-                recognition_model=rec_model_path,
-                device=body.get("text_device", "cpu"),
-                column_bimodal_threshold=body.get("text_column_bimodal_threshold", 0.5),
-                masking_enabled=body.get("text_masking_enabled", True),
-                mask_padding=body.get("text_mask_padding", 15),
-                music_overlap_filter_enabled=body.get("text_music_overlap_filter_enabled", True),
-                mask_json_override=mask_json_override,
-                source_id=body.get("text_source_id") if image_folio else None,
-                folio_override=image_folio,
-                debug_mode=text_debug_mode,
-                # mothra#260: image_data is original_data whenever used_original
-                # (see the SF-2 comment above) -- syl_boxes come back in that
-                # frame, so the viewer needs to know to display against
-                # /original rather than the resized working copy.
-                storage_variant="original" if used_original else "working_copy",
-            ):
-                if text_ev.get("type") == "log":
-                    publish(text_ev)
-                elif text_ev.get("type") == "error":
-                    publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
-                elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
-                    text_debug_data[image_name] = text_ev["debug_data"]
+            with stage_timer(publish, "text-finding", image=image_name):
+                for text_ev in stream_text_finding(
+                    project_id, image_id, image_name,
+                    bytes(image_data), mime_type,
+                    column_count=body.get("text_column_count"),
+                    segmentation_model=seg_model_path,
+                    recognition_model=rec_model_path,
+                    device=body.get("text_device", "cpu"),
+                    column_bimodal_threshold=body.get("text_column_bimodal_threshold", 0.5),
+                    masking_enabled=body.get("text_masking_enabled", True),
+                    mask_padding=body.get("text_mask_padding", 15),
+                    music_overlap_filter_enabled=body.get("text_music_overlap_filter_enabled", True),
+                    mask_json_override=mask_json_override,
+                    source_id=body.get("text_source_id") if image_folio else None,
+                    folio_override=image_folio,
+                    debug_mode=text_debug_mode,
+                    # mothra#260: image_data is original_data whenever used_original
+                    # (see the SF-2 comment above) -- syl_boxes come back in that
+                    # frame, so the viewer needs to know to display against
+                    # /original rather than the resized working copy.
+                    storage_variant="original" if used_original else "working_copy",
+                ):
+                    if text_ev.get("type") == "log":
+                        publish(text_ev)
+                    elif text_ev.get("type") == "error":
+                        publish({"type": "log", "message": f"text-finding: {text_ev.get('message', 'failed')}"})
+                    elif text_ev.get("type") == "result" and text_ev.get("debug_data"):
+                        text_debug_data[image_name] = text_ev["debug_data"]
+            publish({"type": "log", "message":
+                     f"[timing] image total: {time.perf_counter() - image_t0:.2f}s"
+                     f" (image={image_name})"})
             publish({"type": "item_done", "item": idx})
             publish({"type": "stage_done", "name": "processing"})
+        publish({"type": "log", "message":
+                 f"[timing] all images: {time.perf_counter() - job_t0:.2f}s"
+                 f" ({len(images)} image(s))"})
         if not images:
             # mothra#236: no item ever ran (every requested image was already
             # fully processed -- see the "skipped" bookkeeping in the

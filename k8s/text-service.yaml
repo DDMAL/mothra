@@ -7,6 +7,44 @@ metadata:
     app: text-service
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate. At replicas=1 the RollingUpdate
+  # defaults are maxSurge 25% (rounds UP to 1) and maxUnavailable 25% (rounds
+  # DOWN to 0), so a rollout is required to run the OLD and the NEW pod at the
+  # same time -- 2Gi of reservations at once for this Deployment. Every
+  # schedulable node in this cluster sits at 81-88% memory requests, so the new
+  # pod has nowhere to go: it stays Pending with
+  # "FailedScheduling ... Insufficient memory" until some unrelated workload
+  # frees memory, which on 2026-09-25 took ~8 minutes.
+  #
+  # The Deployment's own progressDeadlineSeconds (600s, the default) then marks
+  # the rollout Failed and CI's `kubectl rollout status` exits non-zero -- on a
+  # deploy that is not broken and that completed a minute later. Raising the CI
+  # timeout cannot fix this: the deadline belongs to the Deployment, not to the
+  # wait, so `rollout status` reports failure the moment it trips regardless of
+  # how long CI is willing to wait.
+  #
+  # Recreate terminates the old pod BEFORE scheduling the new one, so only one
+  # 2Gi reservation exists at a time and the replacement schedules into the
+  # space the old pod just freed. The cost is a gap with no text-service:
+  # it is called server-to-server by the worker, never by a browser, and
+  # tasks_predict.py publishes a text-finding error as a log line and keeps
+  # going (the page simply gets no text alignment), so a predict job that
+  # lands in the gap still completes.
+  strategy:
+    type: Recreate
+  # progressDeadlineSeconds must sit ABOVE this pod's own startup budget, or
+  # the Deployment declares the rollout Failed while the pod is still starting
+  # legitimately. The default is 600s -- exactly equal to this pod's
+  # startupProbe budget below (120 x 5s = 10 min), before the image pull is
+  # even counted -- so any start that actually used its grace tripped it.
+  # 1200s keeps the decision with CI's `rollout status --timeout=900s`
+  # (build-images.yml), which is the single place a deploy is judged. A pod
+  # that is genuinely wedged is still caught, and faster: the startupProbe
+  # kills the container at 600s and it CrashLoopBackOffs.
+  #
+  # Ordering to preserve when any of these move:
+  #   startupProbe budget  <  CI rollout wait  <  progressDeadlineSeconds
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: text-service
@@ -30,6 +68,56 @@ spec:
           # text-service has no DB/broker of its own to distinguish readiness
           # from liveness on (see main.py's healthz() docstring), so both probes
           # point at the same endpoint, unlike backend.yaml's split.
+          # Thread pinning. Nothing set these before, so torch sized its
+          # intra-op pool from the HOST cpu count -- `nproc` reports 8 inside
+          # this container while the cgroup quota below is 2 -- which buys
+          # cfs throttling and context-switch churn, not parallelism. torch
+          # reads OMP_NUM_THREADS at import for its intra-op pool, so this
+          # has to be env rather than a set_num_threads() call somewhere in
+          # the app. Keep in step with resources.limits.cpu below.
+          env:
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: MKL_NUM_THREADS
+              value: "2"
+          # startupProbe: main.py imports torch + Kraken and resolves the
+          # baked-in Tridis recognition model before uvicorn ever binds this
+          # port, so nothing answers /healthz at all until that cold import
+          # finishes. Without this, livenessProbe's own schedule below (30s
+          # initial delay + 3 failures 15s apart) kills the container for
+          # "not up yet" at ~75s -- comfortably shorter than that import
+          # takes under this pod's 2-CPU limit on a cold page cache -- and
+          # then does it again to the replacement, forever. Observed for
+          # real on 2026-09-24: staging took SIX restarts to come up, and
+          # production restarted once the same afternoon (exit 137,
+          # "Container text-service failed liveness probe, will be
+          # restarted"). This is the same failure paco-classifier-service
+          # already guards against for the same reason -- see the much
+          # longer note in paco-classifier-service.yaml; text-service was
+          # simply never given the same treatment.
+          #
+          # A startupProbe suspends BOTH liveness and readiness until it
+          # succeeds once, so a slow-but-eventually-fine boot is no longer
+          # mistaken for a hang. failureThreshold * periodSeconds = 5
+          # minutes of grace, generous for a cold torch+Kraken import but
+          # still bounded -- a genuinely hung container still gets killed.
+          #
+          # This matters beyond boot flakiness: tasks_predict.py calls
+          # text-finding once PER IMAGE, so a predict job that starts while
+          # this pod is in that restart loop has every page's text stage
+          # fail against a service that isn't listening.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8002
+            periodSeconds: 5
+            # 120 x 5s = 10 minutes. 60 (5 min) was tried first and was not
+            # enough: on 2026-09-24 a staging pod on k3s-test exhausted it
+            # (61 probe failures, then "failed startup probe", exit 137) and
+            # only came up on the retry, with the image and page cache warm.
+            # The cold `import torch` + kraken under a 2-CPU quota is simply
+            # slower than that on a loaded node.
+            failureThreshold: 120
           readinessProbe:
             httpGet:
               path: /healthz

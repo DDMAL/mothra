@@ -82,3 +82,11 @@ k8s/secret.yaml
 k8s/staging/secret.yaml
 landing-page/.env.local
 celerybeat-schedule*
+
+# staff-finding/scripts/script_tests/test_merge.py writes debug renders here
+# when the suite runs (see its save_path= arguments). They are test OUTPUT,
+# not fixtures -- staff-finding/.dockerignore already excludes them from the
+# image for the same reason -- but nothing stopped `git add -A` from sweeping
+# them into a commit, which is exactly how two of them once landed on a
+# branch.
+staff-finding/mergetests/
