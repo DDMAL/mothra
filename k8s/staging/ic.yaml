@@ -52,6 +52,51 @@ spec:
                 secretKeyRef:
                   name: mothra-secrets-staging
                   key: DATABASE_URL
+          # startupProbe: ic imports its FastAPI app and builds its session
+          # store before uvicorn binds this port, so nothing answers on 8000
+          # at all until that finishes. Without this, livenessProbe's own
+          # schedule below (20s initial delay + 3 failures 15s apart) kills
+          # the container for "not up yet" at ~65s.
+          #
+          # Observed for real on 2026-09-28, deploying 0ebc8d3 to production:
+          # that pod was SIGTERMed (exit 143) exactly 60s after start, with
+          # "Liveness probe failed: dial tcp 10.42.0.171:8000: connect:
+          # connection refused", and only came up on the retry -- where the
+          # warm page cache got it listening in ~25s. The rollout survived on
+          # that retry alone. This is the same failure text-service and
+          # paco-classifier-service already guard against for the same
+          # reason; ic was simply never given the same treatment. Staging is
+          # the more exposed of the two environments here, not the less: it
+          # redeploys far more often and lands on k3s-test, which is where
+          # text-service's own startup budget was measured to be too small.
+          #
+          # A startupProbe suspends BOTH liveness and readiness until it
+          # succeeds once, so a slow-but-eventually-fine boot is no longer
+          # mistaken for a hang.
+          #
+          # httpGet /healthz, not the tcpSocket the two probes below use: it
+          # proves the ASGI app is actually serving rather than just that
+          # something bound the port, and it is safe to probe on a schedule
+          # because it returns 200 even when the database is unreachable --
+          # ic_api/main.py's healthz() keeps `status: "ok"` deliberately so
+          # that a DB hiccup cannot become a restart loop, and reports the
+          # store's reachability in the payload instead.
+          #
+          # failureThreshold * periodSeconds = 30 x 5s = 150s. That ceiling
+          # is not arbitrary: it must stay UNDER CI's
+          # `rollout status deploy/ic-staging --timeout=300s`
+          # (build-images.yml), which is a shorter wait than the 900s the
+          # other services get. Same ordering CLAUDE.md documents for
+          # text-service and paco:
+          #   startupProbe budget  <  CI rollout wait  <  progressDeadlineSeconds
+          # here 150s < 300s < 600s (the Deployment default, unset below).
+          # Raising this past 300s would hand the failure back to CI.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             tcpSocket:
               port: 8000

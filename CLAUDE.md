@@ -501,6 +501,19 @@ trip**; the deadline belongs to the Deployment. Keeping CI's wait in the middle 
 the single place a deploy is judged, while a genuinely wedged pod is still caught sooner
 by its startupProbe killing the container into CrashLoopBackOff.
 
+**`ic` obeys the same ordering, against a shorter CI wait.** It had no `startupProbe` at
+all until 2026-09-28, so its `livenessProbe` (20s delay + 3 failures 15s apart) killed it
+for "not up yet" at ~65s — observed on the production deploy of `0ebc8d3`, where the pod
+was SIGTERMed at exactly 60s with `connection refused` on 8000 and survived only because
+the retry booted warm in ~25s. Its budget is **150s (30 x 5s)**, and the ceiling is real:
+CI waits `--timeout=300s` on `ic` rather than the 900s the other services get (it is
+rolled out and waited on *before* `backend`, so a compatible IC exists when the backend's
+`verify_ic_finalize_support()` runs), giving **150s < 300s < 600s**. Raising `ic`'s budget
+past 300s hands the failure straight back to CI. Its `startupProbe` uses `httpGet
+/healthz` while its readiness/liveness probes are still bare `tcpSocket`: IC's `healthz()`
+returns `status: "ok"` even when the database is unreachable, deliberately, so probing it
+on a schedule cannot turn a DB hiccup into a restart loop.
+
 A dispatched run executes the **selected branch's** copy of the workflow and of
 `k8s/staging/`, not `main`'s. That's what makes it possible to test manifest edits
 on the branch that makes them, but it also means a branch cut before the staging

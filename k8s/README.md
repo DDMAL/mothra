@@ -213,6 +213,12 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
   deliberately does not, so a transient DB/broker outage pulls the pod out of
   rotation instead of killing and restarting it. `text-service` has no
   DB/broker of its own, so both its probes point at the same `/healthz`.
+  `ic` is the partial case: as of 2026-09-28 it has an `httpGet /healthz`
+  **startupProbe** (added after its livenessProbe killed it mid-boot at 60s on
+  a production deploy — see CLAUDE.md), but its readiness and liveness probes
+  are still bare `tcpSocket`. Converting those two is the remaining piece;
+  `healthz()` is safe for both, since it returns `status: "ok"` even when the
+  database is unreachable and reports store reachability in the payload.
 - ~~`init_db()`/`_migrate_db()` run at import → keep backend/worker at 1 replica~~
   **done (mothra#220 row 31)** — a one-shot `migrate-job.yaml` now runs the
   schema migration once per deploy, applied and waited-on by
