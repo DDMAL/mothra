@@ -205,6 +205,68 @@ curl -sSI https://mothra-ic.staging.simssa.ca/ | grep -iE 'content-security|fram
 kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 ```
 
+## Resource sizing
+
+These memory requests and limits are sized from Prometheus data, not guessed. The
+data is 14 days of `kube-prom-stack` metrics, 2026-09-20..10-04. Production and
+staging use the same values unless noted:
+
+| workload | memory request / limit | 14d working-set peak (prod / staging) |
+|---|---|---|
+| backend | 512Mi / 1Gi | 520Mi / 156Mi |
+| ic | 256Mi / 1Gi | 334Mi / 148Mi |
+| paco-classifier-service | 1536Mi / 3Gi | 833Mi / 1026Mi |
+| text-service | 1536Mi / 3Gi | **OOMKilled at the old 2Gi limit in both**, mid-job; normal jobs 0.9–1.4Gi |
+| worker | 4Gi / 4Gi (staging 2Gi / 4Gi) | 1774Mi / 1326Mi |
+| redis | 64Mi / 256Mi | 9Mi |
+
+- **Request:** steady state plus a normal job's peak, so normal work never goes
+  above its reservation. Under node memory pressure the kubelet evicts pods
+  that are over their request first.
+- **Limit:** the outlier peak plus headroom, at most ~2–3× the request. The
+  nodes these pods land on can be as small as 5.8Gi (`k3s-test`), so a large
+  gap between request and limit is real overcommit.
+- **CPU was left alone.** CPU requests are 31–65% of each node, and the
+  busiest node's p99 is ~1 of 8 cores, so memory is the only scarce resource.
+  Keep the `*_NUM_THREADS` env vars in step with `limits.cpu` if CPU ever
+  moves.
+
+### Re-measuring resource usage
+
+Prometheus keeps 15 days, so `[14d]` is the longest useful window. Port-forward
+it and paste these into the UI at `http://localhost:9090` (or `curl -sG
+localhost:9090/api/v1/query --data-urlencode query=...`):
+
+```bash
+kubectl -n monitoring port-forward svc/kube-prom-stack-kube-prome-prometheus 9090
+```
+
+```promql
+# Peak working set per workload in MiB, across every pod generation in the window
+max by (wl) (label_replace(
+  max_over_time(container_memory_working_set_bytes{namespace="mothra",container!="",container!="POD"}[14d]),
+  "wl", "$1", "pod", "(.*?)(-[a-z0-9]{8,10})?-[a-z0-9]{5}$")) / 2^20
+
+# Peak CPU (cores, 1m rate) per workload
+max by (wl) (label_replace(
+  max_over_time(rate(container_cpu_usage_seconds_total{namespace="mothra",container!="",container!="POD"}[1m])[14d:30s]),
+  "wl", "$1", "pod", "(.*?)(-[a-z0-9]{8,10})?-[a-z0-9]{5}$"))
+
+# OOM kills: the ground truth for "too small"
+max_over_time(kube_pod_container_status_last_terminated_reason{namespace="mothra",reason="OOMKilled"}[14d]) > 0
+
+# Memory requests as a fraction of each node's allocatable
+sum by (node) (kube_pod_container_resource_requests{resource="memory"}
+  and on (namespace, pod) (kube_pod_status_phase{phase=~"Running|Pending"} == 1))
+/ sum by (node) (kube_node_status_allocatable{resource="memory"})
+```
+
+Working set is scraped every ~15s, so a spike between scrapes never shows up.
+Staging's 2026-09-24 OOM kill was last sampled at 1385Mi before it died at
+2Gi. Treat an `OOMKilled` as proof that a limit is too small, even when the
+peak query says there was room. Also note how little traffic the window held
+(the services sat idle almost the whole time), and re-measure after real usage.
+
 ## Known follow-ups
 - ~~No real `/healthz` yet~~ **done (mothra#220 row 29)** — `backend`/`text-service`
   now have real `httpGet` probes too, matching `paco-classifier-service`'s
@@ -231,6 +293,6 @@ kubectl -n mothra describe ingress mothra-ic-staging | grep -i middlewares
 - text-service `/batch-download/{id}` uses local disk keyed by batch_id → needs
   shared storage or a single replica if batch downloads are used.
 - Sharing the `mothra` namespace means no `ResourceQuota` headroom check happens
-  automatically — staging adds ≈2 CPU / 8.6Gi of *requests* (paco-classifier-service
-  alone is 500m / 3Gi of that). Confirm with
+  automatically. Staging adds ≈2 CPU / 5.8Gi of *requests*, down from 8.6Gi
+  before the 2026-10-04 right-sizing (see **Resource sizing**). Confirm with
   `kubectl -n mothra describe quota,limitrange` if pods start failing admission.

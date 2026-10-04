@@ -480,8 +480,11 @@ active branches auto-deploy into it would only thrash both.
    wouldn't have caught it, since it only iterates the `sed` list.
 
 **`text-service` and `paco-classifier-service` roll out with `strategy: Recreate`, and
-three timeouts must stay ordered.** Both are `replicas: 1` and memory-heavy (2Gi / 3Gi),
-and every schedulable node in this cluster runs at 81-88% memory requests. Under the
+three timeouts must stay ordered.** Both are `replicas: 1` and memory-heavy, and on
+2026-09-25 every schedulable node in this cluster ran at 81-88% memory requests.
+The 2026-10-04 right-sizing (`k8s/README.md`'s **Resource sizing**, which also holds the
+PromQL to re-measure) cut both requests to 1536Mi,
+from 2Gi and 3Gi. That eases the squeeze but doesn't remove it, so Recreate stays. Under the
 default RollingUpdate, `maxSurge` 25% rounds **up** to 1 while `maxUnavailable` 25%
 rounds **down** to 0 — so a rollout is required to hold the old *and* the new pod's
 reservation at once, the new pod has nowhere to land, and it sits in `FailedScheduling
@@ -711,10 +714,10 @@ segmentation step got SIGKILL'd by the VM's OOM killer mid-request
 application bug rather than an OOM kill). `worker` (YOLO inference) and
 `text-service` (Kraken segmentation + HTR) are the two memory-heavy
 containers; `backend`/`ic`/`redis` are comparatively light. `paco-classifier-service`
-(TensorFlow sliding-window inference over a full page) is likely a third —
-not yet confirmed the same way as the other two, but its `k8s/` resource
-requests/limits are deliberately set higher than `backend`/`ic` as a
-starting assumption pending real usage data. If you see a service
+(TensorFlow sliding-window inference over a full page) is the third. On the cluster
+it peaked at ~1Gi over 14 days (Prometheus, to 2026-10-04). `text-service` is the
+heaviest per request: normal jobs peak at 0.9–1.4Gi, but both environments were
+OOMKilled mid-job at the old 2Gi limit, so its limit is now 3Gi. If you see a service
 unexpectedly exit with code 137 mid-job, check available memory before
 debugging application code.
 
