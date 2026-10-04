@@ -308,6 +308,40 @@ def manifest_get(session_id: str) -> Optional[dict]:
     finally:
         release_db_conn(con)
 
+
+def neon_manifest_put(session_id: str, manifest: dict, project_id: Optional[int] = None) -> None:
+    """Stores a Neon-editor manifest (mothra#230, NEON_MANIFESTS_DIR half) --
+    called from mei_api.py's create_edit_session in place of the old
+    NEON_MANIFESTS_DIR/{session_id}.jsonld disk write. project_id is
+    provenance only; see neon_manifests's CREATE TABLE comment (auth_api.py)
+    for why this table has no enforceable ownership check on read."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO neon_manifests (session_id, manifest, project_id) VALUES (%s, %s, %s)",
+            (session_id, json.dumps(manifest), project_id),
+        )
+        con.commit()
+        cur.close()
+    finally:
+        release_db_conn(con)
+
+
+def neon_manifest_get(session_id: str) -> Optional[dict]:
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT manifest FROM neon_manifests WHERE session_id=%s", (session_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    finally:
+        release_db_conn(con)
+
+
 class JobCancelled(Exception):
     pass
 
@@ -354,14 +388,41 @@ def cleanup_stale_sessions(max_age_days: int = 14) -> int:
         release_db_conn(con)
 
 
+def cleanup_stale_neon_manifests(max_age_days: int = 1) -> int:
+    """neon_manifests holds Neon-editor manifests (mothra#230) -- 24h matches
+    the old NEON_MANIFESTS_DIR local-disk sweep's 86400s TTL. Now that these
+    live in the shared DB instead of the backend container's own ephemeral
+    disk, this can finally run from the worker via Celery beat like every
+    other periodic cleanup -- see run_periodic_cleanup's docstring, and
+    contrast with the disk-based sweep this replaced (formerly
+    auth_api.cleanup_stale_neon_manifests, which could only run on the
+    backend process itself)."""
+    con = get_db_conn()
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "DELETE FROM neon_manifests WHERE created_at < NOW() - make_interval(days => %s)",
+            (max_age_days,),
+        )
+        deleted = cur.rowcount
+        con.commit()
+        cur.close()
+        return deleted
+    finally:
+        release_db_conn(con)
+
+
 def run_periodic_cleanup() -> dict:
-    """Runs the two Postgres-backed cleanups (job_uploads, job_sessions) --
-    both operate on the shared DB, so unlike auth_api.cleanup_stale_neon_manifests
-    (backend-local disk) this is safe to invoke from anywhere, including the
-    worker via Celery beat (see celery_app.py/tasks_cleanup.py). Previously
-    these only ran once at backend startup (main.py), so a long-lived pod
-    that never restarted never got swept again -- mothra#220 row 28."""
+    """Runs the Postgres-backed cleanups (job_uploads, job_sessions,
+    neon_manifests) -- all operate on the shared DB, so all are safe to
+    invoke from anywhere, including the worker via Celery beat (see
+    celery_app.py/tasks_cleanup.py). Previously job_uploads/job_sessions only
+    ran once at backend startup (main.py), and neon_manifests was a
+    backend-local disk sweep that couldn't run from the worker at all
+    (NEON_MANIFESTS_DIR predated this table -- mothra#230) -- mothra#220
+    row 28."""
     return {
         "job_uploads_deleted": cleanup_stale_uploads(),
+        "neon_manifests_deleted": cleanup_stale_neon_manifests(),
         "job_sessions_deleted": cleanup_stale_sessions(),
     }
