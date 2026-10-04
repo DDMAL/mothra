@@ -107,10 +107,13 @@ spec:
               port: 8000
             initialDelaySeconds: 20
             periodSeconds: 15
+          # Memory: production's 14-day working-set peak was 334Mi, and
+          # <=173Mi since 2026-09-24 (Prometheus, to 2026-10-04). The 1Gi
+          # limit leaves room for large GameraXML pages.
           resources:
             requests:
               cpu: 200m
-              memory: 512Mi
+              memory: 256Mi
             limits:
               cpu: 500m
               memory: 1Gi

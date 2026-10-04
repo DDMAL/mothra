@@ -56,10 +56,14 @@ spec:
               port: 8001
             initialDelaySeconds: 30
             periodSeconds: 15
+          # Memory request < limit on purpose: production's 14-day
+          # working-set peak was 520Mi (Prometheus, to 2026-10-04). The 1Gi
+          # limit is headroom for the synchronous project-export /
+          # cantus-bundle zip builds.
           resources:
             requests:
               cpu: 250m
-              memory: 1Gi
+              memory: 512Mi
             limits:
               cpu: "1"
               memory: 1Gi
