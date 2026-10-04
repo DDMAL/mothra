@@ -98,13 +98,17 @@ spec:
             periodSeconds: 60
             timeoutSeconds: 40
             failureThreshold: 3
+          # Limit matches production's 4Gi (dac96f3); request stays 2Gi. The
+          # 14-day peak was 1326Mi, 65% of the old 2Gi limit, with two
+          # concurrent tasks. The extra limit costs nothing: this node is
+          # tainted and dedicated, and has ~28Gi unrequested.
           resources:
             requests:
               cpu: 500m
               memory: 2Gi
             limits:
               cpu: "2"
-              memory: 2Gi
+              memory: 4Gi
       volumes:
         - name: stored-models
           persistentVolumeClaim:
