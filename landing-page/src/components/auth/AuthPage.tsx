@@ -1,11 +1,11 @@
 import LoginForm from "./LoginForm";
 import RegisterForm from "./RegisterForm";
-import type { CurrentUser } from "../../hooks/useAuth";
+import type { AuthSession } from "../../hooks/useAuth";
 
 interface AuthPageProps {
   mode: "login" | "register";
   onSwitchMode: (mode: "login" | "register") => void;
-  onSuccess: (user: CurrentUser, token: string) => void;
+  onSuccess: (session: AuthSession) => void;
 }
 
 export default function AuthPage({

@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { CurrentUser } from "../../hooks/useAuth";
+import type { AuthSession } from "../../hooks/useAuth";
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
-  onSuccess: (user: CurrentUser, token: string) => void;
+  onSuccess: (session: AuthSession) => void;
 }
 
 export default function RegisterForm({
@@ -40,8 +40,8 @@ export default function RegisterForm({
       setError((data as { detail?: string }).detail || "registration failed");
       return;
     }
-    const { token, user } = await r.json();
-    onSuccess(user, token);
+    const d = await r.json();
+    onSuccess({ user: d.user, token: d.token, refreshToken: d.refresh_token });
   };
 
   return (
