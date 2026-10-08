@@ -9,7 +9,7 @@ import type {
   ProjectImage,
   ProjectInitialTab,
 } from "../types";
-import type { CurrentUser } from "../hooks/useAuth";
+import type { AuthSession, CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { refreshProject } from "../utils/projects";
@@ -92,7 +92,7 @@ interface AppRouterProps {
   meiContent: { bytes: string; stem: string } | null;
   handleDownloadManifest: () => void;
   handleDownloadMei: () => void;
-  handleLoginSuccess: (user: CurrentUser, token: string) => void;
+  handleLoginSuccess: (session: AuthSession) => void;
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
   handleEncodeResult: (ev: {

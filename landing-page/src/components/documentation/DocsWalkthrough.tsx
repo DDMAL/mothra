@@ -272,11 +272,13 @@ export default function DocsWalkthrough({
           your profile, change your password, or delete your account entirely.
         </p>
         <p className="leading-relaxed">
-          One thing worth knowing: logging in keeps you signed in for 72 hours,
-          and there's currently no way to refresh that without logging in again.
-          If you get signed out mid-workflow, don't worry — your project's
-          progress is saved step by step, so logging back in and reopening the
-          project picks up right where you left off.
+          One thing worth knowing: logging in keeps you signed in on that
+          browser, and mothra quietly renews the session while you keep using it
+          — you'll only be asked to log in again after about a month away.
+          Logging out ends the session on that browser straight away. If you do
+          get signed out mid-workflow, don't worry — your project's progress is
+          saved step by step, so logging back in and reopening the project picks
+          up right where you left off.
         </p>
       </section>
     </div>

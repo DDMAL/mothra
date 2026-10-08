@@ -6,6 +6,15 @@ export interface CurrentUser {
   createdAt: string;
 }
 
+// What /api/login and /api/register hand back, camel-cased. refreshToken is
+// optional only so a backend predating refresh tokens still logs in -- the
+// access token alone then works until it expires, as it always did.
+export interface AuthSession {
+  user: CurrentUser;
+  token: string;
+  refreshToken?: string;
+}
+
 const TOKEN_KEY = "mothra_token";
 const REFRESH_TOKEN_KEY = "mothra_refresh_token";
 
