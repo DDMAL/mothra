@@ -4,7 +4,13 @@ import Footer from "./components/layout/Footer";
 import AlphaBanner from "./components/layout/AlphaBanner";
 import AppRouter from "./components/AppRouter";
 import ToastContainer from "./components/shared/ToastContainer";
-import type { View, Project, ProjectInitialTab } from "./types";
+import type {
+  AuthStatus,
+  View,
+  Project,
+  ProjectInitialTab,
+  ProjectsStatus,
+} from "./types";
 import type { AuthSession, CurrentUser } from "./hooks/useAuth";
 import {
   authHeaders,
@@ -66,10 +72,12 @@ const STEPS_UNLOCKED_BY_JOB_KIND: Record<string, number> = {
 // directly back on the anchor view instead of walking back through
 // now-irrelevant processing/completion screens one hop at a time
 // (issue #272).
+//
+// login/register are deliberately not anchors: leaving the form replaces its
+// slot, so Back after logging in returns to wherever the user came from
+// instead of to a login form for a session that already exists.
 const HISTORY_ANCHOR_VIEWS = new Set<View>([
   "landing",
-  "login",
-  "register",
   "account",
   "docs",
   "projects",
@@ -79,7 +87,18 @@ const HISTORY_ANCHOR_VIEWS = new Set<View>([
 export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  // True only while a browser that arrived holding tokens waits on /api/me,
+  // so a stored session never flashes the logged-out landing page first.
+  const [checkingSession, setCheckingSession] = useState(
+    () => !!(getToken() || getRefreshToken()),
+  );
+  const authStatus: AuthStatus = checkingSession
+    ? "checking"
+    : currentUser
+      ? "authenticated"
+      : "anonymous";
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsStatus, setProjectsStatus] = useState<ProjectsStatus>("idle");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
     null,
   );
@@ -219,7 +238,7 @@ export default function App() {
     handleEncodeBatchResult,
   } = useEncodingFlow(selectedProjectId, setProjects);
 
-  useScrollFade(view);
+  useScrollFade(view, authStatus);
 
   // Issue #265: drop any lingering persistent (duration: 0) toast when the
   // user navigates to a different view -- see clearToasts's doc comment for
@@ -288,14 +307,22 @@ export default function App() {
     });
   });
 
-  const fetchProjects = () =>
-    loadProjects(setProjects)
+  const fetchProjects = () => {
+    setProjectsStatus("loading");
+    return loadProjects(setProjects)
       .catch(() => "failed" as const)
       .then((outcome) => {
+        if (outcome === "ok") setProjectsStatus("ready");
+        // Usually apiFetch has already logged out by now, but not when its
+        // refresh succeeded and the retried call still got a 401 -- and
+        // without this the list would sit on "loading" for good.
+        if (outcome === "unauthenticated") clearSession();
         if (outcome === "failed") {
+          setProjectsStatus("error");
           toast.error("couldn't load your projects — try reloading the page");
         }
       });
+  };
 
   const handleLoginSuccess = ({ user, token, refreshToken }: AuthSession) => {
     setToken(token);
@@ -313,6 +340,7 @@ export default function App() {
     clearRefreshToken();
     setCurrentUser(null);
     setProjects([]);
+    setProjectsStatus("idle");
     setSelectedProjectId(null);
     setView("landing");
   };
@@ -361,7 +389,14 @@ export default function App() {
         if (r.status === 401) return clearSession();
         if (!r.ok) throw new Error(`/api/me failed (${r.status})`);
         setCurrentUser(await r.json());
-        setView((v) => (v === "landing" ? "projects" : v));
+        // An auth screen reached while the check was in flight (Back/Forward)
+        // is pointless for a session that turned out valid.
+        setView((v) =>
+          v === "landing" || v === "login" || v === "register" ? "projects" : v,
+        );
+        // Ends the check before the project list arrives, so My Projects
+        // shows its own loading state rather than a blank page.
+        setCheckingSession(false);
         return fetchProjects();
       })
       // Anything else -- backend down, a 5xx -- says nothing about whether
@@ -369,7 +404,10 @@ export default function App() {
       // logging the user out over a server hiccup.
       .catch(() =>
         toast.error("couldn't reach the server — try reloading the page"),
-      );
+      )
+      .finally(() => setCheckingSession(false));
+    // Mount-only: this is the one-time check of a stored session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -380,6 +418,7 @@ export default function App() {
       <AlphaBanner />
       <Navbar
         currentUser={currentUser}
+        checkingSession={authStatus === "checking"}
         onLogout={handleLogout}
         onLogin={() => guardNeonExit(() => setView("login"))}
         onGetStarted={() => guardNeonExit(() => setView("register"))}
@@ -391,9 +430,11 @@ export default function App() {
       <AppRouter
         view={view}
         setView={setView}
+        authStatus={authStatus}
         currentUser={currentUser}
         setCurrentUser={setCurrentUser}
         projects={projects}
+        projectsStatus={projectsStatus}
         setProjects={setProjects}
         selectedProject={selectedProject}
         selectedProjectId={selectedProjectId}
