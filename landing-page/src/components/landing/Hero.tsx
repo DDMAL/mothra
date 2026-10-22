@@ -1,9 +1,18 @@
+import type { CurrentUser } from "../../hooks/useAuth";
+
 interface HeroProps {
+  currentUser?: CurrentUser | null;
   onLogin?: () => void;
+  onGoToProjects?: () => void;
   onViewWalkthrough?: () => void;
 }
 
-export default function Hero({ onLogin, onViewWalkthrough }: HeroProps) {
+export default function Hero({
+  currentUser,
+  onLogin,
+  onGoToProjects,
+  onViewWalkthrough,
+}: HeroProps) {
   return (
     <section className="bg-[#4AADAA] py-16 px-4">
       <div className="max-w-4xl mx-auto text-center">
@@ -20,11 +29,13 @@ export default function Hero({ onLogin, onViewWalkthrough }: HeroProps) {
           >
             view walkthrough
           </button>
+          {/* The wordmark always leads here, so a logged-in user lands on
+              this page too -- offer the way back in, not a login. */}
           <button
-            onClick={onLogin}
+            onClick={currentUser ? onGoToProjects : onLogin}
             className="px-6 py-2.5 bg-[#4AADAA] text-white text-sm rounded-full border border-white hover:opacity-90 transition-opacity cursor-pointer"
           >
-            log in / sign up
+            {currentUser ? "go to my projects" : "log in / sign up"}
           </button>
         </div>
         <div className="hero-fade fade-target bg-[#1E6B70] rounded-lg h-64 flex items-center justify-center">
