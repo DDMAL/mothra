@@ -6,7 +6,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from config import MODELS_DIR, NEON_MANIFESTS_DIR
 import psycopg2, psycopg2.errors, os, secrets, hashlib, base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from contextlib import contextmanager
 import bcrypt
@@ -624,7 +624,10 @@ def _hash_token(raw: str) -> str:
 
 def create_refresh_token(user_id: int) -> str:
     raw = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    # Timezone-aware, unlike the JWT `exp`s nearby: expires_at is TIMESTAMPTZ,
+    # and Postgres reads a naive value in the *session's* timezone, so a
+    # utcnow() here lands hours off on any server not running in UTC.
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     with db_cursor() as (con, cur):
         cur.execute(
             "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
@@ -733,7 +736,9 @@ def refresh_token(x_refresh_token: str = Header(None, alias="X-Refresh-Token")):
             (token_hash,),
         )
         row = cur.fetchone()
-        if not row or row[3] is not None or row[2] < datetime.utcnow():
+        # expires_at comes back timezone-aware (TIMESTAMPTZ); comparing it with
+        # a naive utcnow() raised TypeError, so every refresh used to 500.
+        if not row or row[3] is not None or row[2] < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="invalid or expired refresh token")
         cur.execute("UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=%s", (row[0],))
         con.commit()

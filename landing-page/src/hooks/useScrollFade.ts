@@ -1,7 +1,11 @@
 import { useEffect } from "react";
-import type { View } from "../types";
+import type { AuthStatus, View } from "../types";
 
-export function useScrollFade(view: View) {
+// `authStatus` is a dependency only so this re-runs when it changes: while a
+// stored session is being checked, AppRouter renders a placeholder on
+// "landing" instead of the hero, so if the check fails the hero mounts later
+// with `view` unchanged -- and its .hero-fade elements would never be found.
+export function useScrollFade(view: View, authStatus: AuthStatus) {
   useEffect(() => {
     if (view !== "landing") {
       document
@@ -38,5 +42,5 @@ export function useScrollFade(view: View) {
       if (timer) clearTimeout(timer);
       observer.disconnect();
     };
-  }, [view]);
+  }, [view, authStatus]);
 }

@@ -262,3 +262,12 @@ export type View =
   | "cu-submission"
   | "neon-editor"
   | "neon-completion";
+
+// "checking" covers only the initial /api/me round-trip for a browser that
+// arrived holding tokens -- it is what keeps the logged-out landing page from
+// flashing up before a stored session is recognised.
+export type AuthStatus = "checking" | "authenticated" | "anonymous";
+
+// The project list's fetch state, so "no projects yet" is only ever shown
+// for a list that actually came back empty.
+export type ProjectsStatus = "idle" | "loading" | "ready" | "error";

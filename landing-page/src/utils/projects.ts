@@ -13,6 +13,25 @@ export function normalizeProjects(raw: Project[]): Project[] {
 }
 
 /**
+ * GETs the user's whole project list into local state.
+ *
+ * Leaves state untouched on any non-OK response: an error body isn't a
+ * project array, and feeding it to normalizeProjects throws. "unauthenticated"
+ * means a 401 apiFetch couldn't fix by refreshing, so it has already logged
+ * the user out and toasted -- callers only need to report "failed". Network
+ * failures reject, as with any fetch.
+ */
+export async function loadProjects(
+  setProjects: Dispatch<SetStateAction<Project[]>>,
+): Promise<"ok" | "unauthenticated" | "failed"> {
+  const r = await apiFetch("/api/projects");
+  if (r.status === 401) return "unauthenticated";
+  if (!r.ok) return "failed";
+  setProjects(normalizeProjects(await r.json()));
+  return "ok";
+}
+
+/**
  * Re-GETs one project and merges the server's copy into local state.
  *
  * Several fields (icXmlFiles, stafflines, text alignments) are written

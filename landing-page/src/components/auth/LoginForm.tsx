@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { CurrentUser } from "../../hooks/useAuth";
+import type { AuthSession } from "../../hooks/useAuth";
 
 interface LoginFormProps {
   onSwitchToRegister: () => void;
-  onSuccess: (user: CurrentUser, token: string) => void;
+  onSuccess: (session: AuthSession) => void;
 }
 
 export default function LoginForm({
@@ -25,8 +25,8 @@ export default function LoginForm({
       setError("invalid username or password");
       return;
     }
-    const { token, user } = await r.json();
-    onSuccess(user, token);
+    const d = await r.json();
+    onSuccess({ user: d.user, token: d.token, refreshToken: d.refresh_token });
   };
   return (
     <div className="bg-[#C8E6E3] rounded-3xl p-6 sm:p-10 flex flex-col gap-4">

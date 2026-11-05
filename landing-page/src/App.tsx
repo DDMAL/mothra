@@ -4,10 +4,24 @@ import Footer from "./components/layout/Footer";
 import AlphaBanner from "./components/layout/AlphaBanner";
 import AppRouter from "./components/AppRouter";
 import ToastContainer from "./components/shared/ToastContainer";
-import type { View, Project, ProjectInitialTab } from "./types";
-import type { CurrentUser } from "./hooks/useAuth";
-import { getToken, setToken, clearToken } from "./hooks/useAuth";
-import { normalizeProjects, refreshProject } from "./utils/projects";
+import type {
+  AuthStatus,
+  View,
+  Project,
+  ProjectInitialTab,
+  ProjectsStatus,
+} from "./types";
+import type { AuthSession, CurrentUser } from "./hooks/useAuth";
+import {
+  authHeaders,
+  clearRefreshToken,
+  clearToken,
+  getRefreshToken,
+  getToken,
+  setRefreshToken,
+  setToken,
+} from "./hooks/useAuth";
+import { loadProjects, refreshProject } from "./utils/projects";
 import { useProjectMutations } from "./hooks/useProjectMutations";
 import { useEncodingFlow } from "./hooks/useEncodingFlow";
 import { useScrollFade } from "./hooks/useScrollFade";
@@ -58,10 +72,12 @@ const STEPS_UNLOCKED_BY_JOB_KIND: Record<string, number> = {
 // directly back on the anchor view instead of walking back through
 // now-irrelevant processing/completion screens one hop at a time
 // (issue #272).
+//
+// login/register are deliberately not anchors: leaving the form replaces its
+// slot, so Back after logging in returns to wherever the user came from
+// instead of to a login form for a session that already exists.
 const HISTORY_ANCHOR_VIEWS = new Set<View>([
   "landing",
-  "login",
-  "register",
   "account",
   "docs",
   "projects",
@@ -71,7 +87,18 @@ const HISTORY_ANCHOR_VIEWS = new Set<View>([
 export default function App() {
   const [view, setView] = useState<View>("landing");
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  // True only while a browser that arrived holding tokens waits on /api/me,
+  // so a stored session never flashes the logged-out landing page first.
+  const [checkingSession, setCheckingSession] = useState(
+    () => !!(getToken() || getRefreshToken()),
+  );
+  const authStatus: AuthStatus = checkingSession
+    ? "checking"
+    : currentUser
+      ? "authenticated"
+      : "anonymous";
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsStatus, setProjectsStatus] = useState<ProjectsStatus>("idle");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
     null,
   );
@@ -211,7 +238,7 @@ export default function App() {
     handleEncodeBatchResult,
   } = useEncodingFlow(selectedProjectId, setProjects);
 
-  useScrollFade(view);
+  useScrollFade(view, authStatus);
 
   // Issue #265: drop any lingering persistent (duration: 0) toast when the
   // user navigates to a different view -- see clearToasts's doc comment for
@@ -280,48 +307,107 @@ export default function App() {
     });
   });
 
-  const handleLoginSuccess = (user: CurrentUser, token: string) => {
+  const fetchProjects = () => {
+    setProjectsStatus("loading");
+    return loadProjects(setProjects)
+      .catch(() => "failed" as const)
+      .then((outcome) => {
+        if (outcome === "ok") setProjectsStatus("ready");
+        // Usually apiFetch has already logged out by now, but not when its
+        // refresh succeeded and the retried call still got a 401 -- and
+        // without this the list would sit on "loading" for good.
+        if (outcome === "unauthenticated") clearSession();
+        if (outcome === "failed") {
+          setProjectsStatus("error");
+          toast.error("couldn't load your projects — try reloading the page");
+        }
+      });
+  };
+
+  const handleLoginSuccess = ({ user, token, refreshToken }: AuthSession) => {
     setToken(token);
+    // Clear rather than keep a previous session's refresh token, which would
+    // otherwise be what apiFetch rotates once this access token expires.
+    if (refreshToken) setRefreshToken(refreshToken);
+    else clearRefreshToken();
     setCurrentUser(user);
-    apiFetch("/api/projects")
-      .then((r) => r.json())
-      .then((data) => setProjects(normalizeProjects(data)));
+    fetchProjects();
     setView("projects");
   };
 
-  const doLogout = () => {
+  const clearSession = () => {
     clearToken();
+    clearRefreshToken();
     setCurrentUser(null);
     setProjects([]);
+    setProjectsStatus("idle");
     setSelectedProjectId(null);
     setView("landing");
+  };
+
+  // Revokes this browser's refresh token server-side before dropping it
+  // locally, so a copied-out token stops working at logout rather than 30
+  // days later. Deliberately a plain fetch, not apiFetch: with an expired
+  // access token apiFetch would first rotate the refresh token, and this
+  // call would then revoke the old, already-dead one while the fresh one it
+  // just minted stayed live. Fire-and-forget (keepalive), so logging out
+  // never waits on, or fails because of, the network.
+  const doLogout = () => {
+    const rt = getRefreshToken();
+    if (rt) {
+      fetch("/api/auth/logout", {
+        method: "POST",
+        keepalive: true,
+        headers: { ...authHeaders(), "X-Refresh-Token": rt },
+      }).catch(() => {});
+    }
+    clearSession();
   };
   // The user-initiated "logout" button goes through the same unsaved-work
   // confirmation as any other exit from the Neon editor. The server-driven
   // forced logout below (a dead/expired session even a refresh couldn't
   // fix, see apiFetch's registerUnauthenticatedHandler) deliberately calls
-  // doLogout directly instead -- the session is already gone server-side by
+  // clearSession directly instead -- the session is already gone server-side by
   // that point, so there's nothing a "stay and keep editing" cancel could
   // actually preserve, only a client UI stuck believing it's still logged in.
   const handleLogout = () => guardNeonExit(doLogout);
 
+  // A forced logout has nothing to revoke: apiFetch only calls this once the
+  // refresh token itself was refused, and it has already cleared both tokens.
   useEffect(() => {
-    registerUnauthenticatedHandler(doLogout);
+    registerUnauthenticatedHandler(clearSession);
   }, []);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
+    // A refresh token alone is still a session: apiFetch's 401 handling
+    // trades it for a new access token on the /api/me call below.
+    if (!getToken() && !getRefreshToken()) return;
     apiFetch("/api/me")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((user) => {
-        setCurrentUser(user);
-        setView((v) => (v === "landing" ? "projects" : v));
-        return apiFetch("/api/projects");
+      .then(async (r) => {
+        // Usually apiFetch has already logged out and toasted by now, but not
+        // when its refresh succeeded and the retried call still got a 401.
+        if (r.status === 401) return clearSession();
+        if (!r.ok) throw new Error(`/api/me failed (${r.status})`);
+        setCurrentUser(await r.json());
+        // An auth screen reached while the check was in flight (Back/Forward)
+        // is pointless for a session that turned out valid.
+        setView((v) =>
+          v === "landing" || v === "login" || v === "register" ? "projects" : v,
+        );
+        // Ends the check before the project list arrives, so My Projects
+        // shows its own loading state rather than a blank page.
+        setCheckingSession(false);
+        return fetchProjects();
       })
-      .then((r) => r.json())
-      .then((data) => setProjects(normalizeProjects(data)))
-      .catch(() => clearToken());
+      // Anything else -- backend down, a 5xx -- says nothing about whether
+      // the session is valid, so keep the tokens for the next load instead of
+      // logging the user out over a server hiccup.
+      .catch(() =>
+        toast.error("couldn't reach the server — try reloading the page"),
+      )
+      .finally(() => setCheckingSession(false));
+    // Mount-only: this is the one-time check of a stored session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -332,6 +418,7 @@ export default function App() {
       <AlphaBanner />
       <Navbar
         currentUser={currentUser}
+        checkingSession={authStatus === "checking"}
         onLogout={handleLogout}
         onLogin={() => guardNeonExit(() => setView("login"))}
         onGetStarted={() => guardNeonExit(() => setView("register"))}
@@ -343,9 +430,11 @@ export default function App() {
       <AppRouter
         view={view}
         setView={setView}
+        authStatus={authStatus}
         currentUser={currentUser}
         setCurrentUser={setCurrentUser}
         projects={projects}
+        projectsStatus={projectsStatus}
         setProjects={setProjects}
         selectedProject={selectedProject}
         selectedProjectId={selectedProjectId}

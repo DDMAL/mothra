@@ -7,7 +7,12 @@ import {
   TARGET_RESIZE_BYTES,
 } from "../../utils/imageResize";
 import { AuthImage } from "../shared/AuthImage";
-import type { Project, MeiFile, CantusSource } from "../../types";
+import type {
+  Project,
+  MeiFile,
+  CantusSource,
+  ProjectsStatus,
+} from "../../types";
 import DeleteProjectModal from "./DeleteProjectModal";
 import LargeImageWarningModal from "./LargeImageWarningModal";
 import { formatLastOpened } from "../../utils/time";
@@ -19,6 +24,7 @@ const TRASH_COLS = "grid-cols-[2fr_2fr_1fr_8rem]";
 
 interface MyProjectsProps {
   projects: Project[];
+  status: ProjectsStatus;
   onSelectProject: (id: number) => void;
   onCreateProject: (name: string, imageFile?: File) => void;
   onRenameProject: (id: number, newName: string) => void;
@@ -92,6 +98,7 @@ function PinButton({
 
 export default function MyProjects({
   projects,
+  status,
   onSelectProject,
   onCreateProject,
   onRenameProject,
@@ -217,6 +224,15 @@ export default function MyProjects({
     .sort((a, b) => sortProjects(a, b, sortBy));
 
   const trashedProjects = projects.filter((p) => !!p.deletedAt);
+
+  // An empty list only means "nothing here" once the fetch has come back --
+  // before that it means "not loaded yet", and after a failure, "unknown".
+  const listMessage = (empty: string) =>
+    status === "ready"
+      ? empty
+      : status === "error"
+        ? "couldn't load your projects — try reloading the page"
+        : "loading your projects…";
 
   const projectToDelete =
     deleteConfirmProject !== null
@@ -390,7 +406,7 @@ export default function MyProjects({
                 ))}
                 {activeProjects.length === 0 && (
                   <p className="px-6 py-6 text-sm text-[#1D3335]/60">
-                    no projects yet
+                    {listMessage("no projects yet")}
                   </p>
                 )}
               </>
@@ -398,7 +414,7 @@ export default function MyProjects({
               <>
                 {activeProjects.length === 0 ? (
                   <p className="px-6 py-6 text-sm text-[#1D3335]/60">
-                    no projects yet
+                    {listMessage("no projects yet")}
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4">
@@ -540,7 +556,7 @@ export default function MyProjects({
             })}
             {trashedProjects.length === 0 && (
               <p className="px-6 py-6 text-sm text-[#1D3335]/60">
-                trash is empty
+                {listMessage("trash is empty")}
               </p>
             )}
           </>

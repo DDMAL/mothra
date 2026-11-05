@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type {
+  AuthStatus,
   View,
   Project,
+  ProjectsStatus,
   AnnotationSet,
   MeiFile,
   ModelKind,
   ProjectImage,
   ProjectInitialTab,
 } from "../types";
-import type { CurrentUser } from "../hooks/useAuth";
+import type { AuthSession, CurrentUser } from "../hooks/useAuth";
 import { apiFetch, apiFetchOrThrow, apiFetchJobStream } from "../lib/apiFetch";
 import { minNextStep, pendingIcImages } from "../utils/imageStep";
 import { refreshProject } from "../utils/projects";
@@ -43,6 +45,15 @@ import type { NeonEditorHandle } from "./workflow/NeonBatchEditor";
 // animation instead (<1s, matching ProcessingPage's own progress-bar
 // transition duration) so "done" reads as done.
 const STEP_TIMING = { intervalMs: 60, completionDelayMs: 500 } as const;
+
+// Views anyone can see. Every other view needs a logged-in user; an anonymous
+// visitor gets the login form in its place (see the guard above the switch).
+const PUBLIC_VIEWS: ReadonlySet<View> = new Set<View>([
+  "landing",
+  "login",
+  "register",
+  "docs",
+]);
 
 // Dev escape hatch for machines that can't run ultralytics: when set, the
 // predict/processing step is bypassed and "Continue" on a fresh project jumps
@@ -78,9 +89,11 @@ function computeBatchRun(
 interface AppRouterProps {
   view: View;
   setView: (v: View) => void;
+  authStatus: AuthStatus;
   currentUser: CurrentUser | null;
   setCurrentUser: (u: CurrentUser) => void;
   projects: Project[];
+  projectsStatus: ProjectsStatus;
   setProjects: Dispatch<SetStateAction<Project[]>>;
   selectedProject: Project | null;
   selectedProjectId: number | null;
@@ -92,7 +105,7 @@ interface AppRouterProps {
   meiContent: { bytes: string; stem: string } | null;
   handleDownloadManifest: () => void;
   handleDownloadMei: () => void;
-  handleLoginSuccess: (user: CurrentUser, token: string) => void;
+  handleLoginSuccess: (session: AuthSession) => void;
   handleLogout: () => void;
   mutations: ReturnType<typeof useProjectMutations>;
   handleEncodeResult: (ev: {
@@ -131,9 +144,11 @@ interface AppRouterProps {
 export default function AppRouter({
   view,
   setView,
+  authStatus,
   currentUser,
   setCurrentUser,
   projects,
+  projectsStatus,
   setProjects,
   selectedProject,
   selectedProjectId,
@@ -370,12 +385,42 @@ export default function AppRouter({
     setView("encoding-processing");
   };
 
+  // A render guard rather than a redirect effect: redirecting would rewrite
+  // the history entry the user just navigated to, so Back would bounce
+  // straight off it again.
+  if (
+    authStatus === "checking" &&
+    (view === "landing" || !PUBLIC_VIEWS.has(view))
+  ) {
+    return (
+      <div className="flex-1 bg-[#4AADAA]" aria-busy="true">
+        <span className="sr-only">loading…</span>
+      </div>
+    );
+  }
+  if (authStatus === "anonymous" && !PUBLIC_VIEWS.has(view)) {
+    return (
+      <AuthPage
+        mode="login"
+        notice={
+          view === "account"
+            ? "log in to manage your account"
+            : "log in to see your projects"
+        }
+        onSwitchMode={(m) => setView(m)}
+        onSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
   switch (view) {
     case "landing":
       return (
         <main>
           <Hero
+            currentUser={currentUser}
             onLogin={() => setView("login")}
+            onGoToProjects={() => setView("projects")}
             onViewWalkthrough={() => setView("docs")}
           />
         </main>
@@ -394,6 +439,7 @@ export default function AppRouter({
       return (
         <MyProjects
           projects={projects}
+          status={projectsStatus}
           onSelectProject={(id) => {
             setSelectedProjectId(id);
             setView("project");
