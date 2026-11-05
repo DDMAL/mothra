@@ -752,13 +752,13 @@ def test_verify_and_correct_syllables_preserves_special_element_position():
 
 def test_component_zone_ids_shares_one_column_for_stacked_pair():
     """A two-component neume whose width column is a single-element list
-    summing to the component count (podatus/oblique's "[2]") must share ONE
+    summing to the component count (podatus2b/oblique's "[2]") must share ONE
     column/zone across both components -- only pitch, not x, tells them
     apart, matching how a stacked pair (or a ligated pair) is actually
     drawn."""
     surface = ET.Element("surface")
     glyph = mei.Glyph(id="g1", ulx=100, uly=50, ncols=20, nrows=40,
-                       class_name="neume.podatus2a", confidence=1.0, state="AUTOMATIC")
+                       class_name="neume.podatus2b", confidence=1.0, state="AUTOMATIC")
     components = [NcTemplate(), NcTemplate(intm=1)]
     zones = mei._component_zone_ids(surface, glyph, components, "[2]")
     assert zones is not None
@@ -797,11 +797,11 @@ def test_component_zone_ids_mismatched_width_still_bails_out():
 
 
 def test_build_mei_podatus_components_share_facs_zone():
-    """End-to-end: a podatus glyph's two <nc>s must point at the same @facs
+    """End-to-end: a podatus2b glyph's two <nc>s must point at the same @facs
     zone, so Neon draws them at the same x -- stacked by pitch alone, not
     side by side."""
     stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
-    glyphs_by_stave = {0: [_glyph("g1", 10, class_name="neume.podatus2a")]}
+    glyphs_by_stave = {0: [_glyph("g1", 10, class_name="neume.podatus2b")]}
     xml_bytes = mei.build_mei(
         glyphs_by_stave, [stave],
         image_path=Path("page.jpg"), image_w=1000, image_h=1000,
@@ -811,6 +811,24 @@ def test_build_mei_podatus_components_share_facs_zone():
     ncs = root.findall(f".//{MEI_NS}neume/{MEI_NS}nc")
     assert len(ncs) == 2
     assert ncs[0].get("facs") == ncs[1].get("facs")
+
+
+def test_build_mei_podatus2a_and_pescephalicus_components_get_separate_facs_zones():
+    """podatus2a and pescephalicus2 are NOT stacked in square notation: their
+    width column is "[1, 1]" (mothra#310 reverted mothra#273's "[2]" for these
+    two), so each <nc> gets its own @facs zone."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    for class_name in ("neume.podatus2a", "neume.pescephalicus2"):
+        glyphs_by_stave = {0: [_glyph("g1", 10, class_name=class_name)]}
+        xml_bytes = mei.build_mei(
+            glyphs_by_stave, [stave],
+            image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+            manuscript_name="test", notation_type="square",
+        )
+        root = ET.fromstring(xml_bytes)
+        ncs = root.findall(f".//{MEI_NS}neume/{MEI_NS}nc")
+        assert len(ncs) == 2, class_name
+        assert ncs[0].get("facs") != ncs[1].get("facs"), class_name
 
 
 def test_build_mei_accid_attaches_beside_next_neume():
