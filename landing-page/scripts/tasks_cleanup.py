@@ -1,10 +1,9 @@
 """Celery task backing celery_app.py's beat_schedule -- periodic sweep of the
-two Postgres-backed staging/output tables (job_uploads, job_sessions), which
-used to only get cleaned up once, at backend startup (main.py). See
-job_store.run_periodic_cleanup's docstring for why the backend-local Neon
-manifest sweep (auth_api.cleanup_stale_neon_manifests) is deliberately NOT
-included here -- it lives on the backend container's own disk, which this
-task (running on the worker) can't reach."""
+Postgres-backed staging/output tables (job_uploads, job_sessions,
+neon_manifests), which used to only get cleaned up once, at backend startup
+(main.py) -- or (neon_manifests, before mothra#230) not at all from here,
+since NEON_MANIFESTS_DIR was backend-local disk a worker-run task couldn't
+reach. See job_store.run_periodic_cleanup's docstring."""
 import logging
 
 from celery_app import celery_app
