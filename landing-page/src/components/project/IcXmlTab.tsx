@@ -13,6 +13,8 @@ interface IcXmlTabProps {
   projectId: number;
   /** Called after a file is deleted so the project's icXmlFiles drops it. */
   onDeleted: (xmlId: string) => void;
+  /** Opens the page that encodes a GameraXML file the user uploads. */
+  onEncodeUploadedXml: () => void;
 }
 
 const formatBytes = (bytes: number) =>
@@ -32,6 +34,7 @@ export default function IcXmlTab({
   images,
   projectId,
   onDeleted,
+  onEncodeUploadedXml,
 }: IcXmlTabProps) {
   const [viewFile, setViewFile] = useState<IcXmlFile | null>(null);
   const [viewContent, setViewContent] = useState<string | null>(null);
@@ -41,12 +44,26 @@ export default function IcXmlTab({
   // state after it. See handleView.
   const viewSeq = useRef(0);
 
+  // The only way into "encode-upload": a page classified outside mothra has
+  // no IC session here, so its GameraXML has to be uploaded by hand.
+  const encodeOwnButton = (
+    <button
+      onClick={onEncodeUploadedXml}
+      className="px-4 py-1.5 bg-white text-[#1D3335] text-sm rounded-full ring-1 ring-inset ring-[#1D3335]/25 hover:bg-[#F5F7F7] cursor-pointer transition-colors"
+    >
+      encode your own GameraXML…
+    </button>
+  );
+
   if (icXmlFiles.length === 0) {
     return (
-      <p className="mt-6 text-white/70 text-sm">
-        no classifier XML yet — each page's file is written when the page is
-        encoded (step 3), from the XML the encoder read
-      </p>
+      <div className="mt-6 flex flex-col items-start gap-3">
+        <p className="text-white/70 text-sm">
+          no classifier XML yet — each page's file is written when the page is
+          encoded (step 4, encode), from the XML the encoder read
+        </p>
+        {encodeOwnButton}
+      </div>
     );
   }
 
@@ -151,12 +168,13 @@ export default function IcXmlTab({
           </button>
         </Modal>
       )}
+      <div className="mt-6 flex justify-end">{encodeOwnButton}</div>
       {error && (
-        <p className="mt-6 text-red-200 text-xs font-mono" title={error}>
+        <p className="mt-4 text-red-200 text-xs font-mono" title={error}>
           {error}
         </p>
       )}
-      <div className="mt-6 grid grid-cols-5 gap-4">
+      <div className="mt-4 grid grid-cols-5 gap-4">
         {sorted.map((file, idx) => {
           const group = sourceGroupLabel(images, file.imageName);
           const prevGroup =
