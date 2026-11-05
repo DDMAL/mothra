@@ -37,17 +37,11 @@ import {
   markJobSettled,
 } from "../../lib/activeJobs";
 import { useProjectActiveJob } from "../../hooks/useProjectActiveJob";
-
-const STEPS = [
-  "annotate",
-  "interactive classifier",
-  "encoding",
-  "neon",
-  "send to cantus ultimus",
-];
+import { PIPELINE_STEPS } from "../../lib/pipeline";
+import type { PipelineStepId, RoutedStepId } from "../../lib/pipeline";
 
 const JOB_KIND_LABELS: Record<string, string> = {
-  predict: "annotation",
+  predict: "detection",
   text_batch: "text-finding",
   encode_upload: "encoding",
   encode_batch: "batch encoding",
@@ -64,9 +58,13 @@ interface ProjectDetailProps {
   usedNames: { images: string[]; models: string[] };
   onUsedNamesChange: (names: { images: string[]; models: string[] }) => void;
   stepsUnlocked: number;
-  onStepClick: (step: number) => void;
+  /** A progress-list step that leaves this page. "set up" and "encode" are
+   * handled here, by switching tabs. */
+  onStepClick: (step: RoutedStepId) => void;
+  /** Open the page that encodes a GameraXML file the user uploads. */
+  onEncodeUploadedXml: () => void;
   /** Open a saved IC session picked in the "manage IC sessions" modal on the
-   * IC step page (step 1), rather than inside the modal's iframe. */
+   * classify step's page, rather than inside the modal's iframe. */
   onResumeIcSession: (req: IcResumeRequest) => void;
   /** Opens the Cantus Ultimus submission page, carrying whichever MEI files
    * were selected here so they arrive pre-ticked. */
@@ -124,6 +122,7 @@ export default function ProjectDetail({
   onUsedNamesChange,
   stepsUnlocked,
   onStepClick,
+  onEncodeUploadedXml,
   onResumeIcSession,
   onSendToCantus,
   onFocusIcImage,
@@ -337,6 +336,13 @@ export default function ProjectDetail({
   // waiting until the IC step would waste a whole detection run.
   const autoIcNeedsTraining =
     nextStep <= 1 && icSettings.mode === "auto" && !icSettings.hasTrainingSet;
+  // The progress list's current step: "set up" until a page is selected, then
+  // the step the least-advanced selected page is waiting on. nextStep is in
+  // stepsUnlocked space, the same space as unlockIndex (see lib/pipeline.ts).
+  const currentStepIdx =
+    usedNames.images.length === 0
+      ? 0
+      : PIPELINE_STEPS.findIndex((s) => s.unlockIndex === nextStep);
 
   // mothra#294: the single decision point for "clicking this selected image
   // should jump me back into IC/Neon" -- reused by both the Images tab grid
@@ -386,6 +392,14 @@ export default function ProjectDetail({
     annSection.clearSelection();
     meiSection.setPage(0);
     annSection.setPage(0);
+  };
+
+  const handleStepClick = (step: PipelineStepId) => {
+    if (step === "setup") switchTab("images");
+    else if (step === "encode") {
+      switchTab("generated");
+      switchGeneratedSubTab("mei files");
+    } else onStepClick(step);
   };
 
   const TAB_LABELS: Record<string, string> = {
@@ -556,28 +570,54 @@ export default function ProjectDetail({
       <div className="flex gap-8 max-w-6xl mx-auto">
         {/* progress sidebar */}
         <div className="flex flex-col gap-3 shrink-0 mt-[4.5rem]">
-          <div className="w-48 bg-[#C8E6E3]/30 rounded-2xl p-5 flex flex-col gap-2 self-start">
-            <span className="text-white/60 text-sm font-medium mb-1">
-              progress:
-            </span>
-            {STEPS.map((label, i) => {
-              const stepNum = i;
-              const unlocked = stepsUnlocked >= stepNum;
-              return (
-                <button
-                  key={stepNum}
-                  disabled={!unlocked}
-                  onClick={() => onStepClick(stepNum)}
-                  className={`text-left text-sm px-3 py-2 rounded-xl transition-opacity ${
-                    unlocked
-                      ? "text-white hover:bg-white/10 cursor-pointer"
-                      : "text-white/30 cursor-not-allowed"
-                  }`}
-                >
-                  {stepNum} {label}
-                </button>
-              );
-            })}
+          {/* Solid, with ink text: white on the translucent box this used to
+              be failed contrast. */}
+          <div className="w-48 bg-[#C8E6E3] rounded-2xl p-5 flex flex-col gap-2 self-start">
+            <nav aria-label="pipeline progress">
+              <span className="block text-[#1D3335] text-sm font-medium mb-2">
+                progress:
+              </span>
+              <ol className="flex flex-col gap-1">
+                {PIPELINE_STEPS.map((step, i) => {
+                  const locked =
+                    step.unlockIndex !== null &&
+                    stepsUnlocked < step.unlockIndex;
+                  const current = i === currentStepIdx;
+                  const done = i < currentStepIdx;
+                  return (
+                    <li key={step.id}>
+                      <button
+                        disabled={locked}
+                        aria-current={current ? "step" : undefined}
+                        title={
+                          locked
+                            ? `finish ${PIPELINE_STEPS[i - 1].label} first`
+                            : undefined
+                        }
+                        onClick={() => handleStepClick(step.id)}
+                        className={`w-full flex items-center justify-between gap-2 text-left text-sm px-3 py-2 rounded-xl transition-colors ${
+                          current
+                            ? "bg-white text-[#1D3335] font-semibold cursor-pointer"
+                            : locked
+                              ? "text-[#1D3335]/40 cursor-not-allowed"
+                              : "text-[#1D3335] hover:bg-white/60 cursor-pointer"
+                        }`}
+                      >
+                        <span>
+                          {i + 1} {step.label}
+                        </span>
+                        {done && (
+                          <>
+                            <span aria-hidden="true">✓</span>
+                            <span className="sr-only">(done)</span>
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
             <button
               onClick={async () => {
                 const res = await apiFetch(
@@ -585,7 +625,7 @@ export default function ProjectDetail({
                 );
                 downloadBlob(await res.blob(), `${project.name}.zip`);
               }}
-              className="mt-3 text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
+              className="mt-3 text-xs text-[#1D3335] text-left px-3 py-2 rounded-xl hover:bg-white/60 cursor-pointer transition-colors"
             >
               export all files ↓
             </button>
@@ -601,7 +641,7 @@ export default function ProjectDetail({
               stepsUnlocked >= 1) && (
               <button
                 onClick={() => setIcSessionsModal(true)}
-                className="text-xs text-white/60 hover:text-white text-left px-3 py-2 rounded-xl hover:bg-white/10 cursor-pointer transition-colors"
+                className="text-xs text-[#1D3335] text-left px-3 py-2 rounded-xl hover:bg-white/60 cursor-pointer transition-colors"
               >
                 manage IC sessions
                 {icSessionCount ? ` (${icSessionCount})` : ""}
@@ -1040,6 +1080,7 @@ export default function ProjectDetail({
                         ),
                       })
                     }
+                    onEncodeUploadedXml={onEncodeUploadedXml}
                   />
                 )}
                 {generatedSubTab === "mei files" && (
@@ -1079,10 +1120,10 @@ export default function ProjectDetail({
                 usedNames.images.length === 0 || nextStep === 0
                   ? "begin"
                   : nextStep === 1
-                    ? "continue: ic"
+                    ? "continue: classify"
                     : nextStep === 3
-                      ? "continue: neon"
-                      : "continue: send";
+                      ? "continue: correct"
+                      : "continue: submit";
               return (
                 <>
                   <button
@@ -1182,7 +1223,7 @@ export default function ProjectDetail({
                   {autoIcNeedsTraining && (
                     <p className="text-white/70 text-xs mt-1 text-center">
                       the classifier is set to auto — pick training data under
-                      "Classifier settings", or switch it to manual
+                      "Glyph Classifier settings", or switch it to manual
                     </p>
                   )}
                 </>

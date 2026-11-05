@@ -18,12 +18,12 @@ export default function DocsWalkthrough({
     <div className="animate-fade-in px-10 pt-10 pb-16 text-[#1D3335]">
       <h1 className="text-3xl font-bold italic text-white mb-4">walkthrough</h1>
       <p className="leading-relaxed mb-10 max-w-2xl">
-        This walkthrough follows the same order the project page's progress
-        steps do: <em>models</em> and <em>annotations</em> come first (they can
-        happen in either order, but you need at least one model before you can
-        annotate), then <em>interactive classifier</em>, <em>encoding</em>, and{" "}
-        <em>neon</em> proceed one page — or one batch — at a time, and{" "}
-        <em>sending to Cantus Ultimus</em> closes out the project.
+        This walkthrough follows the project page's progress steps:{" "}
+        <em>set up</em> and <em>detect</em> come first (<em>models</em> and{" "}
+        <em>annotations</em> below — you need at least one model before you
+        can detect), then <em>classify</em>, <em>encode</em>, and{" "}
+        <em>correct</em> (in Neon) proceed one page — or one batch — at a time,
+        and <em>submit</em>, sending to Cantus Ultimus, closes out the project.
       </p>
 
       <section id="wt-models" className="mb-10">
@@ -68,8 +68,8 @@ export default function DocsWalkthrough({
           annotations
         </h2>
         <p className="leading-relaxed mb-4">
-          This is the project's step 0 — the "annotate" button on the project
-          page. It runs your selected YOLO model over every image you've marked
+          This is the project's <em>detect</em> step — "2 detect" in the
+          project page's progress list. It runs your selected YOLO model over every image you've marked
           as "used," drawing bounding boxes for text regions, music systems, and
           staff lines, and (if you've selected text-finding models too) running
           handwritten text recognition over the text regions at the same time.
