@@ -2,90 +2,97 @@
 
 Date: 2026-11-05 (America/Toronto)
 
-This branch updates the embedded editor and verifies the ordinary Hufnagel
-connection-editing path. It also exposes an upstream save defect when a user
-changes notation type. **Keep this branch for review; resolve that defect before
-deploying this combination.** No deployment was performed.
+The embedded editor uses Neon develop `68e3555b` plus the reviewed cache
+pending-save fix. Successful notation conversions now send the changed MEI to
+the content API, preserve it across navigation and a fresh edit session, and
+complete their successful PUT response before Mark Done sends corrected PATCH.
+The final build and all six repository integration tests pass locally.
 
-## Change
+## Pinned version and changes
 
 - Mothra base: `7ac370af52ec51da82b95bea633a0904daffc621`.
 - Neon pin: `6b168f444e975c19a772981c4ceb3d06aae8022a` →
-  `68e3555b0a98f0f417629f8fbdca245511ee7846` (merged upstream develop).
+  `1b6e34ab99cfcdbfc444f5315467ebf3844e3bc3`.
+- The new Neon commit has parent `68e3555b0a98f0f417629f8fbdca245511ee7846`.
+  It preserves later merged changes, including the `l` connection shortcut.
+  It is not a pin directly to the older source commit `2a46faaf`.
+- Its only source change is the five-line `NeonCore.ts` patch from
+  `2a46faaf956bec1f525e53b59c2bba85cfc00e25`. The original author, author date,
+  commit explanation and coauthor are retained, with a `Cherry-picked-from`
+  trailer recording the source.
 - Bundled Verovio: `5.4.0-dev-ac22768-dirty` → `6.4.0-dev-ce49d38`.
-- Remove Mothra's extra notation-dropdown click on iframe load. In this Neon
-  version the dropdown converts the MEI, so replaying stale `xmlContent` props
-  can undo a user's saved change of notation. Neon already initializes new
-  manifests from their MEI and maintains settings per manifest.
-- Keep the normal build command, font assets, save/Mark Done handling, and
-  insert-mode guard. No patches to Neon itself, mapping CSV, or notation migration.
-- Update the legacy save-helper docstring; its behavior is unchanged.
+- Remove Mothra's extra notation-dropdown click on iframe load. Neon initializes
+  a new manifest from its MEI; replaying stale React `xmlContent` can otherwise
+  convert a saved document back to its old notation.
+- Keep Mothra's build command, Save/Mark Done implementation, fonts and
+  insert-mode guard. The legacy save-helper docstring changes; its behavior does
+  not. Control points, mapping and notation/subtype migration are outside #215.
 
-The normal Mothra build uses Neon's development webpack mode and **the pinned
-local Verovio bundle**. Switching to Neon's `build:prod` would instead load the
-moving Verovio develop URL and would change the tested dependency. The source,
-copied public asset, and final `dist` asset had identical SHA256:
-`7689c9549b49a0f233bca23f3ea2b9e9951f2ad49a2d92b8865a824aace8f722`.
+## Pending-save correction
 
-## Validation
+Changing notation calls `replaceMEI`, which marks the cache entry dirty. Changing
+font then clears `lastPageLoaded`, and rendering reloads the cached MEI.
+`loadPage` now passes `cached.dirty` to `loadData` rather than resetting it to the
+default false. A render therefore preserves the need to save, and
+`updateDatabase` includes the changed page in its PUT requests.
+
+This source patch is byte-for-byte identical to the reviewed candidate patch on
+`68e3555b`. There are no additional Neon source changes in the new commit.
+
+## Final validation
 
 | Check | Result |
 | --- | --- |
-| Full `landing-page` build, including Neon, TypeScript and Vite | Passed (Node 22.16.0); existing large-chunk warning |
-| ESLint on modified `NeonBatchEditor.tsx` | Passed |
-| Full-repository ESLint | Existing backlog: 51 errors, 8 warnings; unrelated files were not changed |
-| MEI encoder and Neon manifest Python tests | 41 passed (Python 3.14) |
-| Neon's `toggle-shortcut.cy.ts` and `drag/hufnagel-ligature.cy.ts` | 17 passed |
-| Real Mothra wrapper + built Neon: initial Square/Hufnagel, switch pages without edits | Passed |
-| Real wrapper: cancel/confirm leaving an unsaved notation change | Passed |
-| Real wrapper: native Hufnagel connection editing, Mark Done and reload | Passed; raw PUT and subsequent GET checked, not only the Saved toast |
-| Real wrapper: save after changing notation in either direction | Failed: no MEI PUT after font-switch render |
-| Real wrapper: Mark Done after changing notation | Failed: no MEI PUT; corrected PATCH alone is insufficient |
+| Full `landing-page` build: Neon, TypeScript and Vite | Passed with Node 22.16.0; existing large-chunk warning |
+| Initial Square/Hufnagel selection and unedited page navigation | Passed, no writes |
+| Square → Hufnagel through Save control, page navigation and fresh session | Passed; raw PUT and newly fetched MEI checked |
+| Hufnagel → Square through Save control, page navigation and fresh session | Passed; raw PUT and newly fetched MEI checked |
+| Cancel/confirm unsaved-navigation dialog | Passed for the existing dialog and no-write assertions |
+| Mark Done after conversion | Passed; successful PUT response completes before corrected PATCH |
+| Native Hufnagel connection edits, Mark Done and reopen | Passed; changed connection state and successful PUT-response order checked |
 
-Browser tests run the actual React component and bundled iframe, with local
-session/content APIs supplied by Cypress. The correction callback updates the
-file array as AppRouter does. They do not exercise a live database, authentication,
-the complete application router, or Gen's production project. No production data
-was read or written for these tests. Test setup and commands are in
-`landing-page/tests/neon-editor/README.md`.
+The repository suite contains six tests, with no skipped tests. Important
+assertions from the separately reviewed candidate tests are now in
+`landing-page/tests/neon-editor`; they require no personal-workspace paths or
+files. Both specs observe actual worker completion before interactions, avoiding
+selection races while the initial font/render is still loading. The conversion
+cases also assert the MEI passed to Verovio, the raw saved XML, new session
+identities, and GET responses matching that saved XML.
 
-The initial Python attempt used the system Python 3.9, which rejected the
-existing `zip(..., strict=True)` calls; rerunning under Python 3.14 passed all 41.
-An early browser setup lacked the backend's `/Neon-gh` static alias; the dedicated
-test server now mirrors that alias. Those environment failures are distinct from
-the three reproducible save failures above.
+The tests use the actual React wrapper and built Neon iframe, with local API
+responses and blank manuscript images supplied by Cypress. They exercise
+successful saves with OK responses. They do not establish correctness for failed
+saves, timeouts, Neon's local fallback, authentication, Postgres, the full app
+router or Gen's production project. The unsaved-navigation test does not establish
+full data consistency after discarding edits. No production data was accessed.
+Commands and setup are in `landing-page/tests/neon-editor/README.md`.
 
-## Deployment blocker: notation conversion loses its pending-save state
+## Built assets and reviewed candidate
 
-Reproduce in the integration suite by changing Square to Hufnagel (or the reverse),
-waiting for the replacement SVG, then saving. The notation and glyphs change,
-but no PUT is issued. Mark Done can subsequently mark the file corrected even
-though that conversion did not reach the content API.
+The normal Mothra build uses Neon's development webpack mode and the pinned local
+Verovio worker. Using Neon's `build:prod` instead would load a moving online
+Verovio develop URL and change the tested dependency.
 
-The source trace in Neon `68e3555b` is:
+The reviewed candidate had 94 built Neon assets. In the final clean-cache build,
+91 are byte-for-byte identical. The remaining three JavaScript bundles have the
+same executable content after accounting for the displayed Neon version label;
+their source maps differ only in source paths, with identical embedded source
+contents. The old webpack cache retained a `7beb021e` display label. The final
+editor correctly displays `1b6e34ab`. These metadata differences do not represent
+additional product logic changes.
 
-1. `NeonView.setNotationType` converts the MEI via `replaceMEI` (dirty=true).
-2. `NeonCore.setNotationFont` clears `lastPageLoaded` when the font changes.
-3. The ensuing render enters `NeonCore.loadPage`'s cached-page branch. It calls
-   `loadData(pageURI, cached.mei)` without the cached dirty flag, resetting it to
-   the default false.
-4. `updateDatabase` saves only dirty entries, so the changed MEI is skipped.
+Neon's build output, Mothra `public/neon` and final `dist/neon` copies match. The
+final editor SHA256 is
+`f6b7d2523c08b9f15a839305b7be3e2dfda7a86b84612dd784429433cee1272a`.
+The unchanged local Verovio bundle SHA256 is
+`7689c9549b49a0f233bca23f3ea2b9e9951f2ad49a2d92b8865a824aace8f722`.
+Machine-readable comparison results are in `NEON_215_ASSET_COMPARISON.json`.
 
-A focused upstream correction should preserve the cache entry's dirty state
-when reloading it for a font change, and test the actual PUT after rendering.
-That Neon implementation is outside this Mothra-only branch. The failing tests
-remain active so a later pin can be checked against the same reproduction.
+## Delivery order
 
-## Other issues that this update does not resolve
-
-Gen's actual Neon #1401 attachment was tested with this exact Verovio bundle:
-all six connected pairs still share their zone after disconnecting. Dragging
-either member moves both. Deleting either removes the shared zone while the
-surviving nc still references it (12 deletion cases). Sending a chain of two
-10-unit drags to a connected pair moves its shared zone by 20. These are toolkit
-MEI/SVG reproductions, not a claim that Neon #1407 has the same cause.
-
-Mothra #310 remains separate: current controlled mapping examples pass, but Gen's
-specific 11/5 pre-Neon output was not attached to that issue and has not been
-obtained. Updating Neon does not re-encode existing MEI or prove all mappings
-correct. The planned standard-neume/subtype migration is also not included.
+Both changes are local commits only. No push, pull request or deployment has been
+performed. The new Neon commit must first become reachable from the configured
+submodule remote, `https://github.com/DDMAL/Neon.git`. Until then, another clone or
+CI cannot fetch this Mothra pin from that remote. Publish the Neon commit first
+when authorized, then publish the Mothra change pointing to it. A live-backend
+check remains separate from the local successful-save tests above.

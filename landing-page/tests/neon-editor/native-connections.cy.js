@@ -1,3 +1,5 @@
+import { observeNeonRenderer, waitForNeonRenderer } from './helpers/renderer';
+
 const projectPath = '/api/projects/215/mei';
 const pagePath = '/tests/neon-editor/index.html';
 const fileId = 'native-hufnagel';
@@ -32,6 +34,7 @@ function expectSaved(saved) {
 }
 
 function selectPair() {
+  waitForNeonRenderer();
   editorElement(`#${firstNc} use`).first().click({ force: true });
   editorElement(`#${firstNc}`).should('have.class', 'selected');
   editorElement(`#${secondNc}`).then(($second) => {
@@ -89,7 +92,10 @@ function expectCurrentMei(connected) {
 
 describe('Mothra-generated Hufnagel connection editing in embedded Neon', () => {
   it('renders, toggles connections, and persists a changed connection state through Mark Done and reopen', () => {
-    const server = { content: '', original: '', corrected: false, events: [], loads: [] };
+    const server = {
+      content: '', original: '', corrected: false, events: [], loads: [],
+      saveResponseCompleted: false,
+    };
     const run = `${Date.now()}-${Cypress._.random(1000000)}`;
     const manifests = new Map();
     const image = `${Cypress.config('baseUrl')}/__test__/native-page.svg`;
@@ -152,15 +158,20 @@ describe('Mothra-generated Hufnagel connection editing in embedded Neon', () => 
       assertMei(req.body, false);
       server.content = req.body;
       server.events.push('put');
+      server.saveResponseCompleted = false;
+      req.on('after:response', () => { server.saveResponseCompleted = true; });
       req.reply({ delay: 75, body: { ok: true } });
     }).as('nativeSave');
     cy.intercept('PATCH', `${projectPath}/${fileId}`, (req) => {
       expect(req.body).to.deep.equal({ corrected: true });
+      expect(server.saveResponseCompleted, 'MEI PUT response completed before corrected PATCH')
+        .to.equal(true);
       server.corrected = true;
       server.events.push('patch');
       req.reply({ body: { ok: true } });
     }).as('nativeDone');
 
+    observeNeonRenderer();
     cy.visit(pagePath);
     cy.wait('@nativeSession');
     editorElement('#notation-type-label').should('contain.text', 'Hufnagel');

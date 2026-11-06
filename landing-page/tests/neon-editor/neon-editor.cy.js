@@ -1,3 +1,5 @@
+import { observeNeonRenderer, waitForNeonRenderer } from './helpers/renderer';
+
 const projectPath = '/api/projects/215/mei';
 const pagePath = '/tests/neon-editor/index.html';
 const names = { a: 'Square-A.mei', b: 'Hufnagel-B.mei' };
@@ -18,6 +20,10 @@ function expectEditor(id, notation) {
   editorElement('svg.active-page .nc').should('have.length.greaterThan', 0);
 }
 
+function expectRendererIdle(notation) {
+  waitForNeonRenderer().then((mei) => assertNotation(mei, notation));
+}
+
 function expectSaved(saved = true) {
   editorElement('#file-saved').should('have.attr', 'alt',
     saved ? 'Your work is saved' : 'You have unsaved work');
@@ -34,16 +40,14 @@ function selectNotation(notation) {
     editorElement('svg.active-page').should(($after) => {
       expect($after[0], 'notation change rendered').not.to.equal(before);
     });
+    expectRendererIdle(notation.toLowerCase());
     expectSaved(false);
   });
 }
 
-function saveWithNeon() {
-  cy.get('iframe').its('0.contentWindow').then((win) => {
-    win.document.body.dispatchEvent(new win.KeyboardEvent('keydown', {
-      key: 's', bubbles: true,
-    }));
-  });
+function saveWithMenu() {
+  // Exercise Neon's own Save control, which is inside its hover menu.
+  editorElement('#save').click({ force: true });
 }
 
 function goTo(id) {
@@ -65,7 +69,11 @@ describe('Mothra with its real embedded Neon editor', () => {
   let server;
 
   beforeEach(() => {
-    server = { content: {}, writes: [], corrected: [], events: [] };
+    server = {
+      content: {}, writes: [], corrected: [], events: [],
+      loads: { a: [], b: [] }, sessions: { a: [], b: [] },
+      completedSaves: { a: false, b: false },
+    };
     cy.task('readNeonFixture', 'square').then((xml) => {
       // Current Mothra declares Square explicitly; the historical Neon
       // sample predates those values and otherwise bypasses the old shim.
@@ -96,8 +104,9 @@ describe('Mothra with its real embedded Neon editor', () => {
         const body = `${Cypress.config('baseUrl')}${projectPath}/${id}/content?token=local-test`;
         cy.intercept('POST', `${projectPath}/${id}/edit-session`, (req) => {
           // Mothra issues a fresh session + manifest on every POST. This also
-          // models a renewed session after explicitly discarding local edits.
+          // models a renewed session after reopening the editor component.
           const session = `test-${run}-${id}-${++sessionNumber}`;
+          server.sessions[id].push(session);
           const manifestId = `manifest-${session}`;
           manifests.set(session, {
             '@context': [
@@ -122,6 +131,7 @@ describe('Mothra with its real embedded Neon editor', () => {
           req.reply({ body: { session_id: session, manifest_id: manifestId } });
         }).as(`session${id}`);
         cy.intercept('GET', `${projectPath}/${id}/content*`, (req) => {
+          server.loads[id].push(server.content[id]);
           req.reply({
             headers: { 'content-type': 'application/xml' },
             body: server.content[id],
@@ -132,19 +142,50 @@ describe('Mothra with its real embedded Neon editor', () => {
           server.content[id] = req.body;
           server.writes.push({ id, xml: req.body });
           server.events.push(`put:${id}`);
+          server.completedSaves[id] = false;
+          req.on('after:response', () => { server.completedSaves[id] = true; });
           req.reply({ delay: 75, body: { ok: true } });
         }).as(`save${id}`);
         cy.intercept('PATCH', `${projectPath}/${id}`, (req) => {
           expect(req.body).to.deep.equal({ corrected: true });
+          expect(server.completedSaves[id], 'MEI PUT response completed before corrected PATCH')
+            .to.equal(true);
           server.corrected.push(id);
           server.events.push(`patch:${id}`);
           req.reply({ body: { ok: true } });
         }).as(`done${id}`);
       });
     });
+    observeNeonRenderer();
     cy.visit(pagePath);
     cy.wait(['@sessiona', '@sessionb']);
   });
+
+  function reopenAndExpectSaved(id, notation) {
+    cy.then(() => {
+      const loadsBefore = server.loads[id].length;
+      const sessionsBefore = [...server.sessions[id]];
+      cy.reload();
+      cy.wait(['@sessiona', '@sessionb']);
+      if (id === 'b') goTo('b');
+      expectEditor(id, notation);
+      expectRendererIdle(notation.toLowerCase());
+      expectSaved();
+      cy.then(() => {
+        const sessionsAfter = server.sessions[id];
+        expect(sessionsAfter.length, 'reopen creates a new edit session')
+          .to.be.greaterThan(sessionsBefore.length);
+        expect(sessionsBefore).not.to.include(sessionsAfter[sessionsAfter.length - 1]);
+        expect(server.loads[id].length, 'new session fetches saved MEI')
+          .to.be.greaterThan(loadsBefore);
+        server.loads[id].slice(loadsBefore).forEach((xml) => {
+          expect(xml, 'GET returns the MEI sent by PUT').to.equal(server.content[id]);
+          assertNotation(xml, notation.toLowerCase());
+        });
+        expect(server.writes, 'reopen does not write').to.have.length(1);
+      });
+    });
+  }
 
   it('initializes Square and Hufnagel from their own MEI without creating edits', () => {
     expectEditor('a', 'Square');
@@ -158,10 +199,11 @@ describe('Mothra with its real embedded Neon editor', () => {
     cy.then(() => expect(server.writes).to.deep.equal([]));
   });
 
-  it('saves Square to Hufnagel and keeps that change after B then A', () => {
+  it('saves Square to Hufnagel through the Save menu, page navigation, and a new session', () => {
     expectEditor('a', 'Square');
+    expectRendererIdle('square');
     selectNotation('Hufnagel');
-    saveWithNeon();
+    saveWithMenu();
     cy.wait('@savea').then(({ request }) => assertNotation(request.body, 'hufnagel'));
     expectSaved();
     goTo('b');
@@ -174,14 +216,16 @@ describe('Mothra with its real embedded Neon editor', () => {
       assertNotation(server.content.a, 'hufnagel');
       expect(server.writes).to.have.length(1);
     });
+    reopenAndExpectSaved('a', 'Hufnagel');
   });
 
-  it('saves Hufnagel to Square and keeps that change after A then B', () => {
+  it('saves Hufnagel to Square through the Save menu, page navigation, and a new session', () => {
     expectEditor('a', 'Square');
     goTo('b');
     expectEditor('b', 'Hufnagel');
+    expectRendererIdle('hufnagel');
     selectNotation('Square');
-    saveWithNeon();
+    saveWithMenu();
     cy.wait('@saveb').then(({ request }) => assertNotation(request.body, 'square'));
     expectSaved();
     goTo('a');
@@ -193,9 +237,10 @@ describe('Mothra with its real embedded Neon editor', () => {
       assertNotation(server.content.b, 'square');
       expect(server.writes).to.have.length(1);
     });
+    reopenAndExpectSaved('b', 'Square');
   });
 
-  it('guards unsaved navigation and discards the change only after confirmation', () => {
+  it('cancels or confirms unsaved navigation without writing to the content API', () => {
     expectEditor('a', 'Square');
     selectNotation('Hufnagel');
     goTo('b');
@@ -215,6 +260,7 @@ describe('Mothra with its real embedded Neon editor', () => {
 
   it('Mark Done saves the actual edited MEI before PATCH and advances to the next file', () => {
     expectEditor('a', 'Square');
+    expectRendererIdle('square');
     selectNotation('Hufnagel');
     cy.contains('button', 'Mark Done & Next').click();
     cy.wait('@savea').then(({ request }) => assertNotation(request.body, 'hufnagel'));
