@@ -22,17 +22,12 @@ router = APIRouter()
 
 
 def _restore_notation_subtype(previous_xml_content: Optional[str], incoming_xml: str) -> str:
-    """Neon's own Verovio-compatibility shim (stripHufnagelForVerovio, in the
-    landing-page/neon submodule's ConvertMei.ts) normalizes a loaded file's
-    <staffDef notationtype="neume.square"|"neume.hufnagel"> down to the bare
-    "neume" before caching it, and Neon's save flow (updateDatabase()) PUTs
-    that same stripped copy back here -- so saving any edit in Neon would
-    otherwise silently lose which notation the file was encoded in, and the
-    file would reopen as Square (NeonBatchEditor.tsx's applyNotationTypeFont
-    has no subtype left to read). The neon submodule is tracked clean
-    against upstream with no local patches, so the fix lives on this side
-    of the PUT instead: if the incoming save has been stripped to the
-    generic form, re-stamp whatever subtype the previously-stored copy had.
+    """Preserve the notation declaration when an older Neon client strips it.
+
+    Legacy stripHufnagelForVerovio converted neume.square/neume.hufnagel to
+    bare neume before saving. The embedded Neon updated in #215 no longer
+    does that. Keep this compatibility path for older clients, while leaving
+    explicit incoming values untouched so a deliberate conversion can save.
     """
     if not previous_xml_content:
         return incoming_xml
