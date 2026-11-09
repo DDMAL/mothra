@@ -841,7 +841,15 @@ def _facs_groups(class_name, notation_type):
     )
     root = ET.fromstring(xml_bytes)
     ncs = root.findall(f".//{MEI_NS}neume/{MEI_NS}nc")
-    return [nc.get("facs") for nc in ncs]
+    facs = [nc.get("facs") for nc in ncs]
+    zone_ids = {
+        zone.get(mei.XML_ID)
+        for zone in root.findall(f".//{MEI_NS}surface/{MEI_NS}zone")
+    }
+    assert all(f and f.startswith("#") and f[1:] in zone_ids for f in facs), (
+        notation_type, class_name, facs
+    )
+    return facs
 
 
 # (notation_type, class_name, expected column grouping of the <nc>s' @facs,
