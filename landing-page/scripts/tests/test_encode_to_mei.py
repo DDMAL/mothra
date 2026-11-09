@@ -831,6 +831,76 @@ def test_build_mei_podatus2a_and_pescephalicus_components_get_separate_facs_zone
         assert ncs[0].get("facs") != ncs[1].get("facs"), class_name
 
 
+def _facs_groups(class_name, notation_type):
+    """Build one glyph of `class_name` and return its <nc>s' @facs values."""
+    stave = _stave("s1", 100, 160, lrx=1000, line_ys=[100.0, 120.0, 140.0, 160.0])
+    xml_bytes = mei.build_mei(
+        {0: [_glyph("g1", 10, ncols=60, class_name=class_name)]}, [stave],
+        image_path=Path("page.jpg"), image_w=1000, image_h=1000,
+        manuscript_name="test", notation_type=notation_type,
+    )
+    root = ET.fromstring(xml_bytes)
+    ncs = root.findall(f".//{MEI_NS}neume/{MEI_NS}nc")
+    return [nc.get("facs") for nc in ncs]
+
+
+# (notation_type, class_name, expected column grouping of the <nc>s' @facs,
+# as a tuple of group ids -- equal ids share a zone). Mirrors the width column
+# of assets/mei_encoding/{square,hufnagel}.csv.
+_ZONE_SHAPES = [
+    # hufnagel: stacked pair ("[2]")
+    *[("hufnagel", f"neume.clivis{n}a", (0, 0)) for n in (2, 3, 4, 5)],
+    # hufnagel: side-by-side pair ("[1, 1]")
+    *[("hufnagel", f"neume.clivis{n}b", (0, 1)) for n in (2, 3, 4, 5)],
+    *[("hufnagel", f"neume.podatus{n}", (0, 1)) for n in (2, 3, 4, 5)],
+    ("hufnagel", "neume.distropha", (0, 1)),
+    # hufnagel: leading note alone, last two share a column ("[1, 2]")
+    *[("hufnagel", c, (0, 1, 1)) for c in (
+        "neume.torculus22", "neume.torculus34", "neume.torculus43")],
+    # square: stacked pairs ("[2]")
+    *[("square", f"neume.podatus{n}", (0, 0)) for n in (3, 4, 5)],
+    ("square", "neume.podatus2b", (0, 0)),
+    *[("square", f"neume.oblique{n}", (0, 0)) for n in (2, 3, 4)],
+    # square: not stacked ("[1, 1]")
+    ("square", "neume.podatus2a", (0, 1)),
+    ("square", "neume.pescephalicus2", (0, 1)),
+    # square: scandicus variants
+    ("square", "neume.scandicus22a", (0, 1, 1)),
+    ("square", "neume.scandicus22b", (0, 0, 1)),
+    ("square", "neume.scandicus22c", (0, 1, 2)),
+]
+
+
+def test_build_mei_component_zone_sharing_matches_csv_width_column():
+    """For each multi-component class, the <nc>s' @facs must group exactly as
+    the CSV's width column says (shared id = shared column)."""
+    for notation_type, class_name, expected in _ZONE_SHAPES:
+        facs = _facs_groups(class_name, notation_type)
+        assert len(facs) == len(expected), (notation_type, class_name, facs)
+        assert all(facs), (notation_type, class_name, facs)
+        first_seen: dict[str, int] = {}
+        actual = tuple(first_seen.setdefault(f, len(first_seen)) for f in facs)
+        assert actual == expected, (notation_type, class_name, facs)
+
+
+def test_bundled_csv_widths_all_yield_zone_split():
+    """Guard against a CSV edit introducing a width column that fits neither
+    the 1:1 nor the sums-to-count shape: _component_zone_ids would silently
+    return None and the caller falls back to one shared zone."""
+    from neume_mapping import resolve_neume_mapping
+    for notation_type in ("square", "hufnagel"):
+        for key, entry in resolve_neume_mapping(notation_type).items():
+            if len(entry.components) <= 1 or not entry.width:
+                continue
+            surface = ET.Element("surface")
+            glyph = mei.Glyph(id="g1", ulx=0, uly=50, ncols=200, nrows=40,
+                               class_name=entry.classification, confidence=1.0,
+                               state="AUTOMATIC")
+            zones = mei._component_zone_ids(surface, glyph, entry.components, entry.width)
+            assert zones is not None, (notation_type, key, entry.width)
+            assert len(zones) == len(entry.components), (notation_type, key)
+
+
 def test_build_mei_accid_attaches_beside_next_neume():
     """An accidental glyph must attach as a <syllable> child immediately
     preceding the <neume> of the note to its right, not nest inside <nc>/
