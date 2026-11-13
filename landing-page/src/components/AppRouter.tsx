@@ -34,7 +34,7 @@ import CompletionPage from "./workflow/CompletionPage";
 import InteractiveClassifier from "./workflow/InteractiveClassifier";
 import IcAutoQueue from "./workflow/IcAutoQueue";
 import IcSessionUnavailable from "./workflow/IcSessionUnavailable";
-import IcCompletionTestPage from "./workflow/ICCompletionTestPage";
+import EncodeXmlUploadPage from "./workflow/EncodeXmlUploadPage";
 import NeonCompletionPage from "./workflow/NeonCompletionPage";
 import CuSubmissionPage from "./workflow/CuSubmissionPage";
 import NeonBatchEditor from "./workflow/NeonBatchEditor";
@@ -291,6 +291,16 @@ export default function AppRouter({
     setView("cu-submission");
   };
 
+  // Files left from an earlier visit are dropped -- and so is any batch
+  // queue, which "encoding-processing" would otherwise run in preference to
+  // the uploaded file.
+  const openEncodeUpload = () => {
+    setPendingXmlFile(null);
+    setPendingImageFile(null);
+    setPendingBatchPairs([]);
+    setView("encode-upload");
+  };
+
   useEffect(() => {
     const PROJECT_VIEWS: View[] = [
       "project",
@@ -298,6 +308,7 @@ export default function AppRouter({
       "completion",
       "ic",
       "ic-auto",
+      "encode-upload",
       "encoding-processing",
       "encoding-completion",
       "neon-editor",
@@ -336,9 +347,9 @@ export default function AppRouter({
     setView(icSettings.mode === "auto" ? "ic-auto" : "ic");
   };
 
-  // mothra#321: re-entering step 1 from the project page's numbered
-  // step-progress button ("1 interactive classifier") is not the same
-  // action as advancing into it for the first time via Continue.
+  // mothra#321: re-entering the classify step from the project page's
+  // progress list ("3 classify") is not the same action as advancing into
+  // it for the first time via Continue.
   // icSettings.mode is page-session state that resets to "auto" on every
   // return to the project page (useIcSettings.ts, mothra#222) -- so by the
   // time this click happens, "auto" says nothing about whether the user
@@ -491,18 +502,32 @@ export default function AppRouter({
             )
           }
           onStepClick={(step) => {
-            if (step === 0) {
-              if (SKIP_PREDICT) {
-                goToIc();
+            switch (step) {
+              case "detect":
+                if (SKIP_PREDICT) {
+                  goToIc();
+                  return;
+                }
+                setBatchRunIds(computeBatchRun(selectedProject));
+                setBatchResult(null);
+                setView("processing");
                 return;
-              }
-              setBatchRunIds(computeBatchRun(selectedProject));
-              setBatchResult(null);
-              setView("processing");
-            } else if (step === 1) reopenIc();
-            else if (step === 2) setView("ic-completion");
-            else if (step === 3) goToNeon();
+              case "classify":
+                reopenIc();
+                return;
+              case "correct":
+                goToNeon();
+                return;
+              case "submit":
+                goToCuSubmission();
+                return;
+              default:
+                // A step added to lib/pipeline.ts without a case here is a
+                // compile error, not a button that silently does nothing.
+                step satisfies never;
+            }
           }}
+          onEncodeUploadedXml={openEncodeUpload}
           onResumeIcSession={(req) => {
             // IC's own manage page hands back one session at a time; the IC
             // step page's picker (IcSessionPicker) is what supplies several.
@@ -1082,9 +1107,9 @@ export default function AppRouter({
         />
       );
     }
-    case "ic-completion":
+    case "encode-upload":
       return (
-        <IcCompletionTestPage
+        <EncodeXmlUploadPage
           onContinue={() => setView("encoding-processing")}
           onBackToProject={() => setView("project")}
           xmlFile={pendingXmlFile}
@@ -1165,7 +1190,7 @@ export default function AppRouter({
             pendingImageFile ? `encoding ${pendingImageFile.name}` : "encoding"
           }
           logs={encodingLogs}
-          onBack={() => goToIc()}
+          onBack={() => setView("encode-upload")}
           onComplete={() => {
             if (selectedProjectId && selectedProject) {
               updateProjectSteps(

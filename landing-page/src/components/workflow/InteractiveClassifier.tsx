@@ -45,7 +45,7 @@ interface InteractiveClassifierProps {
   onClefShapeChange: (s: "C" | "F") => void;
   clefLine: number;
   onClefLineChange: (n: number) => void;
-  // Training set picked on the project page ("Classifier settings").
+  // Training set picked on the project page ("Glyph Classifier settings").
   // Pre-selected in
   // each page's IC create-session screen via the ic:prefill-training reply
   // below; empty when the user made no choice there, in which case the
@@ -598,7 +598,7 @@ export default function InteractiveClassifier({
               <p className="text-white/40 text-xs max-w-md">
                 {usedImageCount === 0
                   ? "select images on the project page and run detection first."
-                  : "there's nothing left to classify here — carry on with correction (step 3), or select more pages on the project page."}
+                  : "there's nothing left to classify here — carry on with correction (step 5, correct), or select more pages on the project page."}
               </p>
               <div className="mt-1 flex items-center gap-3">
                 <button
@@ -630,7 +630,16 @@ export default function InteractiveClassifier({
                 {error}
               </p>
               <p className="text-white/40 text-xs">
-                is the IC service running on its port? (see CLAUDE.md)
+                the classifier service may be restarting — try again in a
+                minute; if it keeps happening,{" "}
+                <a
+                  href="https://github.com/DDMAL/mothra/issues/new"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-white"
+                >
+                  report an issue
+                </a>
               </p>
             </div>
           ) : icUrl ? (

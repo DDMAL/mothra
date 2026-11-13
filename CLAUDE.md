@@ -43,7 +43,7 @@ Theme colours: `#1D3335` (dark teal, primary bg/text), `#4AADAA` (accent), `#C8E
 | `project_images` | stores image bytes as `BYTEA` |
 | `project_models` | model name references only (no file stored) |
 | `mei_files` | xml_content as TEXT, corrected flag, `created_at` (used to pick each image's latest MEI revision for the cantus-bundle export) |
-| `ic_xml_files` | the GameraXML a page was encoded from (`xml_content` BYTEA — stored verbatim, since the step-3 XML-upload path accepts non-UTF-8 documents; only the JSON viewer endpoint decodes, `glyph_count`) — one current row per page, written by the encode task (`ic_xml_store.py`), delete-then-insert on re-encode; surfaced as "Generated files → Classifier XML", see **Workflow pipeline** step 2 |
+| `ic_xml_files` | the GameraXML a page was encoded from (`xml_content` BYTEA — stored verbatim, since the `encode-upload` path accepts non-UTF-8 documents; only the JSON viewer endpoint decodes, `glyph_count`) — one current row per page, written by the encode task (`ic_xml_store.py`), delete-then-insert on re-encode; surfaced as "Generated files → Classifier XML", see **Workflow pipeline** step 3 |
 | `activity_log`, `project_logs` | audit trail per project |
 | `annotations` | YOLO detections per image (`yolo_txt`), written by the predict job |
 | `text_alignments` | text-finding output per image, written by the predict job |
@@ -762,7 +762,7 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/account_api.py` | Profile update, password change, account delete |
 | `landing-page/scripts/projects_api.py` | Project CRUD, export/duplicate, activity/log-download endpoints |
 | `landing-page/scripts/images_api.py` | Project image upload/fetch/delete endpoints |
-| `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start`, `POST /ic/{session_id}/complete` (exports with `finalize=false`, see **Workflow pipeline** step 2), `GET /projects/{id}/ic/sessions` (what `IcSessionPicker.tsx` lists), the `ic-xml` read endpoints, and the rest of the IC-step endpoints |
+| `landing-page/scripts/ic_api.py` | Bridges to the Interactive Classifier service — `POST /projects/{id}/ic/start`, `POST /ic/{session_id}/complete` (exports with `finalize=false`, see **Workflow pipeline** step 3), `GET /projects/{id}/ic/sessions` (what `IcSessionPicker.tsx` lists), the `ic-xml` read endpoints, and the rest of the IC-step endpoints |
 | `landing-page/scripts/ic_xml_store.py` | Writes `ic_xml_files` — the classifier XML an encode run consumed; called from `tasks_encode.py`, read back by `ic_api.py` |
 | `landing-page/scripts/inference_api.py` | `POST /projects/{id}/predict` kickoff endpoint (enqueues `tasks_predict.py`), annotation CRUD |
 | `landing-page/scripts/mei_api.py` | MEI file CRUD, Neon batch-editor edit-session bootstrap |
@@ -784,12 +784,13 @@ rollout restart`) remains the safer habit.
 | `landing-page/scripts/encode_api.py` | `POST /api/encode-upload` / `/encode-batch` — kickoff endpoints, enqueue Celery tasks |
 | `landing-page/scripts/encode_to_mei.py` | Core encoding logic: parse XML, estimate staves, build MEI, validate |
 | `landing-page/scripts/batch_api.py` | `POST /text-batch/run` job-queue kickoff, `GET /text-batch/{id}/download`, `GET /sources/{id}/export`, and `GET /sources/{id}/cantus-bundle` (corrected-MEI zip for manual hand-off to `production_mei_files`) |
+| `landing-page/src/lib/pipeline.ts` | The six pipeline steps (id, label, `unlockIndex`) the progress list renders, and the `RoutedStepId` that `AppRouter`'s step routing switches over — see **Workflow pipeline** |
 | `landing-page/src/lib/apiFetch.ts` | `apiFetch` (also drives the silent JWT-refresh-on-401 flow via `X-Refresh-Token`) / `apiFetchJobStream` — auth-aware fetch wrapper + job kickoff-then-stream helper, reports `job_id` via an `onJobId` callback |
-| `landing-page/src/utils/mei.ts` | `latestMeiPerImage()` — newest MEI revision per page, what the Neon editor lists (see **Workflow pipeline** step 2) |
+| `landing-page/src/utils/mei.ts` | `latestMeiPerImage()` — newest MEI revision per page, what the Neon editor lists (see **Workflow pipeline** step 3) |
 | `landing-page/src/components/workflow/CuSubmissionPage.tsx` | Step 6's submission surface: CU manuscript picker, per-page folio + status table, and the client-side sequential submit loop |
 | `landing-page/src/types.ts` | All shared TypeScript types |
 | `landing-page/src/components/AppRouter.tsx` | All view routing (switch on `view` string) |
-| `landing-page/src/hooks/useIcSettings.ts` | IC step mode (auto/manual) + shared training set — see **Workflow pipeline** step 2 |
+| `landing-page/src/hooks/useIcSettings.ts` | IC step mode (auto/manual) + shared training set — see **Workflow pipeline** step 3 |
 | `landing-page/src/utils/icQueue.ts` | Shared IC-queue helpers (`buildEncodePair`, `autoQueueImage`) used by both IC modes |
 | `landing-page/src/hooks/useEncodingFlow.ts` | Encoding state: pending files, logs, MEI content |
 | `landing-page/src/hooks/useProjectMutations.ts` | Project CRUD mutations |
@@ -800,19 +801,32 @@ rollout restart`) remains the safer habit.
 ## Workflow pipeline (step order)
 
 ```
-1. Create project, upload images ("use" selected images)
-2. Interactive Classifier  →  view: "ic" (manual) / "ic-auto" (auto)
-3. IC completion / upload XML output  →  view: "ic-completion"
-4. Encoding (GameraXML → MEI via encode_to_mei.py)  →  view: "encoding-processing"
-5. Neon.js batch editor for human correction  →  view: "neon-editor"
-6. Send to Cantus Ultimus  →  view: "cu-submission" (submit for review, or download the zip bundle)
+1. Set up: create project, upload images, "use" selected pages  →  view: "project"
+2. Detect: YOLO layers, stafflines, text finding (tasks_predict.py)  →  view: "processing"
+3. Classify: Interactive Classifier  →  view: "ic" (manual) / "ic-auto" (auto)
+4. Encode: GameraXML → MEI via encode_to_mei.py  →  view: "encoding-processing"
+   (a GameraXML file uploaded by hand: view "encode-upload", opened from
+   Generated files → Classifier XML)
+5. Correct: Neon.js batch editor  →  view: "neon-editor"
+6. Submit to Cantus Ultimus  →  view: "cu-submission" (submit for review, or download the zip bundle)
 ```
 
-`stepsUnlocked` on the project record gates which steps are accessible. It increments as each step completes and is persisted via `PUT /api/projects/{id}`.
+These are the six steps the project page's progress list shows, defined once in
+`src/lib/pipeline.ts`. `stepsUnlocked` on the project record gates which are
+accessible, but it **counts from detection, not set-up** (0 detect … 4 submit —
+each step's `unlockIndex`), so it is one less than the displayed number; so is
+`utils/imageStep.ts`'s `nextStep`. It increments as each step completes and is
+persisted via `PUT /api/projects/{id}`. Two steps don't leave the project page:
+"set up" opens the Images tab, and "encode" — which has no screen of its own,
+since it runs as a hand-off between classify and correct (`nextStep` is never 2)
+— opens Generated files → MEI files. The other four go through `AppRouter.tsx`'s
+`onStepClick`, an exhaustive `switch` over `RoutedStepId`, so a step added to
+`pipeline.ts` without a route is a compile error rather than a dead button (which
+is what "send to cantus ultimus" was until it got one).
 
-**Step 2 has two modes, chosen before the pipeline runs.** The "Classifier
-settings" column of the project page's settings box (`IcSettingsSection.tsx`,
-rendered beside the "CantusDB settings" column inside `CantusSourcePanel.tsx`)
+**Step 3 (classify) has two modes, chosen before the pipeline runs.** The "Glyph
+Classifier settings" column of the project page's settings box (`IcSettingsSection.tsx`,
+rendered beside the "CantusDB Text settings" column inside `CantusSourcePanel.tsx`)
 holds an auto/manual switch plus the shared training set (built-in presets from `GET /api/ic/training-presets` +
 uploaded GameraXML), in state at `useIcSettings.ts`. Both used to live on the
 IC page itself — a "training set" popover in its top bar and a "queue all
@@ -824,7 +838,7 @@ once, alongside image/model selection, rather than mid-classification.
   available" did) and the resulting queue goes straight to
   `"encoding-processing"`. Needs a non-empty training set — classify has no
   training pool otherwise — so `ProjectDetail.tsx` greys out Continue
-  (`autoIcNeedsTraining`, checked at steps 0 and 1) until one is picked, rather
+  (`autoIcNeedsTraining`, checked while `nextStep` is 0 or 1) until one is picked, rather
   than letting a whole detection run be spent first. Because auto is the
   default, that greyed-out Continue is what a brand-new project sees until
   training data is picked or the switch is flipped to manual. It still carries
@@ -841,10 +855,12 @@ once, alongside image/model selection, rather than mid-classification.
   create-session screen via the `ic:prefill-training` postMessage. No selection
   made ⇒ no prefill, and the classifier's own defaults stand.
 
-`AppRouter.tsx`'s `goToIc()` picks the view from the mode, so every ordinary
-route into step 2 (Continue, the completion page, the progress sidebar) honours
-it. Resuming a saved session from "manage IC sessions" always opens `"ic"`
-regardless of mode — the user picked that session explicitly.
+`AppRouter.tsx`'s `goToIc()` picks the view from the mode, so the ordinary
+routes into step 3 (Continue, the completion page) honour it. Two routes always
+open `"ic"` regardless of mode: resuming a saved session from "manage IC
+sessions" (the user picked that session explicitly), and the progress list's
+"3 classify" (`reopenIc()`, mothra#321 — `"ic-auto"` would classify and encode
+every pending page the moment it mounted).
 
 **In manual mode, an IC session is never ended by mothra at all.** IC's
 `POST /sessions/{id}/complete` normally moves a session `CLASSIFYING → EXPORT`,
@@ -864,8 +880,8 @@ since backend and ic are applied together and a startup abort on "IC isn't
 up yet" would CrashLoopBackOff the whole backend on an ordinary deploy
 race. `MOTHRA_IC_COMPAT_CHECK=0` bypasses it without a redeploy, and CD now
 rolls `ic` out and waits for it *before* applying `backend.yaml`. Before that, encoding a page silently retired the
-session behind it: re-entering step 1 for that page — the usual route being
-the project page's progress bar — got a blank new session instead of the
+session behind it: re-entering the classify step for that page — the usual route being
+the project page's progress list — got a blank new session instead of the
 corrections, and since an encoded page is also filtered out of
 `pendingIcImages()`, the IC view had nothing to show but its "already
 encoded" empty state. The IC view now carries a **"saved sessions"** button
@@ -930,8 +946,8 @@ re-encode supersedes rather than accumulating. It is called from
 **`tasks_encode.py`'s `_encode_one()`**, right after `parse_gamera_xml()`
 succeeds — deliberately *not* from the IC export bridge: that bridge can be
 reached with no encode following, IC's own in-iframe export streams straight
-to the browser without mothra seeing it, and the step-3 "upload XML output"
-path never touches IC at all. "Was encoded" is the only rule that holds for
+to the browser without mothra seeing it, and the `"encode-upload"` page
+(a GameraXML file uploaded by hand) never touches IC at all. "Was encoded" is the only rule that holds for
 every path in, the glyph count is then the parse's own rather than a
 string-count guess, and writing before the rest of the pipeline can fail
 leaves a failed encode's input inspectable. `ic_complete` still takes
