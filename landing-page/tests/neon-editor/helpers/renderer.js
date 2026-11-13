@@ -1,8 +1,11 @@
 // Observe the real worker without changing its inputs or renderer behavior.
 // The notation label and first SVG can appear before font loading is complete.
 export function observeNeonRenderer() {
-  cy.intercept('GET', '**/Neon-gh/editor.js', (req) => req.continue((res) => {
-    res.body = `(() => {
+  // Mark Done can remount an iframe and immediately navigate to another file.
+  // Serve the observed copy directly, avoiding an upstream response callback
+  // on a script request canceled with that discarded iframe.
+  return cy.request({ url: '/neon/Neon-gh/editor.js', log: false }).then((response) => {
+    const body = `(() => {
       const NativeWorker = window.Worker;
       window.__neonTestMessages = [];
       window.Worker = class extends NativeWorker {
@@ -20,8 +23,13 @@ export function observeNeonRenderer() {
           return super.postMessage(message, ...rest);
         }
       };
-    })();\n` + res.body;
-  }));
+    })();\n` + response.body;
+    cy.intercept('GET', '**/Neon-gh/editor.js', {
+      statusCode: 200,
+      headers: { 'content-type': 'application/javascript', 'cache-control': 'no-store' },
+      body,
+    });
+  });
 }
 
 export function waitForNeonRenderer() {

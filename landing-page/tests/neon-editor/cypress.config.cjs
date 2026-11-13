@@ -16,12 +16,21 @@ module.exports = {
     supportFile: false,
     fixturesFolder: false,
     setupNodeEvents(on) {
+      const handleResults = [];
       const fixtureNames = {
         square: 'test.mei',
         hufnagel: 'St_Gall_022r_one_staff.mei',
         mothraHufnagelClivis: path.join(__dirname, 'fixtures/current-mothra-hufnagel-clivis2a.mei'),
       };
       on('task', {
+        recordHandleResult(result) {
+          handleResults.push(result);
+          const directory = path.join(__dirname, 'artifacts');
+          fs.mkdirSync(directory, { recursive: true });
+          fs.writeFileSync(path.join(directory, 'handle-results.json'),
+            JSON.stringify(handleResults, null, 2) + '\n');
+          return null;
+        },
         readNeonFixture(type) {
           if (!Object.hasOwn(fixtureNames, type)) {
             throw new Error(`Unknown Neon fixture: ${type}`);

@@ -37,7 +37,7 @@ editor should match `git -C neon rev-parse --short HEAD`.
 
 ## Coverage
 
-The six tests exercise:
+The original six tests exercise:
 
 - Initial Square/Hufnagel selection and navigation without creating edits.
 - Both notation-conversion directions through Neon's actual Save control, with
@@ -60,8 +60,15 @@ clivis2a. It checks connector glyphs, unlink/relink, then saves an unlinked stat
 (different from the original) with Mark Done and reopens it from the content API.
 It also checks PUT-response completion before corrected PATCH.
 
-The pinned Neon is based on `68e3555b` plus the cache dirty-state fix from
-`2a46faaf`; it retains the later merged keyboard-shortcut changes. See
+Seven additional tests in `embedded-handles.cy.js` adapt #1410's samples and
+gestures to the real Mothra iframe: Square/Hufnagel CSS-pixel sizing through Neon
+Zoom, slider use with text bboxes hidden, MEI invariance under UI changes, legal
+content drags with off-image handles (including a ten-times-smaller surface), and
+glyph/staff-line out-of-image rejection with restored MEI. Measurements are
+written to `artifacts/handle-results.json`; the final suite has 13 tests.
+
+The pinned Neon is based on official develop `7f632275`, including merged #1410,
+plus the cache dirty-state fix from `2a46faaf` / previous delivery `1b6e34ab`. See
 `documentation_allons-y/NEON_215_VERIFICATION.md` at the repository root for the
 exact pin, validation results, asset comparison, and publication order. The suite
 does not depend on any files or absolute paths in a personal workspace.

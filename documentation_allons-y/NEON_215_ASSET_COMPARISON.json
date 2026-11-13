@@ -1,37 +1,21 @@
 {
-  "neonCommit": "1b6e34ab99cfcdbfc444f5315467ebf3844e3bc3",
+  "date": "2026-11-13",
+  "previousNeonCommit": "1b6e34ab99cfcdbfc444f5315467ebf3844e3bc3",
+  "officialDevelop": "7f6322757a2002efa29d5a9b11793a07f7d08c9a",
+  "neonCommit": "a7b9dc66aff78897f59fb2e5be5b4b33991d328b",
+  "pr1410MergeIncluded": true,
+  "dirtyPatchMatchesPreviousDelivery": true,
+  "upstreamAlreadyHasDirtyFix": false,
   "assetCount": 94,
-  "byteIdenticalAssetCount": 91,
-  "candidateDisplayedVersion": "7beb021e",
-  "deliveryDisplayedVersion": "1b6e34ab",
-  "changedAssets": [
-    {
-      "file": "Neon-gh/landing.js",
-      "candidateSha256": "8a77ba62b7c5352c61ad9013179ef2606bf44dbd2a1a4a4c60bf9772d4d6528e",
-      "deliverySha256": "3d4140e2f5959c9a9d95f9972d8d7e0b988f9c996c2d940067c9d39dfe6d4fa1",
-      "runtimeEquivalentAfterVersionLabel": true,
-      "sourceMapOnlyPathChanges": true,
-      "sourceMapSourceContentsIdentical": true
-    },
-    {
-      "file": "Neon-gh/editor.js",
-      "candidateSha256": "e38c88ea79e103f537d2400e1a201b6dd5f1ef40b4d63f228d8e8ae8f9d1357e",
-      "deliverySha256": "f6b7d2523c08b9f15a839305b7be3e2dfda7a86b84612dd784429433cee1272a",
-      "runtimeEquivalentAfterVersionLabel": true,
-      "sourceMapOnlyPathChanges": true,
-      "sourceMapSourceContentsIdentical": true
-    },
-    {
-      "file": "Neon-gh/dashboard.js",
-      "candidateSha256": "be67043493afe4ba57392875b130ef2504b59b5fc4e79a923dff0e6e6461a3db",
-      "deliverySha256": "61decd4b63012053aec8f4909239c0a89cc5da0681b11d558141b4bc02f25ea4",
-      "runtimeEquivalentAfterVersionLabel": true,
-      "sourceMapOnlyPathChanges": true,
-      "sourceMapSourceContentsIdentical": true
-    }
+  "changedFromPreviousCandidate": [
+    "Neon-gh/landing.js",
+    "Neon-gh/editor.js",
+    "Neon-gh/dashboard.js"
   ],
-  "sourcePatchMatchesReviewedCandidate": true,
-  "buildCopiesMatch": true,
+  "unchangedAssetCount": 91,
+  "editorSha256": "f40ff5f5dbdf2a5c720fa26356cc2d2a0ff02cb640e48f9bfe0d86ec23ff70b9",
+  "builtCopiesMatch": true,
   "verovioSha256": "7689c9549b49a0f233bca23f3ea2b9e9951f2ad49a2d92b8865a824aace8f722",
-  "editorSha256": "f6b7d2523c08b9f15a839305b7be3e2dfda7a86b84612dd784429433cee1272a"
+  "usesLocalDevelopmentWorker": true,
+  "remoteAvailability": "GitHub API 422 No commit found for SHA on 2026-11-13; local only"
 }
