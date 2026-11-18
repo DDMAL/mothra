@@ -1,0 +1,201 @@
+[
+  {
+    "case": "square zoom 100%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.400009155273438,
+      "diamondH": 16.800003051757812,
+      "offsetX": -23.99999237060547,
+      "offsetY": -11.999992370605469
+    }
+  },
+  {
+    "case": "square zoom 25%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 11.999984741210938,
+      "diamondW": 14.400009155273438,
+      "diamondH": 16.800003051757812,
+      "offsetX": -24,
+      "offsetY": -12
+    }
+  },
+  {
+    "case": "square zoom 400%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.4000244140625,
+      "diamondH": 16.79998779296875,
+      "offsetX": -23.999969482421875,
+      "offsetY": -12
+    }
+  },
+  {
+    "case": "square zoom 100%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.400009155273438,
+      "diamondH": 16.800003051757812,
+      "offsetX": -23.99999237060547,
+      "offsetY": -11.999992370605469
+    }
+  },
+  {
+    "case": "square bbox hidden size 10",
+    "size": 10,
+    "cssPixels": {
+      "circle": 20,
+      "diamondW": 24,
+      "diamondH": 28,
+      "offsetX": -40,
+      "offsetY": -20.00000762939453
+    }
+  },
+  {
+    "case": "square reselected",
+    "size": 10,
+    "cssPixels": {
+      "circle": 20,
+      "diamondW": 24,
+      "diamondH": 28,
+      "offsetX": -40,
+      "offsetY": -20.00000762939453
+    }
+  },
+  {
+    "case": "hufnagel zoom 100%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.399993896484375,
+      "diamondH": 16.800018310546875,
+      "offsetX": -23.999984741210938,
+      "offsetY": -11.999984741210938
+    }
+  },
+  {
+    "case": "hufnagel zoom 25%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.400009155273438,
+      "diamondH": 16.800003051757812,
+      "offsetX": -24.00000762939453,
+      "offsetY": -11.999992370605469
+    }
+  },
+  {
+    "case": "hufnagel zoom 400%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.4000244140625,
+      "diamondH": 16.79998779296875,
+      "offsetX": -23.99993896484375,
+      "offsetY": -12.000030517578125
+    }
+  },
+  {
+    "case": "hufnagel zoom 100%",
+    "size": 6,
+    "cssPixels": {
+      "circle": 12,
+      "diamondW": 14.399993896484375,
+      "diamondH": 16.800018310546875,
+      "offsetX": -23.999984741210938,
+      "offsetY": -11.999984741210938
+    }
+  },
+  {
+    "case": "hufnagel bbox hidden size 10",
+    "size": 10,
+    "cssPixels": {
+      "circle": 20.000015258789062,
+      "diamondW": 24,
+      "diamondH": 28,
+      "offsetX": -39.99999237060547,
+      "offsetY": -20
+    }
+  },
+  {
+    "case": "hufnagel reselected",
+    "size": 10,
+    "cssPixels": {
+      "circle": 20.000015258789062,
+      "diamondW": 24,
+      "diamondH": 28,
+      "offsetX": -39.99999237060547,
+      "offsetY": -20
+    }
+  },
+  {
+    "case": "legal drag",
+    "scale": 1,
+    "zoom": 100,
+    "requestedDx": -544,
+    "tolerance": 10.300211416490487,
+    "start": {
+      "ulx": 623,
+      "uly": 498,
+      "lrx": 3830,
+      "lry": 712
+    },
+    "end": {
+      "ulx": 81,
+      "uly": 498,
+      "lrx": 3288,
+      "lry": 712
+    }
+  },
+  {
+    "case": "legal drag",
+    "scale": 1,
+    "zoom": 25,
+    "requestedDx": -544,
+    "tolerance": 41.20084566596195,
+    "start": {
+      "ulx": 623,
+      "uly": 498,
+      "lrx": 3830,
+      "lry": 712
+    },
+    "end": {
+      "ulx": 74,
+      "uly": 498,
+      "lrx": 3281,
+      "lry": 712
+    }
+  },
+  {
+    "case": "legal drag",
+    "scale": 0.1,
+    "zoom": 25,
+    "requestedDx": 20,
+    "tolerance": 4.12262156448203,
+    "start": {
+      "ulx": 62,
+      "uly": 50,
+      "lrx": 383,
+      "lry": 71
+    },
+    "end": {
+      "ulx": 81,
+      "uly": 50,
+      "lrx": 402,
+      "lry": 71
+    }
+  },
+  {
+    "case": "rejected drag",
+    "kind": "glyphs",
+    "meiRestored": true
+  },
+  {
+    "case": "rejected drag",
+    "kind": "staff lines",
+    "meiRestored": true
+  }
+]

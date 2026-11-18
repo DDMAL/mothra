@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng" type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<?xml-model href="https://music-encoding.org/schema/dev/mei-all.rng" type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0.0-dev">
+ <meiHead>
+  <fileDesc>
+   <titleStmt>
+    <title>read-only mapping probe</title>
+   </titleStmt>
+   <pubStmt>
+    <unpub />
+   </pubStmt>
+  </fileDesc>
+ </meiHead>
+ <music>
+  <facsimile type="transcription">
+   <surface xml:id="surface-0001" ulx="0" uly="0" lrx="1000" lry="1000">
+    <graphic target="diagnostic-page.png" width="1000px" height="1000px" />
+    <zone xml:id="sz-s1" type="staff" ulx="0" uly="100" lrx="1000" lry="160" />
+    <zone xml:id="sz-raw-s1" type="staff-raw" ulx="0" uly="100" lrx="1000" lry="160" />
+    <zone xml:id="cz-s1" ulx="0" uly="100" lrx="60" lry="160" />
+    <zone xml:id="z-g1" ulx="100" uly="110" lrx="220" lry="130" />
+    <zone xml:id="z-g1-0" ulx="100" uly="110" lrx="220" lry="130" />
+   </surface>
+  </facsimile>
+  <body>
+   <mdiv>
+    <score>
+     <scoreDef>
+      <staffGrp>
+       <staffDef xml:id="staffdef-a8e033e709fe" n="1" lines="4" notationtype="neume.hufnagel" clef.shape="C" clef.line="3" />
+      </staffGrp>
+     </scoreDef>
+     <section>
+      <staff xml:id="staff-9148e0044049" n="1">
+       <layer xml:id="layer-360a3efd7be3" n="1">
+        <pb xml:id="pb-59622f950e13" facs="#surface-0001" />
+        <sb xml:id="sb-sz-s1" facs="#sz-s1" />
+        <clef xml:id="clef-7fe858cb516d" shape="C" line="3" facs="#cz-s1" />
+        <syllable xml:id="syllable-g1">
+         <syl xml:id="syl-8b60fbfc8580">-</syl>
+         <neume xml:id="neume-g1" facs="#z-g1">
+          <nc xml:id="nc-g1" facs="#z-g1-0" pname="c" oct="4" tilt="s" />
+          <nc xml:id="nc-g1-1" facs="#z-g1-0" pname="b" oct="3" tilt="n" con="e" />
+         </neume>
+        </syllable>
+       </layer>
+      </staff>
+     </section>
+    </score>
+   </mdiv>
+  </body>
+ </music>
+</mei>
