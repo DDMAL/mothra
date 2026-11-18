@@ -5,7 +5,6 @@
 # they come from .env / the process environment only.
 paths:
   models_dir: stored_models
-  neon_manifests_dir: ../public/neon/samples/manifests
   medieval_models_dir: assets/models/medieval
   mei_encoding_dir: assets/mei_encoding
   # The pitch-finding/ submodule's flat module directory (algorithm #1;
