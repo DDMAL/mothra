@@ -1214,9 +1214,11 @@ def _component_zone_ids(
          CONSECUTIVE components share that column, not one weight per
          component. Lets one classification's <nc> list express a shape
          that isn't "N independent noteheads side by side":
-           - podatus/oblique's "[2]" -- both components of a two-note
-             stack/ligature share ONE column (only pitch, not x, tells them
-             apart -- matches how a podatus/oblique is actually drawn).
+           - square podatus2b/podatus3-5/oblique's and hufnagel clivis*a's
+             "[2]" -- both components of a two-note stack/ligature share
+             ONE column (only pitch, not x, tells them apart). Not every
+             podatus stacks: square podatus2a/pescephalicus and all of
+             hufnagel's podatus use "[1, 1]" (two side-by-side columns).
            - scandicus's "[1, 2]" -- the first <nc> gets its own (narrow)
              column, the remaining two share a second (wider) column beside
              it -- a leading note with an ascending pair stacked next to it.
