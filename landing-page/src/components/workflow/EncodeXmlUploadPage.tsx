@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-interface IcCompletionTestPageProps {
+interface EncodeXmlUploadPageProps {
   onContinue: () => void;
   onBackToProject: () => void;
   xmlFile: File | null;
@@ -9,14 +9,18 @@ interface IcCompletionTestPageProps {
   onImageFileChange: (f: File | null) => void;
 }
 
-export default function IcCompletionTestPage({
+// Encodes a GameraXML file the user uploads (POST /api/encode-upload), for a
+// page classified outside mothra -- every page classified in mothra is
+// encoded straight from its IC session instead. Reached from the project
+// page's Classifier XML tab.
+export default function EncodeXmlUploadPage({
   onContinue,
   onBackToProject,
   xmlFile,
   onXmlFileChange,
   imageFile,
   onImageFileChange,
-}: IcCompletionTestPageProps) {
+}: EncodeXmlUploadPageProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -25,13 +29,17 @@ export default function IcCompletionTestPage({
   return (
     <div className="animate-fade-in flex-1 bg-[#4AADAA] flex flex-col items-center justify-center px-12 py-20 pb-48 relative">
       <div className="flex flex-col items-center gap-6">
-        <h1 className="text-5xl font-bold italic text-white">
-          classification done
+        <h1 className="text-5xl font-bold italic text-[#1D3335] text-center">
+          encode a GameraXML file
         </h1>
-        <p className="text-xl text-[#1D3335]">
-          upload the classifier output to continue to encoding
+        <p className="text-xl text-[#1D3335] text-center max-w-xl">
+          for a page classified outside mothra: upload its GameraXML and the
+          page image, and the encoded MEI file is added to this project
         </p>
-        <p className="text-sm text-white/70 -mt-3">progress saved</p>
+        <p className="text-sm text-[#1D3335] text-center max-w-xl -mt-3">
+          if the image has the same file name as one of this project's pages,
+          that page's detected staves and text are used
+        </p>
 
         {/* xml upload drop zone */}
         <div
@@ -48,10 +56,10 @@ export default function IcCompletionTestPage({
             if (file) onXmlFileChange(file);
           }}
           className={`w-full max-w-sm border-2 border-dashed rounded-2xl px-6 py-4 flex flex-col items-center gap-1 cursor-pointer transition-colors
-            ${dragging ? "border-white bg-white/10" : "border-white/40 hover:border-white/70"}`}
+            ${dragging ? "border-[#1D3335] bg-white/20" : "border-[#1D3335]/40 hover:border-[#1D3335]/70"}`}
         >
-          <span className="text-white/80 text-sm font-mono">
-            {xmlFile ? xmlFile.name : "drop gamera xml here or click to browse"}
+          <span className="text-[#1D3335] text-sm font-mono">
+            {xmlFile ? xmlFile.name : "drop a GameraXML file here, or click to browse"}
           </span>
           {xmlFile && (
             <button
@@ -59,7 +67,7 @@ export default function IcCompletionTestPage({
                 e.stopPropagation();
                 onXmlFileChange(null);
               }}
-              className="text-white/40 text-xs hover:text-white/70 cursor-pointer"
+              className="text-[#1D3335] text-xs hover:underline cursor-pointer"
             >
               × clear
             </button>
@@ -88,12 +96,12 @@ export default function IcCompletionTestPage({
             if (file) onImageFileChange(file);
           }}
           className={`w-full max-w-sm border-2 border-dashed rounded-2xl px-6 py-4 flex flex-col items-center gap-1 cursor-pointer transition-colors
-            ${imageDragging ? "border-white bg-white/10" : "border-white/40 hover:border-white/70"}`}
+            ${imageDragging ? "border-[#1D3335] bg-white/20" : "border-[#1D3335]/40 hover:border-[#1D3335]/70"}`}
         >
-          <span className="text-white/80 text-sm font-mono">
+          <span className="text-[#1D3335] text-sm font-mono">
             {imageFile
               ? imageFile.name
-              : "drop source image here (required for correct bounds)"}
+              : "drop the page image here, or click to browse"}
           </span>
           {imageFile && (
             <button
@@ -101,7 +109,7 @@ export default function IcCompletionTestPage({
                 e.stopPropagation();
                 onImageFileChange(null);
               }}
-              className="text-white/40 text-xs hover:text-white/70 cursor-pointer"
+              className="text-[#1D3335] text-xs hover:underline cursor-pointer"
             >
               × clear
             </button>
@@ -115,7 +123,7 @@ export default function IcCompletionTestPage({
           />
         </div>
         {imageFile && (
-          <p className="text-white/50 text-xs -mt-3">
+          <p className="text-[#1D3335] text-xs -mt-3">
             image dimensions will be used for exact neon bounds
           </p>
         )}
@@ -131,7 +139,7 @@ export default function IcCompletionTestPage({
           </button>
           <button
             onClick={onBackToProject}
-            className="px-10 py-4 border-2 border-white text-white font-semibold text-lg rounded-2xl hover:opacity-90 cursor-pointer"
+            className="px-10 py-4 border-2 border-[#1D3335] text-[#1D3335] font-semibold text-lg rounded-2xl hover:bg-white/20 cursor-pointer"
           >
             back to project
           </button>

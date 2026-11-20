@@ -255,7 +255,7 @@ export type View =
   | "completion"
   | "ic"
   | "ic-auto"
-  | "ic-completion"
+  | "encode-upload"
   | "encoding-processing"
   | "encoding-completion"
   | "send-completion"

@@ -31,8 +31,8 @@ interface IcAutoQueueProps {
 
 /**
  * The "auto" IC mode: classify and queue every pending page with the training
- * set picked on the project page (Classifier settings), then hand the queue
- * to encoding. This is the old "queue all available" button from the IC
+ * set picked on the project page (Glyph Classifier settings), then hand the
+ * queue to encoding. This is the old "queue all available" button from the IC
  * page's filmstrip, run without ever showing the classifier interface.
  *
  * Pages are classified sequentially so the IC service isn't hammered and
@@ -143,7 +143,7 @@ export default function IcAutoQueue({
             <p className="text-white/60 text-xs text-center max-w-md">
               {usedImageCount === 0
                 ? "select images on the project page and run detection first."
-                : "there's nothing left to classify — carry on with correction (step 3), or select more pages on the project page."}
+                : "there's nothing left to classify — carry on with correction (step 5, correct), or select more pages on the project page."}
             </p>
           </>
         ) : !hasTrainingSet ? (
@@ -152,7 +152,7 @@ export default function IcAutoQueue({
               automatic classification needs a training set
             </p>
             <p className="text-white/70 text-sm text-center max-w-md">
-              pick a preset or upload GameraXML under "Classifier settings" on
+              pick a preset or upload GameraXML under "Glyph Classifier settings" on
               the project page, or classify these {images.length} page
               {images.length === 1 ? "" : "s"} yourself.
             </p>
